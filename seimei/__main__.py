@@ -5,6 +5,7 @@ import asyncio
 import getpass
 import logging
 import os
+import time
 import tomllib
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +16,8 @@ from .approvals import Approvals
 from .auth import Auth
 from .dispatcher import Dispatcher
 from .events import EventLog
+from .desktop import Desktop
+from .desktop_tools import make_desktop_tools
 from .files import Files
 from .guard import Guard
 from .server import make_app
@@ -97,9 +100,13 @@ def main():
     approvals = Approvals(events)
     guard = Guard(events, approvals, state)
     usage = Usage(events, state)
-    dispatcher = Dispatcher(disp, events, state, make_tools(pool, files, events), guard, usage)
+    desk = Desktop(events, lambda t: dispatcher.note(t))
+    dispatcher = Dispatcher(disp, events, state, make_tools(pool, files, events, make_desktop_tools(desk, files, events)),
+                            guard, usage)
     pool.dispatcher, pool.guard = dispatcher, guard
-    watcher = Watcher(events, pool.own_sessions)
+    watcher = Watcher(events, pool.own_sessions, lambda s: dispatcher.note(
+        f"The user's session \"{s['name']}\" finished a turn" + (" and asks a question" if s["question"] else "")
+        + f" ({time.strftime('%H:%M')}).", key=f"finished:{s['pid']}"))
     app = make_app(events, dispatcher, pool, files, approvals, guard, watcher, auth, origins)
 
     async def start(app):
@@ -108,6 +115,7 @@ def main():
         app["dispatcher"] = asyncio.create_task(dispatcher.run())
         app["watcher"] = asyncio.create_task(watcher.run())
         app["wake"] = asyncio.create_task(WakeWatch(events, pool).run())
+        app["desktop"] = asyncio.create_task(desk.run())
 
     async def shutdown(app):
         events.close()
@@ -116,6 +124,7 @@ def main():
         app["dispatcher"].cancel()
         app["watcher"].cancel()
         app["wake"].cancel()
+        app["desktop"].cancel()
         await pool.close()
 
     app.on_startup.append(start)

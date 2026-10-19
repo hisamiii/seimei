@@ -234,7 +234,9 @@ function approvalCard(ev) {
   // Cards from before messages went card-free (2026-10-19) held SendMessage text.
   const message = ev.action === 'message';
   title.append(el('b', null, `${ev.who} wants to ${message ? `message ${ev.target}` : ev.target}`));
-  title.append(el('span', 'sub', message ? 'a session you started' : 'a session command'));
+  const SUB = { message: 'a session you started', edit: 'a file edit', desktop: 'a desktop action' };
+  const sub = SUB[ev.action] || (/niri|window/.test(ev.target) ? 'a desktop command' : 'a session command');
+  title.append(el('span', 'sub', sub));
   head.append(badge, title);
   const body = el('div', `body ${message ? 'task' : 'cmd'}`, ev.detail);
   const foot = el('div', 'foot');

@@ -198,9 +198,10 @@ def listing(own: dict[str, str]) -> list[dict]:
 class Watcher:
     """Pushes the user's sessions to the page when anything but the clock changes."""
 
-    def __init__(self, events: EventLog, own):
+    def __init__(self, events: EventLog, own, finished=None):
         self.events = events
         self.own = own
+        self.finished = finished
         self.list: list[dict] = []
 
     def snapshot(self) -> dict:
@@ -214,6 +215,10 @@ class Watcher:
                 new = [(r["pid"], r["name"], r["status"], r["waiting_for"], r["since"], r["question"],
                         r["status"] == "busy" or round(r["active"])) for r in rows]
                 if new != sig:
+                    before = {r["pid"]: r["status"] for r in self.list}
+                    for r in rows:
+                        if self.finished and before.get(r["pid"]) == "busy" and r["status"] != "busy":
+                            self.finished(r)
                     sig, self.list = new, rows
                     self.events.flash(self.snapshot())
             except Exception:

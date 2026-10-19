@@ -1,12 +1,15 @@
-"""Approve/Deny cards: stopping, deleting or resuming a session the user started waits for the user's OK.
-Messaging sessions and driving the desktop need no card (the user's call, 2026-10-19)."""
+"""Approve/Deny cards: stopping, deleting or resuming a session the user started waits for the user's OK, and so do
+closing a window seimei did not open, quitting niri and editing the niri config. Messaging sessions and driving the
+desktop otherwise need no card (the user's calls, 2026-10-19)."""
 
 import asyncio
 import os
 import re
 import time
 import uuid
+from pathlib import Path
 
+from . import desktop
 from .events import EventLog
 from .shell import commands
 
@@ -31,8 +34,51 @@ def _claude_pid(pid: str) -> bool:
     return any(os.path.basename(a) == b"claude" for a in argv[:2])
 
 
+NIRI_CONFIG = Path.home() / ".config" / "niri"
+CONFIG_WRITERS = re.compile(r"\bsed\s+(-\w*\s+)*-i|>|\b(tee|cp|mv|rm|ln|truncate|install|dd|perl|python3?)\b")
+KITTY_CLOSE = {"close-window", "close-tab"}
+
+
+def _window_label(wid: int | None) -> str:
+    try:
+        w = desktop.window(wid) if wid is not None else desktop.ipc("FocusedWindow")
+    except Exception:
+        w = None
+    return f"{w['app_id']} \"{w['title']}\"" if w else "a window"
+
+
+def _close_hit(wid: int | None) -> str | None:
+    """Closing a window needs a card unless seimei opened it."""
+    if wid is None:
+        wid = desktop.focused_id()
+    if wid is not None and wid in desktop.OURS:
+        return None
+    return f"close {_window_label(wid)}"
+
+
+def niri_hit(args: list[str]) -> str | None:
+    """A niri action as `niri msg action` takes it."""
+    if not args:
+        return None
+    if args[0] == "quit":
+        return "quit niri (ends the desktop session)"
+    if args[0] == "close-window":
+        wid = None
+        for i, a in enumerate(args):
+            if a == "--id" and i + 1 < len(args) and args[i + 1].isdigit():
+                wid = int(args[i + 1])
+            elif a.startswith("--id=") and a[5:].isdigit():
+                wid = int(a[5:])
+        return _close_hit(wid)
+    return None
+
+
 def _argv_hit(argv: list[str]) -> str | None:
     prog = argv[0]
+    if prog == "niri" and "action" in argv:
+        return niri_hit(argv[argv.index("action") + 1:])
+    if prog == "kitty" and "@" in argv and KITTY_CLOSE & set(argv):
+        return "close a kitty window"
     if prog == "claude":
         if len(argv) > 1 and argv[1] in SUBCOMMANDS:
             return SUBCOMMANDS[argv[1]]
@@ -60,12 +106,30 @@ def _command_hit(cmd: str) -> str | None:
     return None
 
 
+def _niri_config(path: str) -> bool:
+    try:
+        return Path(os.path.expanduser(path)).resolve().is_relative_to(NIRI_CONFIG.resolve())
+    except (OSError, ValueError):
+        return False
+
+
 def check(tool: str, inp: dict) -> dict | None:
-    """What a tool call does to a user-started session, or None when it touches none."""
+    """What a tool call needs the user's OK for, or None."""
     if tool == "Bash":
         cmd = str(inp.get("command", ""))
         if hit := _command_hit(cmd):
             return {"action": "command", "target": hit, "detail": cmd}
+        if ".config/niri" in cmd and CONFIG_WRITERS.search(cmd):
+            return {"action": "command", "target": "edit the niri config", "detail": cmd}
+    elif tool in ("Write", "Edit", "NotebookEdit"):
+        path = str(inp.get("file_path") or inp.get("notebook_path") or "")
+        if path and _niri_config(path):
+            detail = inp.get("content") or inp.get("new_string") or inp.get("new_source") or ""
+            return {"action": "edit", "target": "edit the niri config", "detail": f"{path}\n\n{detail}"}
+    elif tool == "mcp__seimei__niri":
+        args = [str(inp.get("action", ""))] + [str(a) for a in inp.get("args") or []]
+        if hit := niri_hit(args):
+            return {"action": "desktop", "target": hit, "detail": "niri msg action " + " ".join(args)}
     return None
 
 

@@ -23,7 +23,7 @@ def ago(t: float) -> str:
     return f"{s // 60} min ago" if s < 3600 else f"{s // 3600} h ago" if s < 86400 else f"{s // 86400} d ago"
 
 
-def make_tools(pool: Pool, files: Files, events: EventLog):
+def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = ()):
     @tool("summon", "Start a shikigami: a worker Claude Code session that works on a task on its own and reports back. "
           "Pick a short lowercase name, the folder the task is about, and a model (opus for real work, sonnet for "
           "routine jobs, haiku for quick lookups). Returns at once; the report arrives later.", {
@@ -163,4 +163,4 @@ def make_tools(pool: Pool, files: Files, events: EventLog):
         return text(pool.dispatcher.usage.report())
 
     return create_sdk_mcp_server("seimei", tools=[summon, workers, peek, message, stop, show_image, sessions, session_peek,
-                                                 usage])
+                                                 usage, *extra])
