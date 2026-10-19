@@ -1,7 +1,7 @@
-"""Approve/Deny cards: messaging, stopping or resuming a session the user started waits for the user's OK."""
+"""Approve/Deny cards: stopping, deleting or resuming a session the user started waits for the user's OK.
+Messaging sessions and driving the desktop need no card (the user's call, 2026-10-19)."""
 
 import asyncio
-import json
 import os
 import re
 import shlex
@@ -85,14 +85,8 @@ def _command_hit(cmd: str, depth: int = 0) -> str | None:
     return None
 
 
-def check(tool: str, inp: dict, own: set[str]) -> dict | None:
+def check(tool: str, inp: dict) -> dict | None:
     """What a tool call does to a user-started session, or None when it touches none."""
-    if tool == "SendMessage":
-        to = str(inp.get("to", "")).strip()
-        text = str(inp.get("message") or "")
-        if to == "main" or to in own or not text.strip():
-            return None
-        return {"action": "message", "target": to, "detail": text}
     if tool == "Bash":
         cmd = str(inp.get("command", ""))
         if hit := _command_hit(cmd):
@@ -122,10 +116,8 @@ class Approvals:
         return True
 
     def hooks(self, who: str, worker: str | None = None) -> dict:
-        own: set[str] = set()
-
         async def pre(inp, tool_use_id, ctx):
-            what = check(inp["tool_name"], inp["tool_input"], own)
+            what = check(inp["tool_name"], inp["tool_input"])
             if not what:
                 return {}
             aid = uuid.uuid4().hex[:8]
@@ -149,10 +141,4 @@ class Approvals:
             return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                            "permissionDecisionReason": reason}}
 
-        async def spawned(inp, tool_use_id, ctx):
-            # Subagents this session started are its own to message.
-            own.update(re.findall(r"agentId\W{1,4}(a[0-9a-f]{8,})", json.dumps(inp.get("tool_response"))))
-            return {}
-
-        return {"PreToolUse": [HookMatcher(matcher="SendMessage|Bash", hooks=[pre], timeout=HOOK_TIMEOUT)],
-                "PostToolUse": [HookMatcher(matcher="Agent|Task", hooks=[spawned])]}
+        return {"PreToolUse": [HookMatcher(matcher="Bash", hooks=[pre], timeout=HOOK_TIMEOUT)]}

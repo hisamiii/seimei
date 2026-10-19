@@ -14,18 +14,21 @@ for u in seimei.service seimei-tunnel.service; do
 done
 systemctl --user daemon-reload
 systemctl --user reenable seimei.service seimei-tunnel.service 2>/dev/null
-# Wait up to 5 minutes for 20 quiet seconds, so a running turn is not cut off.
+# Wait up to 5 minutes for 20 quiet seconds and no open Approve/Deny card, so no turn or held call is cut off.
 python3 - <<'PY'
 import json, os, time
 log = os.path.expanduser("~/.local/share/seimei/events.jsonl")
 for _ in range(60):
     try:
         with open(log, "rb") as f:
-            f.seek(max(f.seek(0, 2) - 65536, 0))
-            last = json.loads(f.read().splitlines()[-1])
+            f.seek(max(f.seek(0, 2) - (1 << 20), 0))
+            tail = [json.loads(l) for l in f.read().splitlines()[1:]]
+        last = tail[-1]
     except (OSError, IndexError, ValueError):
         break
-    if time.time() - last["t"] > 20:
+    done = {e["aid"] for e in tail if e["type"] == "approval_done"}
+    open_cards = [e for e in tail if e["type"] == "approval" and e["aid"] not in done]
+    if time.time() - last["t"] > 20 and not open_cards:
         break
     time.sleep(5)
 PY

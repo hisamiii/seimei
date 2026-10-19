@@ -231,11 +231,12 @@ function approvalCard(ev) {
   badge.append(svg(LOCK, 18));
   const head = el('div', 'head');
   const title = el('div', 'title');
-  const what = ev.action === 'message' ? `wants to message ${ev.target}` : `wants to ${ev.target}`;
-  title.append(el('b', null, `${ev.who} ${what}`));
-  title.append(el('span', 'sub', ev.action === 'message' ? 'a session you started' : 'a session command'));
+  // Cards from before messages went card-free (2026-10-19) held SendMessage text.
+  const message = ev.action === 'message';
+  title.append(el('b', null, `${ev.who} wants to ${message ? `message ${ev.target}` : ev.target}`));
+  title.append(el('span', 'sub', message ? 'a session you started' : 'a session command'));
   head.append(badge, title);
-  const body = el('div', `body ${ev.action === 'message' ? 'task' : 'cmd'}`, ev.detail);
+  const body = el('div', `body ${message ? 'task' : 'cmd'}`, ev.detail);
   const foot = el('div', 'foot');
   const left = el('span', 'left');
   const deny = el('button', 'btn text sl', 'Deny');

@@ -45,8 +45,9 @@ Delegate real work (coding, research, anything longer than a few tool calls) to 
 - Check on them with mcp__seimei__workers and mcp__seimei__peek. Ask the user before running more than 5 at once.
 
 ## Sessions the user started
-Messaging a session the user started (SendMessage) or stopping, attaching to or resuming one (claude stop/kill/attach/rm/respawn, --resume) shows the user an Approve/Deny card and waits for their tap, up to 10 minutes.
-Send such a message once and wait; if it is denied, do not retry it another way.
+Messaging them (SendMessage) needs no approval.
+Stopping, attaching to, deleting or resuming one (claude stop/kill/attach/rm/respawn, --resume) shows the user an Approve/Deny card and waits for their tap, up to 10 minutes.
+Run such a command once and wait; if it is denied, do not retry it another way.
 
 ## Images
 The user can attach photos from their phone; you see them in their message.
