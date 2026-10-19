@@ -1,4 +1,5 @@
 import { md } from './md.js';
+import { deviceName, register, supported } from './passkey.js';
 
 const $ = (id) => document.getElementById(id);
 const log = $('log'), thread = $('thread'), older = $('older'), working = $('working');
@@ -37,8 +38,12 @@ function dayLabel(t) {
 const nearBottom = () => log.scrollHeight - log.scrollTop - log.clientHeight < 120;
 const toBottom = () => { log.scrollTop = log.scrollHeight; };
 
+// A session that ended (expired, logged out elsewhere, revoked on the laptop) sends the page back to login.
+const toLogin = () => location.reload();
+
 async function post(path, body) {
   const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (r.status === 401) toLogin();
   if (!r.ok) throw new Error(`${r.status}`);
   return r.json();
 }
@@ -303,8 +308,13 @@ function connect() {
   };
   source.onerror = () => {
     lost();
-    // The browser retries on its own unless the server refused the request outright.
-    if (source.readyState === EventSource.CLOSED) setTimeout(connect, 10000);
+    // The browser retries on its own unless the server refused the request outright,
+    // and EventSource cannot see why, so ask whether the session is still valid.
+    if (source.readyState === EventSource.CLOSED) {
+      fetch('api/auth/me')
+        .then((r) => (r.status === 401 ? toLogin() : setTimeout(connect, 10000)))
+        .catch(() => setTimeout(connect, 10000));
+    }
   };
 }
 
@@ -335,7 +345,9 @@ async function loadOlder() {
 }
 
 async function start() {
-  const r = await fetch('api/history?limit=200').then((x) => x.json()).catch(() => null);
+  const res = await fetch('api/history?limit=200').catch(() => null);
+  if (res?.status === 401) return toLogin();
+  const r = res?.ok ? await res.json() : null;
   if (r) {
     r.events.forEach((ev) => main.add(ev));
     lastId = r.last;
@@ -346,7 +358,53 @@ async function start() {
   }
   render();
   connect();
+  account();
 }
+
+// ---------- account ----------
+
+const menu = $('menu'), card = $('fp-card');
+
+async function account() {
+  const r = await fetch('api/auth/me').then((x) => x.json()).catch(() => null);
+  if (!r?.auth) return;
+  $('menu-btn').hidden = false;
+  $('add-passkey').hidden = !supported();
+  let dismissed = false;
+  try { dismissed = localStorage.getItem('seimei.fp-card') === 'no'; } catch {}
+  if (supported() && r.passkeys === 0 && !dismissed) {
+    card.hidden = false;
+    requestAnimationFrame(toBottom);
+  }
+}
+
+async function addPasskey() {
+  menu.hidden = true;
+  const r = await register(deviceName()).catch(() => ({ ok: false }));
+  if (r.status === 401) return toLogin();
+  if (r.ok) card.hidden = true;
+  const text = r.ok ? 'Fingerprint login is set up on this device.'
+    : r.exists ? 'This device already has a passkey for seimei.'
+    : r.cancelled ? null : 'Could not set up the fingerprint login.';
+  if (text) {
+    main.add({ type: 'system', level: r.ok || r.exists ? '' : 'error', text });
+    toBottom();
+  }
+}
+
+$('menu-btn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  menu.hidden = !menu.hidden;
+});
+document.addEventListener('click', (e) => { if (!menu.contains(e.target)) menu.hidden = true; });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') menu.hidden = true; });
+$('add-passkey').addEventListener('click', addPasskey);
+$('fp-yes').addEventListener('click', addPasskey);
+$('fp-no').addEventListener('click', () => {
+  card.hidden = true;
+  try { localStorage.setItem('seimei.fp-card', 'no'); } catch {}
+});
+$('logout').addEventListener('click', () => post('api/auth/logout', {}).finally(toLogin));
 
 // ---------- input ----------
 

@@ -6,17 +6,28 @@ A phone-driven dispatcher for Claude Code on my laptop: one permanent Claude Cod
 
 ```
 uv sync
-cp config.example.toml ~/.config/seimei/config.toml   # fill in [access]
-uv run python -m seimei          # production: 127.0.0.1:8417, Cloudflare Access required
-uv run python -m seimei --dev    # local testing: 127.0.0.1:8418, no auth, separate session
+uv run python -m seimei passwd   # set the login password (run in a real terminal)
+uv run python -m seimei          # 127.0.0.1:8417, behind the Cloudflare Tunnel
+uv run python -m seimei --dev    # local testing: localhost:8418, no login, separate session
 ```
 
-As a service:
+Defaults live in `config.example.toml`; copy it to `~/.config/seimei/config.toml` to change them.
+
+Login is the password or a passkey (fingerprint) added from the page after the first login.
+Recovery happens on the laptop:
 
 ```
-ln -s ~/src/seimei/seimei.service ~/.config/systemd/user/
-systemctl --user enable --now seimei
+uv run python -m seimei passwd            # new password
+uv run python -m seimei passkeys [--clear]
+uv run python -m seimei logout-all        # end every session, takes effect within 15 s
 ```
 
-State lives in `~/.local/share/seimei/` (event log, session id, the dispatcher's notes).
+As services:
+
+```
+ln -s ~/src/seimei/seimei.service ~/src/seimei/seimei-tunnel.service ~/.config/systemd/user/
+systemctl --user enable --now seimei seimei-tunnel
+```
+
+State lives in `~/.local/share/seimei/` (event log, session id, the dispatcher's notes, auth.json).
 It uses the system `claude` binary on the claude.ai login; `ANTHROPIC_API_KEY` is dropped at startup.

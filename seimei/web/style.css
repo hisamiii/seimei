@@ -221,3 +221,61 @@ body.offline .composer { opacity: .5; pointer-events: none; }
   .log { margin: 0 24px; border-radius: 28px 28px 0 0; }
   .composer { margin: 0 24px; }
 }
+
+/* Buttons shared by login and menus */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 48px; padding: 0 24px; border: 0; border-radius: 999px; font-size: 15px; font-weight: 500;
+}
+.btn.filled { background: var(--primary); color: var(--on-primary); }
+.btn.tonal { background: var(--tonal); color: var(--on-tonal); }
+.btn.text { background: none; color: var(--primary); padding: 0 14px; min-height: 40px; }
+.btn:disabled { opacity: .5; pointer-events: none; }
+
+/* Login */
+body.login { display: grid; place-items: center; grid-template-rows: 1fr; padding: 24px 16px; }
+.signin { width: 100%; max-width: 360px; display: flex; flex-direction: column; align-items: stretch; gap: 14px; text-align: center; animation: rise .45s var(--ease); }
+.signin .mark {
+  align-self: center; width: 88px; height: 88px; border-radius: 30px; margin-bottom: 6px;
+  background: var(--primary-container); color: var(--on-primary-container); display: grid; place-items: center;
+}
+.signin h1 { margin: 0; font-size: 28px; font-weight: 500; letter-spacing: -.02em; }
+.signin .sub { margin: -6px 0 14px; color: var(--text-3); }
+.signin .btn { min-height: 56px; border-radius: 18px; }
+.or { display: flex; align-items: center; gap: 12px; color: var(--text-3); font-size: 13px; }
+.or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--container-high); }
+.pwform { display: flex; flex-direction: column; gap: 10px; }
+.pwform .field { border-radius: 18px; min-height: 56px; }
+.pwform input {
+  flex: 1; border: 0; outline: none; background: none; color: var(--text);
+  font: 16px var(--sans); padding: 0 20px; min-height: 56px;
+}
+.pwform input::placeholder { color: var(--text-3); }
+.err { margin: 0; min-height: 1.5em; color: var(--error); font-size: 14px; }
+
+/* Account menu */
+.bar { position: relative; }
+.icon-btn {
+  margin-left: auto; width: 44px; height: 44px; border: 0; border-radius: 50%;
+  background: none; color: var(--text-2); display: grid; place-items: center;
+}
+.menu {
+  position: absolute; right: 12px; top: calc(56px + env(safe-area-inset-top)); z-index: 5; min-width: 220px;
+  background: var(--container-high); border-radius: 16px; padding: 8px 0;
+  box-shadow: 0 6px 24px rgb(0 0 0 / .35); animation: rise .2s var(--ease);
+}
+.menu button {
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 48px; padding: 0 16px;
+  border: 0; background: none; text-align: left; font-size: 14px;
+}
+.menu button svg { color: var(--text-3); }
+
+/* Fingerprint setup card */
+.card {
+  max-width: 720px; margin: 14px auto 0; padding: 16px; border-radius: 20px;
+  background: var(--container); display: flex; gap: 14px; align-items: flex-start; animation: rise .35s var(--ease);
+}
+.card .badge { flex: none; width: 40px; height: 40px; border-radius: 50%; background: var(--primary-container); color: var(--on-primary-container); display: grid; place-items: center; }
+.card h3 { margin: 0 0 2px; font-size: 15px; font-weight: 600; }
+.card p { margin: 0; color: var(--text-2); font-size: 14px; }
+.card .actions { display: flex; gap: 4px; margin: 8px 0 0 -14px; }
