@@ -1,0 +1,13 @@
+[Unit]
+Description=seimei, the phone-driven dispatcher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=%h/src/seimei
+ExecStart=/usr/bin/uv run --frozen python -m seimei
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,14 @@
+# Copy to ~/.config/seimei/config.toml.
+
+[server]
+port = 8417                              # the tunnel points here; --dev uses port + 1
+origin = "https://seimei.example.org"
+
+[access]
+team = ""                                # <team>.cloudflareaccess.com
+aud = ""                                 # Access application AUD tag
+emails = []                              # who may use the site
+
+[dispatcher]
+model = "opus"
+cwd = "~"

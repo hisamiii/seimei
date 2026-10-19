@@ -1,0 +1,223 @@
+@font-face {
+  font-family: 'Roboto Flex';
+  font-style: normal;
+  font-weight: 400 600;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url(fonts/roboto-flex-cyrillic.woff2) format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: 'Roboto Flex';
+  font-style: normal;
+  font-weight: 400 600;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url(fonts/roboto-flex-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Roboto Mono';
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url(fonts/roboto-mono-cyrillic.woff2) format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: 'Roboto Mono';
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url(fonts/roboto-mono-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* Catppuccin Mocha arranged as Material 3 tonal roles. */
+:root {
+  color-scheme: dark;
+  --surface: #1e1e2e;
+  --surface-low: #181825;
+  --surface-lowest: #11111b;
+  --container: #26263a;
+  --container-high: #313244;
+  --container-highest: #3a3b50;
+  --primary: #cba6f7;
+  --on-primary: #2d1b47;
+  --primary-container: #3d3552;
+  --on-primary-container: #ecdcff;
+  --tonal: #35384d;
+  --on-tonal: #dfe3ff;
+  --ok: #a6e3a1;
+  --warn: #fab387;
+  --error: #f38ba8;
+  --text: #cdd6f4;
+  --text-2: #bac2de;
+  --text-3: #a6adc8;
+  --outline: #6c7086;
+  --sans: 'Roboto Flex', system-ui, sans-serif;
+  --mono: 'Roboto Mono', ui-monospace, monospace;
+  --ease: cubic-bezier(.05, .7, .1, 1);
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--text);
+  font: 15px/1.55 var(--sans);
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100dvh;
+  -webkit-tap-highlight-color: transparent;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+[hidden] { display: none !important; }
+
+/* Material state layer: one rule for hover and press feedback on anything interactive. */
+.sl { position: relative; overflow: hidden; }
+.sl::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit;
+  background: currentColor; opacity: 0; transition: opacity .15s; pointer-events: none;
+}
+.sl:hover::after { opacity: .08; }
+.sl:active::after { opacity: .14; }
+
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+/* Top app bar */
+.bar { display: flex; align-items: center; gap: 12px; height: 64px; padding: 0 16px 0 12px; padding-top: env(safe-area-inset-top); }
+.avatar {
+  flex: none; width: 40px; height: 40px; border-radius: 50%;
+  background: var(--primary-container); color: var(--on-primary-container);
+  display: grid; place-items: center;
+}
+.bar h1 { margin: 0; font-size: 20px; font-weight: 500; letter-spacing: -.01em; line-height: 1.1; }
+.status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-3); }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); flex: none; }
+.status[data-s="working"] .dot { background: var(--primary); animation: pulse 2s ease-in-out infinite; }
+.status[data-s="idle"] .dot { background: var(--ok); }
+.status[data-s="away"] .dot, .status[data-s="connecting"] .dot { background: none; box-shadow: inset 0 0 0 1px var(--text-3); }
+.status[data-s="starting"] .dot { background: var(--warn); }
+
+/* Conversation sheet */
+.log {
+  overflow-y: auto; overscroll-behavior: contain;
+  background: var(--surface-low); border-radius: 28px 28px 0 0;
+  padding: 12px 16px 16px;
+}
+.thread { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+.thread > * { animation: rise .35s var(--ease); }
+.older {
+  align-self: center; min-height: 36px; padding: 0 16px; border: 0; border-radius: 999px;
+  background: var(--tonal); color: var(--on-tonal); font-size: 13px; font-weight: 500;
+}
+.note {
+  align-self: center; max-width: 90%; text-align: center;
+  font-size: 12px; font-weight: 500; color: var(--text-3);
+  background: var(--container); border-radius: 999px; padding: 4px 12px;
+}
+.note.warn { color: var(--warn); }
+.note.error { color: var(--error); }
+
+.msg { overflow-wrap: anywhere; }
+.msg.user {
+  align-self: flex-end; max-width: 80%; white-space: pre-wrap;
+  background: var(--primary-container); color: var(--on-primary-container);
+  border-radius: 20px 20px 4px 20px; padding: 11px 16px; line-height: 1.45;
+}
+.msg .time { display: block; margin-top: 4px; font-size: 12px; color: var(--text-3); }
+.msg.user .time { color: var(--on-primary-container); opacity: .7; text-align: right; }
+
+/* Markdown inside replies */
+.msg.assistant > :first-child { margin-top: 0; }
+.msg.assistant > :last-child { margin-bottom: 0; }
+.msg.assistant p { margin: 0 0 .7em; }
+.msg.assistant h3, .msg.assistant h4, .msg.assistant h5, .msg.assistant h6 { margin: 1em 0 .4em; font-size: 16px; font-weight: 600; line-height: 1.3; }
+.msg.assistant h3 { font-size: 17px; }
+.msg.assistant ul, .msg.assistant ol { margin: 0 0 .7em; padding-left: 1.4em; }
+.msg.assistant li { margin: .15em 0; }
+.msg.assistant li > ul, .msg.assistant li > ol { margin: .15em 0 0; }
+.msg.assistant a { color: var(--primary); text-underline-offset: 2px; }
+.msg.assistant code { font: .9em var(--mono); background: var(--container-high); border-radius: 6px; padding: .1em .35em; }
+.msg.assistant pre {
+  margin: 0 0 .7em; padding: 12px 14px; overflow-x: auto;
+  background: var(--surface-lowest); border-radius: 16px;
+  font: 13px/1.6 var(--mono); color: var(--text-2);
+}
+.msg.assistant pre code { background: none; padding: 0; font: inherit; }
+.msg.assistant blockquote { margin: 0 0 .7em; padding: 2px 0 2px 14px; color: var(--text-2); box-shadow: inset 2px 0 var(--outline); }
+.msg.assistant hr { border: 0; height: 1px; background: var(--container-high); margin: 1em 0; }
+.msg.assistant .table { overflow-x: auto; margin: 0 0 .7em; background: var(--container); border-radius: 16px; }
+.msg.assistant table { border-collapse: collapse; font-size: 14px; min-width: 100%; }
+.msg.assistant th, .msg.assistant td { padding: 8px 12px; text-align: left; vertical-align: top; }
+.msg.assistant th { font-weight: 600; color: var(--text-2); }
+.msg.assistant tr + tr td, .msg.assistant tbody tr:first-child td { box-shadow: inset 0 1px var(--container-highest); }
+
+/* Collapsed tool activity: one assist chip per run of tool calls */
+.activity { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 12px 0 10px;
+  border: 0; border-radius: 10px; background: var(--container); color: var(--text-2); font-size: 13px; text-align: left;
+}
+.chip svg { flex: none; }
+.chip .spin { width: 6px; height: 6px; border-radius: 50%; background: var(--primary); animation: pulse 1.6s ease-in-out infinite; }
+.chip .chev { transition: transform .2s var(--ease); }
+.activity.open .chev { transform: rotate(90deg); }
+.calls { align-self: stretch; background: var(--surface-lowest); border-radius: 16px; padding: 6px; display: flex; flex-direction: column; }
+.call {
+  display: flex; align-items: baseline; gap: 10px; min-height: 36px; padding: 8px 10px;
+  border: 0; border-radius: 10px; background: none; text-align: left; font: 12.5px/1.5 var(--mono); color: var(--text-2);
+}
+.call b { font-weight: 500; color: var(--text-3); flex: none; }
+.call span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.call.err b { color: var(--error); }
+.call.run b { animation: pulse 1.6s ease-in-out infinite; }
+.out {
+  margin: 0 4px 6px; padding: 10px 12px; max-height: 320px; overflow: auto;
+  background: var(--surface-low); border-radius: 10px;
+  font: 12px/1.6 var(--mono); color: var(--text-3); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+
+/* Working indicator and the away card */
+.working { display: flex; align-items: center; gap: 8px; color: var(--text-3); font-size: 14px; max-width: 720px; margin: 14px auto 0; }
+.working::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--primary); animation: pulse 1.6s ease-in-out infinite; }
+.away {
+  max-width: 340px; margin: 40px auto 0; padding: 0 12px;
+  display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center;
+  animation: rise .45s var(--ease);
+}
+.away .badge { width: 96px; height: 96px; border-radius: 32px; background: var(--container); color: var(--outline); display: grid; place-items: center; }
+.away h2 { margin: 0; font-size: 22px; font-weight: 500; letter-spacing: -.01em; }
+.away p { margin: 0; color: var(--text-2); }
+.away button {
+  min-height: 44px; padding: 0 22px; border: 0; border-radius: 999px;
+  background: var(--tonal); color: var(--on-tonal); font-size: 14px; font-weight: 500;
+}
+body.offline .thread { opacity: .45; transition: opacity .4s; }
+
+/* Composer */
+.composer { background: var(--surface-low); padding: 8px 12px calc(16px + env(safe-area-inset-bottom)); }
+.composer-inner { max-width: 720px; margin: 0 auto; display: flex; align-items: flex-end; gap: 8px; }
+.field { flex: 1; display: flex; background: var(--container-high); border-radius: 28px; min-height: 52px; }
+.field textarea {
+  flex: 1; resize: none; border: 0; outline: none; background: none; color: var(--text);
+  font: 15px/1.4 var(--sans); padding: 15px 20px; min-height: 52px; max-height: 168px;
+}
+.field textarea::placeholder { color: var(--text-3); }
+.field:focus-within { box-shadow: inset 0 0 0 2px var(--primary); }
+.fab {
+  flex: none; width: 52px; height: 52px; border: 0; border-radius: 18px;
+  background: var(--primary); color: var(--on-primary); display: grid; place-items: center;
+}
+.fab.tonal { background: var(--primary-container); color: var(--on-primary-container); }
+.fab .square { width: 14px; height: 14px; border-radius: 4px; background: currentColor; }
+body.offline .composer { opacity: .5; pointer-events: none; }
+
+@media (min-width: 900px) {
+  .log { margin: 0 24px; border-radius: 28px 28px 0 0; }
+  .composer { margin: 0 24px; }
+}

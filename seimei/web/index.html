@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#1e1e2e">
+<title>seimei</title>
+<link rel="icon" href="static/star.svg" type="image/svg+xml">
+<link rel="preload" href="static/fonts/roboto-flex-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="static/style.css">
+<script type="module" src="static/app.js"></script>
+</head>
+<body>
+<header class="bar">
+  <span class="avatar"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 17.88 20.09 2.49 8.91h19.02L6.12 20.09Z"/></svg></span>
+  <div>
+    <h1>seimei</h1>
+    <span class="status" id="status" data-s="connecting"><span class="dot"></span><span id="status-text">connecting</span></span>
+  </div>
+</header>
+
+<main class="log" id="log">
+  <div class="thread" id="thread" aria-live="polite">
+    <button class="older sl" id="older" hidden>Load earlier</button>
+  </div>
+  <div class="working" id="working" hidden>working</div>
+  <section class="away" id="away" hidden>
+    <span class="badge"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 17.88 20.09 2.49 8.91h19.02L6.12 20.09Z"/></svg></span>
+    <h2>The laptop went quiet</h2>
+    <p>It is probably asleep. Everything is paused where it was, and this page reconnects on its own when it wakes.</p>
+    <button class="sl" id="retry">Try now</button>
+  </section>
+</main>
+
+<form class="composer" id="composer">
+  <div class="composer-inner">
+    <label class="field"><span class="sr">Message seimei</span><textarea id="input" rows="1" placeholder="Message seimei" enterkeyhint="send" autocomplete="off"></textarea></label>
+    <button class="fab sl" type="submit" id="send" aria-label="Send"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/></svg></button>
+    <button class="fab tonal sl" type="button" id="stop" aria-label="Stop" hidden><span class="square"></span></button>
+  </div>
+</form>
+</body>
+</html>
