@@ -4,7 +4,6 @@ import asyncio
 import hashlib
 import hmac
 import json
-import os
 import secrets
 import time
 from pathlib import Path
@@ -19,6 +18,8 @@ from webauthn.helpers.structs import (
     UserVerificationRequirement,
 )
 
+from .util import write_json
+
 SESSION_DAYS = 30
 CHALLENGE_SECONDS = 120
 SCRYPT = {"n": 2**15, "r": 8, "p": 1}
@@ -30,14 +31,6 @@ MAX_LOCK = 15 * 60
 
 def scrypt(password: str, salt: bytes, n: int, r: int, p: int) -> bytes:
     return hashlib.scrypt(password.encode(), salt=salt, n=n, r=r, p=p, maxmem=64 << 20, dklen=32)
-
-
-def write_private(path: Path, data: dict):
-    tmp = path.with_suffix(".tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        json.dump(data, f, indent=1)
-    tmp.replace(path)
 
 
 class Auth:
@@ -67,7 +60,7 @@ class Auth:
         self.mtime = mtime
 
     def save(self):
-        write_private(self.path, self.data)
+        write_json(self.path, self.data, private=True)
         self.mtime = self.path.stat().st_mtime_ns
 
     @property

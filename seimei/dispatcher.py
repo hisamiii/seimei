@@ -1,7 +1,6 @@
 """The permanent dispatcher session: one Claude Code conversation that survives restarts."""
 
 import asyncio
-import json
 import logging
 import os
 import shutil
@@ -24,6 +23,7 @@ from claude_agent_sdk import (
 )
 
 from .events import EventLog
+from .util import queue_env, result_text, summarize
 
 log = logging.getLogger("seimei")
 
@@ -35,47 +35,21 @@ They talk to you through a web page, usually from their phone.
   Keep durable notes (ongoing tasks, decisions, open questions) in {notes} and re-read them after a compaction or restart.
 - Replies are read on a phone: lead with the answer, keep it short, avoid wide tables.
 - Messages starting with [seimei] are events from the server, not typed by the user.
+
+## Shikigami
+Delegate real work (coding, research, anything longer than a few tool calls) to shikigami: worker sessions you start with mcp__seimei__summon.
+- Give each a short lowercase name, the folder the task is about, and complete instructions: it sees nothing else.
+- Pick the model per task: opus for real work, sonnet for routine jobs, haiku for quick lookups.
+- Their reports are shown to the user as cards, so do not repeat a report; add only what the user needs on top.
+- A [seimei] line tells you when one finishes, fails or asks something. Answer questions with mcp__seimei__message when you can; ask the user when only they can decide.
+- Check on them with mcp__seimei__workers and mcp__seimei__peek. Ask the user before running more than 5 at once.
 """
 
-QUEUE_LIB = Path.home() / ".local/lib/claude-queue"
-RESULT_CHARS = 4000
-
-
-def summarize(inp: dict) -> str:
-    """One line describing a tool call, for the collapsed activity row."""
-    for key in ("command", "file_path", "path", "pattern", "url", "query", "description", "prompt"):
-        if isinstance(inp.get(key), str):
-            return inp[key].strip().splitlines()[0][:200] if inp[key].strip() else ""
-    return json.dumps(inp)[:200]
-
-
-def result_text(content) -> str:
-    if isinstance(content, str):
-        text = content
-    elif isinstance(content, list):
-        text = "\n".join(c.get("text", "") if c.get("type") == "text" else f"[{c.get('type')}]" for c in content)
-    else:
-        text = ""
-    return text if len(text) <= RESULT_CHARS else text[:RESULT_CHARS] + "\n[...]"
-
-
-def queue_env() -> dict:
-    """Run the dispatcher's commands through claude-queue, like a `claude-queue seimei` session."""
-    if not (QUEUE_LIB / "queue-prefix").exists():
-        return {}
-    qdir = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/claude-queue-{os.getuid()}") / "claude-queue"
-    qdir.mkdir(parents=True, exist_ok=True)
-    return {
-        "CLAUDE_QUEUE": "seimei",
-        "CLAUDE_QUEUE_DIR": str(qdir),
-        "CLAUDE_QUEUE_LIB": str(QUEUE_LIB / "devgate.so"),
-        "CLAUDE_CODE_SHELL_PREFIX": str(QUEUE_LIB / "queue-prefix"),
-    }
-
-
 class Dispatcher:
-    def __init__(self, cfg: dict, events: EventLog, state_dir: Path):
+    def __init__(self, cfg: dict, events: EventLog, state_dir: Path, tools=None):
         self.cfg = cfg
+        self.tools = tools
+        self.notes_queue: list[str] = []
         self.events = events
         self.sid_file = state_dir / "session_id"
         self.notes = state_dir / "notes.md"
@@ -115,7 +89,8 @@ class Dispatcher:
             include_partial_messages=True,
             setting_sources=["user", "project", "local"],
             system_prompt={"type": "preset", "preset": "claude_code", "append": PROMPT.format(notes=self.notes)},
-            env=queue_env(),
+            env=queue_env("seimei"),
+            mcp_servers={"seimei": self.tools} if self.tools else {},
             **where,
         )
 
@@ -158,6 +133,21 @@ class Dispatcher:
 
     async def send(self, text: str):
         self.events.add({"type": "user", "text": text})
+        await self._deliver(text)
+
+    def note(self, text: str):
+        """Something the dispatcher should know, delivered with its next message."""
+        self.notes_queue.append(text)
+
+    def wake(self, text: str):
+        """Something the dispatcher should act on now."""
+        asyncio.ensure_future(self._deliver(f"[seimei] {text}"))
+
+    async def _deliver(self, text: str):
+        if self.notes_queue:
+            notes = "\n".join(f"- {n}" for n in self.notes_queue)
+            self.notes_queue.clear()
+            text = f"[seimei] Since your last turn:\n{notes}\n\n{text}"
         self._set(busy=True)
         # A message sent mid-turn is folded into the running turn at its next step.
         if self.connected:
@@ -209,9 +199,13 @@ class Dispatcher:
             self.stopping = False
             self._set(busy=False)
         elif isinstance(msg, RateLimitEvent):
-            info = msg.rate_limit_info
-            window = info.rate_limit_type or "unknown"
-            prev = self.rate_limits.get(window, {}).get("status", "allowed")
-            self.rate_limits[window] = {"status": info.status, "resets_at": info.resets_at, "utilization": info.utilization}
-            if info.status != prev:
-                self.events.add({"type": "rate_limit", "window": window, **self.rate_limits[window]})
+            self.rate_limit(msg)
+
+    def rate_limit(self, msg: RateLimitEvent):
+        """Limits are shared by the dispatcher and every worker: one account."""
+        info = msg.rate_limit_info
+        window = info.rate_limit_type or "unknown"
+        prev = self.rate_limits.get(window, {}).get("status", "allowed")
+        self.rate_limits[window] = {"status": info.status, "resets_at": info.resets_at, "utilization": info.utilization}
+        if info.status != prev:
+            self.events.add({"type": "rate_limit", "window": window, **self.rate_limits[window]})

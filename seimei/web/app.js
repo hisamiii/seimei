@@ -87,6 +87,11 @@ function phrase(name, n) {
   if (name === 'WebFetch') return `opened ${plural(n, 'a page', 'pages')}`;
   if (/^(Agent|Task)$/.test(name)) return `started ${plural(n, 'an agent', 'agents')}`;
   if (/^(TodoWrite|TaskCreate|TaskUpdate|TaskList|TaskGet)$/.test(name)) return 'updated its tasks';
+  if (name === 'ToolSearch') return 'loaded tools';
+  if (name === 'mcp__seimei__workers') return 'checked the shikigami';
+  if (name === 'mcp__seimei__peek') return n === 1 ? 'looked in on a shikigami' : `looked in on shikigami ${n} times`;
+  if (name === 'mcp__seimei__message') return n === 1 ? 'messaged a shikigami' : `sent ${n} shikigami messages`;
+  if (name === 'mcp__seimei__stop') return 'stopped a shikigami';
   const short = name.startsWith('mcp__') ? name.split('__').pop().replace(/_/g, ' ') : name;
   return n === 1 ? `used ${short}` : `used ${short} ${n} times`;
 }
@@ -158,6 +163,51 @@ class Activity {
 
 // ---------- rendering ----------
 
+const STAR = 'M12 2 17.88 20.09 2.49 8.91h19.02L6.12 20.09Z';
+const WORKER = {
+  summoned: { icon: STAR, title: (n) => `Summoned ${n}` },
+  done: { icon: 'M5 12.5l4.5 4.5L19 7.5', title: (n) => `${n} finished` },
+  failed: { icon: 'M12 7v6M12 17v.01M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z', title: (n) => `${n} failed` },
+  asking: { icon: 'M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17v.01', title: (n) => `${n} asks` },
+};
+
+function workerCard(ev) {
+  const kind = WORKER[ev.event];
+  if (!kind) {
+    const what = ev.event === 'stopped' ? 'was stopped' : 'was interrupted by a restart';
+    return el('div', 'note', `${ev.name} ${what}`);
+  }
+  const card = el('div', `wcard ${ev.event}`);
+  card.dataset.worker = ev.worker;
+  const badge = el('span', 'badge');
+  badge.append(svg(kind.icon, 18));
+  const head = el('div', 'head');
+  const title = el('div', 'title');
+  title.append(el('b', null, kind.title(ev.name)));
+  if (ev.event === 'summoned') title.append(el('span', 'meta', `${ev.model} \u00b7 ${ev.cwd.replace(/^\/home\/[^/]+/, '~')}`));
+  head.append(badge, title);
+  card.append(head);
+  if (ev.text) {
+    const body = el('div', ev.event === 'summoned' ? 'body task' : 'body');
+    if (ev.event === 'summoned') body.textContent = ev.text;
+    else body.innerHTML = md(ev.text);
+    card.append(body);
+    requestAnimationFrame(() => {
+      if (body.scrollHeight > body.clientHeight + 4) {
+        card.classList.add('clipped');
+        const more = el('button', 'more sl', 'Show more');
+        more.type = 'button';
+        more.addEventListener('click', () => {
+          card.classList.toggle('open');
+          more.textContent = card.classList.contains('open') ? 'Show less' : 'Show more';
+        });
+        card.append(more);
+      }
+    });
+  }
+  return card;
+}
+
 function message(ev) {
   const node = el('div', `msg ${ev.type}`);
   if (ev.type === 'assistant') node.innerHTML = md(ev.text);
@@ -192,6 +242,8 @@ class Renderer {
       this.day = dayKey(ev.t);
       this.put(el('div', 'note day', dayLabel(ev.t)));
     }
+    // The summoned card already says it.
+    if (ev.type === 'tool' && ev.name === 'mcp__seimei__summon') return;
     if (ev.type === 'tool') {
       if (!this.activity) {
         this.activity = new Activity();
@@ -208,6 +260,7 @@ class Renderer {
     this.activity = null;
     if (ev.type === 'user' || ev.type === 'assistant') this.put(message(ev));
     else if (ev.type === 'system') this.put(el('div', `note ${ev.level || ''}`, ev.text));
+    else if (ev.type === 'worker') this.put(workerCard(ev));
     else if (ev.type === 'rate_limit') this.put(el('div', `note ${ev.status === 'rejected' ? 'error' : 'warn'}`, limitText(ev)));
   }
 }

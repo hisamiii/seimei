@@ -15,6 +15,8 @@ from .auth import Auth
 from .dispatcher import Dispatcher
 from .events import EventLog
 from .server import make_app
+from .tools import make_tools
+from .workers import Pool
 
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "seimei/config.toml"
 STATE = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "seimei"
@@ -83,10 +85,13 @@ def main():
             raise SystemExit("seimei: no password yet, run `uv run python -m seimei passwd` first")
 
     events = EventLog(state / "events.jsonl")
-    dispatcher = Dispatcher(disp, events, state)
-    app = make_app(events, dispatcher, auth, origins)
+    pool = Pool(events, state)
+    dispatcher = Dispatcher(disp, events, state, make_tools(pool))
+    pool.dispatcher = dispatcher
+    app = make_app(events, dispatcher, pool, auth, origins)
 
     async def start(app):
+        pool.startup()
         app["dispatcher"] = asyncio.create_task(dispatcher.run())
 
     async def shutdown(app):
@@ -94,6 +99,7 @@ def main():
 
     async def stop(app):
         app["dispatcher"].cancel()
+        await pool.close()
 
     app.on_startup.append(start)
     app.on_shutdown.append(shutdown)

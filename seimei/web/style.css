@@ -279,3 +279,27 @@ body.login { display: grid; place-items: center; grid-template-rows: 1fr; paddin
 .card h3 { margin: 0 0 2px; font-size: 15px; font-weight: 600; }
 .card p { margin: 0; color: var(--text-2); font-size: 14px; }
 .card .actions { display: flex; gap: 4px; margin: 8px 0 0 -14px; }
+
+/* Shikigami cards in the conversation */
+.wcard { background: var(--container); border-radius: 20px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+.wcard .head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.wcard .title { display: flex; flex-direction: column; min-width: 0; }
+.wcard .title b { font-weight: 600; font-size: 14px; line-height: 1.3; overflow-wrap: anywhere; }
+.wcard .meta { font: 12px/1.4 var(--mono); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wcard .badge { flex: none; width: 30px; height: 30px; border-radius: 10px; display: grid; place-items: center; background: var(--primary-container); color: var(--on-primary-container); }
+.wcard.done .badge { background: #2b3b33; color: var(--ok); }
+.wcard.failed .badge { background: #45293a; color: var(--error); }
+.wcard.asking { box-shadow: inset 0 0 0 1.5px var(--primary); }
+.wcard .body { font-size: 14px; color: var(--text-2); max-height: 9.5em; overflow: hidden; overflow-wrap: anywhere; }
+.wcard .body.task { white-space: pre-wrap; max-height: 4.4em; }
+.wcard.clipped:not(.open) .body { -webkit-mask-image: linear-gradient(#000 60%, transparent); mask-image: linear-gradient(#000 60%, transparent); }
+.wcard.open .body { max-height: none; }
+.wcard .body > :first-child { margin-top: 0; }
+.wcard .body > :last-child { margin-bottom: 0; }
+.wcard .body p, .wcard .body ul, .wcard .body ol, .wcard .body pre { margin: 0 0 .6em; }
+.wcard .body ul, .wcard .body ol { padding-left: 1.3em; }
+.wcard .body code { font: .9em var(--mono); background: var(--container-high); border-radius: 6px; padding: .1em .35em; }
+.wcard .body pre { padding: 10px 12px; overflow-x: auto; background: var(--surface-lowest); border-radius: 12px; font: 12.5px/1.55 var(--mono); }
+.wcard .body pre code { background: none; padding: 0; }
+.wcard .body a { color: var(--primary); }
+.wcard .more { align-self: flex-start; border: 0; background: none; color: var(--primary); font-size: 13px; font-weight: 500; padding: 4px 8px; margin: -4px -8px; border-radius: 8px; }

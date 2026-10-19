@@ -9,6 +9,7 @@ from aiohttp import web
 from .auth import Auth
 from .dispatcher import Dispatcher
 from .events import EventLog
+from .workers import Pool
 
 WEB = Path(__file__).parent / "web"
 CSP = ("default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; font-src 'self'; "
@@ -24,7 +25,7 @@ async def write_event(resp: web.StreamResponse, ev: dict):
     await resp.write(f"{head}data: {json.dumps(ev)}\n\n".encode())
 
 
-def make_app(events: EventLog, dispatcher: Dispatcher, auth: Auth | None, origins: set[str]) -> web.Application:
+def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, auth: Auth | None, origins: set[str]) -> web.Application:
     @web.middleware
     async def guard(request: web.Request, handler):
         # Never trust the peer address: cloudflared connects from localhost too.
@@ -96,7 +97,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, auth: Auth | None, origin
         except ValueError:
             raise web.HTTPBadRequest()
         return web.json_response({"events": events.before(before, limit), "last": events.last_id,
-                                  "state": dispatcher.state()})
+                                  "state": dispatcher.state(), "workers": pool.listing()["list"]})
 
     async def stream(request):
         try:
@@ -112,6 +113,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, auth: Auth | None, origin
                 await write_event(resp, ev)
                 last = ev["id"]
             await write_event(resp, dispatcher.state())
+            await write_event(resp, pool.listing())
             while True:
                 try:
                     ev = await asyncio.wait_for(q.get(), HEARTBEAT)
