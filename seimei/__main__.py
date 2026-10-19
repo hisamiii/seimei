@@ -17,6 +17,7 @@ from .dispatcher import Dispatcher
 from .events import EventLog
 from .files import Files
 from .server import make_app
+from .sessions import Watcher
 from .tools import make_tools
 from .usage import Usage
 from .workers import Pool
@@ -95,18 +96,21 @@ def main():
     usage = Usage(events, state)
     dispatcher = Dispatcher(disp, events, state, make_tools(pool, files, events), approvals, usage)
     pool.dispatcher, pool.approvals = dispatcher, approvals
-    app = make_app(events, dispatcher, pool, files, approvals, auth, origins)
+    watcher = Watcher(events, pool.own_sessions)
+    app = make_app(events, dispatcher, pool, files, approvals, watcher, auth, origins)
 
     async def start(app):
         approvals.startup()
         pool.startup()
         app["dispatcher"] = asyncio.create_task(dispatcher.run())
+        app["watcher"] = asyncio.create_task(watcher.run())
 
     async def shutdown(app):
         events.close()
 
     async def stop(app):
         app["dispatcher"].cancel()
+        app["watcher"].cancel()
         await pool.close()
 
     app.on_startup.append(start)

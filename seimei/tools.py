@@ -113,13 +113,7 @@ def make_tools(pool: Pool, files: Files, events: EventLog):
         events.add({"type": "image", "file": name, "caption": str(args.get("caption") or "")[:300]})
         return text("Shown to the user.")
 
-    def own() -> dict[str, str]:
-        """seimei's own sessions, so the listing can tell them from the user's."""
-        labels = {w.rec["session_id"]: f"shikigami {w.name}" for w in pool.workers.values()}
-        sid = pool.dispatcher.session_id() if pool.dispatcher else None
-        if sid:
-            labels[sid] = "seimei (you)"
-        return labels
+    own = pool.own_sessions
 
     @tool("sessions", "List every running Claude Code session on the laptop: name, status (idle, busy, waiting with "
           "what for, shell, parked), kind, folder and last activity. Includes the user's own sessions.", {})

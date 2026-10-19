@@ -10,11 +10,13 @@ from pathlib import Path
 
 from aiohttp import web
 
+from . import sessions
 from .approvals import Approvals
 from .auth import Auth
 from .dispatcher import Dispatcher
 from .events import EventLog
 from .files import MAX_MODEL_BYTES, Files
+from .sessions import Watcher
 from .workers import Pool
 
 WEB = (Path(__file__).parent / "web").resolve()
@@ -44,7 +46,7 @@ async def write_event(resp: web.StreamResponse, ev: dict):
 
 
 def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files, approvals: Approvals,
-             auth: Auth | None, origins: set[str]) -> web.Application:
+             watcher: Watcher, auth: Auth | None, origins: set[str]) -> web.Application:
     @web.middleware
     async def guard(request: web.Request, handler):
         # Never trust the peer address: cloudflared connects from localhost too.
@@ -149,6 +151,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
             await write_event(resp, pool.listing())
             if dispatcher.usage:
                 await write_event(resp, dispatcher.usage.snapshot())
+            await write_event(resp, watcher.snapshot())
             while True:
                 try:
                     ev = await asyncio.wait_for(q.get(), HEARTBEAT)
@@ -189,6 +192,19 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
             saved.append((name, kind, base64.b64encode(data).decode()))
         await dispatcher.send(text, saved)
         return web.json_response({"ok": True})
+
+    async def session(request):
+        """Read-only look at one of the user's sessions."""
+        pid = request.match_info["pid"]
+        s = next((x for x in sessions.live(pool.own_sessions()) if str(x["pid"]) == pid), None)
+        path = s and sessions.transcript(s["rec"])
+        if not path:
+            raise web.HTTPNotFound()
+        info = next((x for x in watcher.list if x["pid"] == s["pid"]), None)
+        peek = await asyncio.to_thread(sessions.peek, path, 8)
+        return web.json_response({"session": info or {"pid": s["pid"], "name": s["name"], "status": s["status"],
+                                                      "since": s["since"], "active": s["active"], "cwd": s["cwd"]},
+                                  **peek})
 
     async def usage(request):
         return web.json_response(dispatcher.usage.snapshot() if dispatcher.usage else {})
@@ -249,6 +265,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     app.router.add_get("/api/files/{name}", file)
     app.router.add_post("/api/approvals/{aid}", decide)
     app.router.add_get("/api/usage", usage)
+    app.router.add_get("/api/sessions/{pid:[0-9]+}", session)
     app.router.add_get("/api/workers", workers_all)
     app.router.add_get("/api/workers/{id}", worker_history)
     app.router.add_post("/api/workers/{id}/send", worker_send)

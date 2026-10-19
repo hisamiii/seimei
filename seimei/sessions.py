@@ -1,10 +1,15 @@
 """Every Claude Code session on the laptop, read from Claude Code's own session registry and transcripts."""
 
+import asyncio
 import json
-import os
+import logging
 import re
 import time
 from pathlib import Path
+
+from .events import EventLog
+
+log = logging.getLogger("seimei.sessions")
 
 CLAUDE = Path.home() / ".claude"
 TAIL = 4 << 20
@@ -114,10 +119,10 @@ def _summary(inp: dict) -> str:
     return json.dumps(inp)[:200]
 
 
-def peek(path: Path, count: int = 3) -> dict:
+def peek(path: Path, count: int = 3, tail: int = TAIL) -> dict:
     """Last user messages and assistant texts, plus tool calls still open (a pending AskUserQuestion first)."""
     with open(path, "rb") as f:
-        f.seek(max(f.seek(0, 2) - TAIL, 0))
+        f.seek(max(f.seek(0, 2) - tail, 0))
         lines = f.read().splitlines()[1:] or []
     users, texts, pending = [], [], {}
     for line in lines:
@@ -153,3 +158,62 @@ def peek(path: Path, count: int = 3) -> dict:
         else:
             out["open_calls"].append({"since": t, "tool": name, "what": _summary(inp)})
     return out
+
+
+_questions: dict[Path, tuple[float, bool]] = {}
+
+
+def asking(path: Path) -> bool:
+    """Whether the transcript ends in an open AskUserQuestion; cached until the file changes."""
+    mtime = path.stat().st_mtime
+    hit = _questions.get(path)
+    if hit and hit[0] == mtime:
+        return hit[1]
+    try:
+        ask = bool(peek(path, 1, tail=256 << 10)["questions"])
+    except OSError:
+        ask = False
+    _questions[path] = (mtime, ask)
+    return ask
+
+
+def listing(own: dict[str, str]) -> list[dict]:
+    """The user's running sessions for the page: seimei's and parked terminals left out."""
+    out = []
+    for s in live(own):
+        rec = s["rec"]
+        # seimei's sessions show in their own places; another seimei (dev) by its name.
+        if s["kind"] in own.values() or rec.get("parkedJobId") or re.match(r"^(seimei(-dev)?|shikigami .+)$", s["name"]):
+            continue
+        path = transcript(rec)
+        out.append({"pid": s["pid"], "name": s["name"], "session_id": s["session_id"],
+                    "status": rec.get("status", "?"), "waiting_for": rec.get("waitingFor"),
+                    "since": s["since"], "active": s["active"], "cwd": s["cwd"], "kind": s["kind"],
+                    "question": bool(path) and asking(path)})
+    return out
+
+
+class Watcher:
+    """Pushes the user's sessions to the page when anything but the clock changes."""
+
+    def __init__(self, events: EventLog, own):
+        self.events = events
+        self.own = own
+        self.list: list[dict] = []
+
+    def snapshot(self) -> dict:
+        return {"type": "sessions", "list": self.list}
+
+    async def run(self, every: float = 4):
+        sig = None
+        while True:
+            try:
+                rows = await asyncio.to_thread(listing, self.own())
+                new = [(r["pid"], r["name"], r["status"], r["waiting_for"], r["since"], r["question"],
+                        r["status"] == "busy" or round(r["active"])) for r in rows]
+                if new != sig:
+                    sig, self.list = new, rows
+                    self.events.flash(self.snapshot())
+            except Exception:
+                log.exception("session scan failed")
+            await asyncio.sleep(every)

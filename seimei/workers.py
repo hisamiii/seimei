@@ -232,6 +232,14 @@ class Pool:
                   if w.rec["state"] in ACTIVE or now - w.rec.get("updated", 0) < RECENT]
         return {"type": "workers", "list": recent, "total": len(self.workers)}
 
+    def own_sessions(self) -> dict[str, str]:
+        """seimei's own sessions by session id, so listings can tell them from the user's."""
+        labels = {w.rec["session_id"]: f"shikigami {w.name}" for w in self.workers.values()}
+        sid = self.dispatcher.session_id() if self.dispatcher else None
+        if sid:
+            labels[sid] = "seimei (you)"
+        return labels
+
     def running(self) -> int:
         return sum(w.rec["state"] in ACTIVE for w in self.workers.values())
 

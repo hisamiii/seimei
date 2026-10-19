@@ -377,6 +377,8 @@ function render() {
     starting: 'session starting', waiting: 'waiting for your OK', working: 'working', idle: 'idle' }[s];
   $('status').dataset.s = s;
   $('status-text').textContent = text;
+  // Idle and working go without saying (the working line in the chat shows a turn); only problems and asks show.
+  $('status').hidden = s === 'idle' || s === 'working';
   document.body.classList.toggle('offline', !online && !!awaySince);
   const away = !!(awaySince && Date.now() - awaySince > 4000 && !online);
   if (away && $('away').hidden) requestAnimationFrame(toBottom);
@@ -433,6 +435,8 @@ function handle(ev) {
     sheetEvent(ev);
   } else if (ev.type === 'usage') {
     setUsage(ev);
+  } else if (ev.type === 'sessions') {
+    setSessions(ev.list);
   }
 }
 
@@ -773,8 +777,80 @@ function stateText(w) {
 function setWorkers(ev) {
   workers = ev.list;
   workersTotal = ev.total ?? workersTotal;
+  renderChips();
+  if (sheet.worker) {
+    const w = workers.find((x) => x.id === sheet.worker.id);
+    if (w) updateHead({ ...sheet.worker, ...w });
+  }
+}
+
+// ---------- the user's own sessions ----------
+
+let userSessions = [];
+const SEEN = 'seimei.seen';
+let seen = {};
+try { seen = JSON.parse(localStorage.getItem(SEEN) || '{}'); } catch {}
+const saveSeen = () => { try { localStorage.setItem(SEEN, JSON.stringify(seen)); } catch {} };
+
+const short = (t) => {
+  const s = Math.max(0, Date.now() / 1000 - t);
+  return s < 60 ? 'now' : s < 3600 ? `${Math.floor(s / 60)}m` : s < 86400 ? `${Math.floor(s / 3600)}h` : `${Math.floor(s / 86400)}d`;
+};
+
+// What a session needs from the user: an open question first, then a finished turn not yet looked at.
+function look(s) {
+  if (s.question) return { label: 'question', tone: 'ask', rank: 0, badge: true };
+  if (s.status === 'waiting') return { label: s.waiting_for || 'waiting', tone: 'ask', rank: 0, badge: true };
+  if (s.status === 'busy') return { label: 'working', tone: 'run', rank: 2 };
+  if (s.status === 'idle' && s.active > (seen[s.session_id] || 0) + 1) return { label: 'done', tone: 'ok', rank: 1, badge: true };
+  return { label: s.status, tone: 'idle', rank: 3 };
+}
+
+function setSessions(list) {
+  // A session seen for the first time starts read; only turns that end after that get a badge.
+  let fresh = false;
+  for (const s of list) {
+    if (!(s.session_id in seen)) {
+      seen[s.session_id] = s.status === 'busy' ? 0 : s.active;
+      fresh = true;
+    }
+  }
+  if (fresh) saveSeen();
+  userSessions = list;
+  renderChips();
+  if (sheet.view === 'session') {
+    const s = list.find((x) => x.pid === sheet.pid);
+    if (s && s.status + s.question + s.active !== sheet.sig) openSession(s.pid);
+  }
+  if (sheet.view === 'workers') openAll();
+}
+
+function markSeen(s) {
+  seen[s.session_id] = s.active;
+  saveSeen();
+}
+
+function sessionChip(s) {
+  const l = look(s);
+  const b = el('button', `wchip user ${l.tone} sl`);
+  b.type = 'button';
+  b.append(el('span', 'dot'), el('span', 'name', s.name), el('span', 'st', `${l.label} \u00b7 ${short(s.since)}`));
+  if (l.badge) b.append(el('i', 'badge'));
+  b.addEventListener('click', () => openSession(s.pid));
+  return b;
+}
+
+function sortedSessions() {
+  return [...userSessions].sort((a, b) => look(a).rank - look(b).rank || b.active - a.active);
+}
+
+function renderChips() {
   const nav = $('chips');
   nav.replaceChildren();
+  // Whatever needs the user comes first: their sessions with a question or a finished turn, then shikigami, then the rest.
+  const sessions = sortedSessions();
+  const urgent = sessions.filter((x) => look(x).badge);
+  for (const x of urgent) nav.append(sessionChip(x));
   const list = [...workers].sort((a, b) => (ORDER[a.state] ?? 5) - (ORDER[b.state] ?? 5) || b.updated - a.updated);
   for (const w of list) {
     const [label, tone] = TONES[w.state] || [w.state, 'idle'];
@@ -784,24 +860,79 @@ function setWorkers(ev) {
     b.addEventListener('click', () => openWorker(w.id));
     nav.append(b);
   }
-  if (workersTotal) {
+  for (const x of sessions) if (!urgent.includes(x)) nav.append(sessionChip(x));
+  if (workersTotal || userSessions.length) {
     const all = el('button', 'wchip all sl');
     all.type = 'button';
-    all.setAttribute('aria-label', 'All shikigami');
+    all.setAttribute('aria-label', 'All sessions and shikigami');
     all.append(svg('M4 6h16M4 12h16M4 18h10', 18));
     all.addEventListener('click', openAll);
     nav.append(all);
   }
-  if (sheet.worker) {
-    const w = workers.find((x) => x.id === sheet.worker.id);
-    if (w) updateHead({ ...sheet.worker, ...w });
+}
+setInterval(renderChips, 30000);
+
+async function openSession(pid) {
+  const r = await getJSON(`api/sessions/${pid}`);
+  if (!r) return;
+  const s = r.session;
+  sheet.view = 'session';
+  sheet.pid = s.pid;
+  sheet.sig = s.status + s.question + s.active;
+  sheet.worker = null;
+  sheet.renderer = null;
+  if (s.session_id) markSeen(s);
+  renderChips();
+
+  const l = s.session_id ? look(s) : { label: s.status, tone: 'idle' };
+  const badge = el('span', `wbadge ${l.tone}`);
+  badge.append(el('span'));
+  const titles = el('div');
+  titles.append(el('h2', null, s.name), el('div', 'sub', `${l.label === 'done' ? 'idle' : l.label} for ${short(s.since).replace('now', 'a moment')}`));
+  const head = el('div', 'whead');
+  head.append(badge, titles);
+  const facts = el('div', 'facts');
+  facts.append(el('span', 'mono', home(s.cwd)), el('span', null, s.kind), el('span', null, `last active ${clock(s.active)}`));
+  const parts = [head, facts];
+
+  for (const q of r.questions) {
+    const box = el('div', 'squestion');
+    box.append(el('b', null, 'Waiting on a question in the terminal'));
+    for (const item of q.questions) {
+      box.append(el('p', null, item.question + (item.multiSelect ? ' (pick any)' : '')));
+      const ol = el('ol');
+      for (const o of item.options || []) {
+        const li = el('li');
+        li.append(el('span', null, o.label));
+        if (o.description) li.append(el('small', null, o.description));
+        ol.append(li);
+      }
+      box.append(ol);
+    }
+    parts.push(box);
   }
+  for (const c of r.open_calls) {
+    const row = el('div', 'running');
+    row.append(el('span', null, `${c.tool} since ${clock(Date.parse(c.since) / 1000)}`), el('code', null, c.what));
+    parts.push(row);
+  }
+
+  const log = el('div', 'wlog');
+  const msgs = [...r.user.map(([t, text]) => ({ t, type: 'user', text })), ...r.assistant.map(([t, text]) => ({ t, type: 'assistant', text }))]
+    .sort((a, b) => a.t.localeCompare(b.t));
+  for (const m of msgs) log.append(message({ ...m, t: Date.parse(m.t) / 1000 }));
+  if (!msgs.length) log.append(el('div', 'note', 'No messages yet.'));
+  parts.push(log, el('p', 'usage-note', 'Read-only. Ask seimei to message this session.'));
+  sheet.body.replaceChildren(...parts);
+  showSheet();
+  log.scrollTop = log.scrollHeight;
 }
 
 // One bottom sheet, filled with either a worker or the list of all workers.
 const sheet = { wrap: $('sheet-wrap'), body: $('sheet-body'), worker: null, log: null, renderer: null, head: null };
 
 function showSheet() {
+  sheet.body.classList.toggle('scroll', sheet.view === 'session' || sheet.view === 'usage');
   if (sheet.wrap.hidden) {
     sheet.wrap.hidden = false;
     history.pushState({ sheet: true }, '');
@@ -1006,7 +1137,21 @@ async function openAll() {
     row.addEventListener('click', () => openWorker(w.id));
     list.append(row);
   }
-  sheet.body.replaceChildren(el('h2', 'list', 'Shikigami'), list);
+  const parts = [];
+  if (userSessions.length) {
+    const mine = el('div', 'wlist');
+    for (const s of sortedSessions()) {
+      const l = look(s);
+      const row = el('button', `wrow ${l.tone} sl`);
+      row.type = 'button';
+      row.append(el('i', 'dot'), el('b', null, s.name), el('time', null, `${l.label} \u00b7 ${short(s.since)}`), el('span', null, home(s.cwd)));
+      row.addEventListener('click', () => openSession(s.pid));
+      mine.append(row);
+    }
+    parts.push(el('h2', 'list', 'Your sessions'), mine);
+  }
+  if (r.workers.length) parts.push(el('h2', 'list', 'Shikigami'), list);
+  sheet.body.replaceChildren(...parts);
   showSheet();
 }
 
