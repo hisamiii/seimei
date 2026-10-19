@@ -144,6 +144,34 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, auth: Auth | 
         await dispatcher.send(text)
         return web.json_response({"ok": True})
 
+    def worker(request):
+        w = pool.workers.get(request.match_info["id"])
+        if not w:
+            raise web.HTTPNotFound()
+        return w
+
+    async def workers_all(request):
+        ws = sorted(pool.workers.values(), key=lambda w: w.rec["created"], reverse=True)[:200]
+        return web.json_response({"workers": [w.info() for w in ws]})
+
+    async def worker_history(request):
+        w = worker(request)
+        return web.json_response({"worker": {**w.info(), "task": w.rec["task"], "question": w.rec.get("question")},
+                                  "events": w.log.before(None, 400)})
+
+    async def worker_send(request):
+        w = worker(request)
+        text = str((await request.json()).get("text", "")).strip()
+        if not text:
+            raise web.HTTPBadRequest()
+        await w.send(text)
+        dispatcher.note(f"the user messaged shikigami {w.name} ({w.id}) directly: {text[:500]}")
+        return web.json_response({"ok": True})
+
+    async def worker_stop(request):
+        await worker(request).stop()
+        return web.json_response({"ok": True})
+
     async def interrupt(request):
         await dispatcher.interrupt()
         return web.json_response({"ok": True})
@@ -155,6 +183,10 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, auth: Auth | 
     app.router.add_post("/api/send", send)
     app.router.add_post("/api/interrupt", interrupt)
     app.router.add_get("/api/auth/me", me)
+    app.router.add_get("/api/workers", workers_all)
+    app.router.add_get("/api/workers/{id}", worker_history)
+    app.router.add_post("/api/workers/{id}/send", worker_send)
+    app.router.add_post("/api/workers/{id}/stop", worker_stop)
     if auth:
         app.router.add_post("/api/auth/password", login_password)
         app.router.add_post("/api/auth/passkey/options", passkey_options)

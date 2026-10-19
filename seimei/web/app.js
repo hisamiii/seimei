@@ -327,6 +327,10 @@ function handle(ev) {
     render();
   } else if (ev.type === 'delta') {
     onDelta(ev.text);
+  } else if (ev.type === 'workers') {
+    setWorkers(ev);
+  } else if (ev.type === 'w') {
+    sheetEvent(ev);
   }
 }
 
@@ -336,9 +340,13 @@ let source = null;
 let awayTimer = 0;
 let lastSeen = 0;
 const SILENT = 40000;
+const GRACE = 8000;
+let quietUntil = 0;
 
+// A phone pauses a background tab and its stream drops; that is not the laptop sleeping.
+// Losses while hidden or during a quiet reconnect only count once that reconnect fails.
 function lost() {
-  if (online) awaySince = Date.now();
+  if (online && !document.hidden && Date.now() > quietUntil) awaySince = Date.now();
   online = false;
   render();
   clearTimeout(awayTimer);
@@ -373,13 +381,32 @@ function connect() {
 
 // The server pings every 15 s. A suspended laptop never closes the connection, so silence is the signal.
 function watchdog() {
+  if (document.hidden) return;
   if (Date.now() - lastSeen > SILENT) {
     lost();
     connect();
   }
 }
 setInterval(watchdog, 5000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) watchdog(); });
+
+// Back in front: reconnect quietly, and show the away card only if the laptop does not answer.
+function resume() {
+  if (online && Date.now() - lastSeen < SILENT) return;
+  const since = Date.now();
+  quietUntil = since + GRACE;
+  awaySince = null;
+  online = false;
+  render();
+  connect();
+  setTimeout(() => {
+    if (!online && !awaySince) {
+      awaySince = since;
+      render();
+    }
+  }, GRACE);
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) resume(); });
+window.addEventListener('pageshow', (e) => { if (e.persisted) resume(); });
 
 async function loadOlder() {
   older.disabled = true;
@@ -407,6 +434,7 @@ async function start() {
     firstId = r.events[0]?.id ?? null;
     older.hidden = !firstId || firstId <= 1;
     session = r.state;
+    setWorkers({ list: r.workers, total: r.workers.length });
     toBottom();
   }
   render();
@@ -494,13 +522,201 @@ stopBtn.addEventListener('click', () => post('api/interrupt', {}).catch(() => {}
 older.addEventListener('click', loadOlder);
 $('retry').addEventListener('click', () => location.reload());
 
-// Tap a message to see when it was sent.
+// Tap a message to see when it was sent; tap a shikigami card to open it.
 thread.addEventListener('click', (e) => {
+  const card = e.target.closest('.wcard');
+  if (card && !e.target.closest('a, .more') && !getSelection().toString()) return openWorker(card.dataset.worker);
   const msg = e.target.closest('.msg');
   if (!msg || e.target.closest('a') || getSelection().toString()) return;
   const t = msg.querySelector(':scope > .time');
   if (t) t.remove();
   else if (msg.dataset.t) msg.append(el('span', 'time', clock(+msg.dataset.t)));
 });
+
+// ---------- shikigami ----------
+
+const TONES = {
+  starting: ['working', 'run'], running: ['working', 'run'], asking: ['needs you', 'ask'], done: ['done', 'ok'],
+  failed: ['failed', 'bad'], stopped: ['stopped', 'idle'], interrupted: ['interrupted', 'idle'],
+};
+const ORDER = { asking: 0, starting: 1, running: 1, failed: 2, done: 3, stopped: 4, interrupted: 4 };
+const ACTIVE = new Set(['starting', 'running', 'asking']);
+const home = (p) => p.replace(/^\/home\/[^/]+/, '~');
+let workers = [];
+let workersTotal = 0;
+
+function stateText(w) {
+  const at = clock(w.updated);
+  return {
+    starting: 'Starting', running: `Working since ${at}`, asking: 'Waiting for your answer', done: `Finished at ${at}`,
+    failed: `Failed at ${at}`, stopped: `Stopped at ${at}`, interrupted: `Interrupted at ${at}`,
+  }[w.state] || w.state;
+}
+
+function setWorkers(ev) {
+  workers = ev.list;
+  workersTotal = ev.total ?? workersTotal;
+  const nav = $('chips');
+  nav.replaceChildren();
+  const list = [...workers].sort((a, b) => (ORDER[a.state] ?? 5) - (ORDER[b.state] ?? 5) || b.updated - a.updated);
+  for (const w of list) {
+    const [label, tone] = TONES[w.state] || [w.state, 'idle'];
+    const b = el('button', `wchip ${tone} sl`);
+    b.type = 'button';
+    b.append(el('span', 'dot'), el('span', 'name', w.name), el('span', 'st', label));
+    b.addEventListener('click', () => openWorker(w.id));
+    nav.append(b);
+  }
+  if (workersTotal) {
+    const all = el('button', 'wchip all sl');
+    all.type = 'button';
+    all.setAttribute('aria-label', 'All shikigami');
+    all.append(svg('M4 6h16M4 12h16M4 18h10', 18));
+    all.addEventListener('click', openAll);
+    nav.append(all);
+  }
+  if (sheet.worker) {
+    const w = workers.find((x) => x.id === sheet.worker.id);
+    if (w) updateHead({ ...sheet.worker, ...w });
+  }
+}
+
+// One bottom sheet, filled with either a worker or the list of all workers.
+const sheet = { wrap: $('sheet-wrap'), body: $('sheet-body'), worker: null, log: null, renderer: null, head: null };
+
+function showSheet() {
+  if (sheet.wrap.hidden) {
+    sheet.wrap.hidden = false;
+    history.pushState({ sheet: true }, '');
+  }
+}
+
+function closeSheet(fromHistory = false) {
+  if (sheet.wrap.hidden) return;
+  sheet.wrap.hidden = true;
+  sheet.worker = null;
+  sheet.renderer = null;
+  if (!fromHistory && history.state?.sheet) history.back();
+}
+
+$('scrim').addEventListener('click', () => closeSheet());
+window.addEventListener('popstate', () => closeSheet(true));
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });
+
+async function getJSON(path) {
+  const r = await fetch(path).catch(() => null);
+  if (r?.status === 401) toLogin();
+  return r?.ok ? r.json() : null;
+}
+
+function updateHead(w) {
+  sheet.worker = w;
+  const [, tone] = TONES[w.state] || [w.state, 'idle'];
+  const h = sheet.head;
+  h.badge.className = `wbadge ${tone}`;
+  h.sub.textContent = stateText(w);
+  const active = ACTIVE.has(w.state);
+  h.stop.hidden = !active;
+  h.input.placeholder = w.state === 'asking' ? `Answer ${w.name}` : `Message ${w.name}`;
+  h.question.hidden = !(w.state === 'asking' && w.question);
+  if (w.question) h.question.textContent = w.question;
+}
+
+async function openWorker(id) {
+  const r = await getJSON(`api/workers/${encodeURIComponent(id)}`);
+  if (!r) return;
+  const w = r.worker;
+  const body = sheet.body;
+  body.replaceChildren();
+
+  const badge = el('span', 'wbadge');
+  badge.append(el('span'));
+  const titles = el('div');
+  const sub = el('div', 'sub');
+  titles.append(el('h2', null, w.name), sub);
+  const head = el('div', 'whead');
+  head.append(badge, titles);
+
+  const facts = el('div', 'facts');
+  facts.append(el('span', 'mono', home(w.cwd)), el('span', null, w.model), el('span', null, `started ${clock(w.created)}`));
+
+  const task = el('details', 'task');
+  task.append(el('summary', null, 'Task'), el('div', null, w.task));
+
+  const question = el('div', 'question');
+  const log = el('div', 'wlog');
+  sheet.renderer = new Renderer(log);
+  r.events.forEach((ev) => sheet.renderer.add(ev));
+  sheet.log = log;
+
+  const form = el('form', 'sheet-actions');
+  const field = el('label', 'field');
+  const input = el('textarea');
+  input.rows = 1;
+  input.setAttribute('enterkeyhint', 'send');
+  field.append(input);
+  const send = el('button', 'fab sl');
+  send.type = 'submit';
+  send.setAttribute('aria-label', 'Send');
+  send.append(svg('M12 19V5M5.5 11.5 12 5l6.5 6.5', 20));
+  const stop = el('button', 'round-stop sl');
+  stop.type = 'button';
+  stop.setAttribute('aria-label', 'Stop');
+  stop.append(el('span'));
+  form.append(field, send, stop);
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    try {
+      await post(`api/workers/${encodeURIComponent(w.id)}/send`, { text });
+    } catch {
+      input.value = text;
+    }
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && finePointer) {
+      e.preventDefault();
+      form.requestSubmit();
+    }
+  });
+  stop.addEventListener('click', () => post(`api/workers/${encodeURIComponent(w.id)}/stop`, {}).catch(() => {}));
+
+  body.append(head, facts, task, question, log, form);
+  sheet.head = { badge, sub, stop, input, question };
+  updateHead(w);
+  showSheet();
+  log.scrollTop = log.scrollHeight;
+}
+
+function sheetEvent(ev) {
+  if (!sheet.renderer || sheet.worker?.id !== ev.worker) return;
+  const log = sheet.log;
+  const stick = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
+  sheet.renderer.add(ev.ev);
+  if (stick) log.scrollTop = log.scrollHeight;
+}
+
+async function openAll() {
+  const r = await getJSON('api/workers');
+  if (!r) return;
+  sheet.worker = null;
+  sheet.renderer = null;
+  const list = el('div', 'wlist');
+  for (const w of r.workers) {
+    const [, tone] = TONES[w.state] || [w.state, 'idle'];
+    const row = el('button', `wrow ${tone} sl`);
+    row.type = 'button';
+    const d = new Date(w.updated * 1000);
+    const when = d.toDateString() === new Date().toDateString() ? clock(w.updated) : d.toLocaleDateString([], { day: 'numeric', month: 'short' });
+    row.append(el('i', 'dot'), el('b', null, w.name), el('time', null, when), el('span', null, w.summary || stateText(w)));
+    row.addEventListener('click', () => openWorker(w.id));
+    list.append(row);
+  }
+  sheet.body.replaceChildren(el('h2', 'list', 'Shikigami'), list);
+  showSheet();
+}
 
 start();

@@ -223,7 +223,7 @@ class Pool:
         now = time.time()
         recent = [w.info() for w in self.workers.values()
                   if w.rec["state"] in ACTIVE or now - w.rec.get("updated", 0) < RECENT]
-        return {"type": "workers", "list": recent}
+        return {"type": "workers", "list": recent, "total": len(self.workers)}
 
     def running(self) -> int:
         return sum(w.rec["state"] in ACTIVE for w in self.workers.values())
