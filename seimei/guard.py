@@ -24,6 +24,8 @@ SECRETS = [
     (".gnupg", "your GnuPG keys", r"\.gnupg"),
     (".local/share/TelegramDesktop/tdata", "the Telegram session", r"TelegramDesktop|tdata"),
     (".local/share/seimei/auth.json", "seimei's login secrets", r"seimei/(dev/)?auth\.json"),
+    (".local/share/seimei/unlock", "the screen password", r"seimei/(dev/)?unlock"),
+    (".local/share/seimei/dev/unlock", "the screen password", r"seimei/dev/unlock"),
     (".claude/.credentials.json", "the Claude login", r"\.credentials\.json"),
     (".cloudflared", "the tunnel credentials", r"\.cloudflared"),
     (".config/gh/hosts.yml", "the GitHub token", r"gh/hosts\.yml"),

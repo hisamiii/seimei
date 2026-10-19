@@ -1,0 +1,6 @@
+// seimei: autologin lands on the lock screen, and Mod+Shift+Escape stops seimei driving the desktop.
+spawn-at-startup "swaylock" "-f" "-c" "1e1e2e"
+
+binds {
+    Mod+Shift+Escape hotkey-overlay-title="Stop seimei" { spawn "systemctl" "--user" "kill" "--kill-whom=main" "--signal=USR1" "seimei"; }
+}

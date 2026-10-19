@@ -1,4 +1,4 @@
-"""python -m seimei [--dev] [--model MODEL] | passwd | passkeys [--clear] | logout-all"""
+"""python -m seimei [--dev] [--model MODEL] | passwd | passkeys [--clear] | logout-all | screen-password [--clear]"""
 
 import argparse
 import asyncio
@@ -17,7 +17,7 @@ from .approvals import Approvals
 from .auth import Auth
 from .dispatcher import Dispatcher
 from .events import EventLog
-from .desktop import Desktop
+from .desktop import UNLOCK, Desktop
 from .layout import Layout
 from .desktop_tools import make_desktop_tools
 from .files import Files
@@ -34,9 +34,25 @@ STATE = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / 
 MIN_PASSWORD = 8
 
 
-def account(auth: Auth, cmd: str, clear: bool):
+def account(auth: Auth, cmd: str, clear: bool, state: Path):
     """Recovery lives on the laptop: these never go through the web page."""
-    if cmd == "passwd":
+    if cmd == "screen-password":
+        path = state / UNLOCK
+        if clear:
+            path.unlink(missing_ok=True)
+            print("Screen password removed; seimei can no longer unlock the screen.")
+            return
+        pw = getpass.getpass("Your login (screen lock) password: ")
+        if not pw or getpass.getpass("Again: ") != pw:
+            raise SystemExit("seimei: the two entries differ")
+        if not pw.isascii() or not pw.isprintable():
+            raise SystemExit("seimei: the unlock tool can only type printable ASCII")
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(pw)
+        os.chmod(path, 0o600)
+        print(f"Saved to {path} (only you can read it). seimei types it into the lock screen; it never reaches the model.")
+    elif cmd == "passwd":
         pw = getpass.getpass("New seimei password: ")
         if len(pw) < MIN_PASSWORD:
             raise SystemExit(f"seimei: use at least {MIN_PASSWORD} characters")
@@ -61,7 +77,8 @@ def account(auth: Auth, cmd: str, clear: bool):
 
 def main():
     ap = argparse.ArgumentParser(prog="seimei")
-    ap.add_argument("command", nargs="?", choices=["serve", "passwd", "passkeys", "logout-all"], default="serve")
+    ap.add_argument("command", nargs="?", choices=["serve", "passwd", "passkeys", "logout-all", "screen-password"],
+                    default="serve")
     ap.add_argument("--dev", action="store_true", help="local testing: no login, port + 1, separate session")
     ap.add_argument("--model", help="override the dispatcher model")
     ap.add_argument("--clear", action="store_true", help="with passkeys: remove them all")
@@ -76,7 +93,7 @@ def main():
     state.mkdir(parents=True, exist_ok=True)
 
     if args.command != "serve":
-        return account(Auth(state, origin), args.command, args.clear)
+        return account(Auth(state, origin), args.command, args.clear, state)
 
     disp = dict(cfg.get("dispatcher", {}))
     if args.model:
@@ -102,7 +119,7 @@ def main():
     approvals = Approvals(events)
     guard = Guard(events, approvals, state)
     usage = Usage(events, state)
-    desk = Desktop(events, lambda t: dispatcher.note(t))
+    desk = Desktop(events, lambda t: dispatcher.note(t), state / UNLOCK)
     layout = Layout(desk, approvals, events, state)
     dispatcher = Dispatcher(disp, events, state, make_tools(pool, files, events, make_desktop_tools(desk, files, events, layout)),
                             guard, usage)

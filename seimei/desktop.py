@@ -21,6 +21,8 @@ log = logging.getLogger("seimei.desktop")
 RUN = Path(f"/run/user/{os.getuid()}")
 WORKSPACE = "seimei"
 DRIVING = RUN / "seimei-driving"
+# The user's screen password, set with `python -m seimei screen-password`; the guard blocks reading it.
+UNLOCK = "unlock"
 # Full-screen shots are scaled from logical pixels so the long edge stays near what the model sees at full detail.
 SHOT_EDGE = 1568
 DOWN_GRACE = 8
@@ -145,8 +147,9 @@ def _screen_scale() -> float:
 
 
 class Desktop:
-    def __init__(self, events: EventLog, note=None):
+    def __init__(self, events: EventLog, note=None, secret: Path | None = None):
         self.events = events
+        self.secret = secret
         self.note = note or (lambda text: None)
         self.up = None
         self.windows: dict[int, dict] = {}
@@ -404,6 +407,40 @@ class Desktop:
         action("switch-layout", "0")
         time.sleep(0.05)
         return layouts["current_idx"]
+
+    async def unlock(self) -> str:
+        """Type the saved screen password into the lock screen. The password never leaves this function."""
+        async with self.lock:
+            return await asyncio.to_thread(self._unlock)
+
+    def _unlock(self) -> str:
+        if not locked():
+            return "The screen is not locked."
+        if time.time() < self.halted_until:
+            raise RuntimeError("the user pressed the stop key on the laptop; ask them first")
+        if not self.secret or not self.secret.exists():
+            raise RuntimeError("no screen password saved; the user sets one with `uv run python -m seimei "
+                               "screen-password` in a terminal on the laptop")
+        self._drive()
+        back = self._us_layout()
+        try:
+            # Clear anything half-typed into the password field first.
+            self.keyboard.combo("esc")
+            time.sleep(0.2)
+            self.keyboard.type(self.secret.read_text(), delay=0.02)
+            self.keyboard.combo("enter")
+        finally:
+            if back is not None:
+                time.sleep(0.5)
+                try:
+                    action("switch-layout", str(back))
+                except Exception:
+                    pass
+        for _ in range(30):
+            time.sleep(0.2)
+            if not locked():
+                return "Unlocked."
+        return "Typed the password, but the screen is still locked (wrong saved password, or the locker needs a moment)."
 
     async def type_text(self, window_id: int, text: str):
         async with self.lock:

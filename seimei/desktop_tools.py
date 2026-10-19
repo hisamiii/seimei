@@ -251,6 +251,14 @@ def make_desktop_tools(desk: Desktop, files: Files, events: EventLog, layout=Non
                            + (f" | {n['body'][:300]}" if n.get("body") else ""))
         return text("\n".join(out[:limit * 2]) or "No notifications.")
 
+    @tool("unlock_screen", "Unlock the laptop's lock screen with the password the user saved for seimei. You never "
+          "see the password. Use it only when a task needs the desktop while the screen is locked.", {})
+    async def unlock_screen(args):
+        try:
+            return text(await desk.unlock())
+        except Exception as e:
+            return failed(e)
+
     @tool("restore_desktop", "Bring back the desktop layout from before the last niri restart or reboot: apps on "
           "their workspaces, kitty windows in their folders, the user's Claude sessions resumed. Without go=true it "
           "only lists the plan; with go=true the user gets one Approve/Deny card for all of it.", {
@@ -273,4 +281,4 @@ def make_desktop_tools(desk: Desktop, files: Files, events: EventLog, layout=Non
         return text("\n".join(await layout.restore(plan)))
 
     return [overview, screenshot, niri, open_app, type_text, press_keys, click, scroll, ui_tree, ui_action, media,
-            notifications, restore_desktop]
+            notifications, unlock_screen, restore_desktop]
