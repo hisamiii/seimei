@@ -107,7 +107,7 @@ def main():
     watcher = Watcher(events, pool.own_sessions, lambda s: dispatcher.note(
         f"The user's session \"{s['name']}\" finished a turn" + (" and asks a question" if s["question"] else "")
         + f" ({time.strftime('%H:%M')}).", key=f"finished:{s['pid']}"))
-    app = make_app(events, dispatcher, pool, files, approvals, guard, watcher, auth, origins)
+    app = make_app(events, dispatcher, pool, files, approvals, guard, watcher, desk, auth, origins)
 
     async def start(app):
         approvals.startup()

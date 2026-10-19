@@ -1,6 +1,7 @@
 """HTTP side: the page, login, the event stream, history, and the write endpoints."""
 
 import asyncio
+import time
 import base64
 import binascii
 import hashlib
@@ -15,6 +16,8 @@ from .approvals import Approvals
 from .auth import Auth
 from .dispatcher import Dispatcher
 from .events import EventLog
+from . import desktop as dt
+from .desktop import Desktop, NoDesktop
 from .files import MAX_MODEL_BYTES, Files
 from .guard import Guard
 from .sessions import Watcher
@@ -47,7 +50,7 @@ async def write_event(resp: web.StreamResponse, ev: dict):
 
 
 def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files, approvals: Approvals,
-             tool_guard: Guard, watcher: Watcher, auth: Auth | None, origins: set[str]) -> web.Application:
+             tool_guard: Guard, watcher: Watcher, desk: Desktop, auth: Auth | None, origins: set[str]) -> web.Application:
     @web.middleware
     async def guard(request: web.Request, handler):
         # Never trust the peer address: cloudflared connects from localhost too.
@@ -207,6 +210,40 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
                                                       "since": s["since"], "active": s["active"], "cwd": s["cwd"]},
                                   **peek})
 
+    frames: dict[tuple, tuple[float, bytes, str]] = {}
+    frame_lock = asyncio.Lock()
+    # Whole-screen frames for live view; a window shot also borrows the clipboard, so it refreshes slowly.
+    FRAME_TTL = {"screen": 0.8, "window": 4.0}
+
+    async def screen(request):
+        mode = request.query.get("mode", "screen")
+        wid = request.query.get("id", "")
+        if mode not in FRAME_TTL or (mode == "window" and not wid.isdigit()):
+            raise web.HTTPBadRequest()
+        if await asyncio.to_thread(dt.bench_running):
+            return web.json_response({"paused": "bench"}, status=503)
+        key = (mode, wid)
+        async with frame_lock:
+            hit = frames.get(key)
+            if not hit or time.monotonic() - hit[0] > FRAME_TTL[mode]:
+                try:
+                    data, mime = (await desk.frame(0.6, 62), "image/jpeg") if mode == "screen" else \
+                        await desk.screenshot(int(wid))
+                except NoDesktop:
+                    return web.json_response({"down": True}, status=503)
+                except (ValueError, RuntimeError) as e:
+                    return web.json_response({"error": str(e)}, status=404)
+                hit = frames[key] = (time.monotonic(), data, mime)
+        return web.Response(body=hit[1], content_type=hit[2], headers={"Cache-Control": "no-store"})
+
+    async def desktop_state(request):
+        try:
+            state = await asyncio.to_thread(desk.state)
+        except NoDesktop:
+            state = {"up": False}
+        state["bench"] = await asyncio.to_thread(dt.bench_running)
+        return web.json_response(state)
+
     async def audit(request):
         limit = max(1, min(int(request.query.get("limit", 200)), 1000))
         return web.json_response({"calls": await asyncio.to_thread(tool_guard.tail, limit)})
@@ -271,6 +308,8 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     app.router.add_post("/api/approvals/{aid}", decide)
     app.router.add_get("/api/usage", usage)
     app.router.add_get("/api/audit", audit)
+    app.router.add_get("/api/screen", screen)
+    app.router.add_get("/api/desktop", desktop_state)
     app.router.add_get("/api/sessions/{pid:[0-9]+}", session)
     app.router.add_get("/api/workers", workers_all)
     app.router.add_get("/api/workers/{id}", worker_history)
