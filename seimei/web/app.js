@@ -437,6 +437,7 @@ async function start() {
     setWorkers({ list: r.workers, total: r.workers.length });
     toBottom();
   }
+  autosize();
   render();
   connect();
   account();
@@ -494,6 +495,16 @@ function autosize() {
   input.style.height = `${Math.min(input.scrollHeight, 168)}px`;
 }
 
+// The draft survives reloads; it lives only in this browser.
+const DRAFT = 'seimei.draft';
+function saveDraft() {
+  try {
+    if (input.value) localStorage.setItem(DRAFT, input.value);
+    else localStorage.removeItem(DRAFT);
+  } catch {}
+}
+try { input.value = localStorage.getItem(DRAFT) || ''; } catch {}
+
 $('composer').addEventListener('submit', async (e) => {
   e.preventDefault();
   const text = input.value.trim();
@@ -503,15 +514,17 @@ $('composer').addEventListener('submit', async (e) => {
   render();
   try {
     await post('api/send', { text });
+    if (!input.value) saveDraft();
   } catch {
     input.value = text;
+    saveDraft();
     autosize();
     main.add({ type: 'system', level: 'error', text: 'Could not send that. Try again.' });
     render();
   }
 });
 
-input.addEventListener('input', () => { autosize(); render(); });
+input.addEventListener('input', () => { autosize(); render(); saveDraft(); });
 input.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && finePointer) {
     e.preventDefault();

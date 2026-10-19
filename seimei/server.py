@@ -40,6 +40,9 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, auth: Auth | 
             resp.headers["Content-Security-Policy"] = CSP
             resp.headers["X-Content-Type-Options"] = "nosniff"
             resp.headers["Referrer-Policy"] = "no-referrer"
+            if request.path.startswith("/static/"):
+                # Revalidate every time so a deploy reaches the phone; unchanged files answer 304.
+                resp.headers["Cache-Control"] = "no-cache"
         return resp
 
     async def index(request):
