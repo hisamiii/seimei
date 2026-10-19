@@ -52,7 +52,7 @@ def failed(e: Exception) -> dict:
     return text(str(e) if isinstance(e, (NoDesktop, ValueError, RuntimeError)) else f"{type(e).__name__}: {e}", error=True)
 
 
-def make_desktop_tools(desk: Desktop, files: Files, events: EventLog) -> list:
+def make_desktop_tools(desk: Desktop, files: Files, events: EventLog, layout=None) -> list:
     @tool("desktop", "The laptop's niri desktop: outputs, workspaces with their windows (id, app, title; focused, urgent, "
           "opened by seimei), the keyboard layout and whether the screen is locked. Start here before acting.", {})
     async def overview(args):
@@ -251,5 +251,26 @@ def make_desktop_tools(desk: Desktop, files: Files, events: EventLog) -> list:
                            + (f" | {n['body'][:300]}" if n.get("body") else ""))
         return text("\n".join(out[:limit * 2]) or "No notifications.")
 
+    @tool("restore_desktop", "Bring back the desktop layout from before the last niri restart or reboot: apps on "
+          "their workspaces, kitty windows in their folders, the user's Claude sessions resumed. Without go=true it "
+          "only lists the plan; with go=true the user gets one Approve/Deny card for all of it.", {
+              "type": "object", "properties": {"go": {"type": "boolean", "default": False}}})
+    async def restore_desktop(args):
+        if not layout:
+            return text("Layout memory is off.", error=True)
+        try:
+            plan = await asyncio.to_thread(layout.plan)
+        except Exception as e:
+            return failed(e)
+        if not plan:
+            return text("Nothing to bring back: no earlier layout from the last 3 days, or everything is already open.")
+        if not args.get("go"):
+            return text(layout.describe(plan))
+        outcome = await layout.approvals.hold({"action": "desktop", "target": f"bring back your desktop ({len(plan)} windows)",
+                                               "detail": layout.describe(plan)}, "seimei", None)
+        if outcome != "approved":
+            return text(f"The user {outcome} the restore." if outcome != "expired" else "No answer in 10 minutes; not restored.")
+        return text("\n".join(await layout.restore(plan)))
+
     return [overview, screenshot, niri, open_app, type_text, press_keys, click, scroll, ui_tree, ui_action, media,
-            notifications]
+            notifications, restore_desktop]

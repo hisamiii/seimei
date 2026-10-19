@@ -61,6 +61,8 @@ Use them rather than `niri msg`, grim or ydotool in Bash: niri can restart, and 
 - Never type into a window you have not just looked at. The tools refuse input while the screen is locked.
 - Screenshots are always allowed; a window shot works even for windows on other workspaces.
 - ui_tree and ui_action reach GTK apps (Quod Libet) through accessibility, without the mouse; media controls players, notifications reads mako.
+- seimei remembers the desktop layout. After niri restarts or the laptop reboots, the user gets one card to bring it back (apps per workspace, kitty folders, their Claude sessions resumed); restore_desktop does the same on request.
+- The user has a stop key on the laptop. When they press it, your turn ends and desktop input is blocked for a minute: do not resume driving until they say so.
 - The user can open a shikigami on the laptop from its sheet: then its session runs in a kitty window there, and you cannot message it until that window is closed.
 
 ## Guard

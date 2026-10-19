@@ -5,6 +5,7 @@ import asyncio
 import getpass
 import logging
 import os
+import signal
 import time
 import tomllib
 from datetime import datetime
@@ -17,6 +18,7 @@ from .auth import Auth
 from .dispatcher import Dispatcher
 from .events import EventLog
 from .desktop import Desktop
+from .layout import Layout
 from .desktop_tools import make_desktop_tools
 from .files import Files
 from .guard import Guard
@@ -101,7 +103,8 @@ def main():
     guard = Guard(events, approvals, state)
     usage = Usage(events, state)
     desk = Desktop(events, lambda t: dispatcher.note(t))
-    dispatcher = Dispatcher(disp, events, state, make_tools(pool, files, events, make_desktop_tools(desk, files, events)),
+    layout = Layout(desk, approvals, events, state)
+    dispatcher = Dispatcher(disp, events, state, make_tools(pool, files, events, make_desktop_tools(desk, files, events, layout)),
                             guard, usage)
     pool.dispatcher, pool.guard = dispatcher, guard
     watcher = Watcher(events, pool.own_sessions, lambda s: dispatcher.note(
@@ -116,6 +119,17 @@ def main():
         app["watcher"] = asyncio.create_task(watcher.run())
         app["wake"] = asyncio.create_task(WakeWatch(events, pool).run())
         app["desktop"] = asyncio.create_task(desk.run())
+        app["layout"] = asyncio.create_task(layout.run())
+
+        def stop_key():
+            # `systemctl --user kill -s USR1 seimei` from a niri bind: stop driving and end the turn.
+            desk.halt()
+            asyncio.ensure_future(dispatcher.interrupt())
+            events.add({"type": "system", "level": "warn", "text": "Stopped from the laptop with the stop key."})
+            dispatcher.note("The user pressed the stop key on the laptop: your turn was interrupted and desktop input "
+                            "is blocked for a minute. Do not drive the desktop again until they say so.")
+
+        asyncio.get_running_loop().add_signal_handler(signal.SIGUSR1, stop_key)
 
     async def shutdown(app):
         events.close()
@@ -125,6 +139,7 @@ def main():
         app["watcher"].cancel()
         app["wake"].cancel()
         app["desktop"].cancel()
+        app["layout"].cancel()
         await pool.close()
 
     app.on_startup.append(start)

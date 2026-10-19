@@ -20,6 +20,7 @@ log = logging.getLogger("seimei.desktop")
 
 RUN = Path(f"/run/user/{os.getuid()}")
 WORKSPACE = "seimei"
+DRIVING = RUN / "seimei-driving"
 # Full-screen shots are scaled from logical pixels so the long edge stays near what the model sees at full detail.
 SHOT_EDGE = 1568
 DOWN_GRACE = 8
@@ -155,6 +156,7 @@ class Desktop:
         self.pointer, self.keyboard = Pointer(), Keyboard()
         self.lock = asyncio.Lock()
         self.driving_until = 0.0
+        self.halted_until = 0.0
         self.listeners = []
 
     # ---------- event stream ----------
@@ -363,10 +365,25 @@ class Desktop:
         return time.time() < self.driving_until
 
     def _drive(self):
+        if time.time() < self.halted_until:
+            raise RuntimeError("the user pressed the stop key on the laptop; ask them before driving the desktop again")
         self.driving_until = time.time() + 20
+        # For the bar's "seimei is driving" indicator.
+        try:
+            DRIVING.write_text(json.dumps({"until": self.driving_until}))
+        except OSError:
+            pass
+
+    def halt(self):
+        """The stop key: no input for a while, and the indicator goes off."""
+        self.halted_until = time.time() + 60
+        self.driving_until = 0
+        DRIVING.unlink(missing_ok=True)
 
     def _target(self, window_id: int) -> dict:
         """Focus the window and check it really has focus, so input never lands somewhere else."""
+        if time.time() < self.halted_until:
+            raise RuntimeError("the user pressed the stop key on the laptop; ask them before driving the desktop again")
         if locked():
             raise RuntimeError("the screen is locked; unlock it first")
         if not window(window_id):
