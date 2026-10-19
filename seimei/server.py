@@ -147,6 +147,8 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
                 last = ev["id"]
             await write_event(resp, dispatcher.state())
             await write_event(resp, pool.listing())
+            if dispatcher.usage:
+                await write_event(resp, dispatcher.usage.snapshot())
             while True:
                 try:
                     ev = await asyncio.wait_for(q.get(), HEARTBEAT)
@@ -187,6 +189,9 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
             saved.append((name, kind, base64.b64encode(data).decode()))
         await dispatcher.send(text, saved)
         return web.json_response({"ok": True})
+
+    async def usage(request):
+        return web.json_response(dispatcher.usage.snapshot() if dispatcher.usage else {})
 
     async def decide(request):
         body = await request.json()
@@ -243,6 +248,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     app.router.add_get("/api/auth/me", me)
     app.router.add_get("/api/files/{name}", file)
     app.router.add_post("/api/approvals/{aid}", decide)
+    app.router.add_get("/api/usage", usage)
     app.router.add_get("/api/workers", workers_all)
     app.router.add_get("/api/workers/{id}", worker_history)
     app.router.add_post("/api/workers/{id}/send", worker_send)

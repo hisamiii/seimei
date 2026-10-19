@@ -431,6 +431,8 @@ function handle(ev) {
     setWorkers(ev);
   } else if (ev.type === 'w') {
     sheetEvent(ev);
+  } else if (ev.type === 'usage') {
+    setUsage(ev);
   }
 }
 
@@ -809,6 +811,7 @@ function showSheet() {
 function closeSheet(fromHistory = false) {
   if (sheet.wrap.hidden) return;
   sheet.wrap.hidden = true;
+  sheet.view = null;
   sheet.worker = null;
   sheet.renderer = null;
   if (!fromHistory && history.state?.sheet) history.back();
@@ -840,6 +843,7 @@ function updateHead(w) {
 async function openWorker(id) {
   const r = await getJSON(`api/workers/${encodeURIComponent(id)}`);
   if (!r) return;
+  sheet.view = 'worker';
   const w = r.worker;
   const body = sheet.body;
   body.replaceChildren();
@@ -914,9 +918,81 @@ function sheetEvent(ev) {
   if (stick) log.scrollTop = log.scrollHeight;
 }
 
+// ---------- usage ----------
+
+const WINDOWS = [['five_hour', '5-hour'], ['seven_day', 'Weekly']];
+let usage = null;
+
+const tone = (u) => (u >= 0.95 ? 'bad' : u >= 0.8 ? 'warn' : 'ok');
+const tokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : `${n}`);
+
+function resetText(t) {
+  const d = new Date(t * 1000);
+  const mins = Math.max(0, Math.round((t * 1000 - Date.now()) / 60000));
+  const left = mins < 60 ? `${mins} min` : mins < 2880 ? `${Math.floor(mins / 60)} h ${mins % 60} min` : `${Math.round(mins / 1440)} days`;
+  const when = d.toDateString() === new Date().toDateString() ? clock(t)
+    : d.toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+  return `resets ${when}, in ${left}`;
+}
+
+function setUsage(u) {
+  usage = u;
+  const w = u.windows?.five_hour;
+  const btn = $('usage-btn');
+  btn.hidden = !w;
+  if (w) {
+    const pct = Math.round(w.utilization * 100);
+    $('usage-ring').setAttribute('stroke-dasharray', `${pct} 100`);
+    $('usage-pct').textContent = pct;
+    btn.dataset.tone = u.status === 'rejected' ? 'bad' : tone(w.utilization);
+    btn.setAttribute('aria-label', `Usage: 5-hour window ${pct}% used`);
+  }
+  if (sheet.view === 'usage') openUsage();
+}
+
+function openUsage() {
+  if (!usage) return;
+  sheet.worker = null;
+  sheet.renderer = null;
+  sheet.view = 'usage';
+  const body = [el('h2', 'list', 'Usage')];
+  for (const [key, label] of WINDOWS) {
+    const w = usage.windows?.[key];
+    if (!w) continue;
+    const pct = Math.round(w.utilization * 100);
+    const meter = el('div', `meter ${tone(w.utilization)}`);
+    const top = el('div', 'top');
+    top.append(el('b', null, label), el('span', 'pct', `${pct}%`));
+    const bar = el('div', 'bar-track');
+    const fill = el('i');
+    fill.style.width = `${Math.min(pct, 100)}%`;
+    bar.append(fill);
+    meter.append(top, bar, el('span', 'sub', w.resets_at ? resetText(w.resets_at) : ''));
+    body.push(meter);
+  }
+  if (usage.updated) body.push(el('p', 'usage-note', `Updated ${clock(usage.updated)}. Claude Code reports usage when a session takes a turn.`));
+  const rows = Object.entries(usage.today?.sessions || {}).sort((a, b) => b[1].output - a[1].output);
+  if (rows.length) {
+    body.push(el('h3', 'usage-h', 'Today in seimei'));
+    const list = el('div', 'ulist');
+    for (const [name, t] of rows) {
+      const row = el('div', 'urow');
+      row.append(el('b', null, name), el('time', null, `${t.turns} ${t.turns === 1 ? 'turn' : 'turns'}`),
+        el('span', null, `${tokens(t.output)} out \u00b7 ${tokens(t.input + t.cache_read + t.cache_write)} in`));
+      list.append(row);
+    }
+    body.push(list);
+  }
+  sheet.body.replaceChildren(...body);
+  showSheet();
+}
+
+$('usage-btn').addEventListener('click', openUsage);
+
 async function openAll() {
   const r = await getJSON('api/workers');
   if (!r) return;
+  sheet.view = 'workers';
   sheet.worker = null;
   sheet.renderer = null;
   const list = el('div', 'wlist');

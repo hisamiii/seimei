@@ -18,6 +18,7 @@ from .events import EventLog
 from .files import Files
 from .server import make_app
 from .tools import make_tools
+from .usage import Usage
 from .workers import Pool
 
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "seimei/config.toml"
@@ -91,7 +92,8 @@ def main():
     pool = Pool(events, state)
     files = Files(state)
     approvals = Approvals(events)
-    dispatcher = Dispatcher(disp, events, state, make_tools(pool, files, events), approvals)
+    usage = Usage(events, state)
+    dispatcher = Dispatcher(disp, events, state, make_tools(pool, files, events), approvals, usage)
     pool.dispatcher, pool.approvals = dispatcher, approvals
     app = make_app(events, dispatcher, pool, files, approvals, auth, origins)
 

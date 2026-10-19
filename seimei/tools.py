@@ -163,4 +163,10 @@ def make_tools(pool: Pool, files: Files, events: EventLog):
             lines += [f"[{who} {t[11:19]}] {x}" for t, who, x in merged]
         return text("\n".join(lines))
 
-    return create_sdk_mcp_server("seimei", tools=[summon, workers, peek, message, stop, show_image, sessions, session_peek])
+    @tool("usage", "The account's plan usage: the 5-hour and weekly windows (share used, reset time) and today's "
+          "tokens per seimei session.", {})
+    async def usage(args):
+        return text(pool.dispatcher.usage.report())
+
+    return create_sdk_mcp_server("seimei", tools=[summon, workers, peek, message, stop, show_image, sessions, session_peek,
+                                                 usage])

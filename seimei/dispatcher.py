@@ -58,8 +58,9 @@ To show the user an image (a screenshot, a render, a chart), save it as PNG, JPE
 """
 
 class Dispatcher:
-    def __init__(self, cfg: dict, events: EventLog, state_dir: Path, tools=None, approvals=None):
+    def __init__(self, cfg: dict, events: EventLog, state_dir: Path, tools=None, approvals=None, usage=None):
         self.cfg = cfg
+        self.usage = usage
         self.tools = tools
         self.approvals = approvals
         self.notes_queue: list[str] = []
@@ -221,6 +222,8 @@ class Dispatcher:
             if msg.subtype == "compact_boundary":
                 self.events.add({"type": "system", "text": "Older context was compacted."})
         elif isinstance(msg, ResultMessage):
+            if self.usage:
+                self.usage.turn("seimei", msg.session_id, msg.model_usage)
             if msg.is_error:
                 if self.stopping:
                     self.events.add({"type": "system", "text": "Stopped."})
@@ -234,6 +237,8 @@ class Dispatcher:
     def rate_limit(self, msg: RateLimitEvent):
         """Limits are shared by the dispatcher and every worker: one account."""
         info = msg.rate_limit_info
+        if self.usage:
+            self.usage.limit(info.raw)
         window = info.rate_limit_type or "unknown"
         prev = self.rate_limits.get(window, {}).get("status", "allowed")
         self.rate_limits[window] = {"status": info.status, "resets_at": info.resets_at, "utilization": info.utilization}

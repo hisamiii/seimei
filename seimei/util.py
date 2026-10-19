@@ -42,6 +42,13 @@ def queue_env(name: str) -> dict:
     }
 
 
+def read_json(path: Path):
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+
+
 def write_json(path: Path, data, private: bool = False):
     """Atomic write; private files are created 600."""
     tmp = path.with_suffix(".tmp")

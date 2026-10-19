@@ -169,6 +169,10 @@ class Worker:
             self.pool.dispatcher.rate_limit(msg)
 
     def _finish(self, msg: ResultMessage):
+        if self.pool.dispatcher and self.pool.dispatcher.usage:
+            fresh = not self.rec.get("turns")
+            self.rec["turns"] = self.rec.get("turns", 0) + 1
+            self.pool.dispatcher.usage.turn(f"shikigami {self.name}", msg.session_id, msg.model_usage, fresh)
         text = (msg.result if isinstance(msg.result, str) and msg.result.strip() else self.last_text).strip()
         if self.rec["state"] == "asking":
             pass
