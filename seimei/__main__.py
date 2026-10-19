@@ -18,7 +18,7 @@ from .server import make_app
 
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "seimei/config.toml"
 STATE = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "seimei"
-MIN_PASSWORD = 12
+MIN_PASSWORD = 8
 
 
 def account(auth: Auth, cmd: str, clear: bool):
