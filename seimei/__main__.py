@@ -21,6 +21,7 @@ from .server import make_app
 from .sessions import Watcher
 from .tools import make_tools
 from .usage import Usage
+from .wake import WakeWatch
 from .workers import Pool
 
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "seimei/config.toml"
@@ -106,6 +107,7 @@ def main():
         pool.startup()
         app["dispatcher"] = asyncio.create_task(dispatcher.run())
         app["watcher"] = asyncio.create_task(watcher.run())
+        app["wake"] = asyncio.create_task(WakeWatch(events, pool).run())
 
     async def shutdown(app):
         events.close()
@@ -113,6 +115,7 @@ def main():
     async def stop(app):
         app["dispatcher"].cancel()
         app["watcher"].cancel()
+        app["wake"].cancel()
         await pool.close()
 
     app.on_startup.append(start)
