@@ -374,3 +374,28 @@ body { grid-template-rows: auto auto 1fr auto; }
 .wrow time { font-size: 12px; color: var(--text-3); }
 .wrow span { grid-column: 2 / 4; font-size: 13px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sheet h2.list { margin: 0; font-size: 22px; font-weight: 500; }
+
+/* Images */
+.field .attach {
+  flex: none; align-self: flex-end; width: 44px; height: 44px; margin: 4px 0 4px 6px; border: 0; border-radius: 50%;
+  background: none; color: var(--text-3); display: grid; place-items: center;
+}
+.field .attach + textarea { padding-left: 8px; }
+.attachments { max-width: 720px; margin: 0 auto 8px; display: flex; gap: 8px; overflow-x: auto; }
+.att { position: relative; flex: none; width: 72px; height: 72px; border-radius: 14px; overflow: hidden; background: var(--container); }
+.att img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.att .remove {
+  position: absolute; top: 4px; right: 4px; width: 24px; height: 24px; border: 0; border-radius: 50%;
+  background: rgb(17 17 27 / .75); color: var(--text); display: grid; place-items: center;
+}
+.msg .pics { display: grid; gap: 4px; margin: -6px -11px 8px; }
+.msg .pics.only { margin-bottom: -6px; }
+.msg .pics.n2 { grid-template-columns: 1fr 1fr; }
+.msg .pics.n3 { grid-template-columns: 1fr 1fr 1fr; }
+.msg .pics img { width: 100%; max-height: 280px; object-fit: cover; border-radius: 16px; display: block; cursor: zoom-in; }
+.msg .pics.n2 img, .msg .pics.n3 img { aspect-ratio: 1; }
+.shown { margin: 0; align-self: flex-start; max-width: 100%; display: flex; flex-direction: column; gap: 6px; }
+.shown img { max-width: 100%; max-height: 60vh; border-radius: 16px; display: block; cursor: zoom-in; background: var(--container); }
+.shown figcaption { font-size: 13px; color: var(--text-3); }
+.viewer { position: fixed; inset: 0; z-index: 20; background: rgb(17 17 27 / .94); display: grid; place-items: center; padding: 12px; animation: fadeIn .2s; cursor: zoom-out; }
+.viewer img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; }

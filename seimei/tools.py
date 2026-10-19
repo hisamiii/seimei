@@ -1,9 +1,13 @@
 """The dispatcher's own tools, served in-process as the `seimei` MCP server."""
 
+import os
 import time
+from pathlib import Path
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
+from .events import EventLog
+from .files import MAX_BYTES, Files
 from .workers import ACTIVE, Pool
 
 MAX_RUNNING = 5
@@ -18,7 +22,7 @@ def ago(t: float) -> str:
     return f"{s // 60} min ago" if s < 3600 else f"{s // 3600} h ago" if s < 86400 else f"{s // 86400} d ago"
 
 
-def make_tools(pool: Pool):
+def make_tools(pool: Pool, files: Files, events: EventLog):
     @tool("summon", "Start a shikigami: a worker Claude Code session that works on a task on its own and reports back. "
           "Pick a short lowercase name, the folder the task is about, and a model (opus for real work, sonnet for "
           "routine jobs, haiku for quick lookups). Returns at once; the report arrives later.", {
@@ -91,4 +95,21 @@ def make_tools(pool: Pool):
         await w.stop()
         return text(f"Stopping {w.name}.")
 
-    return create_sdk_mcp_server("seimei", tools=[summon, workers, peek, message, stop])
+    @tool("show_image", "Show the user an image inline in the chat: a screenshot, render or chart saved as PNG, JPEG, "
+          "WebP or GIF (not SVG).", {
+              "type": "object",
+              "properties": {"path": {"type": "string", "description": "absolute path of the image file"},
+                             "caption": {"type": "string", "description": "optional one-line caption"}},
+              "required": ["path"]})
+    async def show_image(args):
+        path = Path(os.path.expanduser(str(args["path"])))
+        try:
+            if path.stat().st_size > MAX_BYTES:
+                return text("That image is larger than 20 MB.", error=True)
+            name, _ = files.save(path.read_bytes())
+        except (OSError, ValueError) as e:
+            return text(f"Could not show it: {e}", error=True)
+        events.add({"type": "image", "file": name, "caption": str(args.get("caption") or "")[:300]})
+        return text("Shown to the user.")
+
+    return create_sdk_mcp_server("seimei", tools=[summon, workers, peek, message, stop, show_image])

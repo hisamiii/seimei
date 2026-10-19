@@ -14,6 +14,7 @@ from aiohttp import web
 from .auth import Auth
 from .dispatcher import Dispatcher
 from .events import EventLog
+from .files import Files
 from .server import make_app
 from .tools import make_tools
 from .workers import Pool
@@ -86,9 +87,10 @@ def main():
 
     events = EventLog(state / "events.jsonl")
     pool = Pool(events, state)
-    dispatcher = Dispatcher(disp, events, state, make_tools(pool))
+    files = Files(state)
+    dispatcher = Dispatcher(disp, events, state, make_tools(pool, files, events))
     pool.dispatcher = dispatcher
-    app = make_app(events, dispatcher, pool, auth, origins)
+    app = make_app(events, dispatcher, pool, files, auth, origins)
 
     async def start(app):
         pool.startup()

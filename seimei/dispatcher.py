@@ -43,6 +43,10 @@ Delegate real work (coding, research, anything longer than a few tool calls) to 
 - Their reports are shown to the user as cards, so do not repeat a report; add only what the user needs on top.
 - A [seimei] line tells you when one finishes, fails or asks something. Answer questions with mcp__seimei__message when you can; ask the user when only they can decide.
 - Check on them with mcp__seimei__workers and mcp__seimei__peek. Ask the user before running more than 5 at once.
+
+## Images
+The user can attach photos from their phone; you see them in their message.
+To show the user an image (a screenshot, a render, a chart), save it as PNG, JPEG, WebP or GIF and call mcp__seimei__show_image with its path; it appears inline in the chat.
 """
 
 class Dispatcher:
@@ -127,13 +131,19 @@ class Dispatcher:
             await asyncio.sleep(delay)
             delay = min(delay * 2, 60)
 
-    async def _write(self, text: str):
+    async def _write(self, content: str | list):
         async with self.write_lock:
-            await self.client.query(text)
+            if isinstance(content, str):
+                await self.client.query(content)
+            else:
+                async def one():
+                    yield {"type": "user", "message": {"role": "user", "content": content}, "parent_tool_use_id": None}
+                await self.client.query(one())
 
-    async def send(self, text: str):
-        self.events.add({"type": "user", "text": text})
-        await self._deliver(text)
+    async def send(self, text: str, images: list[tuple[str, str, str]] = ()):
+        """images: (file name, media type, base64 data) from the phone."""
+        self.events.add({"type": "user", "text": text, **({"images": [n for n, _, _ in images]} if images else {})})
+        await self._deliver(text, images)
 
     def note(self, text: str):
         """Something the dispatcher should know, delivered with its next message."""
@@ -143,17 +153,22 @@ class Dispatcher:
         """Something the dispatcher should act on now."""
         asyncio.ensure_future(self._deliver(f"[seimei] {text}"))
 
-    async def _deliver(self, text: str):
+    async def _deliver(self, text: str, images=()):
         if self.notes_queue:
             notes = "\n".join(f"- {n}" for n in self.notes_queue)
             self.notes_queue.clear()
             text = f"[seimei] Since your last turn:\n{notes}\n\n{text}"
+        content = text
+        if images:
+            content = [{"type": "image", "source": {"type": "base64", "media_type": kind, "data": data}}
+                       for _, kind, data in images]
+            content.append({"type": "text", "text": text or "(photo)"})
         self._set(busy=True)
         # A message sent mid-turn is folded into the running turn at its next step.
         if self.connected:
-            await self._write(text)
+            await self._write(content)
         else:
-            self.pending.append(text)
+            self.pending.append(content)
 
     async def interrupt(self):
         if self.connected and self.busy:

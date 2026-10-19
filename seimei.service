@@ -4,7 +4,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-WorkingDirectory=%h/src/seimei
+WorkingDirectory=%h/.local/share/seimei-app
 ExecStart=/usr/bin/uv run --frozen python -m seimei
 Restart=on-failure
 RestartSec=5

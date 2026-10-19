@@ -1,8 +1,11 @@
 """HTTP side: the page, login, the event stream, history, and the write endpoints."""
 
 import asyncio
+import base64
+import binascii
 import hashlib
 import json
+import mimetypes
 from pathlib import Path
 
 from aiohttp import web
@@ -10,22 +13,25 @@ from aiohttp import web
 from .auth import Auth
 from .dispatcher import Dispatcher
 from .events import EventLog
+from .files import MAX_MODEL_BYTES, Files
 from .workers import Pool
 
 WEB = (Path(__file__).parent / "web").resolve()
 CSP = ("default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; font-src 'self'; "
        "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 HEARTBEAT = 15
+MAX_IMAGES = 6
 
 
-def web_version() -> str:
-    """Hash of the page files: assets live under /static/<version>/, so a deploy gets fresh URLs past any cache."""
+def load_web() -> tuple[str, dict[str, bytes]]:
+    """Snapshot the page files at startup, so edits on disk never mix with a running server.
+    Assets live under /static/<hash>/, so a restart gets fresh URLs past any cache."""
+    files = {str(f.relative_to(WEB)): f.read_bytes() for f in sorted(WEB.rglob("*")) if f.is_file()}
     h = hashlib.sha256()
-    for f in sorted(WEB.rglob("*")):
-        if f.is_file():
-            h.update(str(f.relative_to(WEB)).encode())
-            h.update(f.read_bytes())
-    return h.hexdigest()[:12]
+    for name, data in files.items():
+        h.update(name.encode())
+        h.update(data)
+    return h.hexdigest()[:12], files
 # Everything else needs a session. The page at / decides between the app and the login screen itself.
 PUBLIC = {("GET", "/"), ("POST", "/api/auth/password"), ("POST", "/api/auth/passkey/options"),
           ("POST", "/api/auth/passkey/login")}
@@ -36,13 +42,15 @@ async def write_event(resp: web.StreamResponse, ev: dict):
     await resp.write(f"{head}data: {json.dumps(ev)}\n\n".encode())
 
 
-def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, auth: Auth | None, origins: set[str]) -> web.Application:
+def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files, auth: Auth | None, origins: set[str]) -> web.Application:
     @web.middleware
     async def guard(request: web.Request, handler):
         # Never trust the peer address: cloudflared connects from localhost too.
         public = (request.method, request.path) in PUBLIC or (request.method == "GET" and request.path.startswith("/static/"))
         if auth and not public and not auth.session(request):
             return web.Response(status=401, text="log in first")
+        if public and request.method == "POST" and (request.content_length or 0) > 64 << 10:
+            return web.Response(status=413, text="too large")
         if request.method == "POST" and (request.headers.get("Origin") not in origins
                                          or request.content_type != "application/json"):
             return web.Response(status=403, text="forbidden")
@@ -53,19 +61,21 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, auth: Auth | 
             resp.headers["Referrer-Policy"] = "no-referrer"
         return resp
 
-    version = web_version()
-    pages = {name: (WEB / name).read_text().replace('"static/', f'"static/{version}/') for name in ("index.html", "login.html")}
+    version, assets = load_web()
+    pages = {name: assets.pop(name).decode().replace('"static/', f'"static/{version}/') for name in ("index.html", "login.html")}
 
     async def index(request):
         page = "index.html" if not auth or auth.session(request) else "login.html"
         return web.Response(text=pages[page], content_type="text/html", headers={"Cache-Control": "no-store"})
 
     async def static(request):
-        path = (WEB / request.match_info["path"]).resolve()
-        if not path.is_relative_to(WEB) or not path.is_file() or path.suffix == ".html":
+        # Old versions get the current files, so a page loaded before a restart still works.
+        name = request.match_info["path"]
+        data = assets.get(name)
+        if data is None:
             raise web.HTTPNotFound()
-        # Old versions are served from the current files, so a page loaded before a deploy still works.
-        return web.FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
+        kind = mimetypes.guess_type(name)[0] or "application/octet-stream"
+        return web.Response(body=data, content_type=kind, headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
     def logged_in(how: str, request) -> web.Response:
         resp = web.json_response({"ok": True})
@@ -160,10 +170,27 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, auth: Auth | 
     async def send(request):
         body = await request.json()
         text = str(body.get("text", "")).strip()
-        if not text:
-            raise web.HTTPBadRequest()
-        await dispatcher.send(text)
+        images = body.get("images") or []
+        if not (text or images) or not isinstance(images, list) or len(images) > MAX_IMAGES:
+            raise web.HTTPBadRequest(text=f"text or up to {MAX_IMAGES} images")
+        saved = []
+        for img in images:
+            try:
+                data = base64.b64decode(str(img.get("data", "")), validate=True)
+                if len(data) > MAX_MODEL_BYTES:
+                    raise ValueError("an image is larger than 5 MB")
+                name, kind = files.save(data)
+            except (ValueError, binascii.Error, AttributeError) as e:
+                raise web.HTTPBadRequest(text=str(e)[:200])
+            saved.append((name, kind, base64.b64encode(data).decode()))
+        await dispatcher.send(text, saved)
         return web.json_response({"ok": True})
+
+    async def file(request):
+        path = files.path(request.match_info["name"])
+        if not path:
+            raise web.HTTPNotFound()
+        return web.FileResponse(path, headers={"Cache-Control": "private, max-age=31536000, immutable"})
 
     def worker(request):
         w = pool.workers.get(request.match_info["id"])
@@ -197,13 +224,14 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, auth: Auth | 
         await dispatcher.interrupt()
         return web.json_response({"ok": True})
 
-    app = web.Application(middlewares=[guard], client_max_size=1 << 20)
+    app = web.Application(middlewares=[guard], client_max_size=40 << 20)
     app.router.add_get("/", index)
     app.router.add_get("/api/history", history)
     app.router.add_get("/api/stream", stream)
     app.router.add_post("/api/send", send)
     app.router.add_post("/api/interrupt", interrupt)
     app.router.add_get("/api/auth/me", me)
+    app.router.add_get("/api/files/{name}", file)
     app.router.add_get("/api/workers", workers_all)
     app.router.add_get("/api/workers/{id}", worker_history)
     app.router.add_post("/api/workers/{id}/send", worker_send)

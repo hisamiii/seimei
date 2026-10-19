@@ -36,7 +36,15 @@ function dayLabel(t) {
 }
 
 const nearBottom = () => log.scrollHeight - log.scrollTop - log.clientHeight < 120;
-const toBottom = () => { log.scrollTop = log.scrollHeight; };
+// Whether the reader sits at the bottom; content that grows later (pictures loading) keeps them there.
+let pinned = true;
+const toBottom = () => {
+  log.scrollTop = log.scrollHeight;
+  pinned = true;
+};
+log.addEventListener('scroll', () => { pinned = nearBottom(); }, { passive: true });
+// Pictures loading, fonts swapping in and card buttons all grow the thread after it is drawn.
+new ResizeObserver(() => { if (pinned) log.scrollTop = log.scrollHeight; }).observe(thread);
 
 // A session that ended (expired, logged out elsewhere, revoked on the laptop) sends the page back to login.
 const toLogin = () => location.reload();
@@ -92,6 +100,7 @@ function phrase(name, n) {
   if (name === 'mcp__seimei__peek') return n === 1 ? 'looked in on a shikigami' : `looked in on shikigami ${n} times`;
   if (name === 'mcp__seimei__message') return n === 1 ? 'messaged a shikigami' : `sent ${n} shikigami messages`;
   if (name === 'mcp__seimei__stop') return 'stopped a shikigami';
+  if (name === 'mcp__seimei__show_image') return n === 1 ? 'showed you an image' : `showed you ${n} images`;
   const short = name.startsWith('mcp__') ? name.split('__').pop().replace(/_/g, ' ') : name;
   return n === 1 ? `used ${short}` : `used ${short} ${n} times`;
 }
@@ -208,12 +217,34 @@ function workerCard(ev) {
   return card;
 }
 
+function pic(name) {
+  const img = el('img', 'pic');
+  img.src = `api/files/${name}`;
+  img.loading = 'lazy';
+  img.alt = '';
+  return img;
+}
+
 function message(ev) {
   const node = el('div', `msg ${ev.type}`);
   if (ev.type === 'assistant') node.innerHTML = md(ev.text);
-  else node.textContent = ev.text;
+  else {
+    if (ev.images?.length) {
+      const pics = el('div', `pics n${Math.min(ev.images.length, 3)}${ev.text ? '' : ' only'}`);
+      ev.images.forEach((n) => pics.append(pic(n)));
+      node.append(pics);
+    }
+    if (ev.text) node.append(document.createTextNode(ev.text));
+  }
   node.dataset.t = ev.t;
   return node;
+}
+
+function shown(ev) {
+  const fig = el('figure', 'shown');
+  fig.append(pic(ev.file));
+  if (ev.caption) fig.append(el('figcaption', null, ev.caption));
+  return fig;
 }
 
 function limitText(ev) {
@@ -261,6 +292,7 @@ class Renderer {
     if (ev.type === 'user' || ev.type === 'assistant') this.put(message(ev));
     else if (ev.type === 'system') this.put(el('div', `note ${ev.level || ''}`, ev.text));
     else if (ev.type === 'worker') this.put(workerCard(ev));
+    else if (ev.type === 'image') this.put(shown(ev));
     else if (ev.type === 'rate_limit') this.put(el('div', `note ${ev.status === 'rejected' ? 'error' : 'warn'}`, limitText(ev)));
   }
 }
@@ -282,7 +314,7 @@ function render() {
   if (away && $('away').hidden) requestAnimationFrame(toBottom);
   $('away').hidden = !away;
   working.hidden = !(online && session.busy && !live);
-  const typing = input.value.trim() !== '';
+  const typing = input.value.trim() !== '' || attachments.length > 0;
   stopBtn.hidden = !(session.busy && !typing);
   sendBtn.hidden = !stopBtn.hidden;
 }
@@ -508,15 +540,22 @@ try { input.value = localStorage.getItem(DRAFT) || ''; } catch {}
 $('composer').addEventListener('submit', async (e) => {
   e.preventDefault();
   const text = input.value.trim();
-  if (!text || !online) return;
+  const sending = attachments.splice(0);
+  if ((!text && !sending.length) || !online) {
+    attachments.push(...sending);
+    return;
+  }
   input.value = '';
   autosize();
-  render();
+  renderAttachments();
   try {
-    await post('api/send', { text });
+    await post('api/send', { text, images: sending.map((a) => ({ data: a.data })) });
     if (!input.value) saveDraft();
+    sending.forEach((a) => URL.revokeObjectURL(a.url));
   } catch {
     input.value = text;
+    attachments.unshift(...sending);
+    renderAttachments();
     saveDraft();
     autosize();
     main.add({ type: 'system', level: 'error', text: 'Could not send that. Try again.' });
@@ -535,8 +574,103 @@ stopBtn.addEventListener('click', () => post('api/interrupt', {}).catch(() => {}
 older.addEventListener('click', loadOlder);
 $('retry').addEventListener('click', () => location.reload());
 
-// Tap a message to see when it was sent; tap a shikigami card to open it.
+// ---------- images ----------
+
+// The model reads images up to 1568 px on the long side; anything bigger only costs upload time.
+const MAX_SIDE = 1568;
+const attachments = [];
+
+const toBase64 = (blob) => new Promise((resolve, reject) => {
+  const r = new FileReader();
+  r.onload = () => resolve(String(r.result).split(',')[1]);
+  r.onerror = reject;
+  r.readAsDataURL(blob);
+});
+
+async function prepare(file) {
+  const bmp = await createImageBitmap(file);
+  const scale = Math.min(1, MAX_SIDE / Math.max(bmp.width, bmp.height));
+  let blob = file;
+  const lossless = /^image\/(png|gif|webp)$/.test(file.type);
+  if (scale < 1 || !lossless || file.size > 3.5e6) {
+    const c = document.createElement('canvas');
+    c.width = Math.round(bmp.width * scale);
+    c.height = Math.round(bmp.height * scale);
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(bmp, 0, 0, c.width, c.height);
+    blob = await new Promise((resolve) => c.toBlob(resolve, 'image/jpeg', 0.85));
+  }
+  bmp.close?.();
+  return { data: await toBase64(blob), url: URL.createObjectURL(blob) };
+}
+
+async function addFiles(list) {
+  for (const f of list) {
+    if (!f.type.startsWith('image/') || attachments.length >= 6) continue;
+    try {
+      attachments.push(await prepare(f));
+    } catch {
+      main.add({ type: 'system', level: 'error', text: `Could not read ${f.name || 'that image'}.` });
+    }
+  }
+  renderAttachments();
+}
+
+function renderAttachments() {
+  const box = $('attachments');
+  box.replaceChildren();
+  attachments.forEach((a, i) => {
+    const item = el('div', 'att');
+    const img = el('img');
+    img.src = a.url;
+    img.alt = '';
+    const x = el('button', 'remove sl');
+    x.type = 'button';
+    x.setAttribute('aria-label', 'Remove');
+    x.append(svg('M6 6l12 12M18 6 6 18', 14));
+    x.addEventListener('click', () => {
+      URL.revokeObjectURL(a.url);
+      attachments.splice(i, 1);
+      renderAttachments();
+    });
+    item.append(img, x);
+    box.append(item);
+  });
+  box.hidden = attachments.length === 0;
+  render();
+}
+
+$('attach').addEventListener('click', () => $('file').click());
+$('file').addEventListener('change', (e) => {
+  addFiles([...e.target.files]);
+  e.target.value = '';
+});
+input.addEventListener('paste', (e) => {
+  const imgs = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith('image/'));
+  if (imgs.length) {
+    e.preventDefault();
+    addFiles(imgs);
+  }
+});
+$('composer').addEventListener('dragover', (e) => e.preventDefault());
+$('composer').addEventListener('drop', (e) => {
+  e.preventDefault();
+  addFiles([...(e.dataTransfer?.files || [])]);
+});
+
+const viewer = $('viewer');
+function view(src) {
+  $('viewer-img').src = src;
+  viewer.hidden = false;
+}
+viewer.addEventListener('click', () => { viewer.hidden = true; });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') viewer.hidden = true; });
+
+// Tap a message to see when it was sent; tap a shikigami card to open it; tap a picture to zoom.
 thread.addEventListener('click', (e) => {
+  if (e.target.matches('img.pic')) return view(e.target.src);
   const card = e.target.closest('.wcard');
   if (card && !e.target.closest('a, .more') && !getSelection().toString()) return openWorker(card.dataset.worker);
   const msg = e.target.closest('.msg');
