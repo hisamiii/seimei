@@ -310,6 +310,7 @@ class Desktop:
                 return path.read_bytes()
             finally:
                 _restore_clipboard(saved)
+                _dismiss_shot_notice(e, str(path))
 
     # ---------- launching ----------
 
@@ -481,3 +482,22 @@ def _restore_clipboard(saved: tuple[str, bytes] | None):
         action("spawn-sh", "--", f"wl-copy -t {shlex.quote(kind)} < {path}; rm -f {path}")
     except Exception:
         log.warning("could not restore the clipboard")
+
+
+def _dismiss_shot_notice(e: dict, path: str):
+    """niri announces every window shot in a notification; take ours down, leaving no history."""
+    for _ in range(20):
+        try:
+            shown = json.loads(subprocess.run(["makoctl", "list", "-j"], env=e, capture_output=True, text=True,
+                                              timeout=2).stdout or "[]")
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return
+        if isinstance(shown, dict):
+            shown = [n for group in shown.get("data", []) for n in group]
+        mine = [n for n in shown if path in json.dumps(n)]
+        if mine:
+            for n in mine:
+                nid = n["id"]["data"] if isinstance(n["id"], dict) else n["id"]
+                subprocess.run(["makoctl", "dismiss", "-n", str(nid), "--no-history"], env=e, capture_output=True, timeout=2)
+            return
+        time.sleep(0.05)

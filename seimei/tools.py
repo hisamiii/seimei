@@ -83,7 +83,10 @@ def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = ()):
         w = pool.find(args["worker"])
         if not w:
             return text("No such shikigami.", error=True)
-        await w.send(args["text"])
+        try:
+            await w.send(args["text"])
+        except RuntimeError as e:
+            return text(str(e), error=True)
         return text(f"Sent to {w.name}.")
 
     @tool("stop", "Stop a running shikigami. Its session is kept; a later message resumes it.", {"worker": str})

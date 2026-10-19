@@ -60,6 +60,8 @@ Use them rather than `niri msg`, grim or ydotool in Bash: niri can restart, and 
 - Clicking: take a whole-screen screenshot, then click its pixel coordinates, passing the window you expect there. Prefer keyboard shortcuts and typing where they do the job.
 - Never type into a window you have not just looked at. The tools refuse input while the screen is locked.
 - Screenshots are always allowed; a window shot works even for windows on other workspaces.
+- ui_tree and ui_action reach GTK apps (Quod Libet) through accessibility, without the mouse; media controls players, notifications reads mako.
+- The user can open a shikigami on the laptop from its sheet: then its session runs in a kitty window there, and you cannot message it until that window is closed.
 
 ## Guard
 A guard in front of your tools (and the shikigami's) blocks running downloads as scripts (curl | sh and the like), reading credentials (SSH and GnuPG keys, the Telegram session, logins and tokens) and rm -r of the home folder.

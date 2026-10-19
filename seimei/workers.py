@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import shutil
 import time
 import uuid
@@ -68,7 +69,8 @@ class Worker:
 
     def info(self) -> dict:
         r = self.rec
-        return {k: r.get(k) for k in ("id", "name", "state", "cwd", "model", "created", "updated", "summary")}
+        return {**{k: r.get(k) for k in ("id", "name", "state", "cwd", "model", "created", "updated", "summary")},
+                "started": bool(r.get("started"))}
 
     def _set(self, state: str, **kw):
         self.rec.update(state=state, updated=time.time(), **kw)
@@ -106,8 +108,55 @@ class Worker:
 
         return create_sdk_mcp_server("shikigami", tools=[ask])
 
+    def on_laptop(self) -> bool:
+        """The session is open on the laptop (after On laptop): its kitty window is still there, or a running
+        Claude Code holds the session (a trust prompt delays that, hence the window check)."""
+        if self.rec["state"] != "laptop":
+            return False
+        from . import desktop
+        from .sessions import live
+        try:
+            if self.rec.get("laptop_window") is not None and desktop.window(self.rec["laptop_window"]):
+                return True
+        except Exception:
+            pass
+        return any(s["rec"].get("sessionId") == self.rec["session_id"] or s["session_id"] == self.rec["session_id"]
+                   for s in live({}))
+
+    async def hand_over(self, desk) -> dict:
+        """Let go of the session and open it with `claude --resume` in a kitty window on the laptop."""
+        if not self.rec.get("started"):
+            raise RuntimeError("it has no session yet")
+        if self.on_laptop():
+            raise RuntimeError("it is already open on the laptop")
+        if self.rec["state"] in ACTIVE:
+            await self.stop()
+            for _ in range(150):
+                if self.rec["state"] not in ACTIVE:
+                    break
+                await asyncio.sleep(0.2)
+            else:
+                raise RuntimeError("it did not stop in 30 s")
+        async with self.lock:
+            if self.idle_timer:
+                self.idle_timer.cancel()
+                self.idle_timer = None
+            if self.client:
+                self.client = None
+                self.reader.cancel()
+                await asyncio.gather(self.reader, return_exceptions=True)
+            r = self.rec
+            # claude-queue keeps it pausable by benches, like the worker was.
+            cmd = (f"kitty -d {shlex.quote(r['cwd'])} --title {shlex.quote('shikigami ' + r['name'])} "
+                   f"claude-queue {shlex.quote(r['name'])} --resume {r['session_id']}")
+            w = await desk.spawn(cmd, own_workspace=False)
+            self._set("laptop", summary="Open on the laptop.", laptop_window=w and w["id"])
+        return w
+
     async def send(self, text: str):
         """Start the session if needed and hand it a message; folds into a running turn."""
+        if await asyncio.to_thread(self.on_laptop):
+            raise RuntimeError(f"{self.name} is open on the laptop; message it there, or close that window first")
         async with self.lock:
             if self.idle_timer:
                 self.idle_timer.cancel()

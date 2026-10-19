@@ -508,3 +508,4 @@ body { grid-template-rows: auto auto 1fr auto; }
 .wstext { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .wstitle { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wsapp { font-size: 13px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.facts .laptop-btn { min-height: 30px; padding: 0 12px 0 10px; border-radius: 8px; gap: 6px; font-size: 13px; }

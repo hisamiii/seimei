@@ -808,9 +808,9 @@ thread.addEventListener('click', (e) => {
 
 const TONES = {
   starting: ['working', 'run'], running: ['working', 'run'], asking: ['needs you', 'ask'], done: ['done', 'ok'],
-  failed: ['failed', 'bad'], stopped: ['stopped', 'idle'], interrupted: ['interrupted', 'idle'],
+  failed: ['failed', 'bad'], stopped: ['stopped', 'idle'], interrupted: ['interrupted', 'idle'], laptop: ['on laptop', 'idle'],
 };
-const ORDER = { asking: 0, starting: 1, running: 1, failed: 2, done: 3, stopped: 4, interrupted: 4 };
+const ORDER = { asking: 0, starting: 1, running: 1, failed: 2, done: 3, stopped: 4, interrupted: 4, laptop: 4 };
 const ACTIVE = new Set(['starting', 'running', 'asking']);
 const home = (p) => p.replace(/^\/home\/[^/]+/, '~');
 let workers = [];
@@ -821,6 +821,7 @@ function stateText(w) {
   return {
     starting: 'Starting', running: `Working since ${at}`, asking: 'Waiting for your answer', done: `Finished at ${at}`,
     failed: `Failed at ${at}`, stopped: `Stopped at ${at}`, interrupted: `Interrupted at ${at}`,
+    laptop: `Open on the laptop since ${at}`,
   }[w.state] || w.state;
 }
 
@@ -1039,6 +1040,33 @@ async function openWorker(id) {
 
   const facts = el('div', 'facts');
   facts.append(el('span', 'mono', home(w.cwd)), el('span', null, w.model), el('span', null, `started ${clock(w.created)}`));
+  const laptop = el('button', 'btn tonal sl laptop-btn');
+  laptop.type = 'button';
+  laptop.append(svg('M5 6.5A1.5 1.5 0 0 1 6.5 5h11A1.5 1.5 0 0 1 19 6.5V15H5zM3 18h18', 18), 'On laptop');
+  laptop.hidden = w.state === 'laptop' || w.started === false;
+  let armed = false;
+  laptop.addEventListener('click', async () => {
+    const cur = workers.find((x) => x.id === w.id) || w;
+    // A running worker gets stopped first, so ask for a second tap.
+    if (ACTIVE.has(cur.state) && !armed) {
+      armed = true;
+      laptop.lastChild.textContent = 'Stop it and open on laptop';
+      return;
+    }
+    laptop.disabled = true;
+    const r = await fetch(`api/workers/${encodeURIComponent(w.id)}/laptop`, { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => null);
+    const body = await r?.json().catch(() => null);
+    laptop.disabled = false;
+    armed = false;
+    if (r?.ok) {
+      laptop.hidden = true;
+    } else {
+      laptop.lastChild.textContent = 'On laptop';
+      main.add({ type: 'system', level: 'error', text: `Could not open ${w.name} on the laptop: ${body?.error || 'no answer'}` });
+    }
+  });
+  facts.append(laptop);
 
   const task = el('details', 'task');
   task.append(el('summary', null, 'Task'), el('div', null, w.task));

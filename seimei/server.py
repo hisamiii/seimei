@@ -285,13 +285,27 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
         text = str((await request.json()).get("text", "")).strip()
         if not text:
             raise web.HTTPBadRequest()
-        await w.send(text)
+        try:
+            await w.send(text)
+        except RuntimeError as e:
+            return web.json_response({"error": str(e)}, status=409)
         dispatcher.note(f"the user messaged shikigami {w.name} ({w.id}) directly: {text[:500]}")
         return web.json_response({"ok": True})
 
     async def worker_stop(request):
         await worker(request).stop()
         return web.json_response({"ok": True})
+
+    async def worker_laptop(request):
+        w = worker(request)
+        try:
+            win = await w.hand_over(desk)
+        except (RuntimeError, NoDesktop) as e:
+            return web.json_response({"error": str(e)}, status=409)
+        events.add({"type": "system", "text": f"shikigami {w.name} is open on the laptop."})
+        dispatcher.note(f"the user opened shikigami {w.name} ({w.id}) on the laptop: its session now runs in a kitty "
+                        "window there, so message it only after that window is closed.")
+        return web.json_response({"ok": True, "window": win and win["id"]})
 
     async def interrupt(request):
         await dispatcher.interrupt()
@@ -315,6 +329,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     app.router.add_get("/api/workers/{id}", worker_history)
     app.router.add_post("/api/workers/{id}/send", worker_send)
     app.router.add_post("/api/workers/{id}/stop", worker_stop)
+    app.router.add_post("/api/workers/{id}/laptop", worker_laptop)
     if auth:
         app.router.add_post("/api/auth/password", login_password)
         app.router.add_post("/api/auth/passkey/options", passkey_options)
