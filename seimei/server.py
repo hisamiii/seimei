@@ -1,6 +1,7 @@
 """HTTP side: the page, login, the event stream, history, and the write endpoints."""
 
 import asyncio
+import hashlib
 import json
 from pathlib import Path
 
@@ -11,10 +12,20 @@ from .dispatcher import Dispatcher
 from .events import EventLog
 from .workers import Pool
 
-WEB = Path(__file__).parent / "web"
+WEB = (Path(__file__).parent / "web").resolve()
 CSP = ("default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; font-src 'self'; "
        "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 HEARTBEAT = 15
+
+
+def web_version() -> str:
+    """Hash of the page files: assets live under /static/<version>/, so a deploy gets fresh URLs past any cache."""
+    h = hashlib.sha256()
+    for f in sorted(WEB.rglob("*")):
+        if f.is_file():
+            h.update(str(f.relative_to(WEB)).encode())
+            h.update(f.read_bytes())
+    return h.hexdigest()[:12]
 # Everything else needs a session. The page at / decides between the app and the login screen itself.
 PUBLIC = {("GET", "/"), ("POST", "/api/auth/password"), ("POST", "/api/auth/passkey/options"),
           ("POST", "/api/auth/passkey/login")}
@@ -40,14 +51,21 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, auth: Auth | 
             resp.headers["Content-Security-Policy"] = CSP
             resp.headers["X-Content-Type-Options"] = "nosniff"
             resp.headers["Referrer-Policy"] = "no-referrer"
-            if request.path.startswith("/static/"):
-                # Revalidate every time so a deploy reaches the phone; unchanged files answer 304.
-                resp.headers["Cache-Control"] = "no-cache"
         return resp
+
+    version = web_version()
+    pages = {name: (WEB / name).read_text().replace('"static/', f'"static/{version}/') for name in ("index.html", "login.html")}
 
     async def index(request):
         page = "index.html" if not auth or auth.session(request) else "login.html"
-        return web.FileResponse(WEB / page, headers={"Cache-Control": "no-store"})
+        return web.Response(text=pages[page], content_type="text/html", headers={"Cache-Control": "no-store"})
+
+    async def static(request):
+        path = (WEB / request.match_info["path"]).resolve()
+        if not path.is_relative_to(WEB) or not path.is_file() or path.suffix == ".html":
+            raise web.HTTPNotFound()
+        # Old versions are served from the current files, so a page loaded before a deploy still works.
+        return web.FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
     def logged_in(how: str, request) -> web.Response:
         resp = web.json_response({"ok": True})
@@ -197,5 +215,5 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, auth: Auth | 
         app.router.add_post("/api/auth/passkey/register/options", register_options)
         app.router.add_post("/api/auth/passkey/register", register)
         app.router.add_post("/api/auth/logout", logout)
-    app.router.add_static("/static/", WEB)
+    app.router.add_get("/static/{version}/{path:.+}", static)
     return app
