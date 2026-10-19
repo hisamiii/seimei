@@ -91,7 +91,7 @@ class Worker:
             mcp_servers={"shikigami": self._tools()},
             env=queue_env(r["name"]),
             extra_args={"name": f"shikigami {r['name']}"},
-            hooks=self.pool.approvals.hooks(r["name"], r["id"]) if self.pool.approvals else None,
+            hooks=self.pool.guard.hooks(r["name"], r["id"]) if self.pool.guard else None,
             **where,
         )
 
@@ -204,7 +204,7 @@ class Pool:
         self.dir.mkdir(exist_ok=True)
         self.path = state_dir / "workers.json"
         self.dispatcher = None
-        self.approvals = None
+        self.guard = None
         recs = json.loads(self.path.read_text()) if self.path.exists() else []
         self.workers: dict[str, Worker] = {r["id"]: Worker(self, r) for r in recs}
 

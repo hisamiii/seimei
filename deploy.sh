@@ -21,8 +21,9 @@ log = os.path.expanduser("~/.local/share/seimei/events.jsonl")
 for _ in range(60):
     try:
         with open(log, "rb") as f:
-            f.seek(max(f.seek(0, 2) - (1 << 20), 0))
-            tail = [json.loads(l) for l in f.read().splitlines()[1:]]
+            start = max(f.seek(0, 2) - (1 << 20), 0)
+            f.seek(start)
+            tail = [json.loads(l) for l in f.read().splitlines()[1 if start else 0:]]
         last = tail[-1]
     except (OSError, IndexError, ValueError):
         break

@@ -16,6 +16,7 @@ from .auth import Auth
 from .dispatcher import Dispatcher
 from .events import EventLog
 from .files import Files
+from .guard import Guard
 from .server import make_app
 from .sessions import Watcher
 from .tools import make_tools
@@ -93,11 +94,12 @@ def main():
     pool = Pool(events, state)
     files = Files(state)
     approvals = Approvals(events)
+    guard = Guard(events, approvals, state)
     usage = Usage(events, state)
-    dispatcher = Dispatcher(disp, events, state, make_tools(pool, files, events), approvals, usage)
-    pool.dispatcher, pool.approvals = dispatcher, approvals
+    dispatcher = Dispatcher(disp, events, state, make_tools(pool, files, events), guard, usage)
+    pool.dispatcher, pool.guard = dispatcher, guard
     watcher = Watcher(events, pool.own_sessions)
-    app = make_app(events, dispatcher, pool, files, approvals, watcher, auth, origins)
+    app = make_app(events, dispatcher, pool, files, approvals, guard, watcher, auth, origins)
 
     async def start(app):
         approvals.startup()

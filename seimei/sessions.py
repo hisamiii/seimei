@@ -122,8 +122,10 @@ def _summary(inp: dict) -> str:
 def peek(path: Path, count: int = 3, tail: int = TAIL) -> dict:
     """Last user messages and assistant texts, plus tool calls still open (a pending AskUserQuestion first)."""
     with open(path, "rb") as f:
-        f.seek(max(f.seek(0, 2) - tail, 0))
-        lines = f.read().splitlines()[1:] or []
+        start = max(f.seek(0, 2) - tail, 0)
+        f.seek(start)
+        # A read that starts mid-file starts mid-line.
+        lines = f.read().splitlines()[1 if start else 0:]
     users, texts, pending = [], [], {}
     for line in lines:
         try:

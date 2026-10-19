@@ -462,3 +462,17 @@ body { grid-template-rows: auto auto 1fr auto; }
 .running code { font: 12px/1.45 var(--mono); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 4.4em; overflow: hidden; }
 .sheet-body.scroll { overflow-y: auto; overscroll-behavior: contain; }
 .sheet-body.scroll .wlog { flex: none; overflow: visible; }
+
+/* Activity log */
+.alist { display: flex; flex-direction: column; }
+.aday { font-size: 12px; font-weight: 500; color: var(--text-3); padding: 12px 0 4px; }
+.arow { display: flex; flex-direction: column; gap: 3px; padding: 8px 0; border-top: 1px solid var(--container-high); }
+.aday + .arow { border-top: 0; }
+.atop { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.atop time { color: var(--text-3); font-variant-numeric: tabular-nums; }
+.atop b { font-weight: 500; }
+.atop .tool { color: var(--text-2); }
+.atop .tag { font-size: 12px; padding: 0 8px; border-radius: 6px; background: var(--container-high); color: var(--text-2); }
+.arow.bad .tag { background: #45293a; color: var(--error); }
+.arow.ok .tag { background: #2b3b33; color: var(--ok); }
+.arow code { font: 12px/1.45 var(--mono); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

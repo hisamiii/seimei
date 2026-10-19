@@ -16,6 +16,7 @@ from .auth import Auth
 from .dispatcher import Dispatcher
 from .events import EventLog
 from .files import MAX_MODEL_BYTES, Files
+from .guard import Guard
 from .sessions import Watcher
 from .workers import Pool
 
@@ -46,7 +47,7 @@ async def write_event(resp: web.StreamResponse, ev: dict):
 
 
 def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files, approvals: Approvals,
-             watcher: Watcher, auth: Auth | None, origins: set[str]) -> web.Application:
+             tool_guard: Guard, watcher: Watcher, auth: Auth | None, origins: set[str]) -> web.Application:
     @web.middleware
     async def guard(request: web.Request, handler):
         # Never trust the peer address: cloudflared connects from localhost too.
@@ -206,6 +207,10 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
                                                       "since": s["since"], "active": s["active"], "cwd": s["cwd"]},
                                   **peek})
 
+    async def audit(request):
+        limit = max(1, min(int(request.query.get("limit", 200)), 1000))
+        return web.json_response({"calls": await asyncio.to_thread(tool_guard.tail, limit)})
+
     async def usage(request):
         return web.json_response(dispatcher.usage.snapshot() if dispatcher.usage else {})
 
@@ -265,6 +270,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     app.router.add_get("/api/files/{name}", file)
     app.router.add_post("/api/approvals/{aid}", decide)
     app.router.add_get("/api/usage", usage)
+    app.router.add_get("/api/audit", audit)
     app.router.add_get("/api/sessions/{pid:[0-9]+}", session)
     app.router.add_get("/api/workers", workers_all)
     app.router.add_get("/api/workers/{id}", worker_history)

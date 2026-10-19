@@ -555,8 +555,11 @@ const menu = $('menu'), card = $('fp-card');
 
 async function account() {
   const r = await fetch('api/auth/me').then((x) => x.json()).catch(() => null);
-  if (!r?.auth) return;
   $('menu-btn').hidden = false;
+  if (!r?.auth) {
+    $('add-passkey').hidden = $('logout').hidden = true;
+    return;
+  }
   $('add-passkey').hidden = !supported();
   let dismissed = false;
   try { dismissed = localStorage.getItem('seimei.fp-card') === 'no'; } catch {}
@@ -593,6 +596,51 @@ $('fp-no').addEventListener('click', () => {
   try { localStorage.setItem('seimei.fp-card', 'no'); } catch {}
 });
 $('logout').addEventListener('click', () => post('api/auth/logout', {}).finally(toLogin));
+$('audit').addEventListener('click', () => {
+  menu.hidden = true;
+  openAudit();
+});
+
+// ---------- activity log ----------
+
+const AUDIT_TONE = { blocked: 'bad', denied: 'bad', expired: 'bad', approved: 'ok' };
+
+function auditWhat(call) {
+  let inp = {};
+  try { inp = JSON.parse(call.input); } catch { return call.input || ''; }
+  for (const k of ['command', 'file_path', 'path', 'pattern', 'url', 'query', 'description', 'prompt', 'to', 'task', 'worker', 'session']) {
+    if (typeof inp[k] === 'string' && inp[k].trim()) return inp[k].trim().split('\n')[0];
+  }
+  return call.input === '{}' ? '' : call.input;
+}
+
+async function openAudit() {
+  const r = await getJSON('api/audit?limit=300');
+  if (!r) return;
+  sheet.view = 'audit';
+  sheet.worker = null;
+  sheet.renderer = null;
+  const list = el('div', 'alist');
+  let day = null;
+  for (const c of r.calls) {
+    const d = new Date(c.t * 1000).toDateString();
+    if (d !== day) {
+      day = d;
+      list.append(el('div', 'aday', d === new Date().toDateString() ? 'Today' : dayLabel(c.t)));
+    }
+    const row = el('div', `arow ${AUDIT_TONE[c.decision] || ''}`);
+    const top = el('div', 'atop');
+    top.append(el('time', null, clock(c.t)), el('b', null, c.who), el('span', 'tool', c.tool.replace(/^mcp__seimei__/, '')));
+    if (c.decision !== 'allowed') top.append(el('span', 'tag', c.why ? `${c.decision}: ${c.why}` : c.decision));
+    if (c.failed) top.append(el('span', 'tag', 'failed'));
+    row.append(top, el('code', null, auditWhat(c)));
+    list.append(row);
+  }
+  if (!r.calls.length) list.append(el('p', 'usage-note', 'Nothing yet.'));
+  sheet.body.replaceChildren(el('h2', 'list', 'Activity log'),
+    el('p', 'usage-note', 'Every tool call by seimei and the shikigami, newest first.'), list);
+  showSheet();
+}
 
 // ---------- input ----------
 
@@ -932,7 +980,7 @@ async function openSession(pid) {
 const sheet = { wrap: $('sheet-wrap'), body: $('sheet-body'), worker: null, log: null, renderer: null, head: null };
 
 function showSheet() {
-  sheet.body.classList.toggle('scroll', sheet.view === 'session' || sheet.view === 'usage');
+  sheet.body.classList.toggle('scroll', ['session', 'usage', 'audit'].includes(sheet.view));
   if (sheet.wrap.hidden) {
     sheet.wrap.hidden = false;
     history.pushState({ sheet: true }, '');
