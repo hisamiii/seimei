@@ -90,6 +90,7 @@ class Worker:
             system_prompt={"type": "preset", "preset": "claude_code", "append": PROMPT.format(name=r["name"])},
             mcp_servers={"shikigami": self._tools()},
             env=queue_env(r["name"]),
+            hooks=self.pool.approvals.hooks(r["name"], r["id"]) if self.pool.approvals else None,
             **where,
         )
 
@@ -198,6 +199,7 @@ class Pool:
         self.dir.mkdir(exist_ok=True)
         self.path = state_dir / "workers.json"
         self.dispatcher = None
+        self.approvals = None
         recs = json.loads(self.path.read_text()) if self.path.exists() else []
         self.workers: dict[str, Worker] = {r["id"]: Worker(self, r) for r in recs}
 

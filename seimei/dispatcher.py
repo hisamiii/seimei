@@ -44,15 +44,20 @@ Delegate real work (coding, research, anything longer than a few tool calls) to 
 - A [seimei] line tells you when one finishes, fails or asks something. Answer questions with mcp__seimei__message when you can; ask the user when only they can decide.
 - Check on them with mcp__seimei__workers and mcp__seimei__peek. Ask the user before running more than 5 at once.
 
+## Sessions the user started
+Messaging a session the user started (SendMessage) or stopping, attaching to or resuming one (claude stop/kill/attach/rm/respawn, --resume) shows the user an Approve/Deny card and waits for their tap, up to 10 minutes.
+Send such a message once and wait; if it is denied, do not retry it another way.
+
 ## Images
 The user can attach photos from their phone; you see them in their message.
 To show the user an image (a screenshot, a render, a chart), save it as PNG, JPEG, WebP or GIF and call mcp__seimei__show_image with its path; it appears inline in the chat.
 """
 
 class Dispatcher:
-    def __init__(self, cfg: dict, events: EventLog, state_dir: Path, tools=None):
+    def __init__(self, cfg: dict, events: EventLog, state_dir: Path, tools=None, approvals=None):
         self.cfg = cfg
         self.tools = tools
+        self.approvals = approvals
         self.notes_queue: list[str] = []
         self.events = events
         self.sid_file = state_dir / "session_id"
@@ -95,6 +100,7 @@ class Dispatcher:
             system_prompt={"type": "preset", "preset": "claude_code", "append": PROMPT.format(notes=self.notes)},
             env=queue_env("seimei"),
             mcp_servers={"seimei": self.tools} if self.tools else {},
+            hooks=self.approvals.hooks("seimei") if self.approvals else None,
             **where,
         )
 

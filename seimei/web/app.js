@@ -217,6 +217,70 @@ function workerCard(ev) {
   return card;
 }
 
+// ---------- approvals ----------
+
+// Cards by approval id, and outcomes seen so far (an older page can load a card after its outcome).
+const approvals = new Map();
+const outcomes = new Map();
+const LOCK = 'M7 11V8a5 5 0 0 1 10 0v3M6 11h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1z';
+const OUTCOME = { approved: 'Approved', denied: 'Denied', expired: 'No answer in 10 min, denied' };
+
+function approvalCard(ev) {
+  const card = el('div', 'wcard approval');
+  const badge = el('span', 'badge');
+  badge.append(svg(LOCK, 18));
+  const head = el('div', 'head');
+  const title = el('div', 'title');
+  const what = ev.action === 'message' ? `wants to message ${ev.target}` : `wants to ${ev.target}`;
+  title.append(el('b', null, `${ev.who} ${what}`));
+  title.append(el('span', 'sub', ev.action === 'message' ? 'a session you started' : 'a session command'));
+  head.append(badge, title);
+  const body = el('div', `body ${ev.action === 'message' ? 'task' : 'cmd'}`, ev.detail);
+  const foot = el('div', 'foot');
+  const left = el('span', 'left');
+  const deny = el('button', 'btn text sl', 'Deny');
+  const ok = el('button', 'btn filled sl', 'Approve');
+  for (const [b, decision] of [[deny, 'deny'], [ok, 'approve']]) {
+    b.type = 'button';
+    b.addEventListener('click', async () => {
+      deny.disabled = ok.disabled = true;
+      try {
+        await post(`api/approvals/${ev.aid}`, { decision });
+      } catch {
+        if (!outcomes.has(ev.aid)) deny.disabled = ok.disabled = false;
+      }
+    });
+  }
+  foot.append(left, deny, ok);
+  card.append(head, body, foot);
+  card.expires = ev.expires;
+  approvals.set(ev.aid, card);
+  if (outcomes.has(ev.aid)) settle(ev.aid, outcomes.get(ev.aid));
+  else tick();
+  return card;
+}
+
+function settle(aid, outcome) {
+  outcomes.set(aid, outcome);
+  const card = approvals.get(aid);
+  if (!card) return;
+  card.classList.add('settled', outcome);
+  card.querySelectorAll('.foot button').forEach((b) => b.remove());
+  card.querySelector('.foot .left').textContent = OUTCOME[outcome] || outcome;
+  render();
+}
+
+const waitingApprovals = () => [...approvals.entries()].filter(([aid]) => !outcomes.has(aid));
+
+function tick() {
+  const now = Date.now() / 1000;
+  for (const [, card] of waitingApprovals()) {
+    const left = Math.ceil((card.expires - now) / 60);
+    card.querySelector('.foot .left').textContent = left > 0 ? `Auto-denies in ${left} min` : 'Expiring';
+  }
+}
+setInterval(tick, 20000);
+
 function pic(name) {
   const img = el('img', 'pic');
   img.src = `api/files/${name}`;
@@ -269,6 +333,7 @@ class Renderer {
   }
 
   add(ev) {
+    if (ev.type === 'approval_done') return settle(ev.aid, ev.outcome);
     if (ev.t && dayKey(ev.t) !== this.day) {
       this.day = dayKey(ev.t);
       this.put(el('div', 'note day', dayLabel(ev.t)));
@@ -293,6 +358,7 @@ class Renderer {
     else if (ev.type === 'system') this.put(el('div', `note ${ev.level || ''}`, ev.text));
     else if (ev.type === 'worker') this.put(workerCard(ev));
     else if (ev.type === 'image') this.put(shown(ev));
+    else if (ev.type === 'approval') this.put(approvalCard(ev));
     else if (ev.type === 'rate_limit') this.put(el('div', `note ${ev.status === 'rejected' ? 'error' : 'warn'}`, limitText(ev)));
   }
 }
@@ -304,16 +370,17 @@ const main = new Renderer(thread);
 function render() {
   const s = !online ? (awaySince ? 'away' : 'connecting')
     : !session.connected ? 'starting'
+    : waitingApprovals().length ? 'waiting'
     : session.busy ? 'working' : 'idle';
   const text = { away: `away since ${awaySince ? clock(awaySince / 1000) : ''}`, connecting: 'connecting',
-    starting: 'session starting', working: 'working', idle: 'idle' }[s];
+    starting: 'session starting', waiting: 'waiting for your OK', working: 'working', idle: 'idle' }[s];
   $('status').dataset.s = s;
   $('status-text').textContent = text;
   document.body.classList.toggle('offline', !online && !!awaySince);
   const away = !!(awaySince && Date.now() - awaySince > 4000 && !online);
   if (away && $('away').hidden) requestAnimationFrame(toBottom);
   $('away').hidden = !away;
-  working.hidden = !(online && session.busy && !live);
+  working.hidden = !(online && session.busy && !live) || s === 'waiting';
   const typing = input.value.trim() !== '' || attachments.length > 0;
   stopBtn.hidden = !(session.busy && !typing);
   sendBtn.hidden = !stopBtn.hidden;

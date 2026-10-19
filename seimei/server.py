@@ -10,6 +10,7 @@ from pathlib import Path
 
 from aiohttp import web
 
+from .approvals import Approvals
 from .auth import Auth
 from .dispatcher import Dispatcher
 from .events import EventLog
@@ -42,7 +43,8 @@ async def write_event(resp: web.StreamResponse, ev: dict):
     await resp.write(f"{head}data: {json.dumps(ev)}\n\n".encode())
 
 
-def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files, auth: Auth | None, origins: set[str]) -> web.Application:
+def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files, approvals: Approvals,
+             auth: Auth | None, origins: set[str]) -> web.Application:
     @web.middleware
     async def guard(request: web.Request, handler):
         # Never trust the peer address: cloudflared connects from localhost too.
@@ -186,6 +188,14 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
         await dispatcher.send(text, saved)
         return web.json_response({"ok": True})
 
+    async def decide(request):
+        body = await request.json()
+        if body.get("decision") not in ("approve", "deny"):
+            raise web.HTTPBadRequest()
+        if not approvals.decide(request.match_info["aid"], body["decision"] == "approve"):
+            raise web.HTTPConflict(text="already answered or expired")
+        return web.json_response({"ok": True})
+
     async def file(request):
         path = files.path(request.match_info["name"])
         if not path:
@@ -232,6 +242,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     app.router.add_post("/api/interrupt", interrupt)
     app.router.add_get("/api/auth/me", me)
     app.router.add_get("/api/files/{name}", file)
+    app.router.add_post("/api/approvals/{aid}", decide)
     app.router.add_get("/api/workers", workers_all)
     app.router.add_get("/api/workers/{id}", worker_history)
     app.router.add_post("/api/workers/{id}/send", worker_send)

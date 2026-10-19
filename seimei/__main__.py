@@ -11,6 +11,7 @@ from pathlib import Path
 
 from aiohttp import web
 
+from .approvals import Approvals
 from .auth import Auth
 from .dispatcher import Dispatcher
 from .events import EventLog
@@ -88,11 +89,13 @@ def main():
     events = EventLog(state / "events.jsonl")
     pool = Pool(events, state)
     files = Files(state)
-    dispatcher = Dispatcher(disp, events, state, make_tools(pool, files, events))
-    pool.dispatcher = dispatcher
-    app = make_app(events, dispatcher, pool, files, auth, origins)
+    approvals = Approvals(events)
+    dispatcher = Dispatcher(disp, events, state, make_tools(pool, files, events), approvals)
+    pool.dispatcher, pool.approvals = dispatcher, approvals
+    app = make_app(events, dispatcher, pool, files, approvals, auth, origins)
 
     async def start(app):
+        approvals.startup()
         pool.startup()
         app["dispatcher"] = asyncio.create_task(dispatcher.run())
 
