@@ -90,6 +90,7 @@ class Worker:
             system_prompt={"type": "preset", "preset": "claude_code", "append": PROMPT.format(name=r["name"])},
             mcp_servers={"shikigami": self._tools()},
             env=queue_env(r["name"]),
+            extra_args={"name": f"shikigami {r['name']}"},
             hooks=self.pool.approvals.hooks(r["name"], r["id"]) if self.pool.approvals else None,
             **where,
         )

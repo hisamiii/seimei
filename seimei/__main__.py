@@ -77,6 +77,7 @@ def main():
 
     if args.dev:
         port += 1
+        disp.setdefault("name", "seimei-dev")
         origins = {f"http://localhost:{port}", f"http://127.0.0.1:{port}"}
         auth = None
         logging.warning("DEV MODE: no login on http://localhost:%d, state in %s", port, state)

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
+from . import sessions as sess
 from .events import EventLog
 from .files import MAX_BYTES, Files
 from .workers import ACTIVE, Pool
@@ -112,4 +113,54 @@ def make_tools(pool: Pool, files: Files, events: EventLog):
         events.add({"type": "image", "file": name, "caption": str(args.get("caption") or "")[:300]})
         return text("Shown to the user.")
 
-    return create_sdk_mcp_server("seimei", tools=[summon, workers, peek, message, stop, show_image])
+    def own() -> dict[str, str]:
+        """seimei's own sessions, so the listing can tell them from the user's."""
+        labels = {w.rec["session_id"]: f"shikigami {w.name}" for w in pool.workers.values()}
+        sid = pool.dispatcher.session_id() if pool.dispatcher else None
+        if sid:
+            labels[sid] = "seimei (you)"
+        return labels
+
+    @tool("sessions", "List every running Claude Code session on the laptop: name, status (idle, busy, waiting with "
+          "what for, shell, parked), kind, folder and last activity. Includes the user's own sessions.", {})
+    async def sessions(args):
+        rows = sess.live(own())
+        if not rows:
+            return text("No running sessions.")
+        home = str(Path.home())
+        return text("\n".join(
+            f"{s['name']} [pid {s['pid']}]: {s['status']} since {sess.ago(s['since'])}, last activity {sess.ago(s['active'])}, "
+            f"{s['kind']}, in {s['cwd'].replace(home, '~', 1)}" for s in rows))
+
+    @tool("session_peek", "Read a running session: its last user messages and assistant texts, an open "
+          "AskUserQuestion with its options (SendMessage does not reach a session sitting in one), and tool calls "
+          "still running. Session by name, pid or session id.", {
+              "type": "object",
+              "properties": {"session": {"type": "string"}, "count": {"type": "integer", "default": 3}},
+              "required": ["session"]})
+    async def session_peek(args):
+        s = sess.find(str(args["session"]), own())
+        if not s:
+            names = ", ".join(x["name"] for x in sess.live(own()))
+            return text(f"No single running session matches. Running: {names}", error=True)
+        path = sess.transcript(s["rec"])
+        if not path:
+            return text(f"{s['name']} has no transcript yet.")
+        p = sess.peek(path, max(1, min(int(args.get("count", 3)), 20)))
+        lines = [f"{s['name']} [pid {s['pid']}, {s['kind']}]: {s['status']} since {sess.ago(s['since'])}, "
+                 f"last activity {sess.ago(s['active'])}, in {s['cwd']}"]
+        for q in p["questions"]:
+            lines.append(f"\nOPEN AskUserQuestion (asked {q['asked'][:19]}Z), waiting for an answer in the terminal:")
+            for item in q["questions"]:
+                lines.append(f"- {item.get('question')}" + (" (multi-select)" if item.get("multiSelect") else ""))
+                for i, o in enumerate(item.get("options", []), 1):
+                    lines.append(f"    {i}. {o.get('label')}: {o.get('description', '')}")
+        for c in p["open_calls"]:
+            lines.append(f"\nStill running: {c['tool']} since {c['since'][:19]}Z: {c['what']}")
+        merged = sorted([(t, "user", x) for t, x in p["user"]] + [(t, "assistant", x) for t, x in p["assistant"]])
+        if merged:
+            lines.append("\nRecent messages, oldest first:")
+            lines += [f"[{who} {t[11:19]}] {x}" for t, who, x in merged]
+        return text("\n".join(lines))
+
+    return create_sdk_mcp_server("seimei", tools=[summon, workers, peek, message, stop, show_image, sessions, session_peek])

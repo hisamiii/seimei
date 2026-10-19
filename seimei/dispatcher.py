@@ -45,6 +45,9 @@ Delegate real work (coding, research, anything longer than a few tool calls) to 
 - Check on them with mcp__seimei__workers and mcp__seimei__peek. Ask the user before running more than 5 at once.
 
 ## Sessions the user started
+Your session is named "{name}"; peers can always reach you by that name, also after restarts.
+See every running session with mcp__seimei__sessions and read one with mcp__seimei__session_peek (last messages, an open AskUserQuestion with its options, running tool calls).
+A session sitting in an AskUserQuestion does not read SendMessage until the question is answered in its terminal.
 Messaging them (SendMessage) needs no approval.
 Stopping, attaching to, deleting or resuming one (claude stop/kill/attach/rm/respawn, --resume) shows the user an Approve/Deny card and waits for their tap, up to 10 minutes.
 Run such a command once and wait; if it is denied, do not retry it another way.
@@ -70,6 +73,9 @@ class Dispatcher:
         self.pending: list[str] = []
         self.write_lock = asyncio.Lock()
         self.rate_limits: dict[str, dict] = {}
+
+    def session_id(self) -> str | None:
+        return self.sid_file.read_text().strip() if self.sid_file.exists() else None
 
     def state(self) -> dict:
         return {"type": "state", "connected": self.connected, "busy": self.busy}
@@ -98,10 +104,12 @@ class Dispatcher:
             permission_mode="bypassPermissions",
             include_partial_messages=True,
             setting_sources=["user", "project", "local"],
-            system_prompt={"type": "preset", "preset": "claude_code", "append": PROMPT.format(notes=self.notes)},
+            system_prompt={"type": "preset", "preset": "claude_code", "append": PROMPT.format(notes=self.notes, name=self.cfg.get("name", "seimei"))},
             env=queue_env("seimei"),
             mcp_servers={"seimei": self.tools} if self.tools else {},
             hooks=self.approvals.hooks("seimei") if self.approvals else None,
+            # A fixed name is a fixed address: peers reply to "seimei" across restarts.
+            extra_args={"name": self.cfg.get("name", "seimei")},
             **where,
         )
 
