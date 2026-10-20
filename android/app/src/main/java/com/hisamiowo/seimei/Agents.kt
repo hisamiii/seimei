@@ -1,5 +1,9 @@
 package com.hisamiowo.seimei
 
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -421,7 +425,16 @@ fun AgentPage(vm: Seimei, pg: Page) {
 fun QuestionCard(vm: Seimei, pg: Page, ask: JSONObject) {
     val q = ask.optJSONArray("questions")?.optJSONObject(0)
     val canTap = ask.optBoolean("answerable") && pg.reach == null
-    var picked by remember(ask.str("tool_id")) { mutableStateOf(0) }
+    // Survives rotation; after a send the options unlock again in 10 s if the same question is still open.
+    var picked by rememberSaveable(ask.str("tool_id")) { mutableStateOf(0) }
+    var sentAt by rememberSaveable(ask.str("tool_id")) { mutableStateOf(0L) }
+    LaunchedEffect(sentAt) {
+        if (sentAt > 0) {
+            delay(maxOf(0L, 10_000 - (System.currentTimeMillis() - sentAt)))
+            picked = 0
+            sentAt = 0
+        }
+    }
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(ASK_BG).border(1.5.dp, PEACH, RoundedCornerShape(24.dp)).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -445,12 +458,15 @@ fun QuestionCard(vm: Seimei, pg: Page, ask: JSONObject) {
                         .then(if (picked == n) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp)) else Modifier)
                         .clickable(enabled = canTap && picked == 0) {
                             picked = n
-                            vm.pageAnswer(n) { ok -> if (!ok) picked = 0 }
+                            vm.pageAnswer(n) { ok -> if (ok) sentAt = System.currentTimeMillis() else picked = 0 }
                         }
                         .padding(horizontal = 14.dp, vertical = 12.dp)
                         .alpha(if (canTap || picked == n) 1f else .7f),
                 ) {
-                    Text(o.str("label"), fontSize = 14.5.sp, fontWeight = FontWeight.Medium)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(o.str("label"), fontSize = 14.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                        if (picked == n && sentAt > 0) Text("Sent", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                    }
                     if (o.str("description").isNotEmpty()) Text(o.str("description"), fontSize = 12.5.sp, lineHeight = 17.sp, color = LocalExtra.current.text3)
                 }
             }
@@ -493,9 +509,11 @@ fun PageComposer(vm: Seimei, pg: Page, a: Agent) {
                     Spacer(Modifier.width(8.dp))
                     Text(d.name, fontSize = 13.sp, color = LocalExtra.current.text2, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
-                Box(Modifier.align(Alignment.TopEnd).padding(2.dp).size(22.dp).clip(CircleShape).background(Color.Black.copy(alpha = .6f))
-                    .clickable { vm.pageDetach(d) }, contentAlignment = Alignment.Center) {
-                    Icon(Icons.close, "Remove ${d.name}", Modifier.size(12.dp), tint = Color.White)
+                // A 44dp touch area in the corner around the small visible circle.
+                Box(Modifier.align(Alignment.TopEnd).size(44.dp).clickable { vm.pageDetach(d) }, contentAlignment = Alignment.TopEnd) {
+                    Box(Modifier.padding(2.dp).size(22.dp).clip(CircleShape).background(Color.Black.copy(alpha = .6f)), contentAlignment = Alignment.Center) {
+                        Icon(Icons.close, "Remove ${d.name}", Modifier.size(12.dp), tint = Color.White)
+                    }
                 }
             }
         }
@@ -532,7 +550,8 @@ fun PageComposer(vm: Seimei, pg: Page, a: Agent) {
             )
             Spacer(Modifier.width(8.dp))
             val typing = pg.draft.isNotBlank() || pg.files.isNotEmpty()
-            if (pg.kind == "worker" && pg.row.str("state") in ACTIVE && !typing) {
+            // Asking: the answer goes through Send; Stop is in the details sheet.
+            if (pg.kind == "worker" && pg.row.str("state") in ACTIVE && pg.row.str("state") != "asking" && !typing) {
                 FilledTonalIconButton({ vm.workerStop(pg.id) }, Modifier.size(56.dp)) {
                     Box(Modifier.size(14.dp).clip(RoundedCornerShape(3.dp)).background(cs.onSecondaryContainer).semantics { contentDescription = "Stop" })
                 }
@@ -546,10 +565,13 @@ fun PageComposer(vm: Seimei, pg: Page, a: Agent) {
 }
 
 @Composable
-fun Fact(text: String, mono: Boolean = false) = Text(
-    text, fontSize = if (mono) 12.sp else 13.sp, color = LocalExtra.current.text2, fontFamily = if (mono) FontFamily.Monospace else null,
-    modifier = Modifier.heightIn(min = 30.dp).border(1.dp, Color(0xFF585B70), RoundedCornerShape(8.dp)).padding(horizontal = 12.dp, vertical = 6.dp),
-)
+fun Fact(key: String, value: String, mono: Boolean = false) {
+    if (value.isEmpty()) return
+    Row {
+        Text(key, fontSize = 14.sp, lineHeight = 20.sp, color = LocalExtra.current.text3, modifier = Modifier.width(104.dp))
+        Text(value, fontSize = if (mono) 13.sp else 14.sp, lineHeight = 20.sp, fontFamily = if (mono) FontFamily.Monospace else null)
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -564,42 +586,51 @@ fun Details(vm: Seimei, pg: Page) {
                 Text(r.str("name"), fontSize = 22.sp, lineHeight = 26.sp)
                 Text(if (pg.kind == "worker") "Shikigami" else "Session ${r.str("kind")}".trim(), fontSize = 13.sp, color = LocalExtra.current.text3)
             }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Fact(home(r.str("cwd")), mono = true)
-                if (r.str("model").isNotEmpty()) Fact(r.str("model"))
+            // Facts as a quiet key/value list; what can be done sits below as full-width tonal buttons.
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Fact("Folder", home(r.str("cwd")), mono = true)
+                Fact("Model", r.str("model"))
                 val effort = r.str("effort").ifEmpty { r.str("effort_now") }
-                if (effort.isNotEmpty()) Fact("effort $effort" + if (pg.kind == "worker" && r.str("effort").isEmpty()) " (default)" else "")
-                if (r.str("context_cap").isNotEmpty()) Fact("compacts at ${r.str("context_cap")}")
-                if (r.str("subagents").isNotEmpty()) Fact("subagents on ${r.str("subagents")}")
-                r.context()?.let { Fact("context $it% used") }
-                Fact(if (pg.kind == "worker") "started ${atTime(r.optDouble("created"))}" else "last active ${atTime(r.optDouble("active"))}")
-                val state = r.str("state")
-                if (pg.kind == "worker" && state != "laptop" && r.optBoolean("started")) {
-                    // A running worker gets stopped first, so it takes a second tap.
-                    var armed by remember { mutableStateOf(false) }
-                    var sending by remember { mutableStateOf(false) }
-                    var error by remember { mutableStateOf<String?>(null) }
-                    Row(
-                        Modifier.heightIn(min = 30.dp).clip(RoundedCornerShape(8.dp)).background(cs.secondaryContainer)
-                            .clickable(enabled = !sending) {
-                                if (state in ACTIVE && !armed) {
-                                    armed = true
-                                    return@clickable
-                                }
-                                sending = true
-                                scope.launch {
-                                    error = vm.workerLaptop(pg.id)
-                                    sending = false
-                                    armed = false
-                                }
-                            }.padding(horizontal = 10.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(Icons.laptop, null, Modifier.size(16.dp), tint = cs.onSecondaryContainer)
-                        Spacer(Modifier.width(6.dp))
-                        Text(if (armed) "Stop it and open on laptop" else "On laptop", fontSize = 13.sp, color = cs.onSecondaryContainer)
+                Fact("Effort", if (effort.isEmpty()) "" else effort + if (pg.kind == "worker" && r.str("effort").isEmpty()) " (default)" else "")
+                Fact("Compacts at", r.str("context_cap"))
+                Fact("Subagents", r.str("subagents"))
+                Fact("Context", r.context()?.let { "$it% used" } ?: "")
+                if (pg.kind == "worker") Fact("Started", atTime(r.optDouble("created")).replace(Regex("^at "), "today at ").cap())
+                else Fact("Last active", atTime(r.optDouble("active")).replace(Regex("^at "), "today at ").cap())
+            }
+            val state = r.str("state")
+            if (pg.kind == "worker" && state != "laptop" && r.optBoolean("started")) {
+                // A running worker gets stopped first, so it takes a second tap.
+                var armed by remember { mutableStateOf(false) }
+                var sending by remember { mutableStateOf(false) }
+                var error by remember { mutableStateOf<String?>(null) }
+                FilledTonalButton({
+                    if (state in ACTIVE && !armed) {
+                        armed = true
+                        return@FilledTonalButton
                     }
-                    error?.let { Text("Could not open it: $it", fontSize = 13.sp, color = cs.error) }
+                    sending = true
+                    scope.launch {
+                        error = vm.workerLaptop(pg.id)
+                        sending = false
+                        armed = false
+                    }
+                }, Modifier.fillMaxWidth().heightIn(min = 48.dp), enabled = !sending) {
+                    Icon(Icons.laptop, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (armed) "Stop it and open on laptop" else "On laptop")
+                }
+                error?.let { Text("Could not open it: $it", fontSize = 13.sp, color = cs.error) }
+            }
+            if (pg.kind == "worker" && state in ACTIVE) {
+                FilledTonalButton({
+                    vm.workerStop(pg.id)
+                    pg.details = false
+                }, Modifier.fillMaxWidth().heightIn(min = 48.dp), colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = cs.error.copy(alpha = .16f).compositeOver(cs.surfaceContainer), contentColor = cs.error)) {
+                    Box(Modifier.size(12.dp).clip(RoundedCornerShape(3.dp)).background(cs.error))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Stop ${r.str("name")}", maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
             if (pg.kind == "worker" && r.str("task").isNotEmpty()) TaskRow(r.str("task"))

@@ -134,6 +134,8 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     /** Counts the user's sends from the chat: the chat jumps to the end on each. */
     var sent by mutableStateOf(0)
         private set
+    /** A short note for a tap that could not do anything; the screen shows it once. */
+    var snack by mutableStateOf<String?>(null)
 
     /** An event the chat should scroll to (a tapped "reply ready"), once it has loaded. */
     var focus by mutableStateOf<Long?>(null)
@@ -526,6 +528,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 page = pg
                 presence()
             } catch (e: IOException) {
+                snack = "Could not reach the laptop."
             }
         }
     }
@@ -742,7 +745,11 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     fun send() {
         val text = draft.trim()
         val sending = attachments
-        if ((text.isEmpty() && sending.isEmpty()) || !online) return
+        if (text.isEmpty() && sending.isEmpty()) return
+        if (!online) {
+            snack = "Not connected to the laptop yet. Your message stays here."
+            return
+        }
         edit("")
         attachments = emptyList()
         sent++

@@ -1,5 +1,7 @@
 package com.hisamiowo.seimei
 
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarHost
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
@@ -410,6 +412,13 @@ fun AppScreen(vm: Seimei) {
             ask.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
+    val snacks = remember { SnackbarHostState() }
+    LaunchedEffect(vm.snack) {
+        val t = vm.snack ?: return@LaunchedEffect
+        vm.snack = null
+        snacks.showSnackbar(t)
+    }
+    Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().imePadding()) {
         Header(vm)
         Box(Modifier.weight(1f)) {
@@ -423,6 +432,8 @@ fun AppScreen(vm: Seimei) {
         if (vm.tab == "chat") Composer(vm)
         // The keyboard covers the bottom of the screen: while typing, the navigation bar steps aside.
         if (!WindowInsets.isImeVisible) NavBar(vm)
+    }
+    SnackbarHost(snacks, Modifier.align(Alignment.BottomCenter).imePadding().padding(bottom = 96.dp))
     }
     vm.page?.let { AgentPage(vm, it) }
     if (vm.about) AboutSheet(vm) { vm.about = false }
@@ -438,6 +449,10 @@ fun Header(vm: Seimei) {
             (listOfNotNull(if (working > 0) "$working working" else null, if (asks > 0) "$asks ${if (asks == 1) "needs" else "need"} you" else null)
                 .joinToString(" · ").ifEmpty { "nothing running" })
         else -> "idle" to ""
+    }.let { (d, t) ->
+        // Away: the other tabs show the last known state, and say so.
+        if (vm.tab != "chat" && !vm.online && vm.awaySince != null) "away" to "offline since ${clock(vm.awaySince!! / 1000.0)} · last known state"
+        else d to t
     }
     // Idle and working go without saying in the chat (its working line shows a turn); only problems and asks show.
     val showStatus = text.isNotEmpty() && !(vm.tab == "chat" && (dot == "idle" || dot == "working"))

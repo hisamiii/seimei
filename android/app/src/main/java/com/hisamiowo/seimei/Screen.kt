@@ -88,6 +88,7 @@ fun ScreenTab(vm: Seimei) {
     var msg by remember { mutableStateOf("") }
     var zoom by remember { mutableStateOf(false) }
     val scroll = rememberScrollState()
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
 
     val windows = desk?.optJSONArray("workspaces").objects().flatMap { it.optJSONArray("windows").objects() }
@@ -104,7 +105,9 @@ fun ScreenTab(vm: Seimei) {
     }
     LaunchedEffect(mode, targetId, paused, vm.visible) {
         while (vm.visible && !paused) {
-            var wait = if (mode == "screen") 1000L else 4000L
+            // Each frame is ~180 KB: on a metered network one every 3 s instead of every second.
+            val metered = ctx.getSystemService(android.net.ConnectivityManager::class.java)?.isActiveNetworkMetered == true
+            var wait = if (mode == "screen") (if (metered) 3000L else 1000L) else 4000L
             if (mode == "window" && targetId == null) {
                 msg = if (desk == null) "" else "Pick a window below."
             } else {

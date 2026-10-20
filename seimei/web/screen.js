@@ -1,5 +1,5 @@
 // The Screen tab: the laptop screen or one window, about once a second, and the windows by workspace.
-import { $, S, el, svg, getJSON, toLogin, view, ICON } from './util.js';
+import { $, S, el, svg, getJSON, toLogin, view, viewLive, ICON } from './util.js';
 
 const page = $('screen');
 const APP_TONES = ['#cba6f7', '#89b4fa', '#a6e3a1', '#f9e2af', '#fab387', '#f5c2e7', '#94e2d5', '#b4befe'];
@@ -42,7 +42,7 @@ function renderScreen() {
   img.alt = 'The laptop screen';
   img.id = 'screen-img';
   if (screen.url) img.src = screen.url;
-  img.addEventListener('click', () => screen.url && view(screen.url));
+  img.addEventListener('click', () => screen.url && view(screen.url, { live: 'screen' }));
   const live = el('span', `live-chip ${screen.paused ? 'off' : ''}`);
   live.append(el('i'), screen.paused ? 'Paused' : 'Live');
   const msg = el('div', 'screen-msg', '');
@@ -66,7 +66,7 @@ function renderScreen() {
   full.type = 'button';
   full.setAttribute('aria-label', 'Full screen');
   full.append(svg(ICON.full, 18));
-  full.addEventListener('click', () => screen.url && view(screen.url));
+  full.addEventListener('click', () => screen.url && view(screen.url, { live: 'screen' }));
   ctl.append(label, pause, full);
 
   const seg = el('div', 'seg');
@@ -135,7 +135,9 @@ async function pollScreen() {
   if (S.tab !== 'screen' || screen.paused || document.hidden) return;
   const gen = screen.gen;
   const target = screenTarget();
-  let wait = screen.mode === 'screen' ? 1000 : 4000;
+  // Each frame is ~180 KB: on a metered connection one every 3 s instead of every second (QA U13).
+  const metered = navigator.connection?.saveData || navigator.connection?.type === 'cellular';
+  let wait = screen.mode === 'screen' ? (metered ? 3000 : 1000) : 4000;
   if (screen.mode === 'window' && !target) {
     showScreenMsg('Pick a window below.');
   } else {
@@ -148,6 +150,8 @@ async function pollScreen() {
       const old = screen.url;
       screen.url = url;
       if (img) img.src = url;
+      // Full screen keeps following the desktop (QA U13).
+      viewLive('screen', url);
       if (old) setTimeout(() => URL.revokeObjectURL(old), 1000);
       showScreenMsg(screen.state?.locked ? 'Screen locked' : '');
     } else {

@@ -1,5 +1,8 @@
 package com.hisamiowo.seimei
 
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.ui.graphics.Brush
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -153,6 +156,12 @@ fun ChatTab(vm: Seimei) {
                 TextButton({ vm.loadOlder() }, enabled = !vm.loadingOlder) { Text("Load earlier") }
             }
         }
+    }
+    // An empty chat greets instead of showing a blank sheet.
+    if (vm.items.isEmpty() && !vm.hasOlder && vm.online) Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+        Mark(56)
+        Spacer(Modifier.height(14.dp))
+        Text("Ask seimei anything", fontSize = 17.sp, color = LocalExtra.current.text2)
     }
     // Scrolled up: a way back to the end, which also shows that something new may be there.
     if (!follow) SmallFloatingActionButton(
@@ -366,14 +375,24 @@ fun Blocks(blocks: List<Block>, size: Int, color: Color) {
                 }
             }
             Block.Rule -> Box(Modifier.fillMaxWidth().padding(vertical = 4.dp).size(1.dp).background(MaterialTheme.colorScheme.surfaceContainerHigh))
-            is Block.Table -> Box(Modifier.clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceContainer)
-                .horizontalScroll(rememberScrollState())) {
-                Column {
-                    TableRow(b.head, head = true, size)
-                    for (r in b.rows) {
-                        Box(Modifier.fillMaxWidth().size(1.dp).background(MaterialTheme.colorScheme.surfaceContainerHighest))
-                        TableRow(r, head = false, size)
+            is Block.Table -> {
+                val scroll = rememberScrollState()
+                // A shade at an edge with more columns beyond it, so a cut on a column edge does not look complete.
+                Box(Modifier.clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceContainer).height(IntrinsicSize.Min)) {
+                    Box(Modifier.horizontalScroll(scroll)) {
+                        Column {
+                            TableRow(b.head, head = true, size)
+                            for (r in b.rows) {
+                                Box(Modifier.fillMaxWidth().size(1.dp).background(MaterialTheme.colorScheme.surfaceContainerHighest))
+                                TableRow(r, head = false, size)
+                            }
+                        }
                     }
+                    val shade = Color.Black.copy(alpha = .45f)
+                    if (scroll.canScrollForward) Box(Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(16.dp)
+                        .background(Brush.horizontalGradient(listOf(Color.Transparent, shade))))
+                    if (scroll.canScrollBackward) Box(Modifier.align(Alignment.CenterStart).fillMaxHeight().width(16.dp)
+                        .background(Brush.horizontalGradient(listOf(shade, Color.Transparent))))
                 }
             }
         }
@@ -546,7 +565,7 @@ fun WorkerCard(w: Item.Worker) {
             else Box(Modifier.animateContentSize().heightIn(max = if (open) 10_000.dp else 140.dp)) { Md(w.text, 14, LocalExtra.current.text2) }
             if (clipped || w.event != "summoned" && w.text.length > 400) {
                 Text(if (open) "Show less" else "Show more", color = cs.primary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { open = !open }.padding(vertical = 2.dp))
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { open = !open }.padding(vertical = 12.dp, horizontal = 4.dp))
             }
         }
     }
@@ -704,9 +723,11 @@ fun Composer(vm: Seimei) {
                         Text(a.name, fontSize = 13.sp, color = LocalExtra.current.text2, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
                 }
-                Box(Modifier.align(Alignment.TopEnd).padding(2.dp).size(22.dp).clip(CircleShape).background(Color.Black.copy(alpha = .6f))
-                    .clickable { vm.detach(a) }, contentAlignment = Alignment.Center) {
-                    Icon(Icons.close, "Remove", Modifier.size(12.dp), tint = Color.White)
+                // A 44dp touch area in the corner around the small visible circle.
+                Box(Modifier.align(Alignment.TopEnd).size(44.dp).clickable { vm.detach(a) }, contentAlignment = Alignment.TopEnd) {
+                    Box(Modifier.padding(2.dp).size(22.dp).clip(CircleShape).background(Color.Black.copy(alpha = .6f)), contentAlignment = Alignment.Center) {
+                        Icon(Icons.close, "Remove", Modifier.size(12.dp), tint = Color.White)
+                    }
                 }
             }
         }

@@ -608,7 +608,8 @@ body.typing .composer { padding-bottom: 10px; }
 .empty { display: flex; flex-direction: column; gap: 6px; align-items: center; text-align: center; padding: 64px 24px; color: var(--text-3); font-size: 14px; }
 .empty b { color: var(--text); font-size: 16px; font-weight: 500; }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 4s; } }
-.page .meter { background: var(--container); }
+/* Meter cards sit one step below their page, as in the app (QA D14). */
+.page .meter { background: var(--surface-lowest); }
 
 /* Details sheet: facts as a key/value list, actions as full-width tonal buttons */
 .kv { display: grid; grid-template-columns: auto 1fr; gap: 8px 18px; margin: 0; font-size: 14px; line-height: 20px; }
