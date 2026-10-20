@@ -269,8 +269,9 @@ class Desktop:
                         "windows": [{"id": w["id"], "app": w["app_id"], "title": w["title"], "focused": w["is_focused"],
                                      "urgent": w["is_urgent"], "ours": w["id"] in OURS} for w in here]})
         return {"up": True, "locked": locked(), "workspaces": out,
-                "outputs": [{"name": n, **({k: o["modes"][o["current_mode"]][k] for k in ("width", "height")}
-                                           if o.get("current_mode") is not None else {})} for n, o in outs.items()]}
+                "outputs": [{"name": n, "transform": (o.get("logical") or {}).get("transform"),
+                             **({k: o["modes"][o["current_mode"]][k] for k in ("width", "height")}
+                                if o.get("current_mode") is not None else {})} for n, o in outs.items()]}
 
     def urgent(self) -> list[dict]:
         return [w for w in self.windows.values() if w.get("is_urgent")]

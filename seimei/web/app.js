@@ -1,432 +1,119 @@
-import { md } from './md.js';
-import { deviceName, register, supported } from './passkey.js';
-
-const $ = (id) => document.getElementById(id);
-const log = $('log'), thread = $('thread'), older = $('older'), working = $('working');
-const input = $('input'), sendBtn = $('send'), stopBtn = $('stop');
-const finePointer = matchMedia('(pointer: fine)').matches;
+// The page: the stream from the laptop, the four tabs, and the header and navigation bar around them.
+import { $, S, hooks, finePointer } from './util.js';
+import { render, onDelta, clearLive, addEvent, loadHistory, autosize, waitingApprovals, toBottom } from './chat.js';
+import { setWorkers, setSessions, sheetEvent, agentCounts, showAgents } from './agents.js';
+import { showScreen, hideScreen } from './screen.js';
+import { setUsage, renderUsage, tone } from './usage.js';
+import { account } from './account.js';
+import { sheet, closeSheet } from './sheet.js';
 
 let lastId = 0;
-let firstId = null;
-let online = false;
-let awaySince = null;
-let session = { connected: false, busy: false };
-let live = null;
-let liveText = '';
 
-// ---------- helpers ----------
+// ---------- tabs ----------
 
-function el(tag, cls, text) {
-  const e = document.createElement(tag);
-  if (cls) e.className = cls;
-  if (text != null) e.textContent = text;
-  return e;
-}
+const TABS = ['chat', 'agents', 'screen', 'usage'];
+const TITLES = { chat: 'seimei', agents: 'Agents', screen: 'Screen', usage: 'Usage' };
+const pages = { chat: $('log'), agents: $('agents'), screen: $('screen'), usage: $('usage') };
 
-const clock = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-const dayKey = (t) => new Date(t * 1000).toDateString();
-
-function dayLabel(t) {
-  const d = new Date(t * 1000);
-  const today = new Date();
-  const yesterday = new Date(Date.now() - 864e5);
-  if (d.toDateString() === today.toDateString()) return 'Today';
-  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
-  return d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' });
-}
-
-const nearBottom = () => log.scrollHeight - log.scrollTop - log.clientHeight < 120;
-// Whether the reader sits at the bottom; content that grows later (pictures loading) keeps them there.
-let pinned = true;
-const toBottom = () => {
-  log.scrollTop = log.scrollHeight;
-  pinned = true;
-};
-log.addEventListener('scroll', () => { pinned = nearBottom(); }, { passive: true });
-// Pictures loading, fonts swapping in and card buttons all grow the thread after it is drawn.
-new ResizeObserver(() => { if (pinned) log.scrollTop = log.scrollHeight; }).observe(thread);
-
-// A session that ended (expired, logged out elsewhere, revoked on the laptop) sends the page back to login.
-const toLogin = () => location.reload();
-
-async function post(path, body) {
-  const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  if (r.status === 401) toLogin();
-  if (!r.ok) throw new Error(`${r.status}`);
-  return r.json();
-}
-
-const ICONS = {
-  Bash: 'M4 17l5-5-5-5M11 19h9',
-  Read: 'M6 3h9l4 4v14H6zM14 3v5h5',
-  Edit: 'M4 20h4L19 9l-4-4L4 16zM13 7l4 4',
-  Search: 'M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14zM16 16l4 4',
-  Web: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18',
-  Tool: 'M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-2.4z',
-};
-
-function svg(path, size = 16) {
-  const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  s.setAttribute('width', size);
-  s.setAttribute('height', size);
-  s.setAttribute('viewBox', '0 0 24 24');
-  s.setAttribute('fill', 'none');
-  s.setAttribute('stroke', 'currentColor');
-  s.setAttribute('stroke-width', '2');
-  s.setAttribute('stroke-linecap', 'round');
-  s.setAttribute('stroke-linejoin', 'round');
-  s.setAttribute('aria-hidden', 'true');
-  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  p.setAttribute('d', path);
-  s.append(p);
-  return s;
-}
-
-// ---------- tool activity ----------
-
-const plural = (n, one, many) => (n === 1 ? one : `${n} ${many}`);
-
-function phrase(name, n) {
-  if (name === 'Bash') return `ran ${plural(n, 'a command', 'commands')}`;
-  if (name === 'Read') return `read ${plural(n, 'a file', 'files')}`;
-  if (/^(Edit|Write|MultiEdit|NotebookEdit)$/.test(name)) return `edited ${plural(n, 'a file', 'files')}`;
-  if (/^(Grep|Glob)$/.test(name)) return n === 1 ? 'searched the files' : `searched ${n} times`;
-  if (name === 'WebSearch') return 'searched the web';
-  if (name === 'WebFetch') return `opened ${plural(n, 'a page', 'pages')}`;
-  if (/^(Agent|Task)$/.test(name)) return `started ${plural(n, 'an agent', 'agents')}`;
-  if (/^(TodoWrite|TaskCreate|TaskUpdate|TaskList|TaskGet)$/.test(name)) return 'updated its tasks';
-  if (name === 'ToolSearch') return 'loaded tools';
-  if (name === 'mcp__seimei__workers') return 'checked the shikigami';
-  if (name === 'mcp__seimei__peek') return n === 1 ? 'looked in on a shikigami' : `looked in on shikigami ${n} times`;
-  if (name === 'mcp__seimei__message') return n === 1 ? 'messaged a shikigami' : `sent ${n} shikigami messages`;
-  if (name === 'mcp__seimei__stop') return 'stopped a shikigami';
-  if (name === 'mcp__seimei__show_image') return n === 1 ? 'showed you an image' : `showed you ${n} images`;
-  const short = name.startsWith('mcp__') ? name.split('__').pop().replace(/_/g, ' ') : name;
-  return n === 1 ? `used ${short}` : `used ${short} ${n} times`;
-}
-
-function iconFor(name) {
-  if (name === 'Bash') return ICONS.Bash;
-  if (name === 'Read') return ICONS.Read;
-  if (/^(Edit|Write|MultiEdit|NotebookEdit)$/.test(name)) return ICONS.Edit;
-  if (/^(Grep|Glob)$/.test(name)) return ICONS.Search;
-  if (/^Web/.test(name)) return ICONS.Web;
-  return ICONS.Tool;
-}
-
-class Activity {
-  constructor() {
-    this.node = el('div', 'activity');
-    this.chip = el('button', 'chip sl');
-    this.chip.type = 'button';
-    this.calls = el('div', 'calls');
-    this.calls.hidden = true;
-    this.node.append(this.chip, this.calls);
-    this.counts = new Map();
-    this.rows = new Map();
-    this.running = 0;
-    this.first = null;
-    this.chip.addEventListener('click', () => {
-      this.calls.hidden = !this.calls.hidden;
-      this.node.classList.toggle('open', !this.calls.hidden);
-    });
+function show(tab) {
+  if (!TABS.includes(tab)) tab = 'chat';
+  const was = S.tab;
+  S.tab = tab;
+  for (const t of TABS) pages[t].hidden = t !== tab;
+  document.body.dataset.tab = tab;
+  for (const b of document.querySelectorAll('.nav-item')) {
+    const on = b.dataset.tab === tab;
+    b.classList.toggle('on', on);
+    if (on) b.setAttribute('aria-current', 'page');
+    else b.removeAttribute('aria-current');
   }
-
-  add(ev) {
-    this.first ??= ev.name;
-    this.counts.set(ev.name, (this.counts.get(ev.name) || 0) + 1);
-    const row = el('button', 'call sl run');
-    row.type = 'button';
-    row.append(el('b', null, ev.name.startsWith('mcp__') ? ev.name.split('__').pop() : ev.name), el('span', null, ev.summary));
-    const out = el('pre', 'out');
-    out.hidden = true;
-    row.addEventListener('click', () => { if (out.textContent) out.hidden = !out.hidden; });
-    this.calls.append(row, out);
-    this.rows.set(ev.tool_id, { row, out });
-    this.running++;
-    this.label();
-  }
-
-  result(ev) {
-    const r = this.rows.get(ev.tool_id);
-    if (!r || !r.row.classList.contains('run')) return;
-    r.row.classList.remove('run');
-    r.row.classList.toggle('err', ev.error);
-    r.out.textContent = ev.text || '(no output)';
-    this.running--;
-    this.label();
-  }
-
-  label() {
-    const parts = [...this.counts].map(([name, n]) => phrase(name, n));
-    const text = parts.join(', ');
-    const chev = svg('M9 6l6 6-6 6');
-    chev.classList.add('chev');
-    this.chip.replaceChildren(
-      this.running ? el('span', 'spin') : svg(iconFor(this.first)),
-      el('span', null, text.charAt(0).toUpperCase() + text.slice(1)),
-      chev,
-    );
-  }
+  if (was === 'screen' && tab !== 'screen') hideScreen();
+  if (tab === 'chat') {
+    S.unread = false;
+    if (was !== 'chat') requestAnimationFrame(toBottom);
+  } else if (tab === 'agents') showAgents();
+  else if (tab === 'screen') showScreen();
+  else if (tab === 'usage') renderUsage();
+  chrome();
 }
 
-// ---------- rendering ----------
-
-const STAR = 'M12 2 17.88 20.09 2.49 8.91h19.02L6.12 20.09Z';
-const WORKER = {
-  summoned: { icon: STAR, title: (n) => `Summoned ${n}` },
-  done: { icon: 'M5 12.5l4.5 4.5L19 7.5', title: (n) => `${n} finished` },
-  failed: { icon: 'M12 7v6M12 17v.01M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z', title: (n) => `${n} failed` },
-  asking: { icon: 'M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17v.01', title: (n) => `${n} asks` },
-};
-
-function workerCard(ev) {
-  const kind = WORKER[ev.event];
-  if (!kind) {
-    const what = ev.event === 'stopped' ? 'was stopped' : 'was interrupted by a restart';
-    return el('div', 'note', `${ev.name} ${what}`);
+// Chat is home: other tabs sit one step of history above it, so the phone's back button returns to the chat.
+function go(tab) {
+  if (tab === S.tab) {
+    pages[tab].scrollTo({ top: tab === 'chat' ? pages[tab].scrollHeight : 0, behavior: 'smooth' });
+    return;
   }
-  const card = el('div', `wcard ${ev.event}`);
-  card.dataset.worker = ev.worker;
-  const badge = el('span', 'badge');
-  badge.append(svg(kind.icon, 18));
-  const head = el('div', 'head');
-  const title = el('div', 'title');
-  title.append(el('b', null, kind.title(ev.name)));
-  if (ev.event === 'summoned') title.append(el('span', 'meta', `${ev.model} \u00b7 ${ev.cwd.replace(/^\/home\/[^/]+/, '~')}`));
-  head.append(badge, title);
-  card.append(head);
-  if (ev.text) {
-    const body = el('div', ev.event === 'summoned' ? 'body task' : 'body');
-    if (ev.event === 'summoned') body.textContent = ev.text;
-    else body.innerHTML = md(ev.text);
-    card.append(body);
-    requestAnimationFrame(() => {
-      if (body.scrollHeight > body.clientHeight + 4) {
-        card.classList.add('clipped');
-        const more = el('button', 'more sl', 'Show more');
-        more.type = 'button';
-        more.addEventListener('click', () => {
-          card.classList.toggle('open');
-          more.textContent = card.classList.contains('open') ? 'Show less' : 'Show more';
-        });
-        card.append(more);
-      }
-    });
-  }
-  return card;
-}
-
-// ---------- approvals ----------
-
-// Cards by approval id, and outcomes seen so far (an older page can load a card after its outcome).
-const approvals = new Map();
-const outcomes = new Map();
-const LOCK = 'M7 11V8a5 5 0 0 1 10 0v3M6 11h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1z';
-const OUTCOME = { approved: 'Approved', denied: 'Denied', expired: 'No answer in 10 min, denied' };
-
-function approvalCard(ev) {
-  const card = el('div', 'wcard approval');
-  const badge = el('span', 'badge');
-  badge.append(svg(LOCK, 18));
-  const head = el('div', 'head');
-  const title = el('div', 'title');
-  // Cards from before messages went card-free (2026-10-19) held SendMessage text.
-  const message = ev.action === 'message';
-  title.append(el('b', null, `${ev.who} wants to ${message ? `message ${ev.target}` : ev.target}`));
-  const SUB = { message: 'a session you started', edit: 'a file edit', desktop: 'a desktop action' };
-  const sub = SUB[ev.action] || (/niri|window/.test(ev.target) ? 'a desktop command' : 'a session command');
-  title.append(el('span', 'sub', sub));
-  head.append(badge, title);
-  const body = el('div', `body ${message ? 'task' : 'cmd'}`, ev.detail);
-  const foot = el('div', 'foot');
-  const left = el('span', 'left');
-  const deny = el('button', 'btn text sl', 'Deny');
-  const ok = el('button', 'btn filled sl', 'Approve');
-  for (const [b, decision] of [[deny, 'deny'], [ok, 'approve']]) {
-    b.type = 'button';
-    b.addEventListener('click', async () => {
-      deny.disabled = ok.disabled = true;
-      try {
-        await post(`api/approvals/${ev.aid}`, { decision });
-      } catch {
-        if (!outcomes.has(ev.aid)) deny.disabled = ok.disabled = false;
-      }
-    });
-  }
-  foot.append(left, deny, ok);
-  card.append(head, body, foot);
-  card.expires = ev.expires;
-  approvals.set(ev.aid, card);
-  if (outcomes.has(ev.aid)) settle(ev.aid, outcomes.get(ev.aid));
-  else tick();
-  return card;
-}
-
-function settle(aid, outcome) {
-  outcomes.set(aid, outcome);
-  const card = approvals.get(aid);
-  if (!card) return;
-  card.classList.add('settled', outcome);
-  card.querySelectorAll('.foot button').forEach((b) => b.remove());
-  card.querySelector('.foot .left').textContent = OUTCOME[outcome] || outcome;
-  render();
-}
-
-const waitingApprovals = () => [...approvals.entries()].filter(([aid]) => !outcomes.has(aid));
-
-function tick() {
-  const now = Date.now() / 1000;
-  for (const [, card] of waitingApprovals()) {
-    const left = Math.ceil((card.expires - now) / 60);
-    card.querySelector('.foot .left').textContent = left > 0 ? `Auto-denies in ${left} min` : 'Expiring';
-  }
-}
-setInterval(tick, 20000);
-
-function pic(name) {
-  const img = el('img', 'pic');
-  img.src = `api/files/${name}`;
-  img.loading = 'lazy';
-  img.alt = '';
-  return img;
-}
-
-function message(ev) {
-  const node = el('div', `msg ${ev.type}`);
-  if (ev.type === 'assistant') node.innerHTML = md(ev.text);
-  else {
-    if (ev.images?.length) {
-      const pics = el('div', `pics n${Math.min(ev.images.length, 3)}${ev.text ? '' : ' only'}`);
-      ev.images.forEach((n) => pics.append(pic(n)));
-      node.append(pics);
+  if (tab === 'chat') {
+    if (history.state?.tab) history.back();
+    else {
+      history.replaceState(null, '', location.pathname);
+      show('chat');
     }
-    if (ev.text) node.append(document.createTextNode(ev.text));
+    return;
   }
-  node.dataset.t = ev.t;
-  return node;
+  if (S.tab === 'chat') history.pushState({ tab }, '', `#${tab}`);
+  else history.replaceState({ tab }, '', `#${tab}`);
+  show(tab);
 }
 
-function shown(ev) {
-  const fig = el('figure', 'shown');
-  fig.append(pic(ev.file));
-  if (ev.caption) fig.append(el('figcaption', null, ev.caption));
-  return fig;
-}
+for (const b of document.querySelectorAll('.nav-item')) b.addEventListener('click', () => go(b.dataset.tab));
 
-function limitText(ev) {
-  const name = { five_hour: '5-hour', seven_day: 'Weekly' }[ev.window] || ev.window;
-  const what = ev.status === 'rejected' ? 'limit reached' : ev.status === 'allowed' ? 'limit cleared' : 'limit getting close';
-  return `${name} ${what}${ev.resets_at && ev.status !== 'allowed' ? `, resets ${clock(ev.resets_at)}` : ''}`;
-}
+window.addEventListener('popstate', () => {
+  if (!sheet.wrap.hidden) return closeSheet(true);
+  show(location.hash.slice(1) || 'chat');
+});
 
-// Turns events into nodes. One instance appends live; a fresh one renders older pages for prepending.
-class Renderer {
-  constructor(target, before = null) {
-    this.target = target;
-    this.before = before;
-    this.day = null;
-    this.activity = null;
-    this.tools = new Map();
+// ---------- header and navigation bar ----------
+
+function chrome() {
+  const { working, asks } = agentCounts();
+  let s = 'idle', text = '';
+  if (S.tab === 'chat') ({ s, text } = S.status);
+  else if (S.tab === 'agents') {
+    s = asks ? 'waiting' : working ? 'working' : 'idle';
+    text = [working && `${working} working`, asks && `${asks} ${asks === 1 ? 'needs' : 'need'} you`].filter(Boolean).join(' · ') || 'nothing running';
   }
-
-  put(node) {
-    this.target.insertBefore(node, this.before);
-    return node;
-  }
-
-  add(ev) {
-    if (ev.type === 'approval_done') return settle(ev.aid, ev.outcome);
-    if (ev.t && dayKey(ev.t) !== this.day) {
-      this.day = dayKey(ev.t);
-      this.put(el('div', 'note day', dayLabel(ev.t)));
-    }
-    // The summoned card already says it.
-    if (ev.type === 'tool' && ev.name === 'mcp__seimei__summon') return;
-    if (ev.type === 'tool') {
-      if (!this.activity) {
-        this.activity = new Activity();
-        this.put(this.activity.node);
-      }
-      this.activity.add(ev);
-      this.tools.set(ev.tool_id, this.activity);
-      return;
-    }
-    if (ev.type === 'tool_result') {
-      this.tools.get(ev.tool_id)?.result(ev);
-      return;
-    }
-    this.activity = null;
-    if (ev.type === 'user' || ev.type === 'assistant') this.put(message(ev));
-    else if (ev.type === 'system') this.put(el('div', `note ${ev.level || ''}`, ev.text));
-    else if (ev.type === 'worker') this.put(workerCard(ev));
-    else if (ev.type === 'image') this.put(shown(ev));
-    else if (ev.type === 'approval') this.put(approvalCard(ev));
-    else if (ev.type === 'rate_limit') this.put(el('div', `note ${ev.status === 'rejected' ? 'error' : 'warn'}`, limitText(ev)));
-  }
-}
-
-const main = new Renderer(thread);
-
-// ---------- live state ----------
-
-function render() {
-  const s = !online ? (awaySince ? 'away' : 'connecting')
-    : !session.connected ? 'starting'
-    : waitingApprovals().length ? 'waiting'
-    : session.busy ? 'working' : 'idle';
-  const text = { away: `away since ${awaySince ? clock(awaySince / 1000) : ''}`, connecting: 'connecting',
-    starting: 'session starting', waiting: 'waiting for your OK', working: 'working', idle: 'idle' }[s];
+  $('title').textContent = TITLES[S.tab];
   $('status').dataset.s = s;
   $('status-text').textContent = text;
-  // Idle and working go without saying (the working line in the chat shows a turn); only problems and asks show.
-  $('status').hidden = s === 'idle' || s === 'working';
-  document.body.classList.toggle('offline', !online && !!awaySince);
-  const away = !!(awaySince && Date.now() - awaySince > 4000 && !online);
-  if (away && $('away').hidden) requestAnimationFrame(toBottom);
-  $('away').hidden = !away;
-  working.hidden = !(online && session.busy && !live) || s === 'waiting';
-  const typing = input.value.trim() !== '' || attachments.length > 0;
-  stopBtn.hidden = !(session.busy && !typing);
-  sendBtn.hidden = !stopBtn.hidden;
+  // Idle and working go without saying in the chat (its working line shows a turn); only problems and asks show.
+  $('status').hidden = !text || (S.tab === 'chat' && (s === 'idle' || s === 'working'));
+
+  const count = $('nav-count');
+  count.hidden = !working;
+  count.textContent = working > 99 ? '99+' : working;
+  count.classList.toggle('attn', asks > 0);
+  $('nav-agents-dot').hidden = !(asks && !working);
+  $('nav-chat-dot').hidden = !(S.tab !== 'chat' && (S.unread || waitingApprovals().length));
+  const label = [working && `${working} working`, asks && `${asks} waiting for you`].filter(Boolean).join(', ');
+  $('nav-agents').setAttribute('aria-label', label ? `Agents, ${label}` : 'Agents');
+
+  const w = S.usage?.windows?.five_hour;
+  const ring = $('nav-ring');
+  ring.setAttribute('stroke-dasharray', `${w ? Math.round(w.utilization * 100) : 0} 100`);
+  $('nav-usage').dataset.tone = !w ? '' : S.usage.status === 'rejected' ? 'bad' : tone(w.utilization);
+  $('nav-usage').setAttribute('aria-label', w ? `Usage, 5-hour window ${Math.round(w.utilization * 100)}% used` : 'Usage');
+}
+hooks.chrome = chrome;
+
+// The keyboard covers the bottom of a phone screen: while typing, the navigation bar steps aside.
+if (!finePointer) {
+  const composer = $('composer');
+  composer.addEventListener('focusin', () => document.body.classList.add('typing'));
+  composer.addEventListener('focusout', () => document.body.classList.remove('typing'));
 }
 
-function clearLive() {
-  live?.remove();
-  live = null;
-  liveText = '';
-}
-
-let frame = 0;
-function onDelta(text) {
-  const stick = nearBottom();
-  if (!live) {
-    live = el('div', 'msg assistant live');
-    thread.append(live);
-    render();
-  }
-  liveText += text;
-  if (!frame) {
-    frame = requestAnimationFrame(() => {
-      frame = 0;
-      if (live) live.innerHTML = md(liveText);
-      if (stick) toBottom();
-    });
-  }
-}
+// ---------- stream ----------
 
 function handle(ev) {
   if (ev.id) {
     if (ev.id <= lastId) return;
     lastId = ev.id;
-    const stick = nearBottom();
-    if (ev.type === 'assistant') clearLive();
-    main.add(ev);
-    if (live) thread.append(live);
-    if (stick) toBottom();
+    addEvent(ev);
+    if (S.tab !== 'chat' && /^(assistant|approval|worker|image)$/.test(ev.type)) S.unread = true;
     render();
   } else if (ev.type === 'state') {
-    session = ev;
+    S.session = ev;
     if (!ev.busy) clearLive();
     render();
   } else if (ev.type === 'delta') {
@@ -454,8 +141,8 @@ let quietUntil = 0;
 // A phone pauses a background tab and its stream drops; that is not the laptop sleeping.
 // Losses while hidden or during a quiet reconnect only count once that reconnect fails.
 function lost() {
-  if (online && !document.hidden && Date.now() > quietUntil) awaySince = Date.now();
-  online = false;
+  if (S.online && !document.hidden && Date.now() > quietUntil) S.awaySince = Date.now();
+  S.online = false;
   render();
   clearTimeout(awayTimer);
   awayTimer = setTimeout(render, 4500);
@@ -466,8 +153,8 @@ function connect() {
   lastSeen = Date.now();
   source = new EventSource(`api/stream?after=${lastId}`);
   source.onopen = () => {
-    online = true;
-    awaySince = null;
+    S.online = true;
+    S.awaySince = null;
     lastSeen = Date.now();
     render();
   };
@@ -481,7 +168,7 @@ function connect() {
     // and EventSource cannot see why, so ask whether the session is still valid.
     if (source.readyState === EventSource.CLOSED) {
       fetch('api/auth/me')
-        .then((r) => (r.status === 401 ? toLogin() : setTimeout(connect, 10000)))
+        .then((r) => (r.status === 401 ? location.reload() : setTimeout(connect, 10000)))
         .catch(() => setTimeout(connect, 10000));
     }
   };
@@ -499,16 +186,16 @@ setInterval(watchdog, 5000);
 
 // Back in front: reconnect quietly, and show the away card only if the laptop does not answer.
 function resume() {
-  if (online && Date.now() - lastSeen < SILENT) return;
+  if (S.online && Date.now() - lastSeen < SILENT) return;
   const since = Date.now();
   quietUntil = since + GRACE;
-  awaySince = null;
-  online = false;
+  S.awaySince = null;
+  S.online = false;
   render();
   connect();
   setTimeout(() => {
-    if (!online && !awaySince) {
-      awaySince = since;
+    if (!S.online && !S.awaySince) {
+      S.awaySince = since;
       render();
     }
   }, GRACE);
@@ -516,893 +203,21 @@ function resume() {
 document.addEventListener('visibilitychange', () => { if (!document.hidden) resume(); });
 window.addEventListener('pageshow', (e) => { if (e.persisted) resume(); });
 
-async function loadOlder() {
-  older.disabled = true;
-  const r = await fetch(`api/history?before=${firstId}&limit=200`).then((x) => x.json()).catch(() => null);
-  older.disabled = false;
-  if (!r || !r.events.length) return;
-  const height = log.scrollHeight;
-  const anchor = older.nextSibling;
-  const page = new Renderer(thread, anchor);
-  r.events.forEach((ev) => page.add(ev));
-  // Drop the day chip that now repeats right after the inserted page.
-  if (anchor?.classList?.contains('day') && anchor.textContent === dayLabel(r.events.at(-1).t)) anchor.remove();
-  firstId = r.events[0].id;
-  older.hidden = firstId <= 1;
-  log.scrollTop += log.scrollHeight - height;
-}
-
 async function start() {
   const res = await fetch('api/history?limit=200').catch(() => null);
-  if (res?.status === 401) return toLogin();
+  if (res?.status === 401) return location.reload();
   const r = res?.ok ? await res.json() : null;
   if (r) {
-    r.events.forEach((ev) => main.add(ev));
+    loadHistory(r);
     lastId = r.last;
-    firstId = r.events[0]?.id ?? null;
-    older.hidden = !firstId || firstId <= 1;
-    session = r.state;
+    S.session = r.state;
     setWorkers({ list: r.workers, total: r.workers.length });
-    toBottom();
   }
   autosize();
+  show(location.hash.slice(1) || 'chat');
   render();
   connect();
   account();
-}
-
-// ---------- account ----------
-
-const menu = $('menu'), card = $('fp-card');
-
-async function account() {
-  const r = await fetch('api/auth/me').then((x) => x.json()).catch(() => null);
-  $('menu-btn').hidden = false;
-  if (!r?.auth) {
-    $('add-passkey').hidden = $('logout').hidden = true;
-    return;
-  }
-  $('add-passkey').hidden = !supported();
-  let dismissed = false;
-  try { dismissed = localStorage.getItem('seimei.fp-card') === 'no'; } catch {}
-  if (supported() && r.passkeys === 0 && !dismissed) {
-    card.hidden = false;
-    requestAnimationFrame(toBottom);
-  }
-}
-
-async function addPasskey() {
-  menu.hidden = true;
-  const r = await register(deviceName()).catch(() => ({ ok: false }));
-  if (r.status === 401) return toLogin();
-  if (r.ok) card.hidden = true;
-  const text = r.ok ? 'Fingerprint login is set up on this device.'
-    : r.exists ? 'This device already has a passkey for seimei.'
-    : r.cancelled ? null : 'Could not set up the fingerprint login.';
-  if (text) {
-    main.add({ type: 'system', level: r.ok || r.exists ? '' : 'error', text });
-    toBottom();
-  }
-}
-
-$('menu-btn').addEventListener('click', (e) => {
-  e.stopPropagation();
-  menu.hidden = !menu.hidden;
-});
-document.addEventListener('click', (e) => { if (!menu.contains(e.target)) menu.hidden = true; });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') menu.hidden = true; });
-$('add-passkey').addEventListener('click', addPasskey);
-$('fp-yes').addEventListener('click', addPasskey);
-$('fp-no').addEventListener('click', () => {
-  card.hidden = true;
-  try { localStorage.setItem('seimei.fp-card', 'no'); } catch {}
-});
-$('logout').addEventListener('click', () => post('api/auth/logout', {}).finally(toLogin));
-$('audit').addEventListener('click', () => {
-  menu.hidden = true;
-  openAudit();
-});
-
-// ---------- activity log ----------
-
-const AUDIT_TONE = { blocked: 'bad', denied: 'bad', expired: 'bad', approved: 'ok' };
-
-function auditWhat(call) {
-  let inp = {};
-  try { inp = JSON.parse(call.input); } catch { return call.input || ''; }
-  for (const k of ['command', 'file_path', 'path', 'pattern', 'url', 'query', 'description', 'prompt', 'to', 'task', 'worker', 'session']) {
-    if (typeof inp[k] === 'string' && inp[k].trim()) return inp[k].trim().split('\n')[0];
-  }
-  return call.input === '{}' ? '' : call.input;
-}
-
-async function openAudit() {
-  const r = await getJSON('api/audit?limit=300');
-  if (!r) return;
-  sheet.view = 'audit';
-  sheet.worker = null;
-  sheet.renderer = null;
-  const list = el('div', 'alist');
-  let day = null;
-  for (const c of r.calls) {
-    const d = new Date(c.t * 1000).toDateString();
-    if (d !== day) {
-      day = d;
-      list.append(el('div', 'aday', d === new Date().toDateString() ? 'Today' : dayLabel(c.t)));
-    }
-    const row = el('div', `arow ${AUDIT_TONE[c.decision] || ''}`);
-    const top = el('div', 'atop');
-    top.append(el('time', null, clock(c.t)), el('b', null, c.who), el('span', 'tool', c.tool.replace(/^mcp__seimei__/, '')));
-    if (c.decision !== 'allowed') top.append(el('span', 'tag', c.why ? `${c.decision}: ${c.why}` : c.decision));
-    if (c.failed) top.append(el('span', 'tag', 'failed'));
-    row.append(top, el('code', null, auditWhat(c)));
-    list.append(row);
-  }
-  if (!r.calls.length) list.append(el('p', 'usage-note', 'Nothing yet.'));
-  sheet.body.replaceChildren(el('h2', 'list', 'Activity log'),
-    el('p', 'usage-note', 'Every tool call by seimei and the shikigami, newest first.'), list);
-  showSheet();
-}
-
-// ---------- input ----------
-
-function autosize() {
-  input.style.height = 'auto';
-  input.style.height = `${Math.min(input.scrollHeight, 168)}px`;
-}
-
-// The draft survives reloads; it lives only in this browser.
-const DRAFT = 'seimei.draft';
-function saveDraft() {
-  try {
-    if (input.value) localStorage.setItem(DRAFT, input.value);
-    else localStorage.removeItem(DRAFT);
-  } catch {}
-}
-try { input.value = localStorage.getItem(DRAFT) || ''; } catch {}
-
-$('composer').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const text = input.value.trim();
-  const sending = attachments.splice(0);
-  if ((!text && !sending.length) || !online) {
-    attachments.push(...sending);
-    return;
-  }
-  input.value = '';
-  autosize();
-  renderAttachments();
-  try {
-    await post('api/send', { text, images: sending.map((a) => ({ data: a.data })) });
-    if (!input.value) saveDraft();
-    sending.forEach((a) => URL.revokeObjectURL(a.url));
-  } catch {
-    input.value = text;
-    attachments.unshift(...sending);
-    renderAttachments();
-    saveDraft();
-    autosize();
-    main.add({ type: 'system', level: 'error', text: 'Could not send that. Try again.' });
-    render();
-  }
-});
-
-input.addEventListener('input', () => { autosize(); render(); saveDraft(); });
-input.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && finePointer) {
-    e.preventDefault();
-    $('composer').requestSubmit();
-  }
-});
-stopBtn.addEventListener('click', () => post('api/interrupt', {}).catch(() => {}));
-older.addEventListener('click', loadOlder);
-$('retry').addEventListener('click', () => location.reload());
-
-// ---------- images ----------
-
-// The model reads images up to 1568 px on the long side; anything bigger only costs upload time.
-const MAX_SIDE = 1568;
-const attachments = [];
-
-const toBase64 = (blob) => new Promise((resolve, reject) => {
-  const r = new FileReader();
-  r.onload = () => resolve(String(r.result).split(',')[1]);
-  r.onerror = reject;
-  r.readAsDataURL(blob);
-});
-
-async function prepare(file) {
-  const bmp = await createImageBitmap(file);
-  const scale = Math.min(1, MAX_SIDE / Math.max(bmp.width, bmp.height));
-  let blob = file;
-  const lossless = /^image\/(png|gif|webp)$/.test(file.type);
-  if (scale < 1 || !lossless || file.size > 3.5e6) {
-    const c = document.createElement('canvas');
-    c.width = Math.round(bmp.width * scale);
-    c.height = Math.round(bmp.height * scale);
-    const ctx = c.getContext('2d');
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, c.width, c.height);
-    ctx.drawImage(bmp, 0, 0, c.width, c.height);
-    blob = await new Promise((resolve) => c.toBlob(resolve, 'image/jpeg', 0.85));
-  }
-  bmp.close?.();
-  return { data: await toBase64(blob), url: URL.createObjectURL(blob) };
-}
-
-async function addFiles(list) {
-  for (const f of list) {
-    if (!f.type.startsWith('image/') || attachments.length >= 6) continue;
-    try {
-      attachments.push(await prepare(f));
-    } catch {
-      main.add({ type: 'system', level: 'error', text: `Could not read ${f.name || 'that image'}.` });
-    }
-  }
-  renderAttachments();
-}
-
-function renderAttachments() {
-  const box = $('attachments');
-  box.replaceChildren();
-  attachments.forEach((a, i) => {
-    const item = el('div', 'att');
-    const img = el('img');
-    img.src = a.url;
-    img.alt = '';
-    const x = el('button', 'remove sl');
-    x.type = 'button';
-    x.setAttribute('aria-label', 'Remove');
-    x.append(svg('M6 6l12 12M18 6 6 18', 14));
-    x.addEventListener('click', () => {
-      URL.revokeObjectURL(a.url);
-      attachments.splice(i, 1);
-      renderAttachments();
-    });
-    item.append(img, x);
-    box.append(item);
-  });
-  box.hidden = attachments.length === 0;
-  render();
-}
-
-$('attach').addEventListener('click', () => $('file').click());
-$('file').addEventListener('change', (e) => {
-  addFiles([...e.target.files]);
-  e.target.value = '';
-});
-input.addEventListener('paste', (e) => {
-  const imgs = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith('image/'));
-  if (imgs.length) {
-    e.preventDefault();
-    addFiles(imgs);
-  }
-});
-$('composer').addEventListener('dragover', (e) => e.preventDefault());
-$('composer').addEventListener('drop', (e) => {
-  e.preventDefault();
-  addFiles([...(e.dataTransfer?.files || [])]);
-});
-
-const viewer = $('viewer');
-function view(src) {
-  $('viewer-img').src = src;
-  viewer.hidden = false;
-}
-viewer.addEventListener('click', () => { viewer.hidden = true; });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') viewer.hidden = true; });
-
-// Tap a message to see when it was sent; tap a shikigami card to open it; tap a picture to zoom.
-thread.addEventListener('click', (e) => {
-  if (e.target.matches('img.pic')) return view(e.target.src);
-  const card = e.target.closest('.wcard');
-  if (card && !e.target.closest('a, .more') && !getSelection().toString()) return openWorker(card.dataset.worker);
-  const msg = e.target.closest('.msg');
-  if (!msg || e.target.closest('a') || getSelection().toString()) return;
-  const t = msg.querySelector(':scope > .time');
-  if (t) t.remove();
-  else if (msg.dataset.t) msg.append(el('span', 'time', clock(+msg.dataset.t)));
-});
-
-// ---------- shikigami ----------
-
-const TONES = {
-  starting: ['working', 'run'], running: ['working', 'run'], asking: ['needs you', 'ask'], done: ['done', 'ok'],
-  failed: ['failed', 'bad'], stopped: ['stopped', 'idle'], interrupted: ['interrupted', 'idle'], laptop: ['on laptop', 'idle'],
-};
-const ORDER = { asking: 0, starting: 1, running: 1, failed: 2, done: 3, stopped: 4, interrupted: 4, laptop: 4 };
-const ACTIVE = new Set(['starting', 'running', 'asking']);
-const home = (p) => p.replace(/^\/home\/[^/]+/, '~');
-let workers = [];
-let workersTotal = 0;
-
-function stateText(w) {
-  const at = clock(w.updated);
-  return {
-    starting: 'Starting', running: `Working since ${at}`, asking: 'Waiting for your answer', done: `Finished at ${at}`,
-    failed: `Failed at ${at}`, stopped: `Stopped at ${at}`, interrupted: `Interrupted at ${at}`,
-    laptop: `Open on the laptop since ${at}`,
-  }[w.state] || w.state;
-}
-
-function setWorkers(ev) {
-  workers = ev.list;
-  workersTotal = ev.total ?? workersTotal;
-  renderChips();
-  if (sheet.worker) {
-    const w = workers.find((x) => x.id === sheet.worker.id);
-    if (w) updateHead({ ...sheet.worker, ...w });
-  }
-}
-
-// ---------- the user's own sessions ----------
-
-let userSessions = [];
-const SEEN = 'seimei.seen';
-let seen = {};
-try { seen = JSON.parse(localStorage.getItem(SEEN) || '{}'); } catch {}
-const saveSeen = () => { try { localStorage.setItem(SEEN, JSON.stringify(seen)); } catch {} };
-
-const short = (t) => {
-  const s = Math.max(0, Date.now() / 1000 - t);
-  return s < 60 ? 'now' : s < 3600 ? `${Math.floor(s / 60)}m` : s < 86400 ? `${Math.floor(s / 3600)}h` : `${Math.floor(s / 86400)}d`;
-};
-
-// What a session needs from the user: an open question first, then a finished turn not yet looked at.
-function look(s) {
-  if (s.question) return { label: 'question', tone: 'ask', rank: 0, badge: true };
-  if (s.status === 'waiting') return { label: s.waiting_for || 'waiting', tone: 'ask', rank: 0, badge: true };
-  if (s.status === 'busy') return { label: 'working', tone: 'run', rank: 2 };
-  if (s.status === 'idle' && s.active > (seen[s.session_id] || 0) + 1) return { label: 'done', tone: 'ok', rank: 1, badge: true };
-  return { label: s.status, tone: 'idle', rank: 3 };
-}
-
-function setSessions(list) {
-  // A session seen for the first time starts read; only turns that end after that get a badge.
-  let fresh = false;
-  for (const s of list) {
-    if (!(s.session_id in seen)) {
-      seen[s.session_id] = s.status === 'busy' ? 0 : s.active;
-      fresh = true;
-    }
-  }
-  if (fresh) saveSeen();
-  userSessions = list;
-  renderChips();
-  if (sheet.view === 'session') {
-    const s = list.find((x) => x.pid === sheet.pid);
-    if (s && s.status + s.question + s.active !== sheet.sig) openSession(s.pid);
-  }
-  if (sheet.view === 'workers') openAll();
-}
-
-function markSeen(s) {
-  seen[s.session_id] = s.active;
-  saveSeen();
-}
-
-function sessionChip(s) {
-  const l = look(s);
-  const b = el('button', `wchip user ${l.tone} sl`);
-  b.type = 'button';
-  b.append(el('span', 'dot'), el('span', 'name', s.name), el('span', 'st', `${l.label} \u00b7 ${short(s.since)}`));
-  if (l.badge) b.append(el('i', 'badge'));
-  b.addEventListener('click', () => openSession(s.pid));
-  return b;
-}
-
-function sortedSessions() {
-  return [...userSessions].sort((a, b) => look(a).rank - look(b).rank || b.active - a.active);
-}
-
-function renderChips() {
-  const nav = $('chips');
-  nav.replaceChildren();
-  // Whatever needs the user comes first: their sessions with a question or a finished turn, then shikigami, then the rest.
-  const sessions = sortedSessions();
-  const urgent = sessions.filter((x) => look(x).badge);
-  for (const x of urgent) nav.append(sessionChip(x));
-  const list = [...workers].sort((a, b) => (ORDER[a.state] ?? 5) - (ORDER[b.state] ?? 5) || b.updated - a.updated);
-  for (const w of list) {
-    const [label, tone] = TONES[w.state] || [w.state, 'idle'];
-    const b = el('button', `wchip ${tone} sl`);
-    b.type = 'button';
-    b.append(el('span', 'dot'), el('span', 'name', w.name), el('span', 'st', label));
-    b.addEventListener('click', () => openWorker(w.id));
-    nav.append(b);
-  }
-  for (const x of sessions) if (!urgent.includes(x)) nav.append(sessionChip(x));
-  if (workersTotal || userSessions.length) {
-    const all = el('button', 'wchip all sl');
-    all.type = 'button';
-    all.setAttribute('aria-label', 'All sessions and shikigami');
-    all.append(svg('M4 6h16M4 12h16M4 18h10', 18));
-    all.addEventListener('click', openAll);
-    nav.append(all);
-  }
-}
-setInterval(renderChips, 30000);
-
-async function openSession(pid) {
-  const r = await getJSON(`api/sessions/${pid}`);
-  if (!r) return;
-  const s = r.session;
-  sheet.view = 'session';
-  sheet.pid = s.pid;
-  sheet.sig = s.status + s.question + s.active;
-  sheet.worker = null;
-  sheet.renderer = null;
-  if (s.session_id) markSeen(s);
-  renderChips();
-
-  const l = s.session_id ? look(s) : { label: s.status, tone: 'idle' };
-  const badge = el('span', `wbadge ${l.tone}`);
-  badge.append(el('span'));
-  const titles = el('div');
-  titles.append(el('h2', null, s.name), el('div', 'sub', `${l.label === 'done' ? 'idle' : l.label} for ${short(s.since).replace('now', 'a moment')}`));
-  const head = el('div', 'whead');
-  head.append(badge, titles);
-  const facts = el('div', 'facts');
-  facts.append(el('span', 'mono', home(s.cwd)), el('span', null, s.kind), el('span', null, `last active ${clock(s.active)}`));
-  const parts = [head, facts];
-
-  for (const q of r.questions) {
-    const box = el('div', 'squestion');
-    box.append(el('b', null, 'Waiting on a question in the terminal'));
-    for (const item of q.questions) {
-      box.append(el('p', null, item.question + (item.multiSelect ? ' (pick any)' : '')));
-      const ol = el('ol');
-      for (const o of item.options || []) {
-        const li = el('li');
-        li.append(el('span', null, o.label));
-        if (o.description) li.append(el('small', null, o.description));
-        ol.append(li);
-      }
-      box.append(ol);
-    }
-    parts.push(box);
-  }
-  for (const c of r.open_calls) {
-    const row = el('div', 'running');
-    row.append(el('span', null, `${c.tool} since ${clock(Date.parse(c.since) / 1000)}`), el('code', null, c.what));
-    parts.push(row);
-  }
-
-  const log = el('div', 'wlog');
-  const msgs = [...r.user.map(([t, text]) => ({ t, type: 'user', text })), ...r.assistant.map(([t, text]) => ({ t, type: 'assistant', text }))]
-    .sort((a, b) => a.t.localeCompare(b.t));
-  for (const m of msgs) log.append(message({ ...m, t: Date.parse(m.t) / 1000 }));
-  if (!msgs.length) log.append(el('div', 'note', 'No messages yet.'));
-  parts.push(log, el('p', 'usage-note', 'Read-only. Ask seimei to message this session.'));
-  sheet.body.replaceChildren(...parts);
-  showSheet();
-  log.scrollTop = log.scrollHeight;
-}
-
-// One bottom sheet, filled with either a worker or the list of all workers.
-const sheet = { wrap: $('sheet-wrap'), body: $('sheet-body'), worker: null, log: null, renderer: null, head: null };
-
-function showSheet() {
-  sheet.body.classList.toggle('scroll', ['session', 'usage', 'audit', 'screen'].includes(sheet.view));
-  if (sheet.wrap.hidden) {
-    sheet.wrap.hidden = false;
-    history.pushState({ sheet: true }, '');
-  }
-}
-
-function closeSheet(fromHistory = false) {
-  if (sheet.wrap.hidden) return;
-  sheet.wrap.hidden = true;
-  sheet.view = null;
-  sheet.worker = null;
-  sheet.renderer = null;
-  if (!fromHistory && history.state?.sheet) history.back();
-}
-
-$('scrim').addEventListener('click', () => closeSheet());
-window.addEventListener('popstate', () => closeSheet(true));
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });
-
-async function getJSON(path) {
-  const r = await fetch(path).catch(() => null);
-  if (r?.status === 401) toLogin();
-  return r?.ok ? r.json() : null;
-}
-
-function updateHead(w) {
-  sheet.worker = w;
-  const [, tone] = TONES[w.state] || [w.state, 'idle'];
-  const h = sheet.head;
-  h.badge.className = `wbadge ${tone}`;
-  h.sub.textContent = stateText(w);
-  const active = ACTIVE.has(w.state);
-  h.stop.hidden = !active;
-  h.input.placeholder = w.state === 'asking' ? `Answer ${w.name}` : `Message ${w.name}`;
-  h.question.hidden = !(w.state === 'asking' && w.question);
-  if (w.question) h.question.textContent = w.question;
-}
-
-async function openWorker(id) {
-  const r = await getJSON(`api/workers/${encodeURIComponent(id)}`);
-  if (!r) return;
-  sheet.view = 'worker';
-  const w = r.worker;
-  const body = sheet.body;
-  body.replaceChildren();
-
-  const badge = el('span', 'wbadge');
-  badge.append(el('span'));
-  const titles = el('div');
-  const sub = el('div', 'sub');
-  titles.append(el('h2', null, w.name), sub);
-  const head = el('div', 'whead');
-  head.append(badge, titles);
-
-  const facts = el('div', 'facts');
-  facts.append(el('span', 'mono', home(w.cwd)), el('span', null, w.model), el('span', null, `started ${clock(w.created)}`));
-  const laptop = el('button', 'btn tonal sl laptop-btn');
-  laptop.type = 'button';
-  laptop.append(svg('M5 6.5A1.5 1.5 0 0 1 6.5 5h11A1.5 1.5 0 0 1 19 6.5V15H5zM3 18h18', 18), 'On laptop');
-  laptop.hidden = w.state === 'laptop' || w.started === false;
-  let armed = false;
-  laptop.addEventListener('click', async () => {
-    const cur = workers.find((x) => x.id === w.id) || w;
-    // A running worker gets stopped first, so ask for a second tap.
-    if (ACTIVE.has(cur.state) && !armed) {
-      armed = true;
-      laptop.lastChild.textContent = 'Stop it and open on laptop';
-      return;
-    }
-    laptop.disabled = true;
-    const r = await fetch(`api/workers/${encodeURIComponent(w.id)}/laptop`, { method: 'POST',
-      headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => null);
-    const body = await r?.json().catch(() => null);
-    laptop.disabled = false;
-    armed = false;
-    if (r?.ok) {
-      laptop.hidden = true;
-    } else {
-      laptop.lastChild.textContent = 'On laptop';
-      main.add({ type: 'system', level: 'error', text: `Could not open ${w.name} on the laptop: ${body?.error || 'no answer'}` });
-    }
-  });
-  facts.append(laptop);
-
-  const task = el('details', 'task');
-  task.append(el('summary', null, 'Task'), el('div', null, w.task));
-
-  const question = el('div', 'question');
-  const log = el('div', 'wlog');
-  sheet.renderer = new Renderer(log);
-  r.events.forEach((ev) => sheet.renderer.add(ev));
-  sheet.log = log;
-
-  const form = el('form', 'sheet-actions');
-  const field = el('label', 'field');
-  const input = el('textarea');
-  input.rows = 1;
-  input.setAttribute('enterkeyhint', 'send');
-  field.append(input);
-  const send = el('button', 'fab sl');
-  send.type = 'submit';
-  send.setAttribute('aria-label', 'Send');
-  send.append(svg('M12 19V5M5.5 11.5 12 5l6.5 6.5', 20));
-  const stop = el('button', 'round-stop sl');
-  stop.type = 'button';
-  stop.setAttribute('aria-label', 'Stop');
-  stop.append(el('span'));
-  form.append(field, send, stop);
-
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const text = input.value.trim();
-    if (!text) return;
-    input.value = '';
-    try {
-      await post(`api/workers/${encodeURIComponent(w.id)}/send`, { text });
-    } catch {
-      input.value = text;
-    }
-  });
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && finePointer) {
-      e.preventDefault();
-      form.requestSubmit();
-    }
-  });
-  stop.addEventListener('click', () => post(`api/workers/${encodeURIComponent(w.id)}/stop`, {}).catch(() => {}));
-
-  body.append(head, facts, task, question, log, form);
-  sheet.head = { badge, sub, stop, input, question };
-  updateHead(w);
-  showSheet();
-  log.scrollTop = log.scrollHeight;
-}
-
-function sheetEvent(ev) {
-  if (!sheet.renderer || sheet.worker?.id !== ev.worker) return;
-  const log = sheet.log;
-  const stick = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
-  sheet.renderer.add(ev.ev);
-  if (stick) log.scrollTop = log.scrollHeight;
-}
-
-// ---------- usage ----------
-
-const WINDOWS = [['five_hour', '5-hour'], ['seven_day', 'Weekly']];
-let usage = null;
-
-const tone = (u) => (u >= 0.95 ? 'bad' : u >= 0.8 ? 'warn' : 'ok');
-const tokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : `${n}`);
-
-function resetText(t) {
-  const d = new Date(t * 1000);
-  const mins = Math.max(0, Math.round((t * 1000 - Date.now()) / 60000));
-  const left = mins < 60 ? `${mins} min` : mins < 2880 ? `${Math.floor(mins / 60)} h ${mins % 60} min` : `${Math.round(mins / 1440)} days`;
-  const when = d.toDateString() === new Date().toDateString() ? clock(t)
-    : d.toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
-  return `resets ${when}, in ${left}`;
-}
-
-function setUsage(u) {
-  usage = u;
-  const w = u.windows?.five_hour;
-  const btn = $('usage-btn');
-  btn.hidden = !w;
-  if (w) {
-    const pct = Math.round(w.utilization * 100);
-    $('usage-ring').setAttribute('stroke-dasharray', `${pct} 100`);
-    $('usage-pct').textContent = pct;
-    btn.dataset.tone = u.status === 'rejected' ? 'bad' : tone(w.utilization);
-    btn.setAttribute('aria-label', `Usage: 5-hour window ${pct}% used`);
-  }
-  if (sheet.view === 'usage') openUsage();
-}
-
-function openUsage() {
-  if (!usage) return;
-  sheet.worker = null;
-  sheet.renderer = null;
-  sheet.view = 'usage';
-  const body = [el('h2', 'list', 'Usage')];
-  for (const [key, label] of WINDOWS) {
-    const w = usage.windows?.[key];
-    if (!w) continue;
-    const pct = Math.round(w.utilization * 100);
-    const meter = el('div', `meter ${tone(w.utilization)}`);
-    const top = el('div', 'top');
-    top.append(el('b', null, label), el('span', 'pct', `${pct}%`));
-    const bar = el('div', 'bar-track');
-    const fill = el('i');
-    fill.style.width = `${Math.min(pct, 100)}%`;
-    bar.append(fill);
-    meter.append(top, bar, el('span', 'sub', w.resets_at ? resetText(w.resets_at) : ''));
-    body.push(meter);
-  }
-  if (usage.updated) body.push(el('p', 'usage-note', `Updated ${clock(usage.updated)}. Claude Code reports usage when a session takes a turn.`));
-  const rows = Object.entries(usage.today?.sessions || {}).sort((a, b) => b[1].output - a[1].output);
-  if (rows.length) {
-    body.push(el('h3', 'usage-h', 'Today in seimei'));
-    const list = el('div', 'ulist');
-    for (const [name, t] of rows) {
-      const row = el('div', 'urow');
-      row.append(el('b', null, name), el('time', null, `${t.turns} ${t.turns === 1 ? 'turn' : 'turns'}`),
-        el('span', null, `${tokens(t.output)} out \u00b7 ${tokens(t.input + t.cache_read + t.cache_write)} in`));
-      list.append(row);
-    }
-    body.push(list);
-  }
-  sheet.body.replaceChildren(...body);
-  showSheet();
-}
-
-$('usage-btn').addEventListener('click', openUsage);
-
-// ---------- screen ----------
-
-const CHECK = 'M5 12.5l4.5 4.5L19 7.5';
-const APP_TONES = ['#cba6f7', '#89b4fa', '#a6e3a1', '#f9e2af', '#fab387', '#f5c2e7', '#94e2d5', '#b4befe'];
-const screen = { mode: 'screen', window: null, paused: false, timer: null, url: null, state: null, gen: 0 };
-
-function appTone(app) {
-  let h = 0;
-  for (const ch of app || '?') h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return APP_TONES[h % APP_TONES.length];
-}
-
-function segButton(label, on, onClick) {
-  const b = el('button', `seg-btn sl${on ? ' on' : ''}`);
-  b.type = 'button';
-  if (on) b.append(svg(CHECK, 16));
-  b.append(label);
-  b.addEventListener('click', onClick);
-  return b;
-}
-
-function screenTarget() {
-  if (screen.mode === 'screen') return null;
-  const wins = (screen.state?.workspaces || []).flatMap((w) => w.windows);
-  return wins.find((w) => w.id === screen.window) || wins.find((w) => w.focused) || null;
-}
-
-function renderScreen() {
-  const st = screen.state;
-  const head = el('div', 'screen-head');
-  const live = el('span', `live-chip ${screen.paused ? 'off' : ''}`);
-  live.append(el('i'), screen.paused ? 'Paused' : 'Live');
-  head.append(el('h2', 'list', 'Screen'), live);
-  const frame = el('div', 'screen-frame');
-  const img = el('img');
-  img.alt = 'The laptop screen';
-  img.id = 'screen-img';
-  if (screen.url) img.src = screen.url;
-  img.addEventListener('click', () => screen.url && view(screen.url));
-  const msg = el('div', 'screen-msg', '');
-  msg.id = 'screen-msg';
-  frame.append(img, msg);
-  const ctl = el('div', 'screen-ctl');
-  const out = st?.outputs?.[0];
-  const target = screenTarget();
-  ctl.append(el('span', 'screen-label', screen.mode === 'screen'
-    ? (out ? `${out.name}, ${out.width} x ${out.height}` : '')
-    : (target ? target.title : 'No window')));
-  const pause = el('button', 'btn tonal sl', screen.paused ? 'Resume' : 'Pause');
-  pause.type = 'button';
-  pause.addEventListener('click', () => {
-    screen.paused = !screen.paused;
-    renderScreen();
-    if (!screen.paused) pollScreen();
-  });
-  const full = el('button', 'icon-btn tonal sl');
-  full.type = 'button';
-  full.setAttribute('aria-label', 'Full screen');
-  full.append(svg('M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5', 18));
-  full.addEventListener('click', () => screen.url && view(screen.url));
-  ctl.append(pause, full);
-  const seg = el('div', 'seg');
-  seg.append(segButton('Whole screen', screen.mode === 'screen', () => setScreenMode('screen', null)),
-    segButton('Window', screen.mode === 'window', () => setScreenMode('window', screen.window)));
-  const parts = [head, frame, ctl, seg];
-  if (st && st.up === false) parts.push(el('p', 'usage-note', 'The desktop is not running.'));
-  for (const ws of st?.workspaces || []) {
-    if (!ws.windows.length) continue;
-    const group = el('div', 'wsgroup');
-    const label = el('div', 'wslabel');
-    label.append(el('span', null, ws.name ? `Workspace ${ws.idx} \u00b7 ${ws.name}` : `Workspace ${ws.idx}`));
-    if (ws.active) label.append(el('span', 'wsbadge', 'active'));
-    const list = el('div', 'wslist');
-    for (const w of ws.windows) {
-      const row = el('button', `wsrow sl${screen.mode === 'window' && target?.id === w.id ? ' on' : ''}`);
-      row.type = 'button';
-      const letter = el('span', 'wsletter', (w.app || '?')[0].toUpperCase());
-      letter.style.setProperty('--tone', appTone(w.app));
-      const txt = el('span', 'wstext');
-      txt.append(el('span', 'wstitle', w.title || w.app), el('span', 'wsapp',
-        [w.app, w.focused && 'focused', w.urgent && 'needs attention', w.ours && 'opened by seimei'].filter(Boolean).join(' \u00b7 ')));
-      row.append(letter, txt, svg('M9 5l7 7-7 7', 18));
-      row.addEventListener('click', () => setScreenMode('window', w.id));
-      list.append(row);
-    }
-    group.append(label, list);
-    parts.push(group);
-  }
-  const top = sheet.body.scrollTop;
-  sheet.body.replaceChildren(...parts);
-  sheet.body.scrollTop = top;
-  showScreenMsg();
-}
-
-let screenMsg = '';
-function showScreenMsg(text) {
-  if (text !== undefined) screenMsg = text;
-  const m = document.getElementById('screen-msg');
-  if (m) {
-    m.textContent = screenMsg;
-    m.hidden = !screenMsg;
-  }
-}
-
-function setScreenMode(mode, id) {
-  screen.mode = mode;
-  screen.window = id;
-  screen.gen++;
-  if (screen.url) URL.revokeObjectURL(screen.url);
-  screen.url = null;
-  renderScreen();
-  sheet.body.scrollTo({ top: 0, behavior: 'smooth' });
-  pollScreen();
-}
-
-async function refreshDesktop() {
-  const st = await getJSON('api/desktop');
-  if (!st || sheet.view !== 'screen') return;
-  screen.state = st;
-  renderScreen();
-}
-
-async function pollScreen() {
-  clearTimeout(screen.timer);
-  if (sheet.view !== 'screen' || screen.paused || document.hidden) return;
-  const gen = screen.gen;
-  const target = screenTarget();
-  let wait = screen.mode === 'screen' ? 1000 : 4000;
-  if (screen.mode === 'window' && !target) {
-    showScreenMsg('Pick a window below.');
-  } else {
-    const q = screen.mode === 'screen' ? 'mode=screen' : `mode=window&id=${target.id}`;
-    const r = await fetch(`api/screen?${q}`).catch(() => null);
-    if (gen !== screen.gen || sheet.view !== 'screen') return;
-    if (r?.ok) {
-      const url = URL.createObjectURL(await r.blob());
-      const img = document.getElementById('screen-img');
-      const old = screen.url;
-      screen.url = url;
-      if (img) img.src = url;
-      if (old) setTimeout(() => URL.revokeObjectURL(old), 1000);
-      showScreenMsg(screen.state?.locked ? 'Screen locked' : '');
-    } else {
-      const body = await r?.json().catch(() => null);
-      if (r?.status === 401) return toLogin();
-      showScreenMsg(body?.paused === 'bench' ? 'Paused while a benchmark runs' : body?.down ? 'The desktop is not running'
-        : body?.error || 'Could not reach the laptop');
-      wait = 5000;
-    }
-  }
-  screen.timer = setTimeout(pollScreen, wait);
-}
-
-async function openScreen() {
-  sheet.view = 'screen';
-  sheet.worker = null;
-  sheet.renderer = null;
-  screen.gen++;
-  renderScreen();
-  showSheet();
-  await refreshDesktop();
-  pollScreen();
-  clearInterval(screen.listTimer);
-  screen.listTimer = setInterval(() => {
-    if (sheet.view !== 'screen') return clearInterval(screen.listTimer);
-    if (!screen.paused && !document.hidden) refreshDesktop();
-  }, 5000);
-}
-
-$('screen-btn').addEventListener('click', openScreen);
-document.addEventListener('visibilitychange', () => { if (!document.hidden && sheet.view === 'screen') pollScreen(); });
-
-async function openAll() {
-  const r = await getJSON('api/workers');
-  if (!r) return;
-  sheet.view = 'workers';
-  sheet.worker = null;
-  sheet.renderer = null;
-  const list = el('div', 'wlist');
-  for (const w of r.workers) {
-    const [, tone] = TONES[w.state] || [w.state, 'idle'];
-    const row = el('button', `wrow ${tone} sl`);
-    row.type = 'button';
-    const d = new Date(w.updated * 1000);
-    const when = d.toDateString() === new Date().toDateString() ? clock(w.updated) : d.toLocaleDateString([], { day: 'numeric', month: 'short' });
-    row.append(el('i', 'dot'), el('b', null, w.name), el('time', null, when), el('span', null, w.summary || stateText(w)));
-    row.addEventListener('click', () => openWorker(w.id));
-    list.append(row);
-  }
-  const parts = [];
-  if (userSessions.length) {
-    const mine = el('div', 'wlist');
-    for (const s of sortedSessions()) {
-      const l = look(s);
-      const row = el('button', `wrow ${l.tone} sl`);
-      row.type = 'button';
-      row.append(el('i', 'dot'), el('b', null, s.name), el('time', null, `${l.label} \u00b7 ${short(s.since)}`), el('span', null, home(s.cwd)));
-      row.addEventListener('click', () => openSession(s.pid));
-      mine.append(row);
-    }
-    parts.push(el('h2', 'list', 'Your sessions'), mine);
-  }
-  if (r.workers.length) parts.push(el('h2', 'list', 'Shikigami'), list);
-  sheet.body.replaceChildren(...parts);
-  showSheet();
 }
 
 start();

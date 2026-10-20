@@ -69,7 +69,7 @@ class Worker:
 
     def info(self) -> dict:
         r = self.rec
-        return {**{k: r.get(k) for k in ("id", "name", "state", "cwd", "model", "created", "updated", "summary")},
+        return {**{k: r.get(k) for k in ("id", "name", "state", "cwd", "model", "created", "updated", "summary", "question", "doing")},
                 "started": bool(r.get("started"))}
 
     def _set(self, state: str, **kw):
@@ -79,6 +79,11 @@ class Worker:
     def _add(self, ev: dict):
         ev = self.log.add(ev)
         self.pool.events.flash({"type": "w", "worker": self.id, "ev": ev})
+
+    def _doing(self, what: dict):
+        """The latest step, for the Agents page; the next listing write carries it to disk."""
+        self.rec["doing"] = what
+        self.pool.events.flash(self.pool.listing())
 
     def _options(self) -> ClaudeAgentOptions:
         r = self.rec
@@ -203,8 +208,11 @@ class Worker:
                 if isinstance(b, TextBlock) and b.text.strip():
                     self.last_text = b.text
                     self._add({"type": "assistant", "text": b.text})
+                    self._doing({"text": first_line(b.text)})
                 elif isinstance(b, ToolUseBlock):
-                    self._add({"type": "tool", "tool_id": b.id, "name": b.name, "summary": summarize(b.input)})
+                    summary = summarize(b.input)
+                    self._add({"type": "tool", "tool_id": b.id, "name": b.name, "summary": summary})
+                    self._doing({"name": b.name, "summary": summary})
         elif isinstance(msg, UserMessage):
             if msg.parent_tool_use_id or isinstance(msg.content, str):
                 return
