@@ -187,6 +187,8 @@ object Icons {
     val full = icon("M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5")
     val alert = icon("M12 7v6M12 17v.01")
     val dash = icon("M7 12h10")
+    val back = icon("M15 5l-7 7 7 7")
+    val question = icon("M4 5h16v11H9l-5 4zM10 9.2a2 2 0 1 1 2.6 1.9c-.4.2-.6.5-.6.9M12 13.6v.1")
 }
 
 // ---------- activity ----------
@@ -387,7 +389,7 @@ fun AppScreen(vm: Seimei) {
         // The keyboard covers the bottom of the screen: while typing, the navigation bar steps aside.
         if (!WindowInsets.isImeVisible) NavBar(vm)
     }
-    AgentSheet(vm)
+    vm.page?.let { AgentPage(vm, it) }
     if (vm.about) AboutSheet(vm) { vm.about = false }
 }
 

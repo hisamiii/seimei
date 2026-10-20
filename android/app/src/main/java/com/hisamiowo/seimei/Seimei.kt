@@ -46,17 +46,31 @@ sealed interface Attachment {
     class Photo(val data: String, val preview: ImageBitmap) : Attachment
 
     /** Any other file: it goes up to the laptop as soon as it is picked, and the message names it by id. */
-    class Doc(val name: String) : Attachment {
+    class Doc(val name: String, val preview: ImageBitmap? = null) : Attachment {
         var id by mutableStateOf<String?>(null)
         var uploading by mutableStateOf(true)
         var job: Job? = null
     }
 }
 
-/** The bottom sheet over the tabs: one shikigami with its log, or one of the user's own sessions. */
-sealed interface Sheet {
-    data class Worker(val info: JSONObject, val task: String, val items: List<Item>) : Sheet
-    data class Session(val pid: Long, val data: JSONObject, val sig: String) : Sheet
+/** The full-screen page of one agent: a shikigami ("worker", by id) or one of the user's sessions ("session", by pid). */
+class Page(val kind: String, val id: String) {
+    var row by mutableStateOf(JSONObject())
+    var items by mutableStateOf<List<Item>>(emptyList())
+    /** The open question (an AskUserQuestion input, plus tool_id and answerable). */
+    var ask by mutableStateOf<JSONObject?>(null)
+    /** The call that runs now: tool_id, tool, what, since, and its last output lines. */
+    var live by mutableStateOf<JSONObject?>(null)
+    /** Why the app cannot type into this session, or null. */
+    var reach by mutableStateOf<String?>(null)
+    var note by mutableStateOf<String?>(null)
+    var draft by mutableStateOf("")
+    var files by mutableStateOf<List<Attachment.Doc>>(emptyList())
+    var details by mutableStateOf(false)
+    internal val chat = Chat()
+    internal var next: Long? = null
+    internal var last = 0L
+    internal var poll: Job? = null
 }
 
 /** What the Screen tab got back: a frame, or why there is none. */
@@ -108,7 +122,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     /** Every shikigami, finished ones from days ago too; fetched while the Agents tab shows. */
     var allWorkers by mutableStateOf<List<JSONObject>?>(null)
         private set
-    var sheet by mutableStateOf<Sheet?>(null)
+    var page by mutableStateOf<Page?>(null)
         private set
     var seen by mutableStateOf(JSONObject(prefs.seen))
         private set
@@ -131,8 +145,6 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     private var foreground = false
     private var backgroundSince = 0L
     private val images = LruCache<String, ImageBitmap>(48)
-    private var sheetChat = Chat()
-    private var sheetLast = 0L
     private var allFetched = 0L
     private var costFetched = 0L
 
@@ -420,12 +432,8 @@ class Seimei(app: Application) : AndroidViewModel(app) {
 
     private fun takeWorkers(list: List<JSONObject>) {
         workers = list
-        (sheet as? Sheet.Worker)?.let { sh ->
-            list.firstOrNull { it.str("id") == sh.info.str("id") }?.let { w ->
-                val info = JSONObject(sh.info.toString())
-                w.keys().forEach { info.put(it, w.get(it)) }
-                sheet = sh.copy(info = info)
-            }
+        page?.takeIf { it.kind == "worker" }?.let { pg ->
+            list.firstOrNull { it.str("id") == pg.id }?.let { w -> pg.row = pg.row.merged(w) }
         }
         if (tab == "agents") refreshAll()
     }
@@ -455,8 +463,8 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         }
         if (fresh) saveSeen(s)
         sessions = list
-        (sheet as? Sheet.Session)?.let { sh ->
-            list.firstOrNull { it.optLong("pid") == sh.pid }?.let { if (sessionSig(it) != sh.sig) openSession(sh.pid) }
+        page?.takeIf { it.kind == "session" }?.let { pg ->
+            list.firstOrNull { it.optLong("pid").toString() == pg.id }?.let { pg.row = pg.row.merged(it) }
         }
     }
 
@@ -465,59 +473,181 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         prefs.seen = s.toString()
     }
 
-    private fun sessionSig(s: JSONObject) = s.str("status") + s.opt("question") + s.optDouble("active", 0.0)
+    private fun JSONObject.merged(o: JSONObject): JSONObject {
+        val r = JSONObject(toString())
+        o.keys().forEach { r.put(it, o.get(it)) }
+        return r
+    }
 
-    fun openWorker(id: String) {
+    fun openWorker(id: String) = openPage("worker", id)
+
+    fun openSession(pid: Long) = openPage("session", pid.toString())
+
+    private fun openPage(kind: String, id: String) {
         viewModelScope.launch {
             try {
-                val r = api.get("api/workers/$id")
+                val r = api.get(if (kind == "worker") "api/workers/$id" else "api/sessions/$id")
+                page?.poll?.cancel()
+                val pg = Page(kind, id)
                 val evs = r.getJSONArray("events").objects()
-                sheetChat = Chat()
-                evs.forEach(sheetChat::add)
-                sheetLast = evs.lastOrNull()?.optLong("id") ?: 0
-                val w = r.getJSONObject("worker")
-                sheet = Sheet.Worker(w, w.str("task"), sheetChat.items.toList())
+                evs.forEach(pg.chat::add)
+                pg.items = pg.chat.items.toList()
+                if (kind == "worker") {
+                    pg.last = evs.lastOrNull()?.optLong("id") ?: 0
+                    pg.row = r.getJSONObject("worker").merged(workers.firstOrNull { it.str("id") == id } ?: JSONObject())
+                } else {
+                    takeSession(pg, r)
+                    pg.poll = viewModelScope.launch { pollSession(pg) }
+                }
+                page = pg
+            } catch (e: IOException) {
+            }
+        }
+    }
+
+    private fun takeSession(pg: Page, r: JSONObject) {
+        pg.next = r.optLong("next")
+        pg.row = pg.row.merged(r.getJSONObject("session"))
+        pg.reach = r.str("reach").ifEmpty { null }
+        pg.ask = r.optJSONObject("ask")
+        pg.live = r.optJSONObject("doing")?.let { d -> JSONObject(d.toString()).put("output", r.optJSONObject("live")?.optJSONArray("output") ?: JSONArray()) }
+        val s = pg.row
+        val id = s.str("session_id")
+        if (id.isNotEmpty()) saveSeen(JSONObject(seen.toString()).put(id, s.optDouble("active", 0.0)))
+    }
+
+    /** A session's page follows its transcript from where the last read ended. */
+    private suspend fun pollSession(pg: Page) {
+        while (true) {
+            delay(if (foreground) 2000 else 10_000)
+            if (!foreground) continue
+            try {
+                val r = api.get("api/sessions/${pg.id}?from=${pg.next ?: 0}")
+                if (pg.next != null && r.optLong("next") < pg.next!!) {
+                    // The transcript was replaced (compacted or continued): load it again.
+                    openPage("session", pg.id)
+                    return
+                }
+                r.getJSONArray("events").objects().forEach(pg.chat::add)
+                pg.items = pg.chat.items.toList()
+                takeSession(pg, r)
+            } catch (e: HttpError) {
+                if (e.code == 404) pg.reach = "The session has ended."
             } catch (e: IOException) {
             }
         }
     }
 
     private fun workerEvent(ev: JSONObject) {
-        val sh = sheet as? Sheet.Worker ?: return
-        if (ev.str("worker") != sh.info.str("id")) return
+        val pg = page?.takeIf { it.kind == "worker" && it.id == ev.str("worker") } ?: return
         val e = ev.optJSONObject("ev") ?: return
-        // The sheet loaded the log a moment ago; skip what it already holds.
-        if (e.has("id") && e.getLong("id") <= sheetLast) return
-        if (e.has("id")) sheetLast = e.getLong("id")
-        sheetChat.add(e)
-        sheet = sh.copy(items = sheetChat.items.toList())
+        // The page loaded the log a moment ago; skip what it already holds.
+        if (e.has("id") && e.getLong("id") <= pg.last) return
+        if (e.has("id")) pg.last = e.getLong("id")
+        pg.chat.add(e)
+        pg.items = pg.chat.items.toList()
     }
 
-    fun openSession(pid: Long) {
+    fun closePage() {
+        page?.poll?.cancel()
+        page = null
+    }
+
+    private fun errorOf(e: IOException): String = (e as? HttpError)?.let {
+        try { JSONObject(it.body).str("error") } catch (x: JSONException) { "" }
+    }.orEmpty().ifEmpty { if (e is HttpError) "The laptop said no (${e.code})." else "The laptop did not answer." }
+
+    /** Sends the page's draft and files: to a shikigami, as the answer to an open question, or typed into a session. */
+    fun pageSend() {
+        val pg = page ?: return
+        val text = pg.draft.trim()
+        val files = pg.files
+        if (text.isEmpty() && files.isEmpty()) return
+        pg.draft = ""
+        pg.files = emptyList()
         viewModelScope.launch {
             try {
-                val r = api.get("api/sessions/$pid")
-                val s = r.getJSONObject("session")
-                val id = s.str("session_id")
-                if (id.isNotEmpty()) saveSeen(JSONObject(seen.toString()).put(id, s.optDouble("active", 0.0)))
-                sheet = Sheet.Session(pid, r, sessionSig(s))
+                files.forEach { it.job?.join() }
+                val body = JSONObject().put("text", text).put("files", JSONArray(files.mapNotNull { it.id }))
+                val ask = pg.ask
+                when {
+                    pg.kind == "worker" -> api.post("api/workers/${pg.id}/send", body)
+                    ask != null && ask.optBoolean("answerable") -> api.post("api/sessions/${pg.id}/answer", body.put("tool_id", ask.str("tool_id")))
+                    else -> api.post("api/sessions/${pg.id}/send", body)
+                }
+                pg.note = null
             } catch (e: IOException) {
+                if (pg.draft.isEmpty()) pg.draft = text
+                pg.files = files.filter { it.id != null } + pg.files
+                pg.note = errorOf(e)
             }
         }
     }
 
-    fun closeSheet() {
-        sheet = null
-    }
-
-    fun workerSend(id: String, text: String, onFail: () -> Unit) {
+    /** Presses option n (from 1) of the session's open question. */
+    fun pageAnswer(n: Int, onDone: (Boolean) -> Unit) {
+        val pg = page ?: return
+        val ask = pg.ask ?: return
         viewModelScope.launch {
             try {
-                api.post("api/workers/$id/send", JSONObject().put("text", text))
+                api.post("api/sessions/${pg.id}/answer", JSONObject().put("tool_id", ask.str("tool_id")).put("option", n))
+                pg.note = null
+                onDone(true)
             } catch (e: IOException) {
-                onFail()
+                pg.note = errorOf(e)
+                onDone(false)
             }
         }
+    }
+
+    /** Photos and files for the page: each uploads to the laptop at once, and the message names it by path. */
+    fun pageAttach(uris: List<Uri>) {
+        val pg = page ?: return
+        val cr = getApplication<Application>().contentResolver
+        for (uri in uris) {
+            if (pg.files.size >= MAX_FILES) break
+            val (name, size) = try {
+                cr.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { c ->
+                    if (c.moveToFirst()) (c.getString(0) ?: "file") to (if (c.isNull(1)) -1L else c.getLong(1)) else null
+                }
+            } catch (e: Exception) {
+                null
+            } ?: ("file" to -1L)
+            if (size > MAX_FILE) {
+                pg.note = "$name is larger than 50 MB."
+                continue
+            }
+            val preview = if (cr.getType(uri) in PICTURES) try {
+                ImageDecoder.decodeBitmap(ImageDecoder.createSource(cr, uri)) { d, info, _ ->
+                    val k = maxOf(1, maxOf(info.size.width, info.size.height) / 256)
+                    d.setTargetSize(info.size.width / k, info.size.height / k)
+                }.asImageBitmap()
+            } catch (e: Exception) {
+                null
+            } else null
+            val doc = Attachment.Doc(name, preview)
+            pg.files = pg.files + doc
+            doc.job = viewModelScope.launch {
+                try {
+                    withContext(Dispatchers.IO) { cr.openInputStream(uri)?.close() ?: throw IOException("cannot read $name") }
+                    doc.id = api.upload(name) { cr.openInputStream(uri) ?: throw IOException("cannot read $name") }.str("id")
+                } catch (e: SecurityException) {
+                    pg.files = pg.files - doc
+                    pg.note = "seimei may not read $name."
+                } catch (e: IOException) {
+                    pg.files = pg.files - doc
+                    pg.note = "Could not upload $name: ${errorOf(e)}"
+                } finally {
+                    doc.uploading = false
+                }
+            }
+        }
+    }
+
+    fun pageDetach(d: Attachment.Doc) {
+        val pg = page ?: return
+        pg.files = pg.files - d
+        d.job?.cancel()
     }
 
     fun workerStop(id: String) {

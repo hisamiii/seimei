@@ -73,6 +73,7 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import kotlinx.coroutines.delay
+import org.json.JSONObject
 
 // ---------- the chat list ----------
 
@@ -111,12 +112,12 @@ fun ChatTab(vm: Seimei) {
 }
 
 @Composable
-fun Row(item: Item, vm: Seimei, onPicture: (String) -> Unit) {
+fun Row(item: Item, vm: Seimei, live: JSONObject? = null, onPicture: (String) -> Unit) {
     when (item) {
         is Item.Day -> NotePill(dayLabel(item.t), "", day = true)
         is Item.Msg -> if (item.role == "user") UserMsg(item, vm, onPicture) else AssistantMsg(item)
         is Item.Note -> NotePill(item.text + if (item.n > 1) "  ×${item.n}" else "", item.level)
-        is Item.Activity -> ActivityChip(item)
+        is Item.Activity -> ActivityChip(item, live)
         is Item.Worker -> WorkerCard(item)
         is Item.Approval -> ApprovalCard(item, vm)
         is Item.Sent -> Column(Modifier.fillMaxWidth()) {
@@ -345,9 +346,11 @@ fun iconFor(name: String) = when {
 }
 
 @Composable
-fun ActivityChip(a: Item.Activity) {
+fun ActivityChip(a: Item.Activity, live: JSONObject? = null) {
     var open by rememberSaveable(a.key) { mutableStateOf(false) }
     val running = a.calls.any { it.running }
+    val id = live?.str("tool_id")
+    if (id != null && a.calls.any { it.id == id && it.running }) return LivePill(a, live, open) { open = !open }
     Column(Modifier.animateContentSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(
             Modifier.clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.surfaceContainer).clickable { open = !open }
@@ -363,6 +366,41 @@ fun ActivityChip(a: Item.Activity) {
             Icon(Icons.chev, null, Modifier.size(14.dp).then(if (open) Modifier.rotate90() else Modifier), tint = LocalExtra.current.text3)
         }
         if (open) Column(Modifier.padding(start = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            for (c in a.calls) CallRow(c)
+        }
+    }
+}
+
+/** A group whose last call still runs: what it does and for how long, the command, and its last output lines. */
+@Composable
+fun LivePill(a: Item.Activity, live: JSONObject, open: Boolean, toggle: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val now by produceState(System.currentTimeMillis()) {
+        while (true) {
+            delay(1000)
+            value = System.currentTimeMillis()
+        }
+    }
+    val id = live.str("tool_id")
+    val out = live.optJSONArray("output")?.let { o -> List(o.length()) { o.getString(it) } }.orEmpty()
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(cs.surfaceContainer).animateContentSize()) {
+        Row(Modifier.fillMaxWidth().clickable(onClick = toggle).padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.width(8.dp))
+            Text(activityLabel(a.calls, id), fontSize = 13.5.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            val since = live.optDouble("since", 0.0)
+            if (since > 0) Text(elapsed(since, now), fontSize = 13.sp, color = LocalExtra.current.text2)
+            Spacer(Modifier.width(6.dp))
+            Icon(Icons.chev, null, Modifier.size(14.dp).then(if (open) Modifier.rotate90() else Modifier), tint = LocalExtra.current.text3)
+        }
+        Text(live.str("what"), fontFamily = FontFamily.Monospace, fontSize = 11.5.sp, lineHeight = 16.sp,
+            modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 8.dp))
+        if (out.isNotEmpty()) Text(out.joinToString("\n"), fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 16.sp,
+            color = LocalExtra.current.text3, maxLines = 6, softWrap = false, overflow = TextOverflow.Clip,
+            modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 8.dp).clip(RoundedCornerShape(12.dp))
+                .background(cs.surface).padding(horizontal = 10.dp, vertical = 7.dp))
+        if (open) Column(Modifier.padding(start = 8.dp, end = 8.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             for (c in a.calls) CallRow(c)
         }
     }

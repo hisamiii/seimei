@@ -96,6 +96,47 @@ class ChatTest {
         assertEquals("2 KB", sizeText(2048))
         assertEquals("3.0 MB", sizeText(3L shl 20))
     }
+
+    @Test fun sessionTimelineEvents() {
+        // A session's transcript names events by uuid, and tool results carry no id at all.
+        val c = Chat(utc)
+        c.add(JSONObject().put("id", "u-1").put("type", "user").put("text", "go").put("t", 1_800_000_000.0))
+        c.add(JSONObject().put("id", "u-2:0").put("type", "tool").put("name", "Read").put("tool_id", "r").put("summary", "a").put("t", 1_800_000_001.0))
+        c.add(JSONObject().put("type", "tool_result").put("tool_id", "r").put("text", "x"))
+        c.add(JSONObject().put("id", "u-3:0").put("type", "tool").put("name", "Bash").put("tool_id", "b").put("summary", "make").put("t", 1_800_000_002.0))
+        val a = c.items.filterIsInstance<Item.Activity>().single()
+        assertEquals("su-2:0", a.key)
+        assertEquals("Read a file, running a command", activityLabel(a.calls, "b"))
+        assertEquals("Read a file, ran a command", activityLabel(a.calls))
+        assertTrue(c.items.map { it.key }.toSet().size == c.items.size)
+    }
+
+    @Test fun agentRows() {
+        val now = System.currentTimeMillis() / 1000.0
+        val seen = JSONObject()
+        val busy = JSONObject().put("pid", 7).put("name", "tmc").put("status", "busy").put("since", now).put("project", "tmc-lab")
+            .put("doing", JSONObject().put("tool", "Bash").put("what", "make").put("since", now - 250))
+        val r = fromSession(busy, seen)
+        assertEquals("work", r.state)
+        assertEquals("Running make · 4m", r.line)
+        val asking = JSONObject().put("pid", 8).put("name", "q").put("status", "waiting").put("question", true).put("ask", "Keep 4?")
+        assertEquals("ask" to "Keep 4?", fromSession(asking, seen).let { it.state to it.line })
+        val prompt = JSONObject().put("pid", 9).put("name", "p").put("status", "waiting").put("waiting_for", "approve Bash")
+        assertEquals("Waiting for approve Bash on the laptop", fromSession(prompt, seen).line)
+        val idle = JSONObject().put("pid", 10).put("name", "i").put("status", "idle").put("line", "Done.").put("context", 41)
+        assertEquals(41, fromSession(idle, seen).context)
+        assertNull(fromSession(prompt, seen).context)
+        val w = JSONObject().put("id", "w1").put("name", "dot").put("state", "running")
+            .put("doing", JSONObject().put("name", "Edit").put("summary", "router.cpp"))
+        assertEquals("Editing a file: router.cpp", fromWorker(w).line)
+    }
+
+    @Test fun projectTintsMatchTheWebPage() {
+        // The page's tint(): h = (h * 31 + code) >>> 0, then TINTS[h % 10]; yah -> 2, tmc-lab -> 8, seimei -> 6.
+        assertEquals(Color(0xFF94E2D5), tint("yah"))
+        assertEquals(Color(0xFFEBA0AC), tint("tmc-lab"))
+        assertEquals(Color(0xFFF9E2AF), tint("seimei"))
+    }
 }
 
 class MarkdownTest {

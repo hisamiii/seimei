@@ -86,7 +86,12 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault()) {
     fun add(ev: JSONObject) {
         val type = ev.str("type")
         val t = ev.optDouble("t", 0.0).let { if (it.isNaN()) 0.0 else it }
-        val key = if (ev.has("id")) "e${ev.getLong("id")}" else "x${seq++}"
+        // The event log numbers events; a session's transcript names them by uuid.
+        val key = when (val id = ev.opt("id")) {
+            is Number -> "e${id.toLong()}"
+            is String -> "s$id"
+            else -> "x${seq++}"
+        }
         if (type == "approval_done") {
             val aid = ev.str("aid")
             outcomes[aid] = ev.str("outcome")
@@ -186,6 +191,7 @@ fun phrase(name: String, n: Int): String = when {
     name in setOf("Agent", "Task") -> "started ${plural(n, "an agent", "agents")}"
     name in setOf("TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet") -> "updated its tasks"
     name == "ToolSearch" -> "loaded tools"
+    name == "AskUserQuestion" -> if (n == 1) "asked you a question" else "asked you $n questions"
     name == "mcp__seimei__workers" -> "checked the shikigami"
     name == "mcp__seimei__peek" -> if (n == 1) "looked in on a shikigami" else "looked in on shikigami $n times"
     name == "mcp__seimei__message" -> if (n == 1) "messaged a shikigami" else "sent $n shikigami messages"
@@ -214,11 +220,34 @@ fun phrase(name: String, n: Int): String = when {
     }
 }
 
-fun activityLabel(calls: List<Call>): String {
+/** What a call that still runs does: "running a command". */
+fun doingPhrase(name: String): String = when {
+    name == "Bash" -> "running a command"
+    name == "Read" -> "reading a file"
+    name in setOf("Edit", "Write", "MultiEdit", "NotebookEdit") -> "editing a file"
+    name in setOf("Grep", "Glob") -> "searching the files"
+    name == "WebSearch" -> "searching the web"
+    name == "WebFetch" -> "opening a page"
+    name in setOf("Agent", "Task") -> "running an agent"
+    else -> "using " + if (name.startsWith("mcp__")) name.split("__").last().replace('_', ' ') else name
+}
+
+/** The calls done so far, then the one still running (live) as what it does now. */
+fun activityLabel(calls: List<Call>, live: String? = null): String {
     val counts = LinkedHashMap<String, Int>()
-    for (c in calls) counts[c.name] = (counts[c.name] ?: 0) + 1
-    val text = counts.entries.joinToString(", ") { phrase(it.key, it.value) }
-    return text.replaceFirstChar { it.uppercase() }
+    for (c in calls) if (c.id != live) counts[c.name] = (counts[c.name] ?: 0) + 1
+    val parts = counts.entries.map { phrase(it.key, it.value) } + listOfNotNull(calls.firstOrNull { it.id == live }?.let { doingPhrase(it.name) })
+    return parts.joinToString(", ").replaceFirstChar { it.uppercase() }
+}
+
+/** How long something has run: 42s, 4m 12s, 1h 5m. */
+fun elapsed(since: Double, now: Long = System.currentTimeMillis()): String {
+    val s = maxOf(0L, (now / 1000.0 - since).toLong())
+    return when {
+        s < 60 -> "${s}s"
+        s < 3600 -> "${s / 60}m ${s % 60}s"
+        else -> "${s / 3600}h ${s % 3600 / 60}m"
+    }
 }
 
 fun home(path: String) = path.replace(Regex("^/home/[^/]+"), "~")
