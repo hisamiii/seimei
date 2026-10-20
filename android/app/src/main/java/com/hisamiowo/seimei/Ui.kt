@@ -1,5 +1,7 @@
 package com.hisamiowo.seimei
 
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarHost
 import android.Manifest
@@ -413,10 +415,12 @@ fun AppScreen(vm: Seimei) {
         }
     }
     val snacks = remember { SnackbarHostState() }
+    val snackScope = rememberCoroutineScope()
+    // Shown from its own scope: clearing vm.snack restarts this effect, which would cancel a snackbar shown inside it.
     LaunchedEffect(vm.snack) {
         val t = vm.snack ?: return@LaunchedEffect
         vm.snack = null
-        snacks.showSnackbar(t)
+        snackScope.launch { snacks.showSnackbar(t) }
     }
     Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().imePadding()) {
@@ -433,7 +437,9 @@ fun AppScreen(vm: Seimei) {
         // The keyboard covers the bottom of the screen: while typing, the navigation bar steps aside.
         if (!WindowInsets.isImeVisible) NavBar(vm)
     }
-    SnackbarHost(snacks, Modifier.align(Alignment.BottomCenter).imePadding().padding(bottom = 96.dp))
+    // Above the composer (chat) and the navigation bar (hidden while typing).
+    val above = (if (vm.tab == "chat") 76 else 0) + (if (WindowInsets.isImeVisible) 0 else 80) + 8
+    SnackbarHost(snacks, Modifier.align(Alignment.BottomCenter).imePadding().padding(bottom = above.dp))
     }
     vm.page?.let { AgentPage(vm, it) }
     if (vm.about) AboutSheet(vm) { vm.about = false }

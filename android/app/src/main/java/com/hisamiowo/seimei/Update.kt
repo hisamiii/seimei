@@ -1,5 +1,10 @@
 package com.hisamiowo.seimei
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.remember
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.text.font.FontFamily
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -120,7 +125,7 @@ fun AboutSheet(vm: Seimei, onClose: () -> Unit) {
     val r = vm.release
     val st = Updater.state
     ModalBottomSheet(onClose, containerColor = MaterialTheme.colorScheme.surfaceContainer) {
-        Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("seimei for Android", fontSize = 20.sp)
             Text("Version ${BuildConfig.VERSION_NAME}", fontSize = 14.sp, color = LocalExtra.current.text3)
@@ -155,6 +160,13 @@ fun AboutSheet(vm: Seimei, onClose: () -> Unit) {
                     }
                 }
             }
+            // The bundled font's license travels with the app (assets/licenses).
+            var license by remember { mutableStateOf<String?>(null) }
+            TextButton({ license = if (license == null) ctx.assets.open("licenses/OFL-GoogleSansFlex.txt").bufferedReader().use { it.readText() } else null },
+                Modifier.heightIn(min = 48.dp)) {
+                Text(if (license == null) "Font: Google Sans Flex, SIL Open Font License" else "Hide the font license", fontSize = 13.sp)
+            }
+            license?.let { Text(it, fontSize = 11.sp, lineHeight = 15.sp, color = LocalExtra.current.text3, fontFamily = FontFamily.Monospace) }
         }
     }
 }

@@ -128,7 +128,8 @@ fun ChatTab(vm: Seimei) {
         }
     }
     // Rows sit after the away card and the live or working row, when those show.
-    val lead = listOf(!vm.online && vm.awaySince != null, vm.live.isNotEmpty() || (vm.online && vm.busy && vm.waiting == 0)).count { it }
+    val lead = listOf(!vm.online && vm.awaySince != null, vm.live.isNotEmpty() || (vm.online && vm.busy && vm.waiting == 0)).count { it } +
+        vm.pending.size
     LaunchedEffect(vm.focus, rows.size) {
         val id = vm.focus ?: return@LaunchedEffect
         val i = rows.indexOfFirst { it.key == "e$id" }
@@ -148,6 +149,7 @@ fun ChatTab(vm: Seimei) {
         if (!vm.online && vm.awaySince != null) item(key = "away") { Away(vm) }
         if (vm.live.isNotEmpty()) item(key = "live") { Md(vm.live) }
         else if (vm.online && vm.busy && vm.waiting == 0) item(key = "working") { Working() }
+        items(vm.pending.asReversed(), key = { "p" + it.cid }) { PendingMsg(it, vm) }
         items(rows, key = { it.key }, contentType = { it::class }) { row ->
             Row(row, vm) { zoom = it }
         }
@@ -158,7 +160,7 @@ fun ChatTab(vm: Seimei) {
         }
     }
     // An empty chat greets instead of showing a blank sheet.
-    if (vm.items.isEmpty() && !vm.hasOlder && vm.online) Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+    if (vm.items.isEmpty() && vm.pending.isEmpty() && !vm.hasOlder && vm.online) Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
         Mark(56)
         Spacer(Modifier.height(14.dp))
         Text("Ask seimei anything", fontSize = 17.sp, color = LocalExtra.current.text2)
@@ -279,6 +281,38 @@ fun UserMsg(m: Item.Msg, vm: Seimei, onPicture: (String) -> Unit) {
     }
 }
 
+/** A sent message the laptop has not echoed yet: dimmed, or outlined with a retry when it failed. */
+@Composable
+fun PendingMsg(p: Pending, vm: Seimei) {
+    val cs = MaterialTheme.colorScheme
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+        Column(
+            Modifier.widthIn(max = 300.dp).alpha(if (p.failed) 1f else .6f)
+                .clip(RoundedCornerShape(20.dp, 20.dp, 4.dp, 20.dp))
+                .background(cs.primaryContainer)
+                .then(if (p.failed) Modifier.border(1.5.dp, cs.error, RoundedCornerShape(20.dp, 20.dp, 4.dp, 20.dp)) else Modifier)
+                .padding(horizontal = 16.dp, vertical = 11.dp),
+            horizontalAlignment = Alignment.End,
+        ) {
+            val photos = p.sending.filterIsInstance<Attachment.Photo>()
+            if (photos.isNotEmpty()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (ph in photos.take(3)) Image(ph.preview, null,
+                        Modifier.size(if (photos.size == 1) 200.dp else 88.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop)
+                }
+                if (p.text.isNotEmpty()) Spacer(Modifier.size(8.dp))
+            }
+            for (d in p.sending.filterIsInstance<Attachment.Doc>()) {
+                Text(d.name, fontSize = 13.sp, color = cs.onPrimaryContainer, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.size(6.dp))
+            }
+            if (p.text.isNotEmpty()) Text(p.text, color = cs.onPrimaryContainer, lineHeight = 21.sp, fontSize = 15.sp)
+            if (p.failed) Text("Not sent. Tap to retry", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = cs.error,
+                modifier = Modifier.padding(top = 4.dp).clip(RoundedCornerShape(8.dp)).clickable { vm.retry(p) }.padding(vertical = 12.dp, horizontal = 4.dp))
+        }
+    }
+}
+
 val KIND_LABEL = mapOf("pdf" to "PDF", "archive" to "Archive", "audio" to "Audio", "video" to "Video", "image" to "Image",
     "code" to "Code", "text" to "Text")
 
@@ -380,7 +414,8 @@ fun Blocks(blocks: List<Block>, size: Int, color: Color) {
                 // A shade at an edge with more columns beyond it, so a cut on a column edge does not look complete.
                 Box(Modifier.clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceContainer).height(IntrinsicSize.Min)) {
                     Box(Modifier.horizontalScroll(scroll)) {
-                        Column {
+                        // Max intrinsic width, so the row dividers span the whole table.
+                        Column(Modifier.width(IntrinsicSize.Max)) {
                             TableRow(b.head, head = true, size)
                             for (r in b.rows) {
                                 Box(Modifier.fillMaxWidth().size(1.dp).background(MaterialTheme.colorScheme.surfaceContainerHighest))
@@ -766,7 +801,8 @@ fun Composer(vm: Seimei) {
                     Box(Modifier.size(14.dp).clip(RoundedCornerShape(3.dp)).background(cs.onSecondaryContainer))
                 }
             } else {
-                FilledIconButton(vm::send, Modifier.size(56.dp), enabled = typing && vm.online,
+                // Offline it stays tappable: send() then says why nothing went out (QA U15).
+                FilledIconButton(vm::send, Modifier.size(56.dp), enabled = typing,
                     colors = IconButtonDefaults.filledIconButtonColors()) {
                     Icon(Icons.send, "Send", Modifier.size(22.dp))
                 }

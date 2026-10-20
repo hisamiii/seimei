@@ -1,5 +1,6 @@
 package com.hisamiowo.seimei
 
+import androidx.compose.runtime.mutableStateListOf
 import android.app.Activity
 import android.app.Application
 import android.content.ActivityNotFoundException
@@ -51,6 +52,11 @@ sealed interface Attachment {
         var uploading by mutableStateOf(true)
         var job: Job? = null
     }
+}
+
+/** A message shown before the laptop echoes it back (QA U1); a failed one waits for a retry tap. */
+class Pending(val cid: String, val text: String, val sending: List<Attachment>) {
+    var failed by mutableStateOf(false)
 }
 
 /** The full-screen page of one agent: a shikigami ("worker", by id) or one of the user's sessions ("session", by pid). */
@@ -134,6 +140,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     /** Counts the user's sends from the chat: the chat jumps to the end on each. */
     var sent by mutableStateOf(0)
         private set
+    val pending = mutableStateListOf<Pending>()
     /** A short note for a tap that could not do anything; the screen shows it once. */
     var snack by mutableStateOf<String?>(null)
 
@@ -359,6 +366,9 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         lastId = r.getLong("last")
         r.optJSONObject("state")?.let { setState(it) }
         takeWorkers(r.optJSONArray("workers").objects())
+        // A send that got through while the connection was down is in the history now.
+        val echoed = events.map { it.str("cid") }.toSet()
+        pending.removeAll { it.cid in echoed }
         rebuild()
     }
 
@@ -411,6 +421,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             if (id <= lastId) return
             lastId = id
             if (type == "assistant") live = ""
+            if (type == "user" && ev.str("cid").isNotEmpty()) pending.removeAll { it.cid == ev.str("cid") }
             events.add(ev)
             chat.add(ev)
             publish()
@@ -752,21 +763,29 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         }
         edit("")
         attachments = emptyList()
+        deliver(Pending(java.util.UUID.randomUUID().toString().take(12), text, sending))
+    }
+
+    fun retry(p: Pending) {
+        pending.remove(p)
+        // A file whose upload failed is gone; the rest go again.
+        deliver(Pending(p.cid + "r", p.text, p.sending.filter { it !is Attachment.Doc || it.id != null }))
+    }
+
+    private fun deliver(p: Pending) {
+        pending.add(p)
         sent++
         viewModelScope.launch {
-            val docs = sending.filterIsInstance<Attachment.Doc>()
+            val docs = p.sending.filterIsInstance<Attachment.Doc>()
             try {
                 docs.forEach { it.job?.join() }
                 if (docs.any { it.id == null }) throw IOException("upload failed")
                 val imgs = JSONArray()
-                sending.filterIsInstance<Attachment.Photo>().forEach { imgs.put(JSONObject().put("data", it.data)) }
-                api.post("api/send", JSONObject().put("text", text).put("images", imgs).put("files", JSONArray(docs.map { it.id })))
+                p.sending.filterIsInstance<Attachment.Photo>().forEach { imgs.put(JSONObject().put("data", it.data)) }
+                api.post("api/send", JSONObject().put("text", p.text).put("cid", p.cid).put("images", imgs)
+                    .put("files", JSONArray(docs.map { it.id })))
             } catch (e: IOException) {
-                if (draft.isEmpty()) edit(text)
-                // A file whose upload failed is gone; the rest wait for another try.
-                attachments = sending.filter { it !is Attachment.Doc || it.id != null } + attachments
-                chat.local("Could not send that. Try again.")
-                publish()
+                if (p in pending) p.failed = true
             }
         }
     }
