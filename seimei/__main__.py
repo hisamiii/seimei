@@ -161,6 +161,7 @@ def main():
 
     async def start(app):
         approvals.startup()
+        events.close_open_tools()
         pool.startup()
         app["dispatcher"] = asyncio.create_task(dispatcher.run())
         app["watcher"] = asyncio.create_task(watcher.run())
@@ -185,6 +186,9 @@ def main():
         asyncio.get_running_loop().add_signal_handler(signal.SIGUSR1, stop_key)
 
     async def shutdown(app):
+        # A reply cut off mid-stream would vanish without a word (QA U3).
+        if dispatcher.busy:
+            events.add({"type": "system", "level": "warn", "text": "seimei restarted mid-reply; that turn was cut off."})
         events.close()
 
     async def stop(app):

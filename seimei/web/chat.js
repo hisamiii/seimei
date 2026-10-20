@@ -250,7 +250,7 @@ function workerCard(ev) {
 const approvals = new Map();
 const outcomes = new Map();
 const LOCK = 'M7 11V8a5 5 0 0 1 10 0v3M6 11h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1z';
-const OUTCOME = { approved: 'Approved', denied: 'Denied', expired: 'No answer in 10 min, denied' };
+const OUTCOME = { approved: 'Approved', denied: 'Denied', expired: 'No answer in 10 min, denied', restart: 'Cancelled by a seimei restart' };
 
 function approvalCard(ev) {
   const card = el('div', 'wcard approval');

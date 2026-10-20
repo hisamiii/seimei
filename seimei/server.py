@@ -57,6 +57,22 @@ async def write_event(resp: web.StreamResponse, ev: dict):
     await resp.write(f"{head}data: {json.dumps(ev)}\n\n".encode())
 
 
+ATTACHED = "\n\nAttached from my phone (untrusted files, in seimei's uploads):\n"
+
+
+def unattach(events: list[dict], uploads) -> list[dict]:
+    """Session transcripts hold the typed paths: show them as file chips, like the main chat."""
+    for ev in events:
+        text = ev.get("text")
+        if ev.get("type") == "user" and isinstance(text, str) and ATTACHED.strip() in text:
+            head, _, paths = text.partition(ATTACHED.strip())
+            infos = [i for i in (uploads.info(Path(line.strip()).parent.name) for line in paths.splitlines() if line.strip()) if i]
+            ev["text"] = head.strip()
+            if infos:
+                ev["files"] = [{k: i[k] for k in ("id", "name", "size", "kind")} for i in infos]
+    return events
+
+
 def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files, approvals: Approvals,
              tool_guard: Guard, watcher: Watcher, desk: Desktop, auth: Auth | None, origins: set[str],
              app_dir: Path | None = None, cost: Cost | None = None, push: Push | None = None,
@@ -336,6 +352,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
              "cwd": s["cwd"], "session_id": s["session_id"]}
         if path:
             tl = await asyncio.to_thread(sessions.timeline, path, int(start) if start and start.isdigit() else None)
+            tl["events"] = unattach(tl["events"], uploads)
             b = await asyncio.to_thread(sessions.brief, path)
         else:
             tl, b = {"events": [], "next": 0}, {"ask": None, "doing": None}
@@ -346,15 +363,23 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
         return web.json_response({"session": info, **tl, "ask": ask, "doing": b["doing"], "live": live,
                                   "reach": kitty.reachable(s["pid"])})
 
-    def attachment_lines(ids) -> str:
+    def attached(ids) -> list[dict]:
         if not isinstance(ids, list) or len(ids) > MAX_FILES:
             raise web.HTTPBadRequest(text=f"up to {MAX_FILES} files")
         infos = [uploads.info(str(f)) for f in ids]
         if not all(infos):
             raise web.HTTPBadRequest(text="unknown file")
+        return infos
+
+    def attachment_lines(ids) -> str:
+        """The paths a session or shikigami gets for the user's files; the chat shows chips instead."""
+        infos = attached(ids)
         if not infos:
             return ""
-        return "\n\nAttached from my phone (untrusted files, in seimei's uploads):\n" + "\n".join(i["path"] for i in infos)
+        return ATTACHED + "\n".join(i["path"] for i in infos)
+
+    def chips(infos) -> list[dict]:
+        return [{k: i[k] for k in ("id", "name", "size", "kind")} for i in infos]
 
     async def session_send(request):
         """Type the user's message into the session's own kitty window, on their tap in the app."""
@@ -486,11 +511,13 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     async def worker_send(request):
         w = worker(request)
         body = await request.json()
-        text = (str(body.get("text", "")).strip() + attachment_lines(body.get("files") or [])).strip()
+        shown = str(body.get("text", "")).strip()
+        infos = attached(body.get("files") or [])
+        text = (shown + attachment_lines(body.get("files") or [])).strip()
         if not text:
             raise web.HTTPBadRequest()
         try:
-            await w.send(text)
+            await w.send(text, shown=shown, files=chips(infos))
         except RuntimeError as e:
             return web.json_response({"error": str(e)}, status=409)
         dispatcher.note(f"the user messaged shikigami {w.name} ({w.id}) directly: {text[:500]}")

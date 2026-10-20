@@ -215,7 +215,7 @@ class Approvals:
             if ev["type"] == "approval_done":
                 done.add(ev["aid"])
             elif ev["type"] == "approval" and ev["aid"] not in done:
-                self.events.add({"type": "approval_done", "aid": ev["aid"], "outcome": "expired"})
+                self.events.add({"type": "approval_done", "aid": ev["aid"], "outcome": "restart"})
 
     def decide(self, aid: str, approve: bool) -> bool:
         fut = self.waiting.get(aid)

@@ -195,15 +195,16 @@ class Worker:
             self._set("laptop", summary="Open on the laptop.", laptop_window=w and w["id"])
         return w
 
-    async def send(self, text: str):
-        """Start the session if needed and hand it a message; folds into a running turn."""
+    async def send(self, text: str, shown: str | None = None, files: list[dict] | None = None):
+        """Start the session if needed and hand it a message; folds into a running turn. The log keeps what the user
+        wrote (shown) and their files as chips; the session gets text, with the files' paths."""
         if await asyncio.to_thread(self.on_laptop):
             raise RuntimeError(f"{self.name} is open on the laptop; message it there, or close that window first")
         async with self.lock:
             if self.idle_timer:
                 self.idle_timer.cancel()
                 self.idle_timer = None
-            self._add({"type": "user", "text": text})
+            self._add({"type": "user", "text": text if shown is None else shown, **({"files": files} if files else {})})
             if not self.client:
                 self.client = ClaudeSDKClient(self._options())
                 await self.client.connect()
@@ -334,6 +335,7 @@ class Pool:
         already: it keeps waiting, and the answer resumes its session."""
         for w in self.workers.values():
             if w.rec["state"] == "running":
+                w.log.close_open_tools()
                 w._set("interrupted", summary="Interrupted by a seimei restart.")
                 self.report(w, "interrupted", "")
 

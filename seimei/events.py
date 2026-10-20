@@ -54,6 +54,18 @@ class EventLog:
     def unsubscribe(self, q: asyncio.Queue):
         self.subs.discard(q)
 
+    def close_open_tools(self, why: str = "Interrupted by a seimei restart.") -> int:
+        """Tool calls a restart cut off never get a result; give them one, so they stop looking busy."""
+        done, open_ = set(), []
+        for ev in reversed(self.before(None, 2000)):
+            if ev["type"] == "tool_result":
+                done.add(ev.get("tool_id"))
+            elif ev["type"] == "tool" and ev.get("tool_id") not in done:
+                open_.append(ev["tool_id"])
+        for tid in reversed(open_):
+            self.add({"type": "tool_result", "tool_id": tid, "error": True, "text": why})
+        return len(open_)
+
     def close(self):
         """End every open stream, so clients notice a shutdown at once."""
         for q in list(self.subs):
