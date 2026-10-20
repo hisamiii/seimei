@@ -153,9 +153,7 @@ def main():
                             guard, usage)
     pool.dispatcher, pool.guard = dispatcher, guard
     guard.tell = pool.tell
-    watcher = Watcher(events, pool.own_sessions, lambda s: dispatcher.note(
-        f"The user's session \"{s['name']}\" finished a turn" + (" and asks a question" if s["question"] else "")
-        + f" ({time.strftime('%H:%M')}).", key=f"finished:{s['pid']}"))
+    watcher = Watcher(events, pool.own_sessions, pool.notify)
     app = make_app(events, dispatcher, pool, files, approvals, guard, watcher, desk, auth, origins, state / "app", Cost(), push, uploads)
 
     async def start(app):

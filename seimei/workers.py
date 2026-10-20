@@ -334,7 +334,10 @@ class Pool:
         message; repeats collapse. Urgent ones go now; the rest join a running dispatcher turn, or wait for
         its next one."""
         w = self.workers.get(worker)
-        line = f"shikigami {w.name} ({w.id}) {line}" if w else line
+        self.notify(f"shikigami {w.name} ({w.id}) {line}" if w else line, urgent=urgent, key=key)
+
+    def notify(self, line: str, urgent: bool = False, key: str | None = None):
+        """An event line for the dispatcher, batched with the others (see tell)."""
         k = key or line
         old = self._batch.pop(k, None)
         self._batch[k] = (line, urgent or bool(old and old[1]), (old[2] + 1) if old and not key else 1)
@@ -348,7 +351,7 @@ class Pool:
             return
         lines = [line + (f" (×{n})" if n > 1 else "") for _, (line, _, n) in batch]
         if any(u for _, (_, u, _) in batch) or self.dispatcher.busy:
-            self.dispatcher.wake("\n".join(lines) if len(lines) == 1 else "Shikigami events:\n" + "\n".join(f"- {l}" for l in lines))
+            self.dispatcher.wake("\n".join(lines) if len(lines) == 1 else "Events:\n" + "\n".join(f"- {l}" for l in lines))
         else:
             for k, (line, _, n) in batch:
                 self.dispatcher.note(line + (f" (×{n})" if n > 1 else ""), key=f"w:{k}")

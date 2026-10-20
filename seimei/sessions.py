@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import subprocess
 import time
 from pathlib import Path
 
@@ -394,18 +395,121 @@ def listing(own: dict[str, str]) -> list[dict]:
                     "project": b.get("project") or (project_of(s["cwd"] + "/x") if s["cwd"] != HOME else None),
                     "line": b.get("line", ""), "context": b.get("context"), "doing": b.get("doing"),
                     "model": (b.get("model") or "").removeprefix("claude-") or None, "effort": b.get("effort"),
+                    "ask_detail": ask,
                     "reach": kitty.reachable(s["pid"])})
     return out
 
 
-class Watcher:
-    """Pushes the user's sessions to the page when anything but the clock changes."""
+DENIED = re.compile(r"hook (error|blocked|denied)|denied this tool|doesn't want to proceed|has been denied|blocked by", re.I)
+TASK = re.compile(r"<task-notification>.*?<status>([^<]*)</status>.*?<summary>([^<]*)</summary>", re.S)
 
-    def __init__(self, events: EventLog, own, finished=None):
+
+class SessionEvents:
+    """What the user's own sessions run into, as lines for the dispatcher: finished turns, questions, permission
+    prompts, blocked calls, a tool failing again and again, a background task done, the session ending.
+    The first sight of a session only takes its state, so a restart replays nothing."""
+
+    def __init__(self):
+        self.seen: dict[int, dict] = {}
+
+    def scan(self, rows: list[dict]) -> list[tuple[str, bool, str | None]]:
+        out = []
+        now = {r["pid"]: r for r in rows}
+        for pid, r in now.items():
+            who = f'session "{r["name"]}"'
+            path = transcript({"sessionId": r["session_id"], "cwd": r["cwd"]})
+            ask = r.get("ask_detail") or {}
+            st = self.seen.get(pid)
+            if st is None or st["path"] != path:
+                # A new session, or one continued into a new transcript: start from here.
+                self.seen[pid] = {**(st or {"status": r["status"], "ask": ask.get("tool_id"), "perm": None, "tools": {}, "fails": {}}),
+                                  "name": r["name"], "path": path, "offset": path.stat().st_size if path else 0}
+                continue
+            st["name"] = r["name"]
+            was = st["status"]
+            if path:
+                new, st["offset"] = _rows(path, st["offset"])
+                for row in new:
+                    self._row(row, st, who, was, out)
+            tid = ask.get("tool_id")
+            if tid and tid != st["ask"]:
+                q = (ask.get("questions") or [{}])[0]
+                opts = " | ".join(o.get("label", "") for o in q.get("options") or [])
+                out.append((f"{who} asks: {q.get('question', '')}" + (f" Options: {opts}." if opts else "")
+                            + ("" if ask.get("answerable", True) else " (several questions or multi-select: laptop only)"),
+                            True, f"ask:{pid}"))
+            st["ask"] = tid
+            perm = None
+            if r["status"].startswith("waiting") and not tid:
+                d = r.get("doing") or {}
+                perm = d.get("tool_id") or r.get("waiting_for") or "?"
+                if perm != st["perm"]:
+                    what = f"{d.get('tool', '')} {d.get('what', '')}".strip() or r.get("waiting_for") or "something"
+                    out.append((f"{who} waits on the laptop for a permission prompt: {what[:200]}", True, f"perm:{pid}"))
+            st["perm"] = perm
+            if was == "busy" and r["status"] == "idle":
+                out.append((f"{who} finished a turn" + (f": {r['line'][:200]}" if r.get("line") else ""), False, f"finished:{pid}"))
+            st["status"] = r["status"]
+        for pid in [p for p in self.seen if p not in now]:
+            st = self.seen.pop(pid)
+            rec = CLAUDE / "sessions" / f"{pid}.json"
+            if Path(f"/proc/{pid}").exists():
+                continue  # still running, only hidden (parked, or renamed out of the list)
+            if rec.exists():
+                out.append((f'session "{st["name"]}" (pid {pid}) died without closing: killed or crashed{_oomd()}', True, f"end:{pid}"))
+            else:
+                out.append((f'session "{st["name"]}" (pid {pid}) was closed', False, f"end:{pid}"))
+        return out
+
+    def _row(self, row: dict, st: dict, who: str, was: str, out: list):
+        content = (row.get("message") or {}).get("content")
+        if row["type"] == "assistant":
+            for b in content if isinstance(content, list) else []:
+                if isinstance(b, dict) and b.get("type") == "tool_use":
+                    st["tools"][b.get("id")] = b.get("name", "?")
+                    if len(st["tools"]) > 300:
+                        st["tools"].pop(next(iter(st["tools"])))
+            return
+        if isinstance(content, str) or not any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content or []):
+            m = TASK.search(_text(content))
+            if m and was != "busy":
+                out.append((f"{who}: a background task ended ({m.group(1).strip()}): {m.group(2).strip()[:200]}", False, None))
+            return
+        for b in content:
+            if not (isinstance(b, dict) and b.get("type") == "tool_result"):
+                continue
+            name = st["tools"].get(b.get("tool_use_id"), "a tool")
+            text = " ".join(_text(b.get("content")).split())
+            if b.get("is_error") and DENIED.search(text):
+                out.append((f"{who}: a {name} call was blocked: {text[:200]}", False, None))
+            elif b.get("is_error"):
+                st["fails"][name] = n = st["fails"].get(name, 0) + 1
+                if n == 3:
+                    out.append((f"{who}: {name} failed 3 times in a row, last: {text[:200]}", True, None))
+            else:
+                st["fails"].pop(name, None)
+
+
+def _oomd() -> str:
+    """A hint when systemd-oomd killed something just now."""
+    try:
+        r = subprocess.run(["journalctl", "-u", "systemd-oomd", "--since", "-2min", "-o", "cat", "--no-pager"],
+                           capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return " (systemd-oomd killed something in the last 2 minutes)" if "Killed" in r.stdout else ""
+
+
+class Watcher:
+    """Pushes the user's sessions to the page when anything but the clock changes, and tells the dispatcher what
+    they run into (notify: Pool.notify)."""
+
+    def __init__(self, events: EventLog, own, notify=None):
         self.events = events
         self.own = own
-        self.finished = finished
+        self.notify = notify
         self.list: list[dict] = []
+        self.happenings = SessionEvents()
 
     def snapshot(self) -> dict:
         return {"type": "sessions", "list": self.list}
@@ -415,14 +519,14 @@ class Watcher:
         while True:
             try:
                 rows = await asyncio.to_thread(listing, self.own())
+                lines = await asyncio.to_thread(self.happenings.scan, rows)
+                if self.notify:
+                    for line, urgent, key in lines:
+                        self.notify(line, urgent=urgent, key=key)
                 new = [(r["pid"], r["name"], r["status"], r["waiting_for"], r["since"], r["question"], r["project"],
                         r["line"], r["context"], (r["doing"] or {}).get("tool_id"), r["reach"],
                         r["status"] == "busy" or round(r["active"])) for r in rows]
                 if new != sig:
-                    before = {r["pid"]: r["status"] for r in self.list}
-                    for r in rows:
-                        if self.finished and before.get(r["pid"]) == "busy" and r["status"] != "busy":
-                            self.finished(r)
                     sig, self.list = new, rows
                     self.events.flash(self.snapshot())
             except Exception:
