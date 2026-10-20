@@ -44,6 +44,10 @@ class Prefs(ctx: Context) {
     var askedNotifications: Boolean
         get() = p.getBoolean("askedNotifications", false)
         set(v) = p.edit().putBoolean("askedNotifications", v).apply()
+    /** laptop file id -> the copy saved in Downloads, so a second tap opens it. */
+    var saved: String
+        get() = p.getString("saved", "{}") ?: "{}"
+        set(v) = p.edit().putString("saved", v).apply()
     /** session id -> the last activity time the user has looked at, for "new reply" marks. */
     var seen: String
         get() = p.getString("seen", "{}") ?: "{}"

@@ -2,6 +2,13 @@ package com.hisamiowo.seimei
 
 import android.app.Activity
 import android.app.Application
+import android.content.ActivityNotFoundException
+import android.content.ContentValues
+import android.content.Intent
+import android.os.Environment
+import android.provider.MediaStore
+import android.provider.OpenableColumns
+import android.webkit.MimeTypeMap
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
 import android.net.Uri
@@ -16,6 +23,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -31,7 +39,16 @@ import java.util.Base64
 
 enum class Phase { Pair, Locked, Ready }
 
-data class Attachment(val data: String, val preview: ImageBitmap)
+sealed interface Attachment {
+    class Photo(val data: String, val preview: ImageBitmap) : Attachment
+
+    /** Any other file: it goes up to the laptop as soon as it is picked, and the message names it by id. */
+    class Doc(val name: String) : Attachment {
+        var id by mutableStateOf<String?>(null)
+        var uploading by mutableStateOf(true)
+        var job: Job? = null
+    }
+}
 
 /** The bottom sheet over the tabs: one shikigami with its log, or one of the user's own sessions. */
 sealed interface Sheet {
@@ -368,7 +385,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             events.add(ev)
             chat.add(ev)
             publish()
-            if (tab != "chat" && type in setOf("assistant", "approval", "worker", "image")) unread = true
+            if (tab != "chat" && type in setOf("assistant", "approval", "worker", "image", "file")) unread = true
             return
         }
         when (type) {
@@ -566,13 +583,17 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         edit("")
         attachments = emptyList()
         viewModelScope.launch {
+            val docs = sending.filterIsInstance<Attachment.Doc>()
             try {
+                docs.forEach { it.job?.join() }
+                if (docs.any { it.id == null }) throw IOException("upload failed")
                 val imgs = JSONArray()
-                sending.forEach { imgs.put(JSONObject().put("data", it.data)) }
-                api.post("api/send", JSONObject().put("text", text).put("images", imgs))
+                sending.filterIsInstance<Attachment.Photo>().forEach { imgs.put(JSONObject().put("data", it.data)) }
+                api.post("api/send", JSONObject().put("text", text).put("images", imgs).put("files", JSONArray(docs.map { it.id })))
             } catch (e: IOException) {
                 if (draft.isEmpty()) edit(text)
-                attachments = sending + attachments
+                // A file whose upload failed is gone; the rest wait for another try.
+                attachments = sending.filter { it !is Attachment.Doc || it.id != null } + attachments
                 chat.local("Could not send that. Try again.")
                 publish()
             }
@@ -601,7 +622,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     fun attach(uris: List<Uri>) {
         viewModelScope.launch {
             for (uri in uris) {
-                if (attachments.size >= MAX_IMAGES) break
+                if (attachments.count { it is Attachment.Photo } >= MAX_IMAGES) break
                 try {
                     attachments = attachments + withContext(Dispatchers.Default) { prepare(uri) }
                 } catch (e: Exception) {
@@ -614,6 +635,119 @@ class Seimei(app: Application) : AndroidViewModel(app) {
 
     fun detach(a: Attachment) {
         attachments = attachments - a
+        if (a is Attachment.Doc) a.job?.cancel()
+    }
+
+    /** Files from the system picker: real pictures go the photo way, anything else uploads as it is. */
+    fun attachFiles(uris: List<Uri>) {
+        val cr = getApplication<Application>().contentResolver
+        val pictures = mutableListOf<Uri>()
+        for (uri in uris) {
+            if (cr.getType(uri) in PICTURES && attachments.count { it is Attachment.Photo } + pictures.size < MAX_IMAGES) {
+                pictures += uri
+                continue
+            }
+            if (attachments.count { it is Attachment.Doc } >= MAX_FILES) break
+            val (name, size) = try {
+                cr.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { c ->
+                    if (c.moveToFirst()) (c.getString(0) ?: "file") to (if (c.isNull(1)) -1L else c.getLong(1)) else null
+                }
+            } catch (e: Exception) {
+                null
+            } ?: ("file" to -1L)
+            if (size > MAX_FILE) {
+                chat.local("$name is larger than 50 MB.")
+                publish()
+                continue
+            }
+            val doc = Attachment.Doc(name)
+            attachments = attachments + doc
+            doc.job = viewModelScope.launch {
+                try {
+                    doc.id = api.upload(name) { cr.openInputStream(uri) ?: throw IOException("cannot read $name") }.str("id")
+                } catch (e: IOException) {
+                    attachments = attachments - doc
+                    val why = (e as? HttpError)?.let { try { JSONObject(it.body).str("error") } catch (x: JSONException) { "" } }
+                    chat.local("Could not upload $name" + if (why.isNullOrEmpty()) "." else ": $why.")
+                    publish()
+                } finally {
+                    doc.uploading = false
+                }
+            }
+        }
+        if (pictures.isNotEmpty()) attach(pictures)
+    }
+
+    // ---------- files from the laptop ----------
+
+    /** laptop file id -> its copy in Downloads. */
+    private val saved = try { JSONObject(prefs.saved) } catch (e: JSONException) { JSONObject() }
+    var saving by mutableStateOf(setOf<String>())
+        private set
+    var savedIds by mutableStateOf(saved.keys().asSequence().toSet())
+        private set
+
+    /** First tap saves the file into Downloads/seimei; once there, a tap opens it in another app. Never opens on its own. */
+    fun fileTap(f: FileRef) {
+        if (f.id in saving) return
+        val cr = getApplication<Application>().contentResolver
+        val have = saved.optString(f.id).takeIf { it.isNotEmpty() }?.let(Uri::parse)
+        if (have != null && exists(have)) {
+            openFile(have, f)
+            return
+        }
+        forget(f.id)
+        saving = saving + f.id
+        viewModelScope.launch {
+            val values = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, f.name)
+                put(MediaStore.Downloads.MIME_TYPE, mimeOf(f.name))
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/seimei")
+                put(MediaStore.Downloads.IS_PENDING, 1)
+            }
+            var uri: Uri? = null
+            try {
+                uri = withContext(Dispatchers.IO) { cr.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) } ?: throw IOException("no Downloads")
+                val out = withContext(Dispatchers.IO) { cr.openOutputStream(uri) } ?: throw IOException("cannot write")
+                out.use { api.download("api/uploads/${f.id}", it) }
+                withContext(Dispatchers.IO) { cr.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null) }
+                saved.put(f.id, uri.toString())
+                prefs.saved = saved.toString()
+                savedIds = savedIds + f.id
+            } catch (e: Exception) {
+                uri?.let { withContext(Dispatchers.IO + NonCancellable) { cr.delete(it, null, null) } }
+                if (e !is kotlinx.coroutines.CancellationException) {
+                    chat.local("Could not download ${f.name}.")
+                    publish()
+                }
+            } finally {
+                saving = saving - f.id
+            }
+        }
+    }
+
+    private fun forget(id: String) {
+        if (saved.remove(id) != null) {
+            prefs.saved = saved.toString()
+            savedIds = savedIds - id
+        }
+    }
+
+    private fun exists(uri: Uri) = try {
+        getApplication<Application>().contentResolver.query(uri, arrayOf(MediaStore.Downloads._ID), null, null, null)?.use { it.count > 0 } == true
+    } catch (e: Exception) {
+        false
+    }
+
+    private fun openFile(uri: Uri, f: FileRef) {
+        val view = Intent(Intent.ACTION_VIEW).setDataAndType(uri, mimeOf(f.name))
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            getApplication<Application>().startActivity(view)
+        } catch (e: ActivityNotFoundException) {
+            chat.local("No app on this phone opens ${f.name}. It is in Downloads/seimei.")
+            publish()
+        }
     }
 
     /** The model reads images up to 1568 px on the long side; anything bigger only costs upload time. */
@@ -637,7 +771,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             android.graphics.Canvas(flat).apply { drawColor(android.graphics.Color.WHITE); drawBitmap(bmp, 0f, 0f, null) }
             flat.compress(Bitmap.CompressFormat.JPEG, 85, it)
         }.toByteArray()
-        return Attachment(Base64.getEncoder().encodeToString(bytes), bmp.asImageBitmap())
+        return Attachment.Photo(Base64.getEncoder().encodeToString(bytes), bmp.asImageBitmap())
     }
 
     /** A picture from the laptop, fetched with the login token and kept in a small cache. */
@@ -667,6 +801,12 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         const val LOCK_AFTER = 5 * 60_000L
         const val MAX_SIDE = 1568
         const val MAX_IMAGES = 6
+        const val MAX_FILES = 10
+        const val MAX_FILE = 50L shl 20
+        val PICTURES = setOf("image/jpeg", "image/png", "image/webp", "image/gif")
+
+        fun mimeOf(name: String) = MimeTypeMap.getSingleton()
+            .getMimeTypeFromExtension(name.substringAfterLast('.', "").lowercase()) ?: "application/octet-stream"
     }
 }
 

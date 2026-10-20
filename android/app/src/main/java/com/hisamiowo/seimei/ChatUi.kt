@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -32,6 +33,8 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
@@ -65,10 +68,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import kotlinx.coroutines.delay
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
+import kotlinx.coroutines.delay
 
 // ---------- the chat list ----------
 
@@ -115,6 +118,10 @@ fun Row(item: Item, vm: Seimei, onPicture: (String) -> Unit) {
         is Item.Activity -> ActivityChip(item)
         is Item.Worker -> WorkerCard(item)
         is Item.Approval -> ApprovalCard(item, vm)
+        is Item.Sent -> Column(Modifier.fillMaxWidth()) {
+            FileChip(vm, item.file, Modifier.widthIn(max = 320.dp))
+            if (item.caption.isNotEmpty()) Text(item.caption, fontSize = 13.sp, color = LocalExtra.current.text3, modifier = Modifier.padding(top = 6.dp))
+        }
         is Item.Shown -> Column(Modifier.fillMaxWidth()) {
             Picture(vm, item.file, Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable { onPicture(item.file) })
             if (item.caption.isNotEmpty()) Text(item.caption, fontSize = 13.sp, color = LocalExtra.current.text3, modifier = Modifier.padding(top = 6.dp))
@@ -190,13 +197,62 @@ fun UserMsg(m: Item.Msg, vm: Seimei, onPicture: (String) -> Unit) {
                             .clickable { onPicture(name) }, crop = true)
                     }
                 }
-                if (m.text.isNotEmpty()) Spacer(Modifier.size(8.dp))
+                if (m.text.isNotEmpty() || m.files.isNotEmpty()) Spacer(Modifier.size(8.dp))
+            }
+            for (f in m.files) {
+                FileChip(vm, f, Modifier.fillMaxWidth(), onUser = true)
+                Spacer(Modifier.size(6.dp))
             }
             if (m.text.isNotEmpty()) SelectionContainer {
                 Text(m.text, color = MaterialTheme.colorScheme.onPrimaryContainer, lineHeight = 21.sp, fontSize = 15.sp)
             }
             if (time) Text(clock(m.t), fontSize = 12.sp, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = .7f))
         }
+    }
+}
+
+val KIND_LABEL = mapOf("pdf" to "PDF", "archive" to "Archive", "audio" to "Audio", "video" to "Video", "image" to "Image",
+    "code" to "Code", "text" to "Text")
+
+fun kindIcon(kind: String) = when (kind) {
+    "archive" -> Icons.archive
+    "audio" -> Icons.audio
+    "video" -> Icons.video
+    "image" -> Icons.photo
+    "code" -> Icons.code
+    else -> Icons.doc
+}
+
+/** A laptop file: first tap saves it to Downloads, then a tap opens it. */
+@Composable
+fun FileChip(vm: Seimei, f: FileRef, modifier: Modifier = Modifier, onUser: Boolean = false) {
+    val cs = MaterialTheme.colorScheme
+    val fg = if (onUser) cs.onPrimaryContainer else cs.onSurface
+    val sub = if (onUser) cs.onPrimaryContainer.copy(alpha = .75f) else LocalExtra.current.text3
+    val saving = f.id in vm.saving
+    val saved = f.id in vm.savedIds
+    Row(
+        modifier.clip(RoundedCornerShape(16.dp))
+            .background(if (onUser) cs.onPrimaryContainer.copy(alpha = .1f) else cs.surfaceContainerHigh)
+            .clickable { vm.fileTap(f) }
+            .padding(start = 10.dp, end = 14.dp, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(cs.secondaryContainer), contentAlignment = Alignment.Center) {
+            Icon(kindIcon(f.kind), null, Modifier.size(20.dp), tint = cs.onSecondaryContainer)
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(f.name, color = fg, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(when {
+                saving -> "Saving to Downloads…"
+                saved -> "In Downloads · tap to open"
+                else -> "${sizeText(f.size)} · ${KIND_LABEL[f.kind] ?: "File"}"
+            }, color = sub, fontSize = 12.sp)
+        }
+        Spacer(Modifier.width(8.dp))
+        if (saving) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = sub)
+        else Icon(if (saved) Icons.open else Icons.download, if (saved) "Open" else "Download", Modifier.size(18.dp), tint = sub)
     }
 }
 
@@ -461,11 +517,26 @@ fun Zoom(vm: Seimei, name: String, close: () -> Unit) {
 @Composable
 fun Composer(vm: Seimei) {
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(Seimei.MAX_IMAGES)) { vm.attach(it) }
+    val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { vm.attachFiles(it) }
+    var menu by remember { mutableStateOf(false) }
     val cs = MaterialTheme.colorScheme
     Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 8.dp)) {
-        if (vm.attachments.isNotEmpty()) Row(Modifier.padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (vm.attachments.isNotEmpty()) Row(Modifier.padding(bottom = 8.dp).horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             for (a in vm.attachments) Box {
-                Image(a.preview, null, Modifier.size(64.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop)
+                when (a) {
+                    is Attachment.Photo -> Image(a.preview, null, Modifier.size(64.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop)
+                    is Attachment.Doc -> Row(
+                        Modifier.height(64.dp).widthIn(max = 200.dp).clip(RoundedCornerShape(12.dp)).background(cs.surfaceContainerHigh)
+                            .padding(start = 12.dp, end = 30.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (a.uploading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        else Icon(Icons.doc, null, Modifier.size(20.dp), tint = LocalExtra.current.text2)
+                        Spacer(Modifier.width(8.dp))
+                        Text(a.name, fontSize = 13.sp, color = LocalExtra.current.text2, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                }
                 Box(Modifier.align(Alignment.TopEnd).padding(2.dp).size(22.dp).clip(CircleShape).background(Color.Black.copy(alpha = .6f))
                     .clickable { vm.detach(a) }, contentAlignment = Alignment.Center) {
                     Icon(Icons.close, "Remove", Modifier.size(12.dp), tint = Color.White)
@@ -478,8 +549,18 @@ fun Composer(vm: Seimei) {
                 onValueChange = vm::edit,
                 placeholder = { Text("Message seimei") },
                 leadingIcon = {
-                    IconButton({ pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
-                        Icon(Icons.photo, "Attach a photo")
+                    Box {
+                        IconButton({ menu = true }) { Icon(Icons.attach, "Attach") }
+                        DropdownMenu(menu, { menu = false }) {
+                            DropdownMenuItem({ Text("Photos") }, {
+                                menu = false
+                                pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            }, leadingIcon = { Icon(Icons.photo, null) })
+                            DropdownMenuItem({ Text("Files") }, {
+                                menu = false
+                                pickFiles.launch(arrayOf("*/*"))
+                            }, leadingIcon = { Icon(Icons.doc, null) })
+                        }
                     }
                 },
                 maxLines = 7,

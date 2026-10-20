@@ -1,6 +1,6 @@
 // The conversation with seimei: rendering events, live text, approval cards, and the composer.
 import { md } from './md.js';
-import { $, S, hooks, el, svg, clock, dayKey, dayLabel, plural, post, view, finePointer, ICON } from './util.js';
+import { $, S, hooks, el, svg, clock, dayKey, dayLabel, plural, post, view, finePointer, toLogin, ICON } from './util.js';
 import { openWorker } from './agents.js';
 
 export const log = $('log');
@@ -48,6 +48,7 @@ export function phrase(name, n) {
   if (name === 'mcp__seimei__message') return n === 1 ? 'messaged a shikigami' : `sent ${n} shikigami messages`;
   if (name === 'mcp__seimei__stop') return 'stopped a shikigami';
   if (name === 'mcp__seimei__show_image') return n === 1 ? 'showed you an image' : `showed you ${n} images`;
+  if (name === 'mcp__seimei__send_file') return n === 1 ? 'sent you a file' : `sent you ${n} files`;
   const short = name.startsWith('mcp__') ? name.split('__').pop().replace(/_/g, ' ') : name;
   return n === 1 ? `used ${short}` : `used ${short} ${n} times`;
 }
@@ -236,6 +237,40 @@ function pic(name) {
   return img;
 }
 
+// ---------- files ----------
+
+const FILE_ICON = {
+  archive: 'M4 7.5 12 3.5l8 4v9l-8 4-8-4zM4 7.5l8 4 8-4M12 11.5v9',
+  audio: 'M9 18V5.5l10-2v12.5M9 18a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0zM19 16a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z',
+  video: 'M4 6.5h11v11H4zM15 10.5l5-3v9l-5-3',
+  image: 'M6.5 4.5h11a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3h-11a3 3 0 0 1-3-3v-9a3 3 0 0 1 3-3zM20.5 15.5l-4.2-4.2a1.5 1.5 0 0 0-2.1 0L5.5 19.5',
+  code: 'M9 8l-4 4 4 4M15 8l4 4-4 4',
+  doc: 'M6 3h9l4 4v14H6zM14 3v5h5M9 13h6M9 17h6',
+};
+const fileIcon = (kind) => FILE_ICON[kind] || FILE_ICON.doc;
+export const size = (n) => (n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+const KIND_LABEL = { pdf: 'PDF', archive: 'Archive', audio: 'Audio', video: 'Video', image: 'Image', code: 'Code', text: 'Text', file: 'File' };
+
+// A file as a download chip; the laptop always serves it as an attachment, never rendered.
+export function fileChip(f) {
+  const a = el('a', 'fchip sl');
+  a.href = `api/uploads/${f.id}`;
+  a.download = f.name;
+  const ic = el('span', 'ic');
+  ic.append(svg(fileIcon(f.kind), 20));
+  const txt = el('span', 'txt');
+  txt.append(el('b', null, f.name), el('small', null, `${size(f.size)} · ${KIND_LABEL[f.kind] || 'File'}`));
+  a.append(ic, txt, svg('M12 4v11M7 10.5l5 5 5-5M5 20h14', 18));
+  return a;
+}
+
+function sentFile(ev) {
+  const fig = el('figure', 'shown file');
+  fig.append(fileChip({ ...ev, id: ev.file }));
+  if (ev.caption) fig.append(el('figcaption', null, ev.caption));
+  return fig;
+}
+
 export function message(ev) {
   const node = el('div', `msg ${ev.type}`);
   if (ev.type === 'assistant') node.innerHTML = md(ev.text);
@@ -244,6 +279,11 @@ export function message(ev) {
       const pics = el('div', `pics n${Math.min(ev.images.length, 3)}${ev.text ? '' : ' only'}`);
       ev.images.forEach((n) => pics.append(pic(n)));
       node.append(pics);
+    }
+    if (ev.files?.length) {
+      const box = el('div', 'files');
+      ev.files.forEach((f) => box.append(fileChip(f)));
+      node.append(box);
     }
     if (ev.text) node.append(document.createTextNode(ev.text));
   }
@@ -321,6 +361,7 @@ export class Renderer {
     else if (ev.type === 'system') this.note(ev);
     else if (ev.type === 'worker') this.put(workerCard(ev));
     else if (ev.type === 'image') this.put(shown(ev));
+    else if (ev.type === 'file') this.put(sentFile(ev));
     else if (ev.type === 'approval') this.put(approvalCard(ev));
     else if (ev.type === 'rate_limit') this.put(el('div', `note ${ev.status === 'rejected' ? 'error' : 'warn'}`, limitText(ev)));
   }
@@ -439,12 +480,17 @@ $('composer').addEventListener('submit', async (e) => {
   autosize();
   renderAttachments();
   try {
-    await post('api/send', { text, images: sending.map((a) => ({ data: a.data })) });
+    // Files upload as soon as they are picked; wait for any still on the way.
+    await Promise.all(sending.map((a) => a.upload).filter(Boolean));
+    if (sending.some((a) => a.kind === 'file' && !a.id)) throw new Error('upload');
+    await post('api/send', { text, images: sending.filter((a) => a.kind === 'image').map((a) => ({ data: a.data })),
+      files: sending.filter((a) => a.kind === 'file').map((a) => a.id) });
     if (!input.value) saveDraft();
-    sending.forEach((a) => URL.revokeObjectURL(a.url));
+    sending.forEach((a) => a.url && URL.revokeObjectURL(a.url));
   } catch {
     input.value = text;
-    attachments.unshift(...sending);
+    // A file whose upload failed is gone; the rest wait for another try.
+    attachments.unshift(...sending.filter((a) => a.kind !== 'file' || a.id));
     renderAttachments();
     saveDraft();
     autosize();
@@ -492,16 +538,39 @@ async function prepare(file) {
     blob = await new Promise((resolve) => c.toBlob(resolve, 'image/jpeg', 0.85));
   }
   bmp.close?.();
-  return { data: await toBase64(blob), url: URL.createObjectURL(blob) };
+  return { kind: 'image', data: await toBase64(blob), url: URL.createObjectURL(blob) };
+}
+
+const MAX_FILE = 50 << 20;
+const PICTURE = /^image\/(jpeg|png|webp|gif)$/;
+
+// Any other file goes up to the laptop right away; the message then names it by id.
+function uploadFile(f) {
+  const a = { kind: 'file', name: f.name || 'file', size: f.size, id: null };
+  a.upload = fetch(`api/upload?name=${encodeURIComponent(a.name)}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: f,
+  }).then(async (r) => {
+    if (r.status === 401) toLogin();
+    const body = await r.json().catch(() => null);
+    if (!r.ok || !body?.id) throw new Error(body?.error || 'upload failed');
+    Object.assign(a, { id: body.id, kind: 'file', fkind: body.kind });
+  }).catch((e) => {
+    attachments.splice(attachments.indexOf(a) >>> 0, attachments.includes(a) ? 1 : 0);
+    main.add({ type: 'system', level: 'error', text: `Could not upload ${a.name}: ${e.message}` });
+  }).finally(() => { a.upload = null; renderAttachments(); });
+  return a;
 }
 
 async function addFiles(list) {
   for (const f of list) {
-    if (!f.type.startsWith('image/') || attachments.length >= 6) continue;
+    const pics = attachments.filter((a) => a.kind === 'image').length;
+    const files = attachments.length - pics;
     try {
-      attachments.push(await prepare(f));
+      if (PICTURE.test(f.type) && pics < 6) attachments.push(await prepare(f));
+      else if (f.size > MAX_FILE) main.add({ type: 'system', level: 'error', text: `${f.name} is over 50 MB.` });
+      else if (files < 10) attachments.push(uploadFile(f));
     } catch {
-      main.add({ type: 'system', level: 'error', text: `Could not read ${f.name || 'that image'}.` });
+      main.add({ type: 'system', level: 'error', text: `Could not read ${f.name || 'that file'}.` });
     }
   }
   renderAttachments();
@@ -511,20 +580,25 @@ function renderAttachments() {
   const box = $('attachments');
   box.replaceChildren();
   attachments.forEach((a, i) => {
-    const item = el('div', 'att');
-    const img = el('img');
-    img.src = a.url;
-    img.alt = '';
+    const item = el('div', `att${a.kind === 'file' ? ' file' : ''}${a.upload ? ' busy' : ''}`);
+    if (a.kind === 'file') {
+      item.append(svg(fileIcon(a.fkind), 20), el('span', 'fname', a.name));
+    } else {
+      const img = el('img');
+      img.src = a.url;
+      img.alt = '';
+      item.append(img);
+    }
     const x = el('button', 'remove sl');
     x.type = 'button';
     x.setAttribute('aria-label', 'Remove');
     x.append(svg('M6 6l12 12M18 6 6 18', 14));
     x.addEventListener('click', () => {
-      URL.revokeObjectURL(a.url);
+      if (a.url) URL.revokeObjectURL(a.url);
       attachments.splice(i, 1);
       renderAttachments();
     });
-    item.append(img, x);
+    item.append(x);
     box.append(item);
   });
   box.hidden = attachments.length === 0;

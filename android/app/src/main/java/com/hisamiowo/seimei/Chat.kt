@@ -10,7 +10,8 @@ sealed interface Item {
     val key: String
 
     data class Day(override val key: String, val t: Double) : Item
-    data class Msg(override val key: String, val role: String, val text: String, val images: List<String>, val t: Double) : Item
+    data class Msg(override val key: String, val role: String, val text: String, val images: List<String>, val t: Double,
+                   val files: List<FileRef> = emptyList()) : Item
     data class Note(override val key: String, val text: String, val level: String, val n: Int = 1, val t: Double = 0.0) : Item
     data class Activity(override val key: String, val calls: List<Call>) : Item
     data class Worker(
@@ -22,7 +23,16 @@ sealed interface Item {
         val detail: String, val expires: Double, val outcome: String?,
     ) : Item
     data class Shown(override val key: String, val file: String, val caption: String) : Item
+    /** A file seimei handed over to download. */
+    data class Sent(override val key: String, val file: FileRef, val caption: String) : Item
 }
+
+/** A file stored on the laptop (uploads.py), downloaded only when tapped. */
+data class FileRef(val id: String, val name: String, val size: Long, val kind: String)
+
+fun JSONObject.fileRef(id: String = str("id")) = FileRef(id, str("name"), optLong("size"), str("kind"))
+
+fun sizeText(n: Long) = if (n >= 1 shl 20) "%.1f MB".format(n / 1048576.0) else "${maxOf(1L, Math.round(n / 1024.0))} KB"
 
 data class Call(val id: String, val name: String, val summary: String, val running: Boolean = true,
                 val error: Boolean = false, val out: String = "")
@@ -111,7 +121,9 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault()) {
         when (type) {
             "user", "assistant" -> {
                 val imgs = ev.optJSONArray("images")
-                put(Item.Msg(key, type, ev.str("text"), List(imgs?.length() ?: 0) { imgs!!.getString(it) }, t))
+                val files = ev.optJSONArray("files")
+                put(Item.Msg(key, type, ev.str("text"), List(imgs?.length() ?: 0) { imgs!!.getString(it) }, t,
+                    List(files?.length() ?: 0) { files!!.getJSONObject(it).fileRef() }))
             }
             "system" -> note(ev.str("text"), ev.str("level"), t, key)
             "worker" -> {
@@ -124,6 +136,8 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault()) {
                 }
             }
             "image" -> put(Item.Shown(key, ev.str("file"), ev.str("caption")))
+            // "file", not "id": the event log numbers every event with its own id.
+            "file" -> put(Item.Sent(key, ev.fileRef(ev.str("file")), ev.str("caption")))
             "approval" -> {
                 val aid = ev.str("aid")
                 approvals[aid] = put(Item.Approval(key, aid, ev.str("who"), ev.str("action"), ev.str("target"),
@@ -172,6 +186,7 @@ fun phrase(name: String, n: Int): String = when {
     name == "mcp__seimei__message" -> if (n == 1) "messaged a shikigami" else "sent $n shikigami messages"
     name == "mcp__seimei__stop" -> "stopped a shikigami"
     name == "mcp__seimei__show_image" -> if (n == 1) "showed you an image" else "showed you $n images"
+    name == "mcp__seimei__send_file" -> if (n == 1) "sent you a file" else "sent you $n files"
     else -> {
         val short = if (name.startsWith("mcp__")) name.split("__").last().replace('_', ' ') else name
         if (n == 1) "used $short" else "used $short $n times"

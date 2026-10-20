@@ -23,7 +23,7 @@ def ago(t: float) -> str:
     return f"{s // 60} min ago" if s < 3600 else f"{s // 3600} h ago" if s < 86400 else f"{s // 86400} d ago"
 
 
-def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = ()):
+def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), uploads=None):
     @tool("summon", "Start a shikigami: a worker Claude Code session that works on a task on its own and reports back. "
           "Pick a short lowercase name, the folder the task is about, and a model (opus for real work, sonnet for "
           "routine jobs, haiku for quick lookups). Returns at once; the report arrives later.", {
@@ -116,6 +116,24 @@ def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = ()):
         events.add({"type": "image", "file": name, "caption": str(args.get("caption") or "")[:300]})
         return text("Shown to the user.")
 
+    @tool("send_file", "Hand the user a file to download on their phone or page: any type (PDF, archive, log, "
+          "audio...), up to 50 MB. It shows in the chat as a download chip. For pictures to look at, use show_image.", {
+              "type": "object",
+              "properties": {"path": {"type": "string", "description": "absolute path of the file"},
+                             "caption": {"type": "string", "description": "optional one-line caption"}},
+              "required": ["path"]})
+    async def send_file(args):
+        if not uploads:
+            return text("File sending is not set up.", error=True)
+        try:
+            info = uploads.add(Path(os.path.expanduser(str(args["path"]))))
+        except (OSError, ValueError) as e:
+            return text(f"Could not send it: {e}", error=True)
+        # "file", not "id": the event log numbers every event with its own id.
+        events.add({"type": "file", "file": info["id"], **{k: info[k] for k in ("name", "size", "kind")},
+                    "caption": str(args.get("caption") or "")[:300]})
+        return text(f"Sent {info['name']} to the user.")
+
     own = pool.own_sessions
 
     @tool("sessions", "List every running Claude Code session on the laptop: name, status (idle, busy, waiting with "
@@ -165,5 +183,5 @@ def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = ()):
     async def usage(args):
         return text(pool.dispatcher.usage.report())
 
-    return create_sdk_mcp_server("seimei", tools=[summon, workers, peek, message, stop, show_image, sessions, session_peek,
+    return create_sdk_mcp_server("seimei", tools=[summon, workers, peek, message, stop, show_image, send_file, sessions, session_peek,
                                                  usage, *extra])

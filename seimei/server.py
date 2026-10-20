@@ -7,6 +7,7 @@ import binascii
 import hashlib
 import json
 import mimetypes
+import urllib.parse
 from pathlib import Path
 
 from aiohttp import web
@@ -16,6 +17,7 @@ from .approvals import Approvals
 from .auth import Auth
 from .cost import Cost
 from .push import Push
+from .uploads import TooLarge, Uploads
 from .dispatcher import Dispatcher
 from .events import EventLog
 from . import desktop as dt
@@ -30,6 +32,7 @@ CSP = ("default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script
        "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 HEARTBEAT = 15
 MAX_IMAGES = 6
+MAX_FILES = 10
 
 
 def load_web() -> tuple[str, dict[str, bytes]]:
@@ -56,7 +59,8 @@ async def write_event(resp: web.StreamResponse, ev: dict):
 
 def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files, approvals: Approvals,
              tool_guard: Guard, watcher: Watcher, desk: Desktop, auth: Auth | None, origins: set[str],
-             app_dir: Path | None = None, cost: Cost | None = None, push: Push | None = None) -> web.Application:
+             app_dir: Path | None = None, cost: Cost | None = None, push: Push | None = None,
+             uploads: Uploads | None = None) -> web.Application:
     @web.middleware
     async def guard(request: web.Request, handler):
         # Never trust the peer address: cloudflared connects from localhost too.
@@ -67,8 +71,10 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
             return web.Response(status=413, text="too large")
         # A bearer token is never sent on its own, so the app's calls need no Origin; cookies do.
         app_call = (request.method, request.path) in DEVICE_PUBLIC or (auth and auth.bearer(request))
+        # Uploads stream raw bytes; the Origin check is what keeps other sites out (no type is required there).
+        body_type = "application/octet-stream" if request.path == "/api/upload" else "application/json"
         if request.method == "POST" and ((not app_call and request.headers.get("Origin") not in origins)
-                                         or request.content_type != "application/json"):
+                                         or request.content_type != body_type):
             return web.Response(status=403, text="forbidden")
         resp = await handler(request)
         if not resp.prepared:
@@ -266,8 +272,13 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
         body = await request.json()
         text = str(body.get("text", "")).strip()
         images = body.get("images") or []
-        if not (text or images) or not isinstance(images, list) or len(images) > MAX_IMAGES:
-            raise web.HTTPBadRequest(text=f"text or up to {MAX_IMAGES} images")
+        attached = body.get("files") or []
+        if (not (text or images or attached) or not isinstance(images, list) or len(images) > MAX_IMAGES
+                or not isinstance(attached, list) or len(attached) > MAX_FILES):
+            raise web.HTTPBadRequest(text=f"text, up to {MAX_IMAGES} images or up to {MAX_FILES} files")
+        infos = [uploads.info(str(f)) for f in attached]
+        if not all(infos):
+            raise web.HTTPBadRequest(text="unknown file")
         saved = []
         for img in images:
             try:
@@ -278,8 +289,24 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
             except (ValueError, binascii.Error, AttributeError) as e:
                 raise web.HTTPBadRequest(text=str(e)[:200])
             saved.append((name, kind, base64.b64encode(data).decode()))
-        await dispatcher.send(text, saved)
+        await dispatcher.send(text, saved, infos)
         return web.json_response({"ok": True})
+
+    async def upload(request):
+        try:
+            info = await uploads.receive(request.query.get("name", "file"), request.content.iter_chunked(1 << 16))
+        except TooLarge as e:
+            return web.json_response({"error": str(e)}, status=413)
+        return web.json_response({k: info[k] for k in ("id", "name", "size", "kind")})
+
+    async def uploaded(request):
+        path = uploads.path(request.match_info["id"])
+        if not path:
+            raise web.HTTPNotFound()
+        # Always a download, never rendered: the file is untrusted.
+        return web.FileResponse(path, headers={
+            "Content-Type": "application/octet-stream", "Cache-Control": "private, no-store",
+            "Content-Disposition": f"attachment; filename*=UTF-8''{urllib.parse.quote(path.name)}"})
 
     async def session(request):
         """Read-only look at one of the user's sessions."""
@@ -411,6 +438,8 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     app.router.add_post("/api/interrupt", interrupt)
     app.router.add_get("/api/auth/me", me)
     app.router.add_get("/api/files/{name}", file)
+    app.router.add_post("/api/upload", upload)
+    app.router.add_get("/api/uploads/{id}", uploaded)
     app.router.add_post("/api/approvals/{aid}", decide)
     app.router.add_get("/api/usage", usage)
     app.router.add_get("/api/cost", cost_view)

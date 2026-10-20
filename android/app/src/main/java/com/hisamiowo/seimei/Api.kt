@@ -1,16 +1,27 @@
 package com.hisamiowo.seimei
 
+import java.io.IOException
+import java.io.InputStream
+import java.io.OutputStream
+import java.net.URLEncoder
+import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okio.BufferedSink
+import okio.buffer
+import okio.sink
+import okio.source
 import org.json.JSONObject
-import java.io.IOException
-import java.util.concurrent.TimeUnit
 
 class HttpError(val code: Int, val body: String) : IOException("HTTP $code: ${body.take(200)}")
 
@@ -48,6 +59,40 @@ class Api(server: String) {
         return JSONObject(String(call(req)))
     }
 
+    /** Runs a call that stops at once when its coroutine is cancelled, reading the body with [read]. */
+    private suspend fun <T> await(req: Request, read: (okhttp3.ResponseBody) -> T): T = suspendCancellableCoroutine { cont ->
+        val call = client.newCall(req)
+        cont.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : okhttp3.Callback {
+            override fun onFailure(call: okhttp3.Call, e: IOException) = cont.resumeWithException(e)
+            override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) = response.use { r ->
+                try {
+                    if (!r.isSuccessful) throw HttpError(r.code, r.body.string().take(2000))
+                    cont.resume(read(r.body))
+                } catch (e: Exception) {
+                    cont.resumeWithException(e)
+                }
+            }
+        })
+    }
+
+    /** Streams a file up to the laptop; [open] is read once, never held in memory whole. */
+    suspend fun upload(name: String, open: () -> InputStream): JSONObject {
+        val body = object : RequestBody() {
+            override fun contentType() = OCTET
+            override fun writeTo(sink: BufferedSink) {
+                open().use { sink.writeAll(it.source()) }
+            }
+        }
+        val req = request("api/upload?name=" + URLEncoder.encode(name, "UTF-8")).post(body).build()
+        return JSONObject(await(req) { it.string() })
+    }
+
+    /** Streams a laptop file into [out]. */
+    suspend fun download(path: String, out: OutputStream) = await(request(path).build()) { body ->
+        out.sink().buffer().use { it.writeAll(body.source()) }
+    }
+
     @Volatile
     private var current: okhttp3.Call? = null
 
@@ -80,5 +125,6 @@ class Api(server: String) {
 
     companion object {
         val JSON = "application/json".toMediaType()
+        val OCTET = "application/octet-stream".toMediaType()
     }
 }

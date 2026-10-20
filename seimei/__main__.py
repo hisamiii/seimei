@@ -23,6 +23,7 @@ from .layout import Layout
 from .desktop_tools import make_desktop_tools
 from .music import make_music_tools
 from .cost import Cost
+from .uploads import Uploads
 from .push import FIREBASE, Fcm, Push, make_push_tools
 from .files import Files
 from .guard import Guard
@@ -134,6 +135,7 @@ def main():
     events = EventLog(state / "events.jsonl")
     pool = Pool(events, state)
     files = Files(state)
+    uploads = Uploads(state)
     approvals = Approvals(events)
     guard = Guard(events, approvals, state)
     usage = Usage(events, state)
@@ -141,13 +143,13 @@ def main():
     layout = Layout(desk, approvals, events, state)
     push = Push(events, auth, Fcm(FIREBASE / "service-account.json"), state)
     dispatcher = Dispatcher(disp, events, state, make_tools(pool, files, events, make_desktop_tools(desk, files, events, layout)
-                                                                 + make_music_tools(approvals) + make_push_tools(push)),
+                                                                 + make_music_tools(approvals) + make_push_tools(push), uploads),
                             guard, usage)
     pool.dispatcher, pool.guard = dispatcher, guard
     watcher = Watcher(events, pool.own_sessions, lambda s: dispatcher.note(
         f"The user's session \"{s['name']}\" finished a turn" + (" and asks a question" if s["question"] else "")
         + f" ({time.strftime('%H:%M')}).", key=f"finished:{s['pid']}"))
-    app = make_app(events, dispatcher, pool, files, approvals, guard, watcher, desk, auth, origins, state / "app", Cost(), push)
+    app = make_app(events, dispatcher, pool, files, approvals, guard, watcher, desk, auth, origins, state / "app", Cost(), push, uploads)
 
     async def start(app):
         approvals.startup()

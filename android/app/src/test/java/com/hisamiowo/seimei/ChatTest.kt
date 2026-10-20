@@ -82,6 +82,18 @@ class ChatTest {
         c.add(ev("user", kv = arrayOf("text" to "", "images" to org.json.JSONArray(listOf("a.jpg", "b.png")))))
         assertEquals(listOf("a.jpg", "b.png"), (c.items.last() as Item.Msg).images)
     }
+
+    @Test fun files() {
+        val c = Chat(utc)
+        val f = JSONObject().put("id", "ab12").put("name", "notes.txt").put("size", 2048).put("kind", "text")
+        c.add(ev("user", kv = arrayOf("text" to "", "files" to org.json.JSONArray().put(f))))
+        assertEquals(listOf(FileRef("ab12", "notes.txt", 2048, "text")), (c.items.last() as Item.Msg).files)
+        // The event's own id must not stand in for the file's.
+        c.add(ev("file", kv = arrayOf("file" to "cd34", "name" to "a.pdf", "size" to (3 shl 20), "kind" to "pdf", "caption" to "c")))
+        assertEquals(Item.Sent((c.items.last() as Item.Sent).key, FileRef("cd34", "a.pdf", 3L shl 20, "pdf"), "c"), c.items.last())
+        assertEquals("2 KB", sizeText(2048))
+        assertEquals("3.0 MB", sizeText(3L shl 20))
+    }
 }
 
 class MarkdownTest {

@@ -48,7 +48,7 @@ android {
         minSdk = 30
         targetSdk = 36
         versionCode = (project.findProperty("seimei.versionCode") as String?)?.toInt() ?: 1
-        versionName = (project.findProperty("seimei.versionName") as String?) ?: "0.1"
+        versionName = (project.findProperty("seimei.versionName") as String?) ?: "0.0.0"
         buildConfigField("String", "SERVER", "\"https://seimei.example.org\"")
         // Debug builds may use a key without the fingerprint when the phone has none (emulators); release never does.
         buildConfigField("boolean", "TEST_KEY", "false")
