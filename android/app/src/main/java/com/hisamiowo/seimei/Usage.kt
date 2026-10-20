@@ -57,7 +57,8 @@ fun tokens(n: Long): String = when {
     else -> "$n"
 }
 
-fun usd(n: Double): String = if (n >= 1000) "$" + "%,d".format(Locale.US, Math.round(n)) else "$" + "%.2f".format(Locale.US, n)
+/** Cents only below $100: past that they are noise. */
+fun usd(n: Double): String = if (n >= 100) "$" + "%,d".format(Locale.US, Math.round(n)) else "$" + "%.2f".format(Locale.US, n)
 
 /** claude-opus-5-5 as Opus 5.5. */
 fun modelName(k: String): String = k.removePrefix("claude-").replace(Regex("-(\\d+)-(\\d+)$"), " $1.$2").replace(Regex("-(\\d+)$"), " $1")
@@ -91,7 +92,7 @@ fun UsageTab(vm: Seimei) {
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.Bottom) {
                     Text(label, fontWeight = FontWeight.Medium, fontSize = 15.sp, modifier = Modifier.weight(1f))
-                    Text("${Math.round(util * 100)}%", fontSize = 28.sp, color = tone)
+                    Text("${Math.round(util * 100)}%", fontSize = 28.sp, color = tone, style = TNUM)
                 }
                 LinearProgressIndicator(
                     progress = { util.toFloat().coerceIn(0f, 1f) }, color = tone, trackColor = cs.surfaceContainerHigh,
@@ -157,7 +158,7 @@ fun CostSection(cost: JSONObject?) {
                     Text(listOf(sub, "%,d API calls".format(Locale.US, p.optLong("messages"))).filter { it.isNotEmpty() }.joinToString(" · "),
                         fontSize = 12.sp, color = LocalExtra.current.text3)
                 }
-                Text(usd(p.optDouble("usd")), fontSize = 20.sp)
+                Text(usd(p.optDouble("usd")), fontSize = 20.sp, style = TNUM)
                 Spacer(Modifier.width(6.dp))
                 Icon(Icons.chev, null, Modifier.size(18.dp).rotate(if (open) 90f else 0f), tint = LocalExtra.current.text3)
             }
@@ -168,7 +169,7 @@ fun CostSection(cost: JSONObject?) {
                     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(cs.surfaceContainerLow).padding(horizontal = 12.dp, vertical = 8.dp)) {
                         Row {
                             Text(modelName(m), fontSize = 14.sp, modifier = Modifier.weight(1f))
-                            Text(usd(v.optDouble("usd")), fontSize = 14.sp)
+                            Text(usd(v.optDouble("usd")), fontSize = 14.sp, style = TNUM)
                         }
                         Text("${tokens(v.optLong("output"))} out · ${tokens(v.optLong("input"))} in · ${tokens(v.optLong("cache_read"))} cache read · " +
                             "${tokens(v.optLong("cache_write"))} cache write", fontSize = 12.sp, color = LocalExtra.current.text3)

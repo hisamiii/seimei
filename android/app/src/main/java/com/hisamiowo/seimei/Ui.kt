@@ -37,6 +37,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontVariation
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.ExperimentalTextApi
+import androidx.compose.material3.Typography
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -129,6 +135,28 @@ data class Extra(val ok: Color, val warn: Color, val text2: Color, val text3: Co
 
 val LocalExtra = androidx.compose.runtime.staticCompositionLocalOf { Extra(Mocha.ok, Mocha.warn, Mocha.text2, Mocha.text3) }
 
+/** Google Sans Flex (OFL), bundled: Latin only, pinned to wght 400-700. Cyrillic falls back to the system Roboto. */
+@OptIn(ExperimentalTextApi::class)
+val Sans = FontFamily(listOf(400, 500, 600, 700).map { w ->
+    Font(R.font.google_sans_flex, FontWeight(w), variationSettings = FontVariation.Settings(FontVariation.weight(w)))
+})
+
+private val Base = Typography()
+val SeimeiType = Typography(
+    displayLarge = Base.displayLarge.copy(fontFamily = Sans), displayMedium = Base.displayMedium.copy(fontFamily = Sans),
+    displaySmall = Base.displaySmall.copy(fontFamily = Sans), headlineLarge = Base.headlineLarge.copy(fontFamily = Sans),
+    headlineMedium = Base.headlineMedium.copy(fontFamily = Sans), headlineSmall = Base.headlineSmall.copy(fontFamily = Sans),
+    titleLarge = Base.titleLarge.copy(fontFamily = Sans), titleMedium = Base.titleMedium.copy(fontFamily = Sans),
+    titleSmall = Base.titleSmall.copy(fontFamily = Sans), bodyLarge = Base.bodyLarge.copy(fontFamily = Sans),
+    bodyMedium = Base.bodyMedium.copy(fontFamily = Sans), bodySmall = Base.bodySmall.copy(fontFamily = Sans),
+    labelLarge = Base.labelLarge.copy(fontFamily = Sans), labelMedium = Base.labelMedium.copy(fontFamily = Sans),
+    labelSmall = Base.labelSmall.copy(fontFamily = Sans),
+)
+
+/** The current text style with tabular figures, for numbers that tick or line up (usage, timers). */
+val TNUM: TextStyle
+    @Composable get() = androidx.compose.material3.LocalTextStyle.current.copy(fontFeatureSettings = "tnum")
+
 @Composable
 fun SeimeiTheme(dynamic: Boolean, content: @Composable () -> Unit) {
     val ctx = LocalContext.current
@@ -136,7 +164,7 @@ fun SeimeiTheme(dynamic: Boolean, content: @Composable () -> Unit) {
     val extra = if (scheme === MochaScheme) Extra(Mocha.ok, Mocha.warn, Mocha.text2, Mocha.text3)
     else Extra(Mocha.ok, Mocha.warn, scheme.onSurface.copy(alpha = .85f), scheme.onSurfaceVariant)
     androidx.compose.runtime.CompositionLocalProvider(LocalExtra provides extra) {
-        MaterialTheme(colorScheme = scheme, content = content)
+        MaterialTheme(colorScheme = scheme, typography = SeimeiType, content = content)
     }
 }
 

@@ -446,7 +446,7 @@ fun LivePill(a: Item.Activity, live: JSONObject, open: Boolean, toggle: () -> Un
             Spacer(Modifier.width(8.dp))
             Text(activityLabel(a.calls, id), fontSize = 13.5.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             val since = live.optDouble("since", 0.0)
-            if (since > 0) Text(elapsed(since, now), fontSize = 13.sp, color = LocalExtra.current.text2)
+            if (since > 0) Text(elapsed(since, now), fontSize = 13.sp, color = LocalExtra.current.text2, style = TNUM)
             Spacer(Modifier.width(6.dp))
             Icon(Icons.chev, null, Modifier.size(14.dp).then(if (open) Modifier.rotate90() else Modifier), tint = LocalExtra.current.text3)
         }

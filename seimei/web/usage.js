@@ -63,7 +63,8 @@ export function renderUsage() {
 let cost = null;
 let costAt = 0;
 const open = new Set();
-const usd = (n) => `$${n >= 1000 ? Math.round(n).toLocaleString('en-US') : n.toFixed(2)}`;
+// Cents only below $100: past that they are noise (QA D13).
+const usd = (n) => `$${n >= 100 ? Math.round(n).toLocaleString('en-US') : n.toFixed(2)}`;
 const MODEL = (k) => k.replace(/^claude-/, '').replace(/-(\d+)-(\d+)$/, ' $1.$2').replace(/-(\d+)$/, ' $1')
   .replace(/^./, (c) => c.toUpperCase());
 
