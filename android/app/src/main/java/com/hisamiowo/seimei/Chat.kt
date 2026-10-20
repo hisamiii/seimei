@@ -1,4 +1,4 @@
-package org.example.seimei
+package com.hisamiowo.seimei
 
 import org.json.JSONObject
 import java.time.Instant

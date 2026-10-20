@@ -8,7 +8,7 @@
 Finished shikigami, milestones and the desktop going down or up show only as badges in the app.
 
 Messages are data-only, so the app builds every notification itself (channels per kind, replace, withdraw).
-Needs the Firebase service account key at <state>/firebase/service-account.json; without it nothing is sent.
+Needs the Firebase service account key in FIREBASE (shared by the dev server and the app build); without it nothing is sent.
 """
 
 import asyncio
@@ -28,6 +28,7 @@ log = logging.getLogger(__name__)
 
 QUESTION_GAP = 180
 SCOPE = "https://www.googleapis.com/auth/firebase.messaging"
+FIREBASE = Path.home() / ".local/share/seimei/firebase"
 
 
 def b64(data: bytes) -> str:
@@ -104,7 +105,8 @@ class Push:
         saved = json.loads(self.path.read_text()) if self.path.exists() else {}
         # Questions already pushed, so a restart or a repeated listing does not push them again.
         self.notified: set[str] = set(saved.get("notified", []))
-        self.open: dict[str, int] = {}
+        # device -> its open streams (the requests); None stands for a stream without one, in tests.
+        self.open: dict[str, list] = {}
         self.left: dict[str, float] = {}
         self.last_user = 0.0
         self.approvals: dict[str, dict] = {}
@@ -116,24 +118,36 @@ class Push:
 
     # ---------- which phones have the app open ----------
 
-    def opened(self, device: str | None):
+    def opened(self, device: str | None, request=None):
         if device:
-            self.open[device] = self.open.get(device, 0) + 1
+            self.open.setdefault(device, []).append(request)
 
-    def closed(self, device: str | None):
-        if device:
-            self.open[device] = max(0, self.open.get(device, 0) - 1)
+    def closed(self, device: str | None, request=None):
+        if device and request in self.open.get(device, []):
+            self.open[device].remove(request)
             if not self.open[device]:
                 self.left[device] = time.time()
+
+    def _is_open(self, device: str) -> bool:
+        """Whether the app is on screen. A stream only notices its phone left at its next write (up to a
+        heartbeat later), so look at the connections themselves: a closed one means the app just left."""
+        streams = self.open.get(device, [])
+        live = [r for r in streams if r is None or (r.transport is not None and not r.transport.is_closing())]
+        if streams and not live:
+            self.open[device] = []
+            self.left[device] = time.time()
+        return bool(live)
 
     def _phones(self, only=None) -> list[tuple[str, str]]:
         if not self.auth:
             return []
         return [(d["id"], d["push"]) for d in self.auth.push_devices()
-                if not self.open.get(d["id"]) and (only is None or only(d["id"]))]
+                if not self._is_open(d["id"]) and (only is None or only(d["id"]))]
 
     async def _send(self, data: dict, ttl: int = 3600, only=None):
-        for dev, token in self._phones(only):
+        phones = self._phones(only)
+        log.info("push %s%s to %d phone(s)", data.get("kind"), " cancel" if data.get("cancel") else "", len(phones))
+        for dev, token in phones:
             # The last few pushes, for tests and a look from the laptop.
             self.sent = [*self.sent[-49:], (dev, data)]
             if not self.sender or not self.sender.ready:
@@ -189,6 +203,8 @@ class Push:
         # Only to phones that left the app after the user's latest message.
         if not text or not self.last_user:
             return
+        log.debug("push reply check: last_user %.1f, left %s, open %s", self.last_user,
+                 {d: round(t, 1) for d, t in self.left.items()}, {d: len(r) for d, r in self.open.items()})
         self._fire({"kind": "reply", "tag": "reply", "title": "seimei", "body": text[:600], "alert": 0, "tab": "chat"},
                    only=lambda dev: self.left.get(dev, 0) >= self.last_user)
 

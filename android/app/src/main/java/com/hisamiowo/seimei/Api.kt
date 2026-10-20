@@ -1,4 +1,4 @@
-package org.example.seimei
+package com.hisamiowo.seimei
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -48,10 +48,22 @@ class Api(server: String) {
         return JSONObject(String(call(req)))
     }
 
+    @Volatile
+    private var current: okhttp3.Call? = null
+
+    /**
+     * Closes the event stream's connection now. Cancelling its coroutine alone waits for the blocked read to
+     * return, which takes until the laptop next writes; meanwhile the laptop would think the app is on screen.
+     */
+    fun closeStream() {
+        current?.cancel()
+    }
+
     /** Reads the event stream until it drops; each data line is one JSON event. */
     suspend fun stream(after: Long, onOpen: () -> Unit, onEvent: (JSONObject) -> Unit) = withContext(Dispatchers.IO) {
         val req = request("api/stream?after=$after").header("Accept", "text/event-stream").build()
         val call = client.newCall(req)
+        current = call
         val ctx = currentCoroutineContext()
         ctx[kotlinx.coroutines.Job]?.invokeOnCompletion { call.cancel() }
         call.execute().use { r ->

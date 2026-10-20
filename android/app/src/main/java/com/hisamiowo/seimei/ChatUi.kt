@@ -1,4 +1,4 @@
-package org.example.seimei
+package com.hisamiowo.seimei
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest

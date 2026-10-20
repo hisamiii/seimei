@@ -1,4 +1,4 @@
-package org.example.seimei
+package com.hisamiowo.seimei
 
 import androidx.compose.ui.graphics.Color
 import org.json.JSONObject

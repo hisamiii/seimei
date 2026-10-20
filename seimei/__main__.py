@@ -23,7 +23,7 @@ from .layout import Layout
 from .desktop_tools import make_desktop_tools
 from .music import make_music_tools
 from .cost import Cost
-from .push import Fcm, Push, make_push_tools
+from .push import FIREBASE, Fcm, Push, make_push_tools
 from .files import Files
 from .guard import Guard
 from .server import make_app
@@ -139,7 +139,7 @@ def main():
     usage = Usage(events, state)
     desk = Desktop(events, lambda t: dispatcher.note(t), state / UNLOCK)
     layout = Layout(desk, approvals, events, state)
-    push = Push(events, auth, Fcm(state / "firebase/service-account.json"), state)
+    push = Push(events, auth, Fcm(FIREBASE / "service-account.json"), state)
     dispatcher = Dispatcher(disp, events, state, make_tools(pool, files, events, make_desktop_tools(desk, files, events, layout)
                                                                  + make_music_tools(approvals) + make_push_tools(push)),
                             guard, usage)

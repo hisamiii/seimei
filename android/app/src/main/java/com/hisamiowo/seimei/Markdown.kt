@@ -1,4 +1,4 @@
-package org.example.seimei
+package com.hisamiowo.seimei
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString

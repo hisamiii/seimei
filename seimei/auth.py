@@ -299,13 +299,18 @@ class Auth:
     def set_push(self, device_id: str, token: str | None):
         """The phone's Firebase token for notifications; None stops them."""
         self.load()
+        changed = False
         for d in self.data["devices"]:
-            if d["id"] == device_id and d.get("push") != token:
-                if token:
-                    d["push"] = token
+            # A phone paired again keeps its token; the old pairing must not get the same pushes twice.
+            want = token if d["id"] == device_id else (None if d.get("push") == token else d.get("push"))
+            if d.get("push") != want:
+                if want:
+                    d["push"] = want
                 else:
                     d.pop("push", None)
-                self.save()
+                changed = True
+        if changed:
+            self.save()
 
     def push_devices(self) -> list[dict]:
         self.load()

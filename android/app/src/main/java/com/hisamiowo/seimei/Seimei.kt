@@ -1,4 +1,4 @@
-package org.example.seimei
+package com.hisamiowo.seimei
 
 import android.app.Activity
 import android.app.Application
@@ -188,12 +188,25 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 api.token = r.getString("token")
                 phase = Phase.Ready
                 start()
+                registerPush()
             } catch (e: HttpError) {
                 authError = "Login failed (${e.code})."
             } catch (e: IOException) {
                 authError = "Could not reach the laptop. Is it on?"
             } finally {
                 authBusy = false
+            }
+        }
+    }
+
+    /** Hands this phone's Firebase token to the laptop, which then may push to it. */
+    private fun registerPush() {
+        viewModelScope.launch {
+            val token = Push.token() ?: prefs.pushToken ?: return@launch
+            prefs.pushToken = token
+            try {
+                api.post("api/devices/push", JSONObject().put("token", token))
+            } catch (e: IOException) {
             }
         }
     }
@@ -208,6 +221,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
 
     private fun lock() {
         stream?.cancel()
+        api.closeStream()
         api.token = null
         online = false
         phase = Phase.Locked
@@ -223,6 +237,9 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     fun onStart() {
         foreground = true
         visible = true
+        Push.visible = true
+        // Anything pushed while away is on screen now.
+        Push.clear(getApplication<Application>())
         if (phase != Phase.Ready) return
         // Back after a while away: ask for the fingerprint again.
         if (backgroundSince > 0 && System.currentTimeMillis() - backgroundSince > LOCK_AFTER) return lock()
@@ -232,9 +249,11 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     fun onStop() {
         foreground = false
         visible = false
+        Push.visible = false
         backgroundSince = System.currentTimeMillis()
         stream?.cancel()
         stream = null
+        api.closeStream()
         online = false
     }
 

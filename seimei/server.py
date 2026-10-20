@@ -224,7 +224,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
         # A phone with its stream open has the app on screen, so it gets no pushes meanwhile.
         device = auth and (auth.current(request) or {}).get("device")
         if push:
-            push.opened(device)
+            push.opened(device, request)
         try:
             for ev in events.after(last):
                 await write_event(resp, ev)
@@ -259,7 +259,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
         finally:
             events.unsubscribe(q)
             if push:
-                push.closed(device)
+                push.closed(device, request)
         return resp
 
     async def send(request):

@@ -1,6 +1,12 @@
-package org.example.seimei
+package com.hisamiowo.seimei
 
+import android.Manifest
 import android.app.Activity
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -185,6 +191,7 @@ class MainActivity : ComponentActivity() {
             override fun onStart(owner: LifecycleOwner) = vm.onStart()
             override fun onStop(owner: LifecycleOwner) = vm.onStop()
         })
+        openTab(intent)
         setContent {
             SeimeiTheme(vm.dynamicColor) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
@@ -196,6 +203,17 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        openTab(intent)
+    }
+
+    /** A tapped notification names the tab it is about. */
+    private fun openTab(intent: Intent?) {
+        intent?.getStringExtra("tab")?.takeIf { it in TABS }?.let { vm.show(it) }
+        intent?.removeExtra("tab")
     }
 }
 
@@ -319,6 +337,16 @@ val TITLES = mapOf("chat" to "seimei", "agents" to "Agents", "screen" to "Screen
 @Composable
 fun AppScreen(vm: Seimei) {
     BackHandler(vm.tab != "chat") { vm.show("chat") }
+    // Notifications need a yes on Android 13 and later; asked once, after the first login.
+    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    val ctx = LocalContext.current
+    LaunchedEffect(Unit) {
+        if (Push.configured && !vm.prefs.askedNotifications &&
+            ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            vm.prefs.askedNotifications = true
+            ask.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
     Column(Modifier.fillMaxSize().imePadding()) {
         Header(vm)
         Box(Modifier.weight(1f)) {
@@ -366,6 +394,14 @@ fun Header(vm: Seimei) {
         Box {
             IconButton({ menu = true }) { Icon(Icons.more, "Menu") }
             DropdownMenu(menu, { menu = false }) {
+                val ctx = LocalContext.current
+                if (Push.configured) DropdownMenuItem(
+                    text = { Text("Notifications") },
+                    onClick = {
+                        menu = false
+                        ctx.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName))
+                    },
+                )
                 DropdownMenuItem(
                     text = { Text("Material You colors") },
                     trailingIcon = { Switch(vm.dynamicColor, null) },

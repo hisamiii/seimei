@@ -1,4 +1,4 @@
-package org.example.seimei
+package com.hisamiowo.seimei
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background

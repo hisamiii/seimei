@@ -1,3 +1,4 @@
+import groovy.json.JsonSlurper
 import java.util.Properties
 
 plugins {
@@ -11,14 +12,39 @@ val signing = Properties().apply {
     if (f.exists()) f.inputStream().use { load(it) }
 }
 
+// Firebase (for notifications) is configured from the console's google-services.json, kept outside the repo.
+// Without it the app builds and works, only without notifications.
+val firebase = file(System.getProperty("user.home") + "/.local/share/seimei/firebase/google-services.json")
+
+@Suppress("UNCHECKED_CAST")
+fun firebaseFields(pkg: String): Map<String, String> {
+    if (!firebase.exists()) return emptyMap()
+    val json = JsonSlurper().parse(firebase) as Map<String, Any?>
+    val project = json["project_info"] as Map<String, Any?>
+    val client = (json["client"] as List<Map<String, Any?>>).firstOrNull {
+        ((it["client_info"] as Map<String, Any?>)["android_client_info"] as Map<String, Any?>)["package_name"] == pkg
+    } ?: return emptyMap()
+    return mapOf(
+        "FCM_APP" to (client["client_info"] as Map<String, Any?>)["mobilesdk_app_id"] as String,
+        "FCM_KEY" to ((client["api_key"] as List<Map<String, Any?>>).first()["current_key"] as String),
+        "FCM_PROJECT" to project["project_id"] as String,
+        "FCM_SENDER" to project["project_number"] as String,
+    )
+}
+
+fun com.android.build.api.dsl.VariantDimension.firebase(pkg: String) {
+    val f = firebaseFields(pkg)
+    for (k in listOf("FCM_APP", "FCM_KEY", "FCM_PROJECT", "FCM_SENDER")) buildConfigField("String", k, "\"${f[k] ?: ""}\"")
+}
+
 android {
-    namespace = "org.example.seimei"
+    namespace = "com.hisamiowo.seimei"
     compileSdk {
         version = release(37) { minorApiLevel = 2 }
     }
 
     defaultConfig {
-        applicationId = "org.example.seimei"
+        applicationId = "com.hisamiowo.seimei"
         minSdk = 30
         targetSdk = 36
         versionCode = (project.findProperty("seimei.versionCode") as String?)?.toInt() ?: 1
@@ -26,6 +52,7 @@ android {
         buildConfigField("String", "SERVER", "\"https://seimei.example.org\"")
         // Debug builds may use a key without the fingerprint when the phone has none (emulators); release never does.
         buildConfigField("boolean", "TEST_KEY", "false")
+        firebase("com.hisamiowo.seimei")
     }
 
     signingConfigs {
@@ -44,6 +71,7 @@ android {
             applicationIdSuffix = ".debug"
             buildConfigField("String", "SERVER", "\"http://localhost:8418\"")
             buildConfigField("boolean", "TEST_KEY", "true")
+            firebase("com.hisamiowo.seimei.debug")
         }
         release {
             isMinifyEnabled = true
@@ -76,6 +104,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
     implementation("com.squareup.okhttp3:okhttp:5.5.0")
+    implementation("com.google.firebase:firebase-messaging:25.1.3")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20250517")
 }

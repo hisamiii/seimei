@@ -1,4 +1,4 @@
-package org.example.seimei
+package com.hisamiowo.seimei
 
 import android.app.Activity
 import android.content.Context
@@ -37,6 +37,13 @@ class Prefs(ctx: Context) {
     var draft: String
         get() = p.getString("draft", "") ?: ""
         set(v) = p.edit().putString("draft", v).apply()
+    /** The Firebase token, kept for the next login to hand to the laptop. */
+    var pushToken: String?
+        get() = p.getString("pushToken", null)
+        set(v) = p.edit().putString("pushToken", v).apply()
+    var askedNotifications: Boolean
+        get() = p.getBoolean("askedNotifications", false)
+        set(v) = p.edit().putBoolean("askedNotifications", v).apply()
     /** session id -> the last activity time the user has looked at, for "new reply" marks. */
     var seen: String
         get() = p.getString("seen", "{}") ?: "{}"
