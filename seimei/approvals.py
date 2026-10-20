@@ -37,7 +37,16 @@ def _claude_pid(pid: str) -> bool:
 
 
 NIRI_CONFIG = Path.home() / ".config" / "niri"
-CONFIG_WRITERS = re.compile(r"\bsed\s+(-\w*\s+)*-i|>|\b(tee|cp|mv|rm|ln|truncate|install|dd|perl|python3?)\b")
+# Redirect targets: > file, >> file, &> file, 2> file; not 2>&1 or >&2 (no file).
+REDIRECT = re.compile(r"(?:^|[^<>&\w-])(?:\d|&)?>>?\|?\s*(?!&)(\"[^\"]*\"|'[^']*'|[^\s;&|<>()]+)")
+NIRI_CD = re.compile(r"\bcd\s+[\"']?(~|\$HOME|\$\{HOME\}|" + re.escape(str(Path.home())) + r")/\.config/niri\b")
+# Changes every operand: any niri path among them is a write.
+ANY_OPERAND = {"tee", "rm", "truncate", "mv", "touch", "shred", "unlink"}
+# Writes only the destination: the last operand, or -t DIR.
+TO_LAST = {"cp", "install", "ln", "rsync"}
+INTERPRETERS = {"python", "python3", "perl", "node", "ruby"}
+SCRIPT_WRITES = re.compile(r"""open\([^)]*,\s*(mode\s*=\s*)?['"][^'"]*[wax+]|write_(text|bytes)|os\.(replace|rename|remove|unlink)|"""
+                           r"""\.unlink\(|shutil\.(copy|move)|writeFile|appendFile|rmSync|unlinkSync|renameSync|\bopen\s*\(?\s*[A-Z]*\s*,\s*['"]?[+>]""")
 KITTY_CLOSE = {"close-window", "close-tab"}
 
 
@@ -115,13 +124,72 @@ def _niri_config(path: str) -> bool:
         return False
 
 
+def _shell_path(word: str, in_niri: bool) -> bool:
+    """A word of a command names something under ~/.config/niri (relative words too, after a cd there)."""
+    w = word.strip("\"'")
+    w = re.sub(r"^(\$HOME|\$\{HOME\})(?=/|$)", str(Path.home()), w)
+    if not w or w.startswith("-") or w == "/dev/null":
+        return False
+    if not (w.startswith(("/", "~")) or in_niri):
+        return False
+    return _niri_config(w if w.startswith(("/", "~")) else str(NIRI_CONFIG / w))
+
+
+def _no_redirects(args: list[str]) -> list[str]:
+    """Words without redirections (2>/dev/null, > file, <in): REDIRECT already looked at their targets."""
+    out, skip = [], False
+    for a in args:
+        if skip:
+            skip = False
+        elif re.fullmatch(r"(\d|&)?(>>?|<<?)\|?", a):
+            skip = True
+        elif not re.match(r"^(\d|&)?(>>?|<)", a):
+            out.append(a)
+    return out
+
+
+def _writes_niri(cmd: str) -> bool:
+    """A Bash command writes under ~/.config/niri; reading it (cat, sed -n, cp out of it) is fine."""
+    if "niri" not in cmd:
+        return False
+    in_niri = bool(NIRI_CD.search(cmd))
+    if any(_shell_path(m.group(1), in_niri) for m in REDIRECT.finditer(cmd)):
+        return True
+    for argv in commands(cmd):
+        if not argv:
+            continue
+        prog, args = argv[0], _no_redirects(argv[1:])
+        ops = [a for a in args if not a.startswith("-")]
+        if prog in ANY_OPERAND and any(_shell_path(a, in_niri) for a in ops):
+            return True
+        if prog in TO_LAST:
+            dest = next((a.split("=", 1)[1] for a in args if a.startswith("--target-directory=")), None)
+            if dest is None and "-t" in args[:-1]:
+                dest = args[args.index("-t") + 1]
+            if dest is None and ops:
+                dest = ops[-1]
+            if dest and _shell_path(dest, in_niri):
+                return True
+        if prog == "dd" and any(a.startswith("of=") and _shell_path(a[3:], in_niri) for a in args):
+            return True
+        if prog in ("sed", "perl") and any(a == "--in-place" or a.startswith("--in-place=")
+                                           or re.match(r"^-[a-zA-Z]*i", a) for a in args):
+            if any(_shell_path(a, in_niri) for a in ops):
+                return True
+        if prog.rstrip("0123456789.") in INTERPRETERS or prog in INTERPRETERS:
+            # Scripts: a niri path in the text together with something that writes.
+            if (".config/niri" in cmd or in_niri) and SCRIPT_WRITES.search(cmd):
+                return True
+    return False
+
+
 def check(tool: str, inp: dict) -> dict | None:
     """What a tool call needs the user's OK for, or None."""
     if tool == "Bash":
         cmd = str(inp.get("command", ""))
         if hit := _command_hit(cmd):
             return {"action": "command", "target": hit, "detail": cmd}
-        if ".config/niri" in cmd and CONFIG_WRITERS.search(cmd):
+        if _writes_niri(cmd):
             return {"action": "command", "target": "edit the niri config", "detail": cmd}
     elif tool in ("Write", "Edit", "NotebookEdit"):
         path = str(inp.get("file_path") or inp.get("notebook_path") or "")
