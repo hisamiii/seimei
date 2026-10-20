@@ -1,12 +1,11 @@
-"""Phone notifications through Firebase Cloud Messaging, following the user's rules.
+"""Phone notifications through Firebase Cloud Messaging, following the user's rules. Only three things push:
 
-- Sound: approval cards; questions from shikigami or the user's own sessions, at most one push per
-  QUESTION_GAP ("2 agents need you"); pings the dispatcher sends for things the user asked to hear about
-  (bundled until the user opens the app); its urgent flag for rare emergencies.
-- Silent: the dispatcher's reply, only when the user sent a message and then left the app.
-- Nothing while the app is open on that phone. Each kind has one notification that later pushes replace,
-  and it is withdrawn once it no longer applies (card decided, question answered).
-Finished shikigami, milestones and the desktop going down or up show only as badges in the app.
+- The dispatcher's finished turn, with its last text as the preview: silent, one notification that later turns
+  update ("3 replies"), skipped for a phone that shows the chat right now. Seeing the chat starts a fresh count.
+- Approval cards waiting, with sound; withdrawn once decided.
+- The dispatcher's own notify (bundled until the user opens the app) and urgent pings, with sound.
+Nothing else: questions, finished shikigami, milestones and the desktop show only in the app.
+Approvals and pings skip a phone with the app open on any view: the card or the chat is in front of the user there.
 
 Messages are data-only, so the app builds every notification itself (channels per kind, replace, withdraw).
 Needs the Firebase service account key in FIREBASE (shared by the dev server and the app build); without it nothing is sent.
@@ -27,7 +26,6 @@ from .events import EventLog
 
 log = logging.getLogger(__name__)
 
-QUESTION_GAP = 180
 SCOPE = "https://www.googleapis.com/auth/firebase.messaging"
 FIREBASE = Path.home() / ".local/share/seimei/firebase"
 
@@ -103,18 +101,17 @@ class Push:
         self.auth = auth
         self.sender = sender
         self.path = state / "push.json"
-        saved = json.loads(self.path.read_text()) if self.path.exists() else {}
-        # Questions already pushed, so a restart or a repeated listing does not push them again.
-        self.notified: set[str] = set(saved.get("notified", []))
+        # Questions pushed before the rules changed: withdrawn once at start (push.json held them).
+        self.stale_questions = self.path.exists() and bool(json.loads(self.path.read_text()).get("notified"))
         # device -> its open streams (the requests); None stands for a stream without one, in tests.
         self.open: dict[str, list] = {}
         self.left: dict[str, float] = {}
-        self.last_user = 0.0
+        # device -> what its app shows: "chat", another tab, or "page" (an agent's page).
+        self.view: dict[str, str] = {}
         self.approvals: dict[str, dict] = {}
-        self.asking_workers: dict[str, str] = {}
-        self.asking_sessions: dict[str, str] = {}
-        self.last_question = 0.0
-        self.later: asyncio.TimerHandle | None = None
+        self.turn_text = ""
+        # Finished turns since the user last saw the chat; one notification shows them.
+        self.replies: list[str] = []
         self.sent: list[tuple[str, dict]] = []
         # Pings since the user last had the app open; a new one shows them all.
         self.pings: list[tuple[str, str]] = []
@@ -125,6 +122,18 @@ class Push:
         if device:
             self.open.setdefault(device, []).append(request)
             self.pings.clear()
+            if self.view.get(device, "chat") == "chat":
+                self.replies.clear()
+
+    def shows(self, device: str | None, view: str):
+        """The app on this phone switched views. Seeing the chat clears the replies."""
+        if device:
+            self.view[device] = view
+            if view == "chat" and self._is_open(device):
+                self.replies.clear()
+
+    def _on_chat(self, device: str) -> bool:
+        return self._is_open(device) and self.view.get(device, "chat") == "chat"
 
     def closed(self, device: str | None, request=None):
         if device and request in self.open.get(device, []):
@@ -143,10 +152,11 @@ class Push:
         return bool(live)
 
     def _phones(self, only=None) -> list[tuple[str, str]]:
+        """Phones to push to: by default those without the app open; only= replaces that test."""
         if not self.auth:
             return []
-        return [(d["id"], d["push"]) for d in self.auth.push_devices()
-                if not self._is_open(d["id"]) and (only is None or only(d["id"]))]
+        keep = only or (lambda dev: not self._is_open(dev))
+        return [(d["id"], d["push"]) for d in self.auth.push_devices() if keep(d["id"])]
 
     async def _send(self, data: dict, ttl: int = 3600, only=None):
         phones = self._phones(only)
@@ -165,6 +175,10 @@ class Push:
     # ---------- the event stream ----------
 
     async def run(self):
+        if self.stale_questions:
+            self._fire({"kind": "question", "tag": "question", "cancel": 1}, only=lambda dev: True)
+            self.path.write_text(json.dumps({}))
+            self.stale_questions = False
         while True:
             q = self.events.subscribe()
             try:
@@ -178,39 +192,33 @@ class Push:
 
     def handle(self, ev: dict):
         kind = ev.get("type")
-        if kind == "user":
-            self.last_user = ev.get("t", time.time())
-        elif kind == "assistant":
-            self._reply(ev.get("text", ""))
+        if kind == "assistant":
+            self.turn_text = ev.get("text", "") or self.turn_text
+        elif kind == "state" and not ev.get("busy"):
+            text, self.turn_text = self.turn_text.strip(), ""
+            if text:
+                self._reply(text)
         elif kind == "approval":
             self.approvals[ev["aid"]] = ev
             self._approvals(alert=True)
         elif kind == "approval_done":
             if self.approvals.pop(ev.get("aid"), None) is not None:
                 self._approvals(alert=False)
-        elif kind == "workers":
-            self.asking_workers = {f"w:{w['id']}": f"{w['name']} asks: {w.get('question') or 'a question'}"
-                                   for w in ev.get("list", []) if w.get("state") == "asking"}
-            self._questions()
-        elif kind == "sessions":
-            asks = {}
-            for s in ev.get("list", []):
-                q = s.get("question")
-                if isinstance(q, str) and q:
-                    asks[f"s:{s.get('session_id') or s['pid']}"] = f"{s['name']} asks: {q.splitlines()[0]}"
-                elif s.get("status") == "waiting":
-                    asks[f"s:{s.get('session_id') or s['pid']}"] = f"{s['name']} is waiting for {s.get('waiting_for') or 'you'}"
-            self.asking_sessions = asks
-            self._questions()
 
     def _reply(self, text: str):
-        # Only to phones that left the app after the user's latest message.
-        if not text or not self.last_user:
+        """A finished turn: to every phone that is not showing the chat, its app open on another view or not."""
+        phones = [d for d, _ in self._phones(lambda dev: not self._on_chat(dev))]
+        if not phones:
             return
-        log.debug("push reply check: last_user %.1f, left %s, open %s", self.last_user,
-                 {d: round(t, 1) for d, t in self.left.items()}, {d: len(r) for d, r in self.open.items()})
-        self._fire({"kind": "reply", "tag": "reply", "title": "seimei", "body": text[:600], "alert": 0, "tab": "chat"},
-                   only=lambda dev: self.left.get(dev, 0) >= self.last_user)
+        self.replies = [*self.replies[-9:], text]
+        if len(self.replies) == 1:
+            title, body = "seimei", text[:600]
+        else:
+            # Newest first: the preview the user wants is the latest one.
+            title = f"seimei · {len(self.replies)} replies"
+            body = "\n\n".join(r[:240] for r in reversed(self.replies[-4:]))
+        self._fire({"kind": "reply", "tag": "reply", "title": title, "body": body[:900], "alert": 0, "tab": "chat"},
+                   only=lambda dev: not self._on_chat(dev))
 
     def _approvals(self, alert: bool):
         if not self.approvals:
@@ -222,39 +230,6 @@ class Push:
         else:
             title, body = f"{len(self.approvals)} approvals waiting", ", ".join(a.get("who", "") for a in self.approvals.values())
         self._fire({"kind": "approval", "tag": "approval", "title": title, "body": body, "alert": int(alert), "tab": "chat"}, ttl=600)
-
-    def _questions(self):
-        asking = {**self.asking_workers, **self.asking_sessions}
-        before = set(self.notified)
-        self.notified &= set(asking)
-        if not asking:
-            if before:
-                self._fire({"kind": "question", "tag": "question", "cancel": 1})
-            self._save(before)
-            return
-        if set(asking) - self.notified:
-            wait = self.last_question + QUESTION_GAP - time.time()
-            if wait <= 0:
-                self._push_questions()
-            elif not self.later:
-                self.later = asyncio.get_running_loop().call_later(wait, self._push_questions)
-        self._save(before)
-
-    def _push_questions(self):
-        self.later = None
-        asking = {**self.asking_workers, **self.asking_sessions}
-        if not asking or not set(asking) - self.notified:
-            return
-        before = set(self.notified)
-        self.notified = set(asking)
-        self.last_question = time.time()
-        texts = list(asking.values())
-        if len(texts) == 1:
-            title, _, body = texts[0].partition(": ")
-        else:
-            title, body = f"{len(texts)} agents need you", "\n".join(texts)
-        self._fire({"kind": "question", "tag": "question", "title": title[:120], "body": body[:600], "alert": 1, "tab": "agents"})
-        self._save(before)
 
     def urgent(self, text: str):
         self._fire({"kind": "urgent", "tag": "urgent", "title": "seimei: urgent", "body": text[:600], "alert": 1, "tab": "chat"})
@@ -268,18 +243,14 @@ class Push:
             title, body = f"{len(self.pings)} updates", "\n".join(f"{t}: {b}" if b else t for t, b in self.pings)
         self._fire({"kind": "ping", "tag": "ping", "title": title, "body": body[:900], "alert": 1, "tab": "chat"})
 
-    def _save(self, before: set):
-        if self.notified != before:
-            self.path.write_text(json.dumps({"notified": sorted(self.notified)}))
-
 
 def make_push_tools(push: Push) -> list:
     from claude_agent_sdk import tool
 
     @tool("urgent", "Push an urgent notification with sound to the user's phone. Only for rare emergencies that cannot "
-          "wait for them to look: something broke badly, data at risk, a deadline about to pass. Your replies, "
-          "approval cards and questions from shikigami or sessions already notify on their own; never use this "
-          "for them. Finished work the user wants to hear about goes through notify.", {"text": str})
+          "wait for them to look: something broke badly, data at risk, a deadline about to pass. Your finished "
+          "turns and approval cards already notify on their own; questions from shikigami or sessions do not, so "
+          "when one needs the user soon, say so in your reply. Finished work the user wants to hear about goes through notify.", {"text": str})
     async def urgent(args):
         push.urgent(str(args.get("text", "")))
         phones = len(push._phones())

@@ -393,6 +393,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         if (ev === OPEN) {
             online = true
             awaySince = null
+            presence()
             return
         }
         val type = ev.str("type")
@@ -425,6 +426,22 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             "chat" -> unread = false
             "agents" -> refreshAll(force = true)
             "usage" -> refreshCost()
+        }
+        presence()
+    }
+
+    /** Tells the laptop which view is on screen: a finished turn notifies everywhere but on the chat. */
+    private fun presence() {
+        val view = if (page != null) "page" else tab
+        Push.onChat = view == "chat"
+        if (view == "chat") Push.cancel(getApplication(), "reply")
+        if (!foreground || !online) return
+        viewModelScope.launch {
+            try {
+                api.post("api/presence", JSONObject().put("view", view))
+            } catch (e: IOException) {
+            } catch (e: JSONException) {
+            }
         }
     }
 
@@ -500,6 +517,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                     pg.poll = viewModelScope.launch { pollSession(pg) }
                 }
                 page = pg
+                presence()
             } catch (e: IOException) {
             }
         }
@@ -551,6 +569,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     fun closePage() {
         page?.poll?.cancel()
         page = null
+        presence()
     }
 
     private fun errorOf(e: IOException): String = (e as? HttpError)?.let {

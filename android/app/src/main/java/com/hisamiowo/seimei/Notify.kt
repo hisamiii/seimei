@@ -27,15 +27,13 @@ object Push {
     /** One channel per kind, so each can be tuned or muted in the system settings. */
     private val CHANNELS = listOf(
         Triple("approval", "Approvals", NotificationManager.IMPORTANCE_HIGH),
-        Triple("question", "Questions", NotificationManager.IMPORTANCE_HIGH),
         Triple("reply", "Replies", NotificationManager.IMPORTANCE_LOW),
         Triple("ping", "Pings", NotificationManager.IMPORTANCE_DEFAULT),
         Triple("urgent", "Urgent", NotificationManager.IMPORTANCE_HIGH),
     )
     private val ABOUT = mapOf(
         "approval" to "A card waits for your OK: a session command, a file edit, a desktop action.",
-        "question" to "A shikigami or one of your sessions asks something. At most one every few minutes.",
-        "reply" to "seimei's reply, when you sent a message and left the app before it came. Silent.",
+        "reply" to "seimei's finished turn, when the chat is not on screen. Silent; later turns update it.",
         "ping" to "Things you asked seimei to tell you about: an APK is up, a render or a run finished.",
         "urgent" to "Rare emergencies seimei flags itself.",
     )
@@ -44,6 +42,10 @@ object Push {
     @Volatile
     var visible = false
 
+    /** The chat is on screen (not another tab or an agent's page): replies show everywhere else. */
+    @Volatile
+    var onChat = true
+
     val configured get() = BuildConfig.FCM_APP.isNotEmpty()
 
     fun start(ctx: Context) {
@@ -51,6 +53,8 @@ object Push {
         for ((id, name, importance) in CHANNELS) {
             nm.createNotificationChannel(NotificationChannel(id, name, importance).apply { description = ABOUT[id] })
         }
+        // Questions no longer notify (rules of 2026-10-20).
+        nm.deleteNotificationChannel("question")
         if (!configured || FirebaseApp.getApps(ctx).isNotEmpty()) return
         FirebaseApp.initializeApp(ctx, FirebaseOptions.Builder()
             .setApplicationId(BuildConfig.FCM_APP).setApiKey(BuildConfig.FCM_KEY)
@@ -68,6 +72,8 @@ object Push {
     }
 
     fun clear(ctx: Context) = ctx.getSystemService(NotificationManager::class.java).cancelAll()
+
+    fun cancel(ctx: Context, tag: String) = ctx.getSystemService(NotificationManager::class.java).cancel(tag, 0)
 }
 
 /** Turns the laptop's data messages into notifications: one per kind, replaced by later ones, withdrawn on cancel. */
@@ -84,7 +90,8 @@ class Notify : FirebaseMessagingService() {
         val kind = (d["kind"] ?: return).let { if (nm.getNotificationChannel(it) != null) it else "ping" }
         val tag = d["tag"] ?: kind
         if (d["cancel"] == "1") return nm.cancel(tag, 0)
-        if (Push.visible) return
+        // On screen the laptop holds pushes; a reply still shows when the chat itself is not in front.
+        if (Push.visible && (kind != "reply" || Push.onChat)) return
         val open = PendingIntent.getActivity(
             this, tag.hashCode(),
             Intent(this, MainActivity::class.java).putExtra("tab", d["tab"] ?: "chat").addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
@@ -109,7 +116,7 @@ class Notify : FirebaseMessagingService() {
 
     companion object {
         const val MAUVE = 0xFFCBA6F7.toInt()
-        val PUBLIC = mapOf("approval" to "Approval waiting", "question" to "A question for you", "reply" to "seimei replied", "ping" to "Update from seimei",
+        val PUBLIC = mapOf("approval" to "Approval waiting", "reply" to "seimei replied", "ping" to "Update from seimei",
             "urgent" to "seimei: urgent")
     }
 }

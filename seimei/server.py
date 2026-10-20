@@ -268,6 +268,15 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
                 push.closed(device, request)
         return resp
 
+    async def presence(request):
+        """The app tells which view it shows (chat, another tab, an agent's page): replies skip only the chat."""
+        body = await request.json()
+        view = str(body.get("view", ""))[:20]
+        device = auth and (auth.current(request) or {}).get("device")
+        if push and view:
+            push.shows(device, view)
+        return web.json_response({"ok": True})
+
     async def send(request):
         body = await request.json()
         text = str(body.get("text", "")).strip()
@@ -505,6 +514,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     app.router.add_get("/api/history", history)
     app.router.add_get("/api/stream", stream)
     app.router.add_post("/api/send", send)
+    app.router.add_post("/api/presence", presence)
     app.router.add_post("/api/interrupt", interrupt)
     app.router.add_get("/api/auth/me", me)
     app.router.add_get("/api/files/{name}", file)
