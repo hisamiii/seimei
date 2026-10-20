@@ -219,12 +219,16 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
             if dispatcher.usage:
                 await write_event(resp, dispatcher.usage.snapshot())
             await write_event(resp, watcher.snapshot())
+            checked = time.monotonic()
             while True:
+                # Re-check the login on a clock, not only when quiet: a busy turn must not outlive an unpaired phone.
+                if auth and time.monotonic() - checked > HEARTBEAT:
+                    if not auth.session(request):
+                        break
+                    checked = time.monotonic()
                 try:
                     ev = await asyncio.wait_for(q.get(), HEARTBEAT)
                 except TimeoutError:
-                    if auth and not auth.session(request):
-                        break
                     # A data event, not a comment, so the page can tell a silent dead link from a quiet one.
                     await resp.write(b'data: {"type":"ping"}\n\n')
                     continue
