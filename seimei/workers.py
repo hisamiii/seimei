@@ -483,9 +483,10 @@ class Pool:
         return w
 
     def report(self, w: Worker, event: str, text: str):
-        """A card in the conversation; the dispatcher hears about it now (failures, questions) or at its next turn."""
+        """A card in the conversation; the dispatcher hears about it now (a stop: at its next turn)."""
         self.events.add({"type": "worker", "worker": w.id, "name": w.name, "event": event, "text": text[:4000]})
         line = {"done": f"finished: {first_line(text, 300)}", "failed": f"failed: {first_line(text, 300)}",
                 "asking": f"asks: {text[:1000]}", "stopped": "was stopped",
                 "interrupted": "was interrupted by a seimei restart"}[event]
-        self.tell(w.id, line, urgent=event in ("failed", "asking", "interrupted"), key=f"report:{w.id}")
+        # Everything but a stop the user asked for wakes the dispatcher, so it can follow up on its own.
+        self.tell(w.id, line, urgent=event != "stopped", key=f"report:{w.id}")
