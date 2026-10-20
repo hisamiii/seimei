@@ -16,7 +16,7 @@ sealed interface Item {
     data class Activity(override val key: String, val calls: List<Call>) : Item
     data class Worker(
         override val key: String, val event: String, val name: String, val worker: String,
-        val text: String, val model: String, val cwd: String,
+        val text: String, val model: String, val cwd: String, val effort: String = "", val contextCap: String = "",
     ) : Item
     data class Approval(
         override val key: String, val aid: String, val who: String, val action: String, val target: String,
@@ -139,7 +139,8 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault()) {
             "worker" -> {
                 val event = ev.str("event")
                 if (event in WORKER_CARDS) {
-                    put(Item.Worker(key, event, ev.str("name"), ev.str("worker"), ev.str("text"), ev.str("model"), ev.str("cwd")))
+                    put(Item.Worker(key, event, ev.str("name"), ev.str("worker"), ev.str("text"), ev.str("model"), ev.str("cwd"),
+                        ev.str("effort"), ev.str("context_cap")))
                 } else {
                     val what = if (event == "stopped") "was stopped" else "was interrupted by a restart"
                     put(Item.Note(key, "${ev.str("name")} $what", ""))

@@ -518,6 +518,10 @@ function details() {
   const facts = el('div', 'facts');
   facts.append(el('span', 'mono', home(r.cwd)));
   if (r.model) facts.append(el('span', null, r.model));
+  const effort = r.effort || r.effort_now;
+  if (effort) facts.append(el('span', null, `effort ${effort}${r.effort || P.kind !== 'worker' ? '' : ' (default)'}`));
+  if (r.context_cap) facts.append(el('span', null, `compacts at ${r.context_cap}`));
+  if (r.subagents) facts.append(el('span', null, `subagents on ${r.subagents}`));
   if (r.context != null) facts.append(el('span', null, `context ${r.context}% used`));
   facts.append(el('span', null, P.kind === 'worker' ? `started ${clock(r.created)}` : `last active ${clock(r.active)}`));
   if (P.kind === 'worker' && r.state !== 'laptop' && r.started !== false) facts.append(laptopButton(r));

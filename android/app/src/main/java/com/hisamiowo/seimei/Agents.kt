@@ -557,6 +557,10 @@ fun Details(vm: Seimei, pg: Page) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Fact(home(r.str("cwd")), mono = true)
                 if (r.str("model").isNotEmpty()) Fact(r.str("model"))
+                val effort = r.str("effort").ifEmpty { r.str("effort_now") }
+                if (effort.isNotEmpty()) Fact("effort $effort" + if (pg.kind == "worker" && r.str("effort").isEmpty()) " (default)" else "")
+                if (r.str("context_cap").isNotEmpty()) Fact("compacts at ${r.str("context_cap")}")
+                if (r.str("subagents").isNotEmpty()) Fact("subagents on ${r.str("subagents")}")
                 r.context()?.let { Fact("context $it% used") }
                 Fact(if (pg.kind == "worker") "started ${clock(r.optDouble("created"))}" else "last active ${clock(r.optDouble("active"))}")
                 val state = r.str("state")

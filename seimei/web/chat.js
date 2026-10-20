@@ -219,7 +219,10 @@ function workerCard(ev) {
   const head = el('div', 'head');
   const title = el('div', 'title');
   title.append(el('b', null, kind.title(ev.name)));
-  if (ev.event === 'summoned') title.append(el('span', 'meta', `${ev.model} · ${ev.cwd.replace(/^\/home\/[^/]+/, '~')}`));
+  if (ev.event === 'summoned') {
+    const how = [ev.model, ev.effort, ev.context_cap].filter(Boolean).join(' · ');
+    title.append(el('span', 'meta', `${how} · ${ev.cwd.replace(/^\/home\/[^/]+/, '~')}`));
+  }
   head.append(badge, title);
   card.append(head);
   if (ev.text) {

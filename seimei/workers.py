@@ -17,6 +17,8 @@ from claude_agent_sdk import (
     ClaudeSDKClient,
     RateLimitEvent,
     ResultMessage,
+    TaskNotificationMessage,
+    TaskStartedMessage,
     TextBlock,
     ToolResultBlock,
     ToolUseBlock,
@@ -37,7 +39,11 @@ You are `{name}`, a worker summoned by seimei, the user's dispatcher on their la
 Nobody watches your terminal: work on the task on your own until it is done.
 Your final message is shown to the user on their phone as your report: start it with a one-line summary, keep it short.
 If you are blocked on a decision only the user can make, call mcp__shikigami__ask with the question and end your turn.
+Subagents are fine for searches and lookups; they run on {subagents}. No big parallel fan-outs.
 """
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
+# The context a shikigami may fill before it compacts: the user keeps most at 256-400k, 1m only where really needed.
+CONTEXTS = {"256k": 256_000, "400k": 400_000, "1m": 1_000_000}
 ACTIVE = {"running", "asking"}
 IDLE_DISCONNECT = 600
 RECENT = 24 * 3600
@@ -59,6 +65,8 @@ class Worker:
         self.stopping = False
         self.last_text = ""
         self.idle_timer: asyncio.TimerHandle | None = None
+        # Subagents still working in the background: the turn may end before they report back.
+        self.tasks: dict[str, str] = {}
 
     @property
     def id(self) -> str:
@@ -70,7 +78,8 @@ class Worker:
 
     def info(self) -> dict:
         r = self.rec
-        return {**{k: r.get(k) for k in ("id", "name", "state", "cwd", "model", "created", "updated", "summary", "question", "doing")},
+        return {**{k: r.get(k) for k in ("id", "name", "state", "cwd", "model", "effort", "context_cap", "subagents", "created",
+                                         "updated", "summary", "question", "doing")},
                 "started": bool(r.get("started"))}
 
     def brief(self) -> dict:
@@ -80,7 +89,12 @@ class Worker:
             b = sessions.brief(path) if path else {}
         except OSError:
             b = {}
-        return {"project": b.get("project") or sessions.project_of(self.rec["cwd"] + "/x"), "context": b.get("context")}
+        cap = CONTEXTS.get(self.rec.get("context_cap") or "")
+        used = b.get("tokens") or 0
+        # The ring fills toward the point where this shikigami compacts.
+        context = round(100 * used / cap) if cap and used else b.get("context")
+        return {"project": b.get("project") or sessions.project_of(self.rec["cwd"] + "/x"), "context": context,
+                "effort_now": b.get("effort")}
 
     def _set(self, state: str, **kw):
         self.rec.update(state=state, updated=time.time(), **kw)
@@ -104,13 +118,22 @@ class Worker:
             model=r["model"],
             permission_mode="bypassPermissions",
             setting_sources=["user", "project", "local"],
-            system_prompt={"type": "preset", "preset": "claude_code", "append": PROMPT.format(name=r["name"])},
+            system_prompt={"type": "preset", "preset": "claude_code",
+                           "append": PROMPT.format(name=r["name"], subagents=r.get("subagents") or "haiku")},
             mcp_servers={"shikigami": self._tools()},
-            env=queue_env(r["name"]),
+            env=self._env(),
+            **({"effort": r["effort"]} if r.get("effort") else {}),
             extra_args={"name": f"shikigami {r['name']}"},
             hooks=self.pool.guard.hooks(r["name"], r["id"]) if self.pool.guard else None,
             **where,
         )
+
+    def _env(self) -> dict:
+        r = self.rec
+        env = {**queue_env(r["name"]), "CLAUDE_CODE_SUBAGENT_MODEL": r.get("subagents") or "haiku"}
+        if cap := CONTEXTS.get(r.get("context_cap") or ""):
+            env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = str(cap)
+        return env
 
     def _tools(self):
         @tool("ask", "Ask the user a question through seimei when only they can decide. End your turn afterwards.",
@@ -190,6 +213,12 @@ class Worker:
         if self.client and self.rec["state"] in ACTIVE:
             self.stopping = True
             await self.client.interrupt()
+            if self.tasks and self.rec["state"] == "running":
+                # No turn runs while it only waits for subagents, so no result will say it stopped.
+                self.tasks.clear()
+                self.stopping = False
+                self._set("stopped", summary="Stopped.")
+                self.pool.report(self, "stopped", "")
 
     async def _read(self, client: ClaudeSDKClient):
         try:
@@ -211,7 +240,12 @@ class Worker:
                 pass
 
     def _handle(self, msg):
-        if isinstance(msg, AssistantMessage):
+        if isinstance(msg, TaskStartedMessage):
+            if "bash" not in (msg.task_type or "") and "shell" not in (msg.task_type or ""):
+                self.tasks[msg.task_id] = msg.description or "a subagent"
+        elif isinstance(msg, TaskNotificationMessage):
+            self.tasks.pop(msg.task_id, None)
+        elif isinstance(msg, AssistantMessage):
             if msg.parent_tool_use_id:
                 return
             for b in msg.content:
@@ -246,6 +280,11 @@ class Worker:
         elif self.stopping:
             self._set("stopped", summary="Stopped.")
             self.pool.report(self, "stopped", "")
+        elif self.tasks and not msg.is_error:
+            # Background subagents report back with a new turn; the report waits for that one.
+            n = len(self.tasks)
+            self._set("running", doing={"text": f"Waiting for {n} subagent{'s' if n > 1 else ''}"})
+            return
         elif msg.is_error:
             self._set("failed", summary=first_line(text) or msg.subtype)
             self.pool.report(self, "failed", text or msg.subtype)
@@ -317,18 +356,24 @@ class Pool:
         named = [w for w in self.workers.values() if w.name == key]
         return max(named, key=lambda w: w.rec["created"]) if named else None
 
-    async def summon(self, name: str, task: str, cwd: str, model: str) -> Worker:
+    async def summon(self, name: str, task: str, cwd: str, model: str, effort: str | None = None, context: str = "400k",
+                     subagents: str = "haiku") -> Worker:
         name = re.sub(r"[^a-z0-9-]+", "-", name.lower()).strip("-")[:32] or "worker"
         path = Path(os.path.expanduser(cwd or "~")).resolve()
         if not path.is_dir():
             raise ValueError(f"no such folder: {path}")
+        if effort and effort not in EFFORTS:
+            raise ValueError(f"effort is one of {', '.join(EFFORTS)}")
+        if context not in CONTEXTS:
+            raise ValueError(f"context is one of {', '.join(CONTEXTS)}")
         now = time.time()
         rec = {"id": uuid.uuid4().hex[:8], "name": name, "task": task, "cwd": str(path), "model": model or "opus",
-               "session_id": str(uuid.uuid4()), "state": "starting", "created": now, "updated": now, "summary": ""}
+               "effort": effort or None, "context_cap": context, "subagents": subagents or "haiku", "session_id": str(uuid.uuid4()), "state": "starting", "created": now, "updated": now, "summary": ""}
         w = Worker(self, rec)
         self.workers[rec["id"]] = w
         self.events.add({"type": "worker", "worker": w.id, "name": name, "event": "summoned", "text": task,
-                         "cwd": str(path), "model": rec["model"]})
+                         "cwd": str(path), "model": rec["model"], "effort": rec["effort"], "context_cap": context,
+                         "subagents": rec["subagents"]})
         await w.send(task)
         return w
 

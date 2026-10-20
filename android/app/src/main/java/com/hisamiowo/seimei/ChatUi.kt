@@ -474,7 +474,7 @@ fun WorkerCard(w: Item.Worker) {
     var open by rememberSaveable(w.key) { mutableStateOf(false) }
     var clipped by remember { mutableStateOf(false) }
     Card(highlight = w.event == "asking") {
-        CardHead(icon, bg, fg, title, if (w.event == "summoned") "${w.model} · ${home(w.cwd)}" else null, mono = true)
+        CardHead(icon, bg, fg, title, if (w.event == "summoned") listOf(w.model, w.effort, w.contextCap, home(w.cwd)).filter { it.isNotEmpty() }.joinToString(" · ") else null, mono = true)
         if (w.text.isNotEmpty()) {
             val max = if (open) Int.MAX_VALUE else if (w.event == "summoned") 3 else 6
             if (w.event == "summoned") Text(w.text, fontSize = 14.sp, color = LocalExtra.current.text2, maxLines = max, overflow = TextOverflow.Ellipsis,

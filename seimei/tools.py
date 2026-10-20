@@ -26,13 +26,19 @@ def ago(t: float) -> str:
 def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), uploads=None):
     @tool("summon", "Start a shikigami: a worker Claude Code session that works on a task on its own and reports back. "
           "Pick a short lowercase name, the folder the task is about, and a model (opus for real work, sonnet for "
-          "routine jobs, haiku for quick lookups). Returns at once; the report arrives later.", {
+          "routine jobs, haiku for quick lookups). Context is where it compacts: 400k by default, 256k for small jobs, "
+          "1m only when the task really needs it. Returns at once; the report arrives later.", {
               "type": "object",
               "properties": {
                   "name": {"type": "string", "description": "short lowercase name, like npu-dma or readme-fix"},
                   "task": {"type": "string", "description": "the full instructions; the worker sees nothing else"},
                   "cwd": {"type": "string", "description": "folder to work in, default ~"},
                   "model": {"type": "string", "enum": ["opus", "sonnet", "haiku"], "default": "opus"},
+                  "effort": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max"],
+                             "description": "reasoning effort; leave out for the user's default"},
+                  "context": {"type": "string", "enum": ["256k", "400k", "1m"], "default": "400k"},
+                  "subagent_model": {"type": "string", "enum": ["haiku", "sonnet", "opus"], "default": "haiku",
+                                     "description": "model for the shikigami's own subagents; haiku unless a rare case needs more"},
                   "confirmed": {"type": "boolean", "description": f"set only after the user OKed more than {MAX_RUNNING} running workers"},
               },
               "required": ["name", "task"]})
@@ -41,10 +47,13 @@ def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), upl
             return text(f"{pool.running()} shikigami are already running. Ask the user before starting more, "
                         "then call again with confirmed=true.", error=True)
         try:
-            w = await pool.summon(args["name"], args["task"], args.get("cwd", "~"), args.get("model", "opus"))
+            w = await pool.summon(args["name"], args["task"], args.get("cwd", "~"), args.get("model", "opus"),
+                                  args.get("effort"), args.get("context") or "400k", args.get("subagent_model") or "haiku")
         except Exception as e:
             return text(f"Could not summon: {e}", error=True)
-        return text(f"Summoned {w.name} ({w.id}) in {w.rec['cwd']} on {w.rec['model']}.")
+        r = w.rec
+        return text(f"Summoned {w.name} ({w.id}) in {r['cwd']} on {r['model']}, effort {r['effort'] or 'default'}, "
+                    f"context {r['context_cap']}, subagents on {r['subagents']}.")
 
     @tool("workers", "List shikigami from the last day with their state and one-line summary.", {})
     async def workers(args):

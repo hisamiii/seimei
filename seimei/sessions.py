@@ -242,8 +242,9 @@ def brief(path: Path) -> dict:
         return hit[1]
     size = path.stat().st_size
     rows, _ = _rows(path, max(size - (512 << 10), 0))
-    votes, pending, last, used, model = [], {}, "", 0, ""
+    votes, pending, last, used, model, effort = [], {}, "", 0, "", None
     for row in rows:
+        effort = row.get("effort") or effort
         content = (row.get("message") or {}).get("content")
         blocks = content if isinstance(content, list) else []
         if row["type"] == "user":
@@ -267,7 +268,8 @@ def brief(path: Path) -> dict:
                 pending[b["id"]] = (_t(row), b.get("name"), inp)
     out = {"project": max(set(votes[-60:]), key=votes[-60:].count) if votes else None,
            "line": next((x.strip() for x in last.splitlines() if x.strip()), "")[:200].lstrip("#* "),
-           "context": round(100 * used / CONTEXT) if used else None, "model": model, "ask": None, "doing": None}
+           "context": round(100 * used / CONTEXT) if used else None, "tokens": used, "model": model, "effort": effort,
+           "ask": None, "doing": None}
     for tid, (t, name, inp) in pending.items():
         if name == "AskUserQuestion":
             out["ask"] = {"tool_id": tid, "since": t, **_question(inp)}
@@ -391,6 +393,7 @@ def listing(own: dict[str, str]) -> list[dict]:
                     "question": bool(ask), "ask": ask and ask["questions"][0].get("question", "") if ask and ask["questions"] else None,
                     "project": b.get("project") or (project_of(s["cwd"] + "/x") if s["cwd"] != HOME else None),
                     "line": b.get("line", ""), "context": b.get("context"), "doing": b.get("doing"),
+                    "model": (b.get("model") or "").removeprefix("claude-") or None, "effort": b.get("effort"),
                     "reach": kitty.reachable(s["pid"])})
     return out
 
