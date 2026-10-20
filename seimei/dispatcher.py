@@ -23,7 +23,7 @@ from claude_agent_sdk import (
 )
 
 from .events import EventLog
-from .util import queue_env, result_text, summarize
+from .util import STREAM_BUFFER, queue_env, result_text, summarize
 
 log = logging.getLogger("seimei")
 
@@ -138,6 +138,7 @@ class Dispatcher:
         return ClaudeAgentOptions(
             cli_path=shutil.which("claude") or "claude",
             cwd=cwd,
+            max_buffer_size=STREAM_BUFFER,
             model=self.cfg.get("model", "opus"),
             permission_mode="bypassPermissions",
             include_partial_messages=True,

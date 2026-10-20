@@ -29,7 +29,7 @@ from claude_agent_sdk import (
 
 from . import sessions
 from .events import EventLog
-from .util import queue_env, result_text, summarize, write_json
+from .util import STREAM_BUFFER, queue_env, result_text, summarize, write_json
 
 log = logging.getLogger("seimei.workers")
 
@@ -117,6 +117,7 @@ class Worker:
         return ClaudeAgentOptions(
             cli_path=shutil.which("claude") or "claude",
             cwd=r["cwd"],
+            max_buffer_size=STREAM_BUFFER,
             model=r["model"],
             permission_mode="bypassPermissions",
             setting_sources=["user", "project", "local"],
