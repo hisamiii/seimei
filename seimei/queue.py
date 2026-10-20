@@ -316,9 +316,11 @@ class QueueWatcher:
     GPU faults) to the dispatcher. While cqd is down it falls back to telling once per wait when a queued GPU/NPU
     open has waited too long, naming the blocker."""
 
-    def __init__(self, names, notify):
+    def __init__(self, names, notify, flash=None):
         self.names = names  # () -> {queue name: who}
         self.notify = notify
+        self.flash = flash  # transient app events: {"type": "queue", "snap": cqd's snapshot}
+        self.flashed = 0.0
         self.told: set[tuple] = set()
 
     def check(self) -> list[tuple[str, str]]:
@@ -352,6 +354,11 @@ class QueueWatcher:
 
     def relay(self, ev: dict):
         """One cqd event. Events are keyed per job, so a repeat replaces the earlier note."""
+        if ev.get("type") == "snap":
+            if self.flash and time.monotonic() - self.flashed >= 1:
+                self.flashed = time.monotonic()
+                self.flash({"type": "queue", "snap": ev["snap"]})
+            return
         if ev.get("type") != "event" or ev.get("event") == "cqd_restart":
             return
         names = self.names()
@@ -389,3 +396,78 @@ class QueueWatcher:
             except Exception:
                 log.exception("queue check failed")
             await asyncio.sleep(every)
+
+
+def make_queue_tools(approvals) -> list:
+    """Operator tools for cqd. The queue tool itself (read-only) lives in tools.py."""
+    from claude_agent_sdk import tool
+
+    def text(t: str, error: bool = False) -> dict:
+        return {"content": [{"type": "text", "text": t}], **({"is_error": True} if error else {})}
+
+    @tool("queue_control", "Steer claude-queue's GPU/NPU queue (cqd). action: bump (to: front, or a class: "
+          "interactive, bench, batch), hold / unhold (a waiter keeps its place but does not start), admit (let a "
+          "memory-blocked waiter start once), revoke (stop counting a lease; its processes keep their devices; "
+          "kill=true instead sends SIGTERM to the command, after the user approves), park / unpark (freeze an idle "
+          "agent memory hog and swap it out; never one holding a GPU/NPU), grants (to: on or off; cqd closes them "
+          "after a GPU/NPU fault, check dmesg first). target: a waiter or lease id from the queue tool (W12, L3), a "
+          "pid or a queue name; a hog's name for park.", {
+              "type": "object",
+              "properties": {"action": {"type": "string", "enum": ["bump", "hold", "unhold", "admit", "revoke",
+                                                                   "park", "unpark", "grants"]},
+                             "target": {"type": "string"}, "to": {"type": "string"}, "kill": {"type": "boolean"}},
+              "required": ["action"]})
+    async def queue_control(a):
+        action = a["action"]
+        if action == "revoke" and a.get("kill"):
+            snap = await asyncio.to_thread(snapshot)
+            h = next((h for h in snap["holders"] if a.get("target") in (h.get("id"), str(h["pid"]), h["agent"])), None)
+            what = f"{h['agent']} {h['command'][:80]}" if h else str(a.get("target"))
+            outcome = await approvals.hold({"action": "desktop", "target": f"stop the GPU/NPU job {what}",
+                                            "detail": "SIGTERM to the whole command (its systemd scope)"}, "seimei", None)
+            if outcome != "approved":
+                return text(f"The user {outcome} it; nothing changed.", error=True)
+            action = "kill"
+        r = await asyncio.to_thread(cqd, {"op": "control", "action": action, "target": a.get("target"),
+                                          "to": a.get("to")})
+        if r is None:
+            return text("cqd is not running.", error=True)
+        return text(json.dumps(r), error="error" in r)
+
+    @tool("queue_policy", "Show or set claude-queue's policies (cqd): bench_window (\"22:00-08:00\" or null), "
+          "couple_gpu_npu, exempt (agents never frozen, first in line), interactive ({who: [queue names]}), "
+          "mem_reserve_gb, mem_default_gb, mem_wait_timeout, wait_event_min, holder_idle_min, lease_linger_s, "
+          "external_idle_min, contam_desktop_pct, max_freeze_s, rehome, desktop_names, desktop_args, gate (on/off). "
+          "No key: all of them. Change only what the user asked for.", {
+              "type": "object", "properties": {"key": {"type": "string"}, "value": {}}})
+    async def queue_policy(a):
+        req = {"op": "policy"}
+        if a.get("key"):
+            req["key"] = a["key"]
+        if "value" in a:
+            req["value"] = a["value"]
+        r = await asyncio.to_thread(cqd, req)
+        if r is None:
+            return text("cqd is not running.", error=True)
+        return text(json.dumps(r, indent=1), error="error" in r)
+
+    @tool("queue_history", "Past GPU/NPU jobs of claude-queue (cqd): when, agent, how long they ran and waited, "
+          "memory peaks, whether a bench was contaminated. key matches the command (script path), agent a queue "
+          "name.", {"type": "object", "properties": {"key": {"type": "string"}, "agent": {"type": "string"},
+                                                       "n": {"type": "integer"}}})
+    async def queue_history(a):
+        r = await asyncio.to_thread(cqd, {"op": "history", "key": a.get("key"), "agent": a.get("agent"),
+                                          "n": int(a.get("n") or 10)})
+        if r is None:
+            return text("cqd is not running.", error=True)
+        rows = r.get("rows", [])
+        if not rows:
+            return text("No matching jobs.")
+        return text("\n".join(
+            f"{time.strftime('%m-%d %H:%M', time.localtime(x['since']))} {x['agent']} [{x.get('class', 'batch')}] "
+            f"ran {mins(x['dur'])}" + (f", waited {mins(x['wait'])}" if x.get("wait") else "")
+            + f", peaks anon {x['peak_anon_gb']} GB, GTT {x['peak_gtt_gb']} GB"
+            + (f", CONTAMINATED: {'; '.join(x['contaminated'])}" if x.get("contaminated") else "")
+            + f": {x['key']}" for x in rows))
+
+    return [queue_control, queue_policy, queue_history]

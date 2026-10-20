@@ -21,6 +21,7 @@ from .uploads import TooLarge, Uploads
 from .dispatcher import Dispatcher
 from .events import EventLog
 from . import desktop as dt
+from . import queue as cq
 from .desktop import Desktop, NoDesktop
 from .files import MAX_MODEL_BYTES, Files
 from .guard import Guard
@@ -474,6 +475,26 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
         state["bench"] = await asyncio.to_thread(dt.bench_running)
         return web.json_response(state)
 
+    async def queue_view(request):
+        """claude-queue's state: cqd's snapshot, or the /proc fallback when cqd is down."""
+        snap = await asyncio.to_thread(cq.cqd, {"op": "status"})
+        if snap and "holders" in snap:
+            return web.json_response({"cqd": True, **snap})
+        fallback = await asyncio.to_thread(cq.proc_snapshot, {})
+        return web.json_response(fallback)
+
+    async def queue_action(request):
+        """The user steers the queue from the app: same actions as queue_control, no approval card."""
+        body = await request.json()
+        action = str(body.get("action", ""))
+        if action == "revoke" and body.get("kill"):
+            action = "kill"
+        r = await asyncio.to_thread(cq.cqd, {"op": "control", "action": action, "target": body.get("target"),
+                                             "to": body.get("to")})
+        if r is None:
+            raise web.HTTPServiceUnavailable(text="cqd is not running")
+        return web.json_response(r, status=400 if "error" in r else 200)
+
     async def audit(request):
         limit = max(1, min(int(request.query.get("limit", 200)), 1000))
         return web.json_response({"calls": await asyncio.to_thread(tool_guard.tail, limit)})
@@ -577,6 +598,8 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     app.router.add_get("/api/usage", usage)
     app.router.add_get("/api/cost", cost_view)
     app.router.add_get("/api/audit", audit)
+    app.router.add_get("/api/queue", queue_view)
+    app.router.add_post("/api/queue/action", queue_action)
     app.router.add_get("/api/screen", screen)
     app.router.add_get("/api/desktop", desktop_state)
     app.router.add_get("/api/sessions/{pid:[0-9]+}", session)
