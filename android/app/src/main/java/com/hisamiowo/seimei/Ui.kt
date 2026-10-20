@@ -241,7 +241,10 @@ class MainActivity : ComponentActivity() {
     /** A tapped notification names the tab it is about. */
     private fun openTab(intent: Intent?) {
         intent?.getStringExtra("tab")?.takeIf { it in TABS }?.let { vm.show(it) }
+        // "Reply ready": the chat opens at that message.
+        intent?.getStringExtra("event")?.toLongOrNull()?.let { vm.focus = it }
         intent?.removeExtra("tab")
+        intent?.removeExtra("event")
     }
 }
 

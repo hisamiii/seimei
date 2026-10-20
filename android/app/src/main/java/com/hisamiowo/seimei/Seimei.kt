@@ -130,6 +130,9 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         private set
     var tab by mutableStateOf("chat")
         private set
+
+    /** An event the chat should scroll to (a tapped "reply ready"), once it has loaded. */
+    var focus by mutableStateOf<Long?>(null)
     var unread by mutableStateOf(false)
 
     var draft by mutableStateOf(prefs.draft)

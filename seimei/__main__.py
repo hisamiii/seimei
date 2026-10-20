@@ -27,6 +27,7 @@ from .uploads import Uploads
 from . import discord as discord_link
 from .browser import Browser, make_browser_tools, socket_path
 from .push import FIREBASE, Fcm, Push, make_push_tools
+from .watches import Watches, make_watch_tools
 from .files import Files
 from .guard import Guard
 from .server import make_app
@@ -147,8 +148,9 @@ def main():
     desk = Desktop(events, lambda t: dispatcher.note(t), state / UNLOCK)
     layout = Layout(desk, approvals, events, state)
     push = Push(events, auth, Fcm(FIREBASE / "service-account.json"), state)
+    push.watches = Watches(state / "watches.json", push, lambda line: pool.notify(line), pool.queue_names)
     dispatcher = Dispatcher(disp, events, state, make_tools(pool, files, events, make_desktop_tools(desk, files, events, layout)
-                                                                 + make_music_tools(approvals) + make_push_tools(push)
+                                                                 + make_music_tools(approvals) + make_push_tools(push) + make_watch_tools(push.watches)
                                                                  + make_browser_tools(browser, approvals)
                                                                  + discord_link.make_discord_tools(discord, approvals, uploads), uploads),
                             guard, usage)
@@ -167,6 +169,7 @@ def main():
         app["desktop"] = asyncio.create_task(desk.run())
         app["layout"] = asyncio.create_task(layout.run())
         app["push"] = asyncio.create_task(push.run())
+        app["watches"] = asyncio.create_task(push.watches.run())
         app["uploads"] = asyncio.create_task(uploads.run())
         app["browser"] = asyncio.create_task(browser.run())
         app["discord"] = asyncio.create_task(discord.run())
@@ -192,6 +195,7 @@ def main():
         app["desktop"].cancel()
         app["layout"].cancel()
         app["push"].cancel()
+        app["watches"].cancel()
         app["uploads"].cancel()
         app["browser"].cancel()
         app["discord"].cancel()

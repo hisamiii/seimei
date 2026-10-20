@@ -1,13 +1,14 @@
-"""Phone notifications through Firebase Cloud Messaging, following the user's rules. Only three things push:
+"""Phone notifications through Firebase Cloud Messaging, following the user's rules. Only two things push:
 
-- The dispatcher's finished turn, with its last text as the preview: silent, one notification that later turns
-  update ("3 replies"), skipped for a phone that shows the chat right now. Seeing the chat starts a fresh count.
 - Approval cards waiting, with sound; withdrawn once decided.
-- The dispatcher's own notify (bundled until the user opens the app) and urgent pings, with sound.
-Nothing else: questions, finished shikigami, milestones and the desktop show only in the app.
-Approvals and pings skip a phone with the app open on any view: the card or the chat is in front of the user there.
+- Pings the dispatcher decides to send (notify, or its watch rules): a level each (silent, normal, urgent), an
+  optional collapse key so pings on one topic update one notification, and "reply ready", whose tap opens the chat
+  at the dispatcher's latest message.
+Nothing pushes on its own otherwise: replies, questions, finished shikigami and the desktop show in the app.
+Pings and approvals skip a phone with the app open; "reply ready" skips only one showing the chat. The app reports
+its view (chat, another tab, an agent's page) so the dispatcher can see where the user is.
 
-Messages are data-only, so the app builds every notification itself (channels per kind, replace, withdraw).
+Messages are data-only, so the app builds every notification itself (channels per level, replace, withdraw).
 Needs the Firebase service account key in FIREBASE (shared by the dev server and the app build); without it nothing is sent.
 """
 
@@ -26,6 +27,8 @@ from .events import EventLog
 
 log = logging.getLogger(__name__)
 
+# Ping level -> the app's notification channel.
+LEVELS = {"silent": "quiet", "normal": "ping", "urgent": "urgent"}
 SCOPE = "https://www.googleapis.com/auth/firebase.messaging"
 FIREBASE = Path.home() / ".local/share/seimei/firebase"
 
@@ -109,12 +112,14 @@ class Push:
         # device -> what its app shows: "chat", another tab, or "page" (an agent's page).
         self.view: dict[str, str] = {}
         self.approvals: dict[str, dict] = {}
-        self.turn_text = ""
-        # Finished turns since the user last saw the chat; one notification shows them.
-        self.replies: list[str] = []
+        # The dispatcher's latest message, for "reply ready".
+        self.last_reply: int | None = None
         self.sent: list[tuple[str, dict]] = []
-        # Pings since the user last had the app open; a new one shows them all.
-        self.pings: list[tuple[str, str]] = []
+        # Unkeyed pings per level since the user last had the app open; a new one shows them all.
+        self.pings: dict[str, list[tuple[str, str]]] = {}
+        # Collapse key -> pings on it since the app was last open.
+        self.keyed: dict[str, int] = {}
+        self.watches = None
 
     # ---------- which phones have the app open ----------
 
@@ -122,15 +127,12 @@ class Push:
         if device:
             self.open.setdefault(device, []).append(request)
             self.pings.clear()
-            if self.view.get(device, "chat") == "chat":
-                self.replies.clear()
+            self.keyed.clear()
 
     def shows(self, device: str | None, view: str):
-        """The app on this phone switched views. Seeing the chat clears the replies."""
+        """The app on this phone switched views."""
         if device:
             self.view[device] = view
-            if view == "chat" and self._is_open(device):
-                self.replies.clear()
 
     def _on_chat(self, device: str) -> bool:
         return self._is_open(device) and self.view.get(device, "chat") == "chat"
@@ -192,33 +194,25 @@ class Push:
 
     def handle(self, ev: dict):
         kind = ev.get("type")
-        if kind == "assistant":
-            self.turn_text = ev.get("text", "") or self.turn_text
-        elif kind == "state" and not ev.get("busy"):
-            text, self.turn_text = self.turn_text.strip(), ""
-            if text:
-                self._reply(text)
+        if kind == "assistant" and "id" in ev:
+            self.last_reply = ev["id"]
         elif kind == "approval":
             self.approvals[ev["aid"]] = ev
             self._approvals(alert=True)
         elif kind == "approval_done":
             if self.approvals.pop(ev.get("aid"), None) is not None:
                 self._approvals(alert=False)
+        if self.watches:
+            self.watches.handle(ev)
 
-    def _reply(self, text: str):
-        """A finished turn: to every phone that is not showing the chat, its app open on another view or not."""
-        phones = [d for d, _ in self._phones(lambda dev: not self._on_chat(dev))]
-        if not phones:
-            return
-        self.replies = [*self.replies[-9:], text]
-        if len(self.replies) == 1:
-            title, body = "seimei", text[:600]
-        else:
-            # Newest first: the preview the user wants is the latest one.
-            title = f"seimei · {len(self.replies)} replies"
-            body = "\n\n".join(r[:240] for r in reversed(self.replies[-4:]))
-        self._fire({"kind": "reply", "tag": "reply", "title": title, "body": body[:900], "alert": 0, "tab": "chat"},
-                   only=lambda dev: not self._on_chat(dev))
+    def presence(self) -> list[dict]:
+        """Each phone with notifications: the app open or not, its view, when it last left."""
+        out = []
+        for d in self.auth.push_devices() if self.auth else []:
+            dev = d["id"]
+            out.append({"phone": d.get("name") or dev[:8], "open": self._is_open(dev), "view": self.view.get(dev, "chat"),
+                        "left": self.left.get(dev)})
+        return out
 
     def _approvals(self, alert: bool):
         if not self.approvals:
@@ -231,41 +225,71 @@ class Push:
             title, body = f"{len(self.approvals)} approvals waiting", ", ".join(a.get("who", "") for a in self.approvals.values())
         self._fire({"kind": "approval", "tag": "approval", "title": title, "body": body, "alert": int(alert), "tab": "chat"}, ttl=600)
 
-    def urgent(self, text: str):
-        self._fire({"kind": "urgent", "tag": "urgent", "title": "seimei: urgent", "body": text[:600], "alert": 1, "tab": "chat"})
-
-    def ping(self, title: str, body: str):
-        """Something the user asked to hear about (a build is up, a run finished): sound, normal priority."""
-        self.pings = [*self.pings[-9:], (title.strip()[:120] or "seimei", body.strip()[:400])]
-        if len(self.pings) == 1:
-            title, body = self.pings[0]
+    def ping(self, title: str, body: str, level: str = "normal", key: str | None = None, reply: bool = False) -> int:
+        """A ping the dispatcher chose to send. Returns how many phones it goes to."""
+        level = level if level in LEVELS else "normal"
+        title, body = title.strip()[:120] or "seimei", body.strip()[:600]
+        sound = level != "silent"
+        if reply:
+            tag = "reply"
+            data = {"title": title, "body": body, "alert": int(sound)}
+            if self.last_reply is not None:
+                data["event"] = self.last_reply
+        elif key:
+            tag = "k:" + key.strip()[:60]
+            n = self.keyed[tag] = self.keyed.get(tag, 0) + 1
+            # Later pings on the key update the notification; only urgent ones sound again.
+            data = {"title": title, "body": body + (f"\n({n} updates)" if n > 1 else ""),
+                    "alert": int(sound and (n == 1 or level == "urgent"))}
         else:
-            title, body = f"{len(self.pings)} updates", "\n".join(f"{t}: {b}" if b else t for t, b in self.pings)
-        self._fire({"kind": "ping", "tag": "ping", "title": title, "body": body[:900], "alert": 1, "tab": "chat"})
+            tag = LEVELS[level]
+            bundle = self.pings[tag] = [*self.pings.get(tag, [])[-9:], (title, body)]
+            if len(bundle) > 1:
+                title, body = f"{len(bundle)} updates", "\n".join(f"{t}: {b}" if b else t for t, b in bundle)
+            data = {"title": title, "body": body[:900], "alert": int(sound)}
+        only = (lambda dev: not self._on_chat(dev)) if reply else None
+        self._fire({"kind": LEVELS[level], "tag": tag, "tab": "chat", **data}, only=only)
+        return len(self._phones(only))
 
 
 def make_push_tools(push: Push) -> list:
     from claude_agent_sdk import tool
 
-    @tool("urgent", "Push an urgent notification with sound to the user's phone. Only for rare emergencies that cannot "
-          "wait for them to look: something broke badly, data at risk, a deadline about to pass. Your finished "
-          "turns and approval cards already notify on their own; questions from shikigami or sessions do not, so "
-          "when one needs the user soon, say so in your reply. Finished work the user wants to hear about goes through notify.", {"text": str})
-    async def urgent(args):
-        push.urgent(str(args.get("text", "")))
-        phones = len(push._phones())
-        return {"content": [{"type": "text", "text": f"Sent to {phones} phone(s)." if phones else
-                             "Not sent: no paired phone with notifications, or the app is open right now."}]}
-
-    @tool("notify", "Push a notification with sound to the user's phone, for things they asked to be pinged about: "
-          "an APK is up, a render is done, a run finished. Title short (what happened), body one or two sentences. "
-          "Your ordinary replies already notify on their own when the user left the app, so don't repeat them here; "
-          "emergencies go through urgent. Several pings while the user is away show together in one notification.",
-          {"title": str, "body": str})
+    @tool("notify", "Push a notification to the user's phone. Nothing else pushes on its own except approval cards: "
+          "use it when the user asked to hear about something (an APK is up, a run finished), when a shikigami or "
+          "session needs them soon, or with reply=true when they asked you something and left the app (the tap "
+          "opens the chat at your latest message; it skips a phone already showing the chat). "
+          "level: silent (no sound), normal (default), urgent (sound, high priority; rare emergencies only). "
+          "key: pings with the same key update one notification instead of stacking (e.g. 'build', 'render-7'). "
+          "Pings without a key while the user is away show together. Check presence first when unsure.", {
+              "type": "object",
+              "properties": {
+                  "title": {"type": "string", "description": "short: what happened"},
+                  "body": {"type": "string", "description": "one or two sentences"},
+                  "level": {"type": "string", "enum": list(LEVELS), "default": "normal"},
+                  "key": {"type": "string", "description": "collapse key for one topic"},
+                  "reply": {"type": "boolean", "description": "reply ready: the tap opens the chat at your message"},
+              },
+              "required": ["title"]})
     async def notify(args):
-        push.ping(str(args.get("title", "")), str(args.get("body", "")))
-        phones = len(push._phones())
-        return {"content": [{"type": "text", "text": f"Sent to {phones} phone(s)." if phones else
-                             "Not sent: no paired phone with notifications, or the app is open right now (they see the chat)."}]}
+        n = push.ping(str(args.get("title", "")), str(args.get("body", "")), str(args.get("level") or "normal"),
+                      args.get("key") or None, bool(args.get("reply")))
+        return {"content": [{"type": "text", "text": f"Sent to {n} phone(s)." if n else
+                             "Not sent: no paired phone with notifications, or the app is in front of the user."}]}
 
-    return [urgent, notify]
+    @tool("presence", "Where the user is in the app on each phone: open or not, which view (chat, agents, usage, "
+          "screen, page = an agent's page), and when they last left.", {})
+    async def presence(args):
+        rows = push.presence()
+        if not rows:
+            return {"content": [{"type": "text", "text": "No paired phone with notifications."}]}
+        return {"content": [{"type": "text", "text": "\n".join(
+            f"{r['phone']}: " + (f"open on {r['view']}" if r["open"] else
+                                 f"closed (left {ago(r['left'])})" if r["left"] else "closed") for r in rows)}]}
+
+    return [notify, presence]
+
+
+def ago(t: float) -> str:
+    s = int(time.time() - t)
+    return f"{s}s ago" if s < 60 else f"{s // 60} min ago" if s < 3600 else f"{s // 3600} h ago"

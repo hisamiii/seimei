@@ -87,7 +87,17 @@ fun ChatTab(vm: Seimei) {
     // something new just off screen. A reader at the bottom (or a row or two above it) follows the end.
     val newest = vm.items.lastOrNull()?.key
     LaunchedEffect(newest, vm.live.isEmpty(), vm.busy) {
-        if (state.firstVisibleItemIndex <= 2) state.scrollToItem(0)
+        if (state.firstVisibleItemIndex <= 2 && vm.focus == null) state.scrollToItem(0)
+    }
+    // Rows sit after the away card and the live or working row, when those show.
+    val lead = listOf(!vm.online && vm.awaySince != null, vm.live.isNotEmpty() || (vm.online && vm.busy && vm.waiting == 0)).count { it }
+    LaunchedEffect(vm.focus, rows.size) {
+        val id = vm.focus ?: return@LaunchedEffect
+        val i = rows.indexOfFirst { it.key == "e$id" }
+        if (i >= 0) {
+            state.scrollToItem(lead + i)
+            vm.focus = null
+        }
     }
     LazyColumn(
         Modifier.fillMaxSize(),

@@ -27,14 +27,14 @@ object Push {
     /** One channel per kind, so each can be tuned or muted in the system settings. */
     private val CHANNELS = listOf(
         Triple("approval", "Approvals", NotificationManager.IMPORTANCE_HIGH),
-        Triple("reply", "Replies", NotificationManager.IMPORTANCE_LOW),
+        Triple("quiet", "Quiet pings", NotificationManager.IMPORTANCE_LOW),
         Triple("ping", "Pings", NotificationManager.IMPORTANCE_DEFAULT),
         Triple("urgent", "Urgent", NotificationManager.IMPORTANCE_HIGH),
     )
     private val ABOUT = mapOf(
         "approval" to "A card waits for your OK: a session command, a file edit, a desktop action.",
-        "reply" to "seimei's finished turn, when the chat is not on screen. Silent; later turns update it.",
-        "ping" to "Things you asked seimei to tell you about: an APK is up, a render or a run finished.",
+        "quiet" to "Pings seimei sends without sound.",
+        "ping" to "Things seimei tells you about: an APK is up, a run finished, a reply is ready.",
         "urgent" to "Rare emergencies seimei flags itself.",
     )
 
@@ -53,8 +53,9 @@ object Push {
         for ((id, name, importance) in CHANNELS) {
             nm.createNotificationChannel(NotificationChannel(id, name, importance).apply { description = ABOUT[id] })
         }
-        // Questions no longer notify (rules of 2026-10-20).
+        // Questions and automatic replies no longer notify (rules of 2026-10-20): seimei decides what pings.
         nm.deleteNotificationChannel("question")
+        nm.deleteNotificationChannel("reply")
         if (!configured || FirebaseApp.getApps(ctx).isNotEmpty()) return
         FirebaseApp.initializeApp(ctx, FirebaseOptions.Builder()
             .setApplicationId(BuildConfig.FCM_APP).setApiKey(BuildConfig.FCM_KEY)
@@ -90,11 +91,12 @@ class Notify : FirebaseMessagingService() {
         val kind = (d["kind"] ?: return).let { if (nm.getNotificationChannel(it) != null) it else "ping" }
         val tag = d["tag"] ?: kind
         if (d["cancel"] == "1") return nm.cancel(tag, 0)
-        // On screen the laptop holds pushes; a reply still shows when the chat itself is not in front.
-        if (Push.visible && (kind != "reply" || Push.onChat)) return
+        // On screen the laptop holds pushes; "reply ready" still shows when the chat itself is not in front.
+        if (Push.visible && (tag != "reply" || Push.onChat)) return
         val open = PendingIntent.getActivity(
             this, tag.hashCode(),
-            Intent(this, MainActivity::class.java).putExtra("tab", d["tab"] ?: "chat").addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            Intent(this, MainActivity::class.java).putExtra("tab", d["tab"] ?: "chat").putExtra("event", d["event"])
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val title = d["title"].orEmpty()
@@ -108,7 +110,7 @@ class Notify : FirebaseMessagingService() {
             .setStyle(Notification.BigTextStyle().bigText(body))
             .setContentIntent(open).setAutoCancel(true)
             .setOnlyAlertOnce(d["alert"] != "1")
-            .setCategory(if (kind == "reply") Notification.CATEGORY_MESSAGE else Notification.CATEGORY_REMINDER)
+            .setCategory(if (tag == "reply") Notification.CATEGORY_MESSAGE else Notification.CATEGORY_REMINDER)
             .setVisibility(Notification.VISIBILITY_PRIVATE).setPublicVersion(public)
             .build()
         nm.notify(tag, 0, n)
@@ -116,7 +118,7 @@ class Notify : FirebaseMessagingService() {
 
     companion object {
         const val MAUVE = 0xFFCBA6F7.toInt()
-        val PUBLIC = mapOf("approval" to "Approval waiting", "reply" to "seimei replied", "ping" to "Update from seimei",
+        val PUBLIC = mapOf("approval" to "Approval waiting", "quiet" to "Update from seimei", "ping" to "Update from seimei",
             "urgent" to "seimei: urgent")
     }
 }
