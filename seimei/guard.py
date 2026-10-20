@@ -1,9 +1,12 @@
 """One hook in front of every tool call of the dispatcher and the shikigami: a deny-list for what a prompt
 injection would reach for, Approve/Deny cards for the user's sessions, and an append-only audit log."""
 
+import glob
+import itertools
 import json
 import os
 import re
+import shlex
 import time
 from pathlib import Path
 
@@ -11,42 +14,48 @@ from claude_agent_sdk import HookMatcher
 
 from .approvals import WAIT, Approvals, check
 from .events import EventLog
-from .shell import commands
+from .shell import _unwrap, commands
 
 HOME = str(Path.home())
 # Past the matcher timeout Claude Code gives up on the hook and runs the tool, so it stays well above WAIT.
 HOOK_TIMEOUT = WAIT + 300
 AUDIT_ROTATE = 64 << 20
 
-# Secrets a hijacked session would want to read or send away. The pattern finds the path in a shell command.
+# Secrets a hijacked session would want to read or send away: the path under home, what it is, and the path
+# components that name it even when the rest of the path is built in code (f"{home}/.ssh/id_ed25519").
 SECRETS = [
-    (".ssh", "your SSH keys", r"\.ssh"),
-    (".gnupg", "your GnuPG keys", r"\.gnupg"),
-    (".local/share/TelegramDesktop/tdata", "the Telegram session", r"TelegramDesktop|tdata"),
-    (".local/share/seimei/auth.json", "seimei's login secrets", r"seimei/(dev/)?auth\.json"),
-    (".local/share/seimei/unlock", "the screen password", r"seimei/(dev/)?unlock"),
-    (".local/share/seimei/dev/unlock", "the screen password", r"seimei/dev/unlock"),
-    (".local/share/seimei/signing", "the app signing key", r"seimei/signing"),
-    (".local/share/seimei/firebase", "the Firebase key", r"seimei/firebase"),
-    (".local/share/seimei/kitty-rc.conf", "the kitty remote-control password", r"seimei/kitty-rc(\.conf)?"),
-    (".claude/.credentials.json", "the Claude login", r"\.credentials\.json"),
-    (".cloudflared", "the tunnel credentials", r"\.cloudflared"),
-    (".config/gh/hosts.yml", "the GitHub token", r"gh/hosts\.yml"),
-    (".local/share/keyrings", "the keyring", r"keyrings"),
+    (".ssh", "your SSH keys", [".ssh"]),
+    (".gnupg", "your GnuPG keys", [".gnupg"]),
+    (".local/share/TelegramDesktop/tdata", "the Telegram session", ["TelegramDesktop"]),
+    (".local/share/seimei/auth.json", "seimei's login secrets", ["seimei/auth.json", "seimei/dev/auth.json"]),
+    (".local/share/seimei/unlock", "the screen password", ["seimei/unlock"]),
+    (".local/share/seimei/dev/unlock", "the screen password", ["seimei/dev/unlock"]),
+    (".local/share/seimei/signing", "the app signing key", ["seimei/signing"]),
+    (".local/share/seimei/firebase", "the Firebase key", ["seimei/firebase"]),
+    (".local/share/seimei/kitty-rc.conf", "the kitty remote-control password", ["kitty-rc.conf"]),
+    (".claude/.credentials.json", "the Claude login", [".credentials.json"]),
+    (".cloudflared", "the tunnel credentials", [".cloudflared"]),
+    (".config/gh/hosts.yml", "the GitHub token", ["gh/hosts.yml"]),
+    (".local/share/keyrings", "the keyring", ["share/keyrings"]),
 ]
-SECRET_WORDS = [(name, re.compile(rf"(?<![\w-])(?:{pat})(?![\w-])")) for _, name, pat in SECRETS]
-DOWNLOADERS = r"(curl|wget|fetch|aria2c|http|xh)"
-INTERPRETERS = r"(sudo\s+|doas\s+)?((ba|z|da|fi|k)?sh|python3?|perl|ruby|node|php)\b"
-PIPED = [
-    re.compile(rf"\b{DOWNLOADERS}\b[^;&\n]*\|\s*{INTERPRETERS}"),
-    re.compile(rf"<\(\s*{DOWNLOADERS}\b"),
-    re.compile(rf"\b((ba|z)?sh|eval|source)\s+(-c\s+)?[\"']?\$\(\s*{DOWNLOADERS}\b"),
-]
+DOWNLOADERS = {"curl", "wget", "fetch", "aria2c", "http", "https", "xh"}
+SHELLS = {"sh", "bash", "zsh", "dash", "fish", "ksh"}
+CODE = re.compile(r"^(python[\d.]*|perl|ruby|node|nodejs|php|deno|bun|lua)$")
 PATH_KEYS = ("file_path", "notebook_path", "path")
+# Programs that only look at names and metadata: listing a secret's folder is not reading it.
+METADATA = {"ls", "stat", "test", "[", "[[", "du", "realpath", "readlink", "basename", "dirname"}
+# Both kinds, overlapping: code in "..." holds its paths in '...'.
+LITERALS = (re.compile(r"'([^'\n]*)'"), re.compile(r"\"((?:[^\"\\\n]|\\.)*)\""))
+GLOB_LIMIT = 5000
+SUBST = re.compile(rf"(?:^|[\s;&|(])(?:sudo\s+|doas\s+)?(?:{'|'.join(SHELLS)}|python[\d.]*|perl|ruby|node|php|source|\.)\s+(?:-\S+\s+)*"
+                   rf"<\(\s*(?:sudo\s+)?(?:{'|'.join(DOWNLOADERS)})\b")
+EVALED = re.compile(rf"\b(?:{'|'.join(SHELLS)}|python[\d.]*|perl|ruby|node|eval|source)\s+(?:-[ce]\s+)?[\"']?\$\(\s*(?:{'|'.join(DOWNLOADERS)})\b")
 # Driving kitty: only seimei may type into a session's window, on the user's tap in the app.
-KITTY_RC = re.compile(r"\bkitt(y|en)\s+(\+kitten\s+)?@|\bkitten\s+remote|kitty_rc|KITTY_(LISTEN_ON|PUBLIC_KEY)|"
-                      r"/run/user/\d+/kitty-\d+|\$\{?XDG_RUNTIME_DIR\}?/kitty-|"
-                      r"\bseimei\.kitty\b|from\s+seimei\s+import\s+[^;\n]*\bkitty\b")
+KITTY_SOCKET = re.compile(r"^(unix:|UNIX(-CONNECT)?:)?(/run/user/\d+|\$\{?XDG_RUNTIME_DIR\}?)/kitty-")
+KITTY_ENV = re.compile(r"\$\{?KITTY_(LISTEN_ON|PUBLIC_KEY)\b")
+KITTY_CODE = re.compile(r"""["']kitt(y|en)["']\s*,\s*["'](\+kitten["']\s*,\s*["'])?@["']|\bseimei\.kitty\b|"""
+                        r"""from\s+seimei\s+import\s+[^;\n]*\bkitty\b|["']KITTY_(LISTEN_ON|PUBLIC_KEY)["']""")
+KITTY = "driving kitty by remote control (only the user, from the app, types into sessions)"
 
 
 def _paths_in(inp: dict, cwd: str) -> list[Path]:
@@ -70,6 +79,41 @@ def _secret_path(p: Path) -> str | None:
     return None
 
 
+def _home(text: str) -> str:
+    return re.sub(r"^(~|\$HOME|\$\{HOME\})(?=/|$)", HOME, text)
+
+
+def _parts(text: str) -> list[str]:
+    return [c for c in text.split("/") if c not in ("", ".")]
+
+
+def _secret_word(word: str, bases: list[str]) -> str | None:
+    """The secret a path-like word reaches: as a real path from each base folder (globs included), or by the
+    components that name a secret anywhere in it. Words with spaces are prose, not paths."""
+    word = re.sub(r"^\d*[<>]+&?", "", word)
+    if not word or any(c.isspace() for c in word):
+        return None
+    word = _home(word)
+    parts = _parts(word)
+    for _, name, names in SECRETS:
+        for n in names:
+            seq = _parts(n)
+            if any(parts[i:i + len(seq)] == seq for i in range(len(parts) - len(seq) + 1)):
+                return name
+    if "$" in word or "{" in word or "`" in word:
+        return None
+    for base in bases if not word.startswith("/") else ["/"]:
+        full = os.path.normpath(os.path.join(base, word))
+        if any(c in full for c in "*?["):
+            # A glob does something only through the files it expands to (a regex for sed or grep expands to none).
+            for hit in itertools.islice(glob.iglob(full), GLOB_LIMIT):
+                if name := _secret_path(Path(hit)):
+                    return name
+        elif name := _secret_path(Path(full)):
+            return name
+    return None
+
+
 def _rm_home(argv: list[str], cwd: str) -> str | None:
     """rm -r aimed at the home folder, its contents, /home or /: what it would wipe."""
     if argv[0] != "rm" or not any(a == "--recursive" or (re.match(r"^-[a-zA-Z]+$", a) and "r" in a.lower()) for a in argv[1:]):
@@ -77,12 +121,67 @@ def _rm_home(argv: list[str], cwd: str) -> str | None:
     for a in argv[1:]:
         if a.startswith("-"):
             continue
-        a = re.sub(r"^(\$HOME|\$\{HOME\}|~)(?=/|$)", HOME, a)
+        a = _home(a)
         # `~`, `~/`, `~/*`, `.` or `*` in the home folder all come down to the folder itself.
         base = os.path.normpath(os.path.join(cwd, a[:-2] if a.endswith("/*") else "." if a == "*" else a))
         if base in ("/", "/home", HOME):
             return "your home folder" if base == HOME else "the whole disk" if base == "/" else "/home"
     return None
+
+
+def _stdin_program(argv: list[str]) -> bool:
+    """The interpreter runs whatever comes in on stdin: `sh`, `bash -s`, `python3 -`, not `python3 -c CODE`."""
+    prog, args = argv[0], argv[1:]
+    if prog in SHELLS:
+        if "-c" in args:
+            return False
+        pos = [a for a in args if not a.startswith("-") or a == "-"]
+        return not pos or pos[0] == "-" or any(re.match(r"^-[a-z]*s", a) for a in args)
+    if CODE.match(prog):
+        if any(re.match(r"^-[a-zA-Z]*[cemEpr]$", a) for a in args):
+            return False
+        pos = [a for a in args if not a.startswith("-") or a == "-"]
+        return not pos or pos[0] == "-"
+    return False
+
+
+def _download_run(flat: str) -> bool:
+    if SUBST.search(flat) or EVALED.search(flat):
+        return True
+    for seg in re.split(r"&&|\|\||[;&\n]", flat):
+        stages = []
+        for stage in seg.split("|"):
+            try:
+                argv = shlex.split(stage)
+            except ValueError:
+                argv = stage.split()
+            argv = _unwrap(argv)
+            stages.append([argv[0].rsplit("/", 1)[-1]] + argv[1:] if argv else [])
+        for i, argv in enumerate(stages):
+            if argv and argv[0] in DOWNLOADERS and any(a and _stdin_program(a) for a in stages[i + 1:]):
+                return True
+    return False
+
+
+def _assignments(flat: str) -> list[str]:
+    """Values of the NAME=value words in front of each command, like D=~/.ssh in `D=~/.ssh; cat $D/id`."""
+    out = []
+    for part in re.split(r"&&|\|\||[;&|\n()]", flat):
+        try:
+            words = shlex.split(part)
+        except ValueError:
+            continue
+        for w in words:
+            if not re.match(r"^[A-Za-z_]\w*=", w):
+                break
+            out.append(w.split("=", 1)[1])
+    return out
+
+
+def _kitty_argv(argv: list[str]) -> bool:
+    prog, args = argv[0], argv[1:]
+    return prog in ("kitty", "kitten") and (args[:1] == ["@"] or args[:2] == ["+kitten", "@"]
+                                            or (prog == "kitten" and args[:1] == ["remote"]))
 
 
 def blocked(tool: str, inp: dict, cwd: str) -> str | None:
@@ -91,23 +190,48 @@ def blocked(tool: str, inp: dict, cwd: str) -> str | None:
         if name := _secret_path(p):
             return f"reading or writing {name}"
     if tool == "Glob" and isinstance(inp.get("pattern"), str):
-        for name, word in SECRET_WORDS:
-            if word.search(inp["pattern"]):
-                return f"reading or writing {name}"
+        base = inp.get("path") or cwd
+        if name := _secret_word(inp["pattern"].replace("**/", "*/"), [os.path.expanduser(base)]) or _secret_word(inp["pattern"], [base]):
+            return f"reading or writing {name}"
     if tool != "Bash":
         return None
     cmd = str(inp.get("command", ""))
     flat = re.sub(r"(\$HOME|\$\{HOME\})", HOME, cmd)
-    if any(p.search(flat) for p in PIPED):
+    if _download_run(flat):
         return "running a download as a script"
-    for name, word in SECRET_WORDS:
-        if word.search(flat):
-            return f"reading {name}"
-    if KITTY_RC.search(flat):
-        return "driving kitty by remote control (only the user, from the app, types into sessions)"
+    if KITTY_ENV.search(flat):
+        return KITTY
+    here, code = cwd, False
     for argv in commands(flat):
-        if argv and (what := _rm_home(argv, cwd)):
+        if argv is None:
+            continue
+        if any(CODE.match(a) for a in argv[:3]):  # python3 ..., uv run python ...
+            code = True
+        if argv[0] == "cd":
+            target = next((a for a in argv[1:] if not a.startswith("-")), "~")
+            here = os.path.normpath(os.path.join(here, _home(target)))
+        if _kitty_argv(argv) or any(KITTY_SOCKET.match(a) or re.fullmatch(r"KITTY_(LISTEN_ON|PUBLIC_KEY)", a) for a in argv):
+            return KITTY
+        if what := _rm_home(argv, here):
             return f"deleting {what}"
+        if argv[0] in METADATA:
+            continue
+        for a in argv[1:]:
+            for word in [a, a.split("=", 1)[1]] if "=" in a else [a]:
+                if name := _secret_word(word, [here]):
+                    return f"reading {name}"
+    for value in _assignments(flat):
+        if name := _secret_word(value, [cwd]):
+            return f"reading {name}"
+    if code:
+        # Code builds paths out of string literals: check each against the home folder as well.
+        if KITTY_CODE.search(flat):
+            return KITTY
+        for lit in (m.group(1) for pattern in LITERALS for m in pattern.finditer(flat)):
+            if KITTY_SOCKET.match(lit):
+                return KITTY
+            if name := _secret_word(lit, [here, HOME]):
+                return f"reading {name}"
     return None
 
 
