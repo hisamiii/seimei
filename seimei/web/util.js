@@ -84,13 +84,97 @@ export async function getJSON(path) {
   return r?.ok ? r.json() : null;
 }
 
+// ---------- full-screen pictures: the chat-sized one at once, the original once loaded ----------
+
 const viewer = $('viewer');
-export function view(src) {
-  $('viewer-img').src = src;
-  viewer.hidden = false;
+const vimg = $('viewer-img');
+const vsave = $('viewer-save');
+let zoom = { s: 1, x: 0, y: 0 };
+let token = 0;
+
+function place() {
+  vimg.style.transform = `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.s})`;
+  viewer.classList.toggle('zoomed', zoom.s > 1);
 }
-viewer.addEventListener('click', () => { viewer.hidden = true; });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') viewer.hidden = true; });
+
+// Zoom by f around the point (px, py) of the viewport, keeping that point still.
+function zoomAt(f, px, py) {
+  const s = Math.min(8, Math.max(1, zoom.s * f));
+  const r = viewer.getBoundingClientRect();
+  const cx = px - r.left - r.width / 2;
+  const cy = py - r.top - r.height / 2;
+  const k = s / zoom.s;
+  zoom = s === 1 ? { s: 1, x: 0, y: 0 } : { s, x: cx - (cx - zoom.x) * k, y: cy - (cy - zoom.y) * k };
+  place();
+}
+
+/** src: shown at once; full: the original, swapped in once loaded; save: its download link. */
+export function view(src, { full = null, save = null } = {}) {
+  const mine = ++token;
+  zoom = { s: 1, x: 0, y: 0 };
+  place();
+  vimg.src = src;
+  vsave.hidden = !save;
+  if (save) vsave.href = save;
+  viewer.hidden = false;
+  if (full && full !== src) {
+    const big = new Image();
+    big.onload = () => { if (mine === token && !viewer.hidden) vimg.src = full; };
+    big.src = full;
+  }
+}
+
+function close() {
+  viewer.hidden = true;
+  token++;
+}
+
+const pts = new Map();
+let pinch = null;
+let moved = false;
+vimg.addEventListener('pointerdown', (e) => {
+  vimg.setPointerCapture(e.pointerId);
+  pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  moved = false;
+  if (pts.size === 2) {
+    const [a, b] = [...pts.values()];
+    pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), s: zoom.s };
+  }
+});
+vimg.addEventListener('pointermove', (e) => {
+  const was = pts.get(e.pointerId);
+  if (!was) return;
+  const now = { x: e.clientX, y: e.clientY };
+  pts.set(e.pointerId, now);
+  if (Math.hypot(now.x - was.x, now.y - was.y) > 2) moved = true;
+  if (pts.size === 2 && pinch) {
+    const [a, b] = [...pts.values()];
+    zoomAt(pinch.s * Math.hypot(a.x - b.x, a.y - b.y) / pinch.d / zoom.s, (a.x + b.x) / 2, (a.y + b.y) / 2);
+  } else if (pts.size === 1 && zoom.s > 1) {
+    zoom.x += now.x - was.x;
+    zoom.y += now.y - was.y;
+    place();
+  }
+});
+const lift = (e) => {
+  pts.delete(e.pointerId);
+  if (pts.size < 2) pinch = null;
+};
+vimg.addEventListener('pointerup', lift);
+vimg.addEventListener('pointercancel', lift);
+vimg.addEventListener('dblclick', (e) => zoomAt(zoom.s > 1 ? 1 / zoom.s : 2.5, e.clientX, e.clientY));
+viewer.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  zoomAt(Math.exp(-e.deltaY / 300), e.clientX, e.clientY);
+}, { passive: false });
+// A tap on the backdrop closes, and so does one on the unzoomed picture; a drag never does.
+viewer.addEventListener('click', (e) => {
+  if (e.target.closest('.viewer-bar')) return;
+  if (e.target === vimg && (zoom.s > 1 || moved)) return;
+  close();
+});
+$('viewer-close').addEventListener('click', close);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !viewer.hidden) close(); });
 
 export const ICON = {
   star: 'M12 2 17.88 20.09 2.49 8.91h19.02L6.12 20.09Z',
@@ -100,4 +184,9 @@ export const ICON = {
   laptop: 'M5 6.5A1.5 1.5 0 0 1 6.5 5h11A1.5 1.5 0 0 1 19 6.5V15H5zM3 18h18',
   list: 'M8 7h11M8 12h11M8 17h7M4.5 7h.01M4.5 12h.01M4.5 17h.01',
   full: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5',
+  save: 'M12 4v11M7 10.5l5 5 5-5M5 19.5h14',
+  close: 'M6 6l12 12M18 6L6 18',
 };
+
+vsave.append(svg(ICON.save, 20));
+$('viewer-close').append(svg(ICON.close, 20));

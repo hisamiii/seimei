@@ -394,8 +394,12 @@ body.login { display: grid; place-items: center; grid-template-rows: 1fr; paddin
 .att.file { width: auto; max-width: 180px; display: flex; align-items: center; gap: 8px; padding: 0 30px 0 12px; color: var(--text-2); }
 .att.file .fname { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .att.busy { opacity: .55; }
-.viewer { position: fixed; inset: 0; z-index: 20; background: rgb(17 17 27 / .94); display: grid; place-items: center; padding: 12px; animation: fadeIn .2s; cursor: zoom-out; }
-.viewer img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; }
+.viewer { position: fixed; inset: 0; z-index: 20; background: rgb(17 17 27 / .94); display: grid; place-items: center; padding: 12px; animation: fadeIn .2s; cursor: zoom-out; overflow: hidden; touch-action: none; }
+.viewer img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; transform-origin: center; cursor: zoom-in; user-select: none; }
+.viewer.zoomed img { cursor: grab; border-radius: 0; }
+.viewer-bar { position: absolute; top: max(8px, env(safe-area-inset-top)); right: 8px; z-index: 1; display: flex; gap: 4px; }
+.viewer-bar .icon-btn { margin: 0; color: #cdd6f4; background: rgb(30 30 46 / .7); }
+.viewer-bar .icon-btn:hover { background: rgb(49 50 68 / .9); }
 
 /* Approval cards */
 .status[data-s="waiting"] .dot { background: var(--primary); }

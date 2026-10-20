@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "aiohttp>=3.11",
     "claude-agent-sdk==0.2.168",
+    "pillow>=11",
     "webauthn==2.8.0",
 ]
 

@@ -457,10 +457,16 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
         return web.json_response({"ok": True})
 
     async def file(request):
-        path = files.path(request.match_info["name"])
+        """An image: ?w=thumb for the chat-sized one, ?download=1 for the original as a download."""
+        name = request.match_info["name"]
+        thumb = request.query.get("w") == "thumb"
+        path = await asyncio.to_thread(files.thumb, name) if thumb else files.path(name)
         if not path:
             raise web.HTTPNotFound()
-        return web.FileResponse(path, headers={"Cache-Control": "private, max-age=31536000, immutable"})
+        headers = {"Cache-Control": "private, max-age=31536000, immutable"}
+        if request.query.get("download") and not thumb:
+            headers["Content-Disposition"] = f'attachment; filename="seimei-{name[:8]}{path.suffix}"'
+        return web.FileResponse(path, headers=headers)
 
     def worker(request):
         w = pool.workers.get(request.match_info["id"])

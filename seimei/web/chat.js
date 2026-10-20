@@ -313,7 +313,8 @@ setInterval(tick, 20000);
 
 function pic(name) {
   const img = el('img', 'pic');
-  img.src = `api/files/${name}`;
+  img.src = `api/files/${name}?w=thumb`;
+  img.dataset.name = name;
   img.loading = 'lazy';
   img.alt = '';
   return img;
@@ -726,7 +727,10 @@ $('composer').addEventListener('drop', (e) => {
 
 // Tap a message to see when it was sent; tap a shikigami card to open it; tap a picture to zoom.
 thread.addEventListener('click', (e) => {
-  if (e.target.matches('img.pic')) return view(e.target.src);
+  if (e.target.matches('img.pic')) {
+    const n = e.target.dataset.name;
+    return view(e.target.src, n ? { full: `api/files/${n}`, save: `api/files/${n}?download=1` } : {});
+  }
   const card = e.target.closest('.wcard');
   if (card?.dataset.worker && !e.target.closest('a, .more') && !getSelection().toString()) return openWorker(card.dataset.worker);
   const msg = e.target.closest('.msg');
