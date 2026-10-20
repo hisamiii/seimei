@@ -212,9 +212,8 @@ def make_desktop_tools(desk: Desktop, files: Files, events: EventLog, layout=Non
         return text(r["error"], error=True) if "error" in r else text(json.dumps(r, ensure_ascii=False))
 
     @tool("media", "Music and media players over MPRIS (Quod Libet, browsers, Vesktop): status shows every player and "
-          "what it plays; the rest control one player (default: the active one). For Quod Libet's library use Bash: "
-          "`quodlibet --query=...` (search), `--enqueue=<query>`, `--print-query=<query>`, `--print-queue`, "
-          "`--filter=artist=X`, `--shuffle=1`, `--play-file=...`.", {
+          "what it plays; the rest control one player (default: the active one). For Quod Libet's library, "
+          "queue, playlists, ratings and tags use the music tool.", {
               "type": "object",
               "properties": {"action": {"type": "string", "enum": ["status", "play", "pause", "play-pause", "next",
                                                                  "previous", "stop", "volume"]},

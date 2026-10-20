@@ -20,6 +20,7 @@ from .events import EventLog
 from .desktop import UNLOCK, Desktop
 from .layout import Layout
 from .desktop_tools import make_desktop_tools
+from .music import make_music_tools
 from .files import Files
 from .guard import Guard
 from .server import make_app
@@ -121,7 +122,8 @@ def main():
     usage = Usage(events, state)
     desk = Desktop(events, lambda t: dispatcher.note(t), state / UNLOCK)
     layout = Layout(desk, approvals, events, state)
-    dispatcher = Dispatcher(disp, events, state, make_tools(pool, files, events, make_desktop_tools(desk, files, events, layout)),
+    dispatcher = Dispatcher(disp, events, state, make_tools(pool, files, events, make_desktop_tools(desk, files, events, layout)
+                                                                 + make_music_tools(approvals)),
                             guard, usage)
     pool.dispatcher, pool.guard = dispatcher, guard
     watcher = Watcher(events, pool.own_sessions, lambda s: dispatcher.note(
