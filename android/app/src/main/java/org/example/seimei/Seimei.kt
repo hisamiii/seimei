@@ -33,6 +33,18 @@ enum class Phase { Pair, Locked, Ready }
 
 data class Attachment(val data: String, val preview: ImageBitmap)
 
+/** The bottom sheet over the tabs: one shikigami with its log, or one of the user's own sessions. */
+sealed interface Sheet {
+    data class Worker(val info: JSONObject, val task: String, val items: List<Item>) : Sheet
+    data class Session(val pid: Long, val data: JSONObject, val sig: String) : Sheet
+}
+
+/** What the Screen tab got back: a frame, or why there is none. */
+sealed interface Frame {
+    data class Image(val bmp: ImageBitmap) : Frame
+    data class Problem(val text: String) : Frame
+}
+
 class Seimei(app: Application) : AndroidViewModel(app) {
     val prefs = Prefs(app)
     var api = Api(prefs.server)
@@ -71,7 +83,19 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         private set
     var usage by mutableStateOf<JSONObject?>(null)
         private set
+    var cost by mutableStateOf<JSONObject?>(null)
+        private set
+    /** Every shikigami, finished ones from days ago too; fetched while the Agents tab shows. */
+    var allWorkers by mutableStateOf<List<JSONObject>?>(null)
+        private set
+    var sheet by mutableStateOf<Sheet?>(null)
+        private set
+    var seen by mutableStateOf(JSONObject(prefs.seen))
+        private set
+    var visible by mutableStateOf(false)
+        private set
     var tab by mutableStateOf("chat")
+        private set
     var unread by mutableStateOf(false)
 
     var draft by mutableStateOf(prefs.draft)
@@ -87,6 +111,10 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     private var foreground = false
     private var backgroundSince = 0L
     private val images = LruCache<String, ImageBitmap>(48)
+    private var sheetChat = Chat()
+    private var sheetLast = 0L
+    private var allFetched = 0L
+    private var costFetched = 0L
 
     // ---------- pairing and login ----------
 
@@ -194,6 +222,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
 
     fun onStart() {
         foreground = true
+        visible = true
         if (phase != Phase.Ready) return
         // Back after a while away: ask for the fingerprint again.
         if (backgroundSince > 0 && System.currentTimeMillis() - backgroundSince > LOCK_AFTER) return lock()
@@ -202,6 +231,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
 
     fun onStop() {
         foreground = false
+        visible = false
         backgroundSince = System.currentTimeMillis()
         stream?.cancel()
         stream = null
@@ -264,7 +294,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         hasOlder = firstId > 1
         lastId = r.getLong("last")
         r.optJSONObject("state")?.let { setState(it) }
-        workers = r.optJSONArray("workers").objects()
+        takeWorkers(r.optJSONArray("workers").objects())
         rebuild()
     }
 
@@ -325,10 +355,182 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         when (type) {
             "state" -> setState(ev)
             "delta" -> live += ev.str("text")
-            "workers" -> workers = ev.optJSONArray("list").objects()
-            "sessions" -> sessions = ev.optJSONArray("list").objects()
+            "workers" -> takeWorkers(ev.optJSONArray("list").objects())
+            "sessions" -> takeSessions(ev.optJSONArray("list").objects())
+            "w" -> workerEvent(ev)
             "usage" -> usage = ev
         }
+    }
+
+    // ---------- tabs ----------
+
+    fun show(t: String) {
+        tab = t
+        when (t) {
+            "chat" -> unread = false
+            "agents" -> refreshAll(force = true)
+            "usage" -> refreshCost()
+        }
+    }
+
+    // ---------- shikigami and sessions ----------
+
+    private fun takeWorkers(list: List<JSONObject>) {
+        workers = list
+        (sheet as? Sheet.Worker)?.let { sh ->
+            list.firstOrNull { it.str("id") == sh.info.str("id") }?.let { w ->
+                val info = JSONObject(sh.info.toString())
+                w.keys().forEach { info.put(it, w.get(it)) }
+                sheet = sh.copy(info = info)
+            }
+        }
+        if (tab == "agents") refreshAll()
+    }
+
+    private fun refreshAll(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!force && now - allFetched < 2000) return
+        allFetched = now
+        viewModelScope.launch {
+            try {
+                allWorkers = api.get("api/workers").getJSONArray("workers").objects()
+            } catch (e: IOException) {
+            }
+        }
+    }
+
+    private fun takeSessions(list: List<JSONObject>) {
+        // A session seen for the first time starts read; only turns that end after that get marked.
+        var fresh = false
+        val s = JSONObject(seen.toString())
+        for (x in list) {
+            val id = x.str("session_id")
+            if (id.isNotEmpty() && !s.has(id)) {
+                s.put(id, if (x.str("status") == "busy") 0.0 else x.optDouble("active", 0.0))
+                fresh = true
+            }
+        }
+        if (fresh) saveSeen(s)
+        sessions = list
+        (sheet as? Sheet.Session)?.let { sh ->
+            list.firstOrNull { it.optLong("pid") == sh.pid }?.let { if (sessionSig(it) != sh.sig) openSession(sh.pid) }
+        }
+    }
+
+    private fun saveSeen(s: JSONObject) {
+        seen = s
+        prefs.seen = s.toString()
+    }
+
+    private fun sessionSig(s: JSONObject) = s.str("status") + s.opt("question") + s.optDouble("active", 0.0)
+
+    fun openWorker(id: String) {
+        viewModelScope.launch {
+            try {
+                val r = api.get("api/workers/$id")
+                val evs = r.getJSONArray("events").objects()
+                sheetChat = Chat()
+                evs.forEach(sheetChat::add)
+                sheetLast = evs.lastOrNull()?.optLong("id") ?: 0
+                val w = r.getJSONObject("worker")
+                sheet = Sheet.Worker(w, w.str("task"), sheetChat.items.toList())
+            } catch (e: IOException) {
+            }
+        }
+    }
+
+    private fun workerEvent(ev: JSONObject) {
+        val sh = sheet as? Sheet.Worker ?: return
+        if (ev.str("worker") != sh.info.str("id")) return
+        val e = ev.optJSONObject("ev") ?: return
+        // The sheet loaded the log a moment ago; skip what it already holds.
+        if (e.has("id") && e.getLong("id") <= sheetLast) return
+        if (e.has("id")) sheetLast = e.getLong("id")
+        sheetChat.add(e)
+        sheet = sh.copy(items = sheetChat.items.toList())
+    }
+
+    fun openSession(pid: Long) {
+        viewModelScope.launch {
+            try {
+                val r = api.get("api/sessions/$pid")
+                val s = r.getJSONObject("session")
+                val id = s.str("session_id")
+                if (id.isNotEmpty()) saveSeen(JSONObject(seen.toString()).put(id, s.optDouble("active", 0.0)))
+                sheet = Sheet.Session(pid, r, sessionSig(s))
+            } catch (e: IOException) {
+            }
+        }
+    }
+
+    fun closeSheet() {
+        sheet = null
+    }
+
+    fun workerSend(id: String, text: String, onFail: () -> Unit) {
+        viewModelScope.launch {
+            try {
+                api.post("api/workers/$id/send", JSONObject().put("text", text))
+            } catch (e: IOException) {
+                onFail()
+            }
+        }
+    }
+
+    fun workerStop(id: String) {
+        viewModelScope.launch {
+            try {
+                api.post("api/workers/$id/stop")
+            } catch (e: IOException) {
+            }
+        }
+    }
+
+    /** Opens the shikigami in a terminal on the laptop; null when it worked, else why not. */
+    suspend fun workerLaptop(id: String): String? = try {
+        api.post("api/workers/$id/laptop")
+        null
+    } catch (e: HttpError) {
+        try { JSONObject(e.body).optString("error") } catch (x: JSONException) { "" }.ifEmpty { "no answer" }
+    } catch (e: IOException) {
+        "no answer"
+    }
+
+    // ---------- usage and the screen ----------
+
+    fun refreshCost() {
+        val now = System.currentTimeMillis()
+        if (now - costFetched < 15_000) return
+        costFetched = now
+        viewModelScope.launch {
+            try {
+                val r = api.get("api/cost")
+                if (r.has("all")) cost = r
+            } catch (e: IOException) {
+            }
+        }
+    }
+
+    suspend fun desktop(): JSONObject? = try {
+        api.get("api/desktop")
+    } catch (e: IOException) {
+        null
+    }
+
+    suspend fun frame(query: String): Frame = try {
+        val bytes = api.bytes("api/screen?$query")
+        Frame.Image(withContext(Dispatchers.Default) { ImageDecoder.decodeBitmap(ImageDecoder.createSource(bytes)).asImageBitmap() })
+    } catch (e: HttpError) {
+        val body = try { JSONObject(e.body) } catch (x: JSONException) { JSONObject() }
+        Frame.Problem(when {
+            body.str("paused") == "bench" -> "Paused while a benchmark runs"
+            body.optBoolean("down") -> "The desktop is not running"
+            else -> body.str("error").ifEmpty { "Could not reach the laptop" }
+        })
+    } catch (e: IOException) {
+        Frame.Problem("Could not reach the laptop")
+    } catch (e: Exception) {
+        Frame.Problem("Could not read the picture")
     }
 
     // ---------- actions ----------

@@ -37,6 +37,10 @@ class Prefs(ctx: Context) {
     var draft: String
         get() = p.getString("draft", "") ?: ""
         set(v) = p.edit().putString("draft", v).apply()
+    /** session id -> the last activity time the user has looked at, for "new reply" marks. */
+    var seen: String
+        get() = p.getString("seen", "{}") ?: "{}"
+        set(v) = p.edit().putString("seen", v).apply()
 }
 
 val b64url: Base64.Encoder = Base64.getUrlEncoder().withoutPadding()

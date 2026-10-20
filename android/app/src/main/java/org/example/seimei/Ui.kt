@@ -166,6 +166,11 @@ object Icons {
     val search = icon("M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14zM16 16l4 4")
     val web = icon("M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18")
     val tool = icon("M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-2.4z")
+    val laptop = icon("M5 6.5A1.5 1.5 0 0 1 6.5 5h11A1.5 1.5 0 0 1 19 6.5V15H5zM3 18h18")
+    val list = icon("M8 7h11M8 12h11M8 17h7M4.5 7h.01M4.5 12h.01M4.5 17h.01")
+    val full = icon("M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5")
+    val alert = icon("M12 7v6M12 17v.01")
+    val dash = icon("M7 12h10")
 }
 
 // ---------- activity ----------
@@ -313,34 +318,28 @@ val TITLES = mapOf("chat" to "seimei", "agents" to "Agents", "screen" to "Screen
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun AppScreen(vm: Seimei) {
-    BackHandler(vm.tab != "chat") { vm.tab = "chat" }
-    LaunchedEffect(vm.tab) { if (vm.tab == "chat") vm.unread = false }
+    BackHandler(vm.tab != "chat") { vm.show("chat") }
     Column(Modifier.fillMaxSize().imePadding()) {
         Header(vm)
         Box(Modifier.weight(1f)) {
             when (vm.tab) {
                 "chat" -> ChatTab(vm)
-                else -> Coming(TITLES[vm.tab]!!)
+                "agents" -> AgentsTab(vm)
+                "screen" -> ScreenTab(vm)
+                "usage" -> UsageTab(vm)
             }
         }
         if (vm.tab == "chat") Composer(vm)
         // The keyboard covers the bottom of the screen: while typing, the navigation bar steps aside.
         if (!WindowInsets.isImeVisible) NavBar(vm)
     }
-}
-
-@Composable
-fun Coming(what: String) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text("$what comes in the next build.", color = LocalExtra.current.text3)
-    }
+    AgentSheet(vm)
 }
 
 @Composable
 fun Header(vm: Seimei) {
     val st = status(vm)
-    val working = vm.workers.count { it.str("state") in ACTIVE }
-    val asks = vm.workers.count { it.str("state") == "asking" }
+    val (working, asks) = agentCounts(vm)
     val (dot, text) = when (vm.tab) {
         "chat" -> st.s to st.text
         "agents" -> (if (asks > 0) "waiting" else if (working > 0) "working" else "idle") to
@@ -390,13 +389,12 @@ fun dotColor(s: String): Color = when (s) {
 
 @Composable
 fun NavBar(vm: Seimei) {
-    val working = vm.workers.count { it.str("state") in ACTIVE }
-    val asks = vm.workers.count { it.str("state") == "asking" }
+    val (working, asks) = agentCounts(vm)
     NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
         for (tab in TABS) {
             NavigationBarItem(
                 selected = vm.tab == tab,
-                onClick = { vm.tab = tab },
+                onClick = { vm.show(tab) },
                 label = { Text(TITLES[tab]!!.replaceFirstChar { it.uppercase() }.let { if (tab == "chat") "Chat" else it }) },
                 icon = {
                     val ic = mapOf("chat" to Icons.chat, "agents" to Icons.agents, "screen" to Icons.screen, "usage" to Icons.usage)[tab]!!
@@ -407,7 +405,7 @@ fun NavBar(vm: Seimei) {
                             tab == "agents" && asks > 0 -> Badge(containerColor = LocalExtra.current.warn)
                             tab == "chat" && vm.tab != "chat" && (vm.unread || vm.waiting > 0) -> Badge(containerColor = MaterialTheme.colorScheme.primary)
                         }
-                    }) { Icon(ic, null) }
+                    }) { if (tab == "usage") UsageRing(vm) else Icon(ic, null) }
                 },
             )
         }

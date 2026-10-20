@@ -12,7 +12,7 @@ import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
-class HttpError(val code: Int, msg: String) : IOException("HTTP $code: $msg")
+class HttpError(val code: Int, val body: String) : IOException("HTTP $code: ${body.take(200)}")
 
 /** The laptop's HTTP API. After login every call carries the bearer token. */
 class Api(server: String) {
@@ -34,7 +34,7 @@ class Api(server: String) {
     private suspend fun call(req: Request): ByteArray = withContext(Dispatchers.IO) {
         client.newCall(req).execute().use { r ->
             val body = r.body.bytes()
-            if (!r.isSuccessful) throw HttpError(r.code, String(body).take(200))
+            if (!r.isSuccessful) throw HttpError(r.code, String(body).take(2000))
             body
         }
     }
