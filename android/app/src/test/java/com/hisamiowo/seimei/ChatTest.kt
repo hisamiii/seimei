@@ -130,4 +130,14 @@ class MarkdownTest {
         assertEquals("it also gone b i", s.text)
         assertTrue(s.spanStyles.size >= 5)
     }
+
+    @Test fun discordPhrases() {
+        val tools = listOf("guilds", "dms", "read", "search", "send", "edit", "delete", "react", "mark_read")
+        val fallback = phrase("mcp__seimei__discord_nope", 1)
+        val one = tools.map { phrase("mcp__seimei__discord_$it", 1) }
+        assertTrue(one.none { it == fallback })
+        assertEquals(9, one.toSet().size)
+        assertEquals("read Discord 3 times", phrase("mcp__seimei__discord_read", 3))
+        assertEquals("sent 3 Discord messages", phrase("mcp__seimei__discord_send", 3))
+    }
 }

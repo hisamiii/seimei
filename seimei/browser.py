@@ -4,10 +4,6 @@ unix socket here, mode 600 in the user's runtime dir. Nothing of it is reachable
 Page text and downloads are untrusted data. Tabs the user opened close only after an Approve card.
 """
 
-import asyncio
-import json
-import logging
-import os
 import re
 import time
 from pathlib import Path
@@ -15,90 +11,26 @@ from pathlib import Path
 from claude_agent_sdk import tool
 
 from .approvals import Approvals
+from .link import Link, NotConnected, runtime_path
 
-LIMIT = 32 << 20
 READ_LIMIT = 20000
 # A read is kept this long so paging through a page does not reload it.
 READ_KEEP = 120
 
 
-class NotConnected(RuntimeError):
-    pass
-
-
 def socket_path(dev: bool) -> Path:
-    run = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}") / "seimei"
-    return run / ("browser-dev.sock" if dev else "browser.sock")
+    return runtime_path("browser", dev)
 
 
-class Browser:
+class Browser(Link):
+    missing = "Waterfox is not connected: it is closed, or the seimei extension is not installed."
+    name = "the browser"
+
     def __init__(self, path: Path):
-        self.path = path
-        self.writer: asyncio.StreamWriter | None = None
-        self.pending: dict[int, asyncio.Future] = {}
-        self.next = 0
+        super().__init__(path)
         # Tabs seimei opened: they close without a card.
         self.opened: set[int] = set()
         self.reads: dict[int, tuple[float, dict]] = {}
-
-    @property
-    def connected(self) -> bool:
-        return self.writer is not None
-
-    async def run(self):
-        self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        self.path.parent.chmod(0o700)
-        self.path.unlink(missing_ok=True)
-        server = await asyncio.start_unix_server(self._conn, self.path, limit=LIMIT)
-        self.path.chmod(0o600)
-        async with server:
-            await server.serve_forever()
-
-    async def _conn(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
-        # The newest host wins: after a browser restart the old one is gone anyway.
-        if self.writer:
-            self.writer.close()
-        self.writer = writer
-        logging.info("browser connected")
-        try:
-            while line := await reader.readline():
-                try:
-                    msg = json.loads(line)
-                except ValueError:
-                    continue
-                fut = self.pending.pop(msg.get("id"), None)
-                if fut and not fut.done():
-                    if msg.get("ok"):
-                        fut.set_result(msg.get("result"))
-                    else:
-                        fut.set_exception(RuntimeError(str(msg.get("error") or "failed")))
-        except (OSError, ValueError, asyncio.LimitOverrunError) as e:
-            logging.warning("browser link: %s", e)
-        finally:
-            if self.writer is writer:
-                self.writer = None
-                for fut in self.pending.values():
-                    if not fut.done():
-                        fut.set_exception(NotConnected("the browser went away"))
-                self.pending.clear()
-            writer.close()
-            logging.info("browser disconnected")
-
-    async def call(self, op: str, timeout: float = 30, **args):
-        if not self.writer:
-            raise NotConnected("Waterfox is not connected: it is closed, or the seimei extension is not installed.")
-        self.next += 1
-        rid = self.next
-        fut = asyncio.get_running_loop().create_future()
-        self.pending[rid] = fut
-        self.writer.write(json.dumps({"id": rid, "op": op, "args": args}).encode() + b"\n")
-        try:
-            await self.writer.drain()
-            return await asyncio.wait_for(fut, timeout)
-        except asyncio.TimeoutError:
-            raise RuntimeError("the browser did not answer in time")
-        finally:
-            self.pending.pop(rid, None)
 
     async def read(self, tab: int, fresh: bool) -> dict:
         """The page text; a fresh read for the first part, the kept one while paging on."""

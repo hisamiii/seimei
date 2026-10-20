@@ -14,6 +14,8 @@ from .events import EventLog
 from .shell import commands
 
 WAIT = 600
+# A card shows the whole thing it asks about (a Discord edit has the old and the new text).
+DETAIL = 6000
 
 SUBCOMMANDS = {"stop": "stop a session", "kill": "stop a session", "attach": "attach to a session",
                "rm": "delete a session", "respawn": "restart a session"}
@@ -160,7 +162,7 @@ class Approvals:
         fut = asyncio.get_running_loop().create_future()
         self.waiting[aid] = fut
         self.events.add({"type": "approval", "aid": aid, "who": who, "worker": worker,
-                         **{k: v[:2000] for k, v in what.items()}, "expires": time.time() + WAIT})
+                         **{k: v[:DETAIL if k == "detail" else 2000] for k, v in what.items()}, "expires": time.time() + WAIT})
         try:
             outcome = "approved" if await asyncio.wait_for(fut, WAIT) else "denied"
         except asyncio.TimeoutError:

@@ -56,6 +56,15 @@ export function phrase(name, n) {
   if (name === 'mcp__seimei__browser_close') return 'closed tabs';
   if (name === 'mcp__seimei__browser_download') return n === 1 ? 'started a download' : `started ${n} downloads`;
   if (name === 'mcp__seimei__browser_downloads') return 'checked the downloads';
+  if (name === 'mcp__seimei__discord_guilds') return 'looked at your servers';
+  if (name === 'mcp__seimei__discord_dms') return 'looked at your DMs';
+  if (name === 'mcp__seimei__discord_read') return n === 1 ? 'read Discord' : `read Discord ${n} times`;
+  if (name === 'mcp__seimei__discord_search') return n === 1 ? 'searched Discord' : `searched Discord ${n} times`;
+  if (name === 'mcp__seimei__discord_send') return n === 1 ? 'sent a Discord message' : `sent ${n} Discord messages`;
+  if (name === 'mcp__seimei__discord_edit') return n === 1 ? 'edited a Discord message' : `edited ${n} Discord messages`;
+  if (name === 'mcp__seimei__discord_delete') return n === 1 ? 'deleted a Discord message' : `deleted ${n} Discord messages`;
+  if (name === 'mcp__seimei__discord_react') return n === 1 ? 'reacted on Discord' : `reacted ${n} times on Discord`;
+  if (name === 'mcp__seimei__discord_mark_read') return n === 1 ? 'marked a channel read' : `marked ${n} channels read`;
   const short = name.startsWith('mcp__') ? name.split('__').pop().replace(/_/g, ' ') : name;
   return n === 1 ? `used ${short}` : `used ${short} ${n} times`;
 }
@@ -186,11 +195,11 @@ function approvalCard(ev) {
   // Cards from before messages went card-free (2026-10-19) held SendMessage text.
   const message = ev.action === 'message';
   title.append(el('b', null, `${ev.who} wants to ${message ? `message ${ev.target}` : ev.target}`));
-  const SUB = { message: 'a session you started', edit: 'a file edit', desktop: 'a desktop action' };
+  const SUB = { message: 'a session you started', edit: 'a file edit', desktop: 'a desktop action', discord: 'a Discord action' };
   const sub = SUB[ev.action] || (/niri|window/.test(ev.target) ? 'a desktop command' : 'a session command');
   title.append(el('span', 'sub', sub));
   head.append(badge, title);
-  const body = el('div', `body ${message ? 'task' : 'cmd'}`, ev.detail);
+  const body = el('div', `body ${message || ev.action === 'discord' ? 'task' : 'cmd'}`, ev.detail);
   const foot = el('div', 'foot');
   const left = el('span', 'left');
   const deny = el('button', 'btn text sl', 'Deny');

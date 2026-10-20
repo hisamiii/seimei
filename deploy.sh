@@ -29,6 +29,8 @@ with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
         z.write(src / f, f)
 tmp.replace(out)
 PY
+# The Discord connector: Vencord with the SeimeiConnector plugin, for Vesktop to load from its Vencord Location.
+"$app/discord/build.sh"
 systemctl --user reenable seimei.service seimei-tunnel.service 2>/dev/null
 # Wait up to 5 minutes for 20 quiet seconds and no open Approve/Deny card, so no turn or held call is cut off.
 python3 - <<'PY'

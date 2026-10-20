@@ -457,7 +457,8 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
     val cs = MaterialTheme.colorScheme
     var sent by remember(a.aid) { mutableStateOf(false) }
     val message = a.action == "message"
-    val sub = mapOf("message" to "a session you started", "edit" to "a file edit", "desktop" to "a desktop action")[a.action]
+    val sub = mapOf("message" to "a session you started", "edit" to "a file edit", "desktop" to "a desktop action",
+        "discord" to "a Discord action")[a.action]
         ?: if (Regex("niri|window").containsMatchIn(a.target)) "a desktop command" else "a session command"
     val (bg, fg) = when (a.outcome) {
         null -> cs.primaryContainer to cs.onPrimaryContainer
@@ -468,7 +469,7 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
         CardHead(Icons.lock, bg, fg, "${a.who} wants to ${if (message) "message ${a.target}" else a.target}", sub)
         Text(
             a.detail, fontSize = 13.sp, lineHeight = 19.sp,
-            fontFamily = if (message) null else FontFamily.Monospace,
+            fontFamily = if (message || a.action == "discord") null else FontFamily.Monospace,
             color = if (a.outcome == null) cs.onSurface else LocalExtra.current.text2,
             maxLines = if (a.outcome == null) Int.MAX_VALUE else 3, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth().heightIn(max = if (a.outcome == null) 160.dp else 80.dp)

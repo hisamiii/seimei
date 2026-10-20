@@ -199,6 +199,15 @@ fun phrase(name: String, n: Int): String = when {
     name == "mcp__seimei__browser_close" -> "closed tabs"
     name == "mcp__seimei__browser_download" -> if (n == 1) "started a download" else "started $n downloads"
     name == "mcp__seimei__browser_downloads" -> "checked the downloads"
+    name == "mcp__seimei__discord_guilds" -> "looked at your servers"
+    name == "mcp__seimei__discord_dms" -> "looked at your DMs"
+    name == "mcp__seimei__discord_read" -> if (n == 1) "read Discord" else "read Discord $n times"
+    name == "mcp__seimei__discord_search" -> if (n == 1) "searched Discord" else "searched Discord $n times"
+    name == "mcp__seimei__discord_send" -> if (n == 1) "sent a Discord message" else "sent $n Discord messages"
+    name == "mcp__seimei__discord_edit" -> if (n == 1) "edited a Discord message" else "edited $n Discord messages"
+    name == "mcp__seimei__discord_delete" -> if (n == 1) "deleted a Discord message" else "deleted $n Discord messages"
+    name == "mcp__seimei__discord_react" -> if (n == 1) "reacted on Discord" else "reacted $n times on Discord"
+    name == "mcp__seimei__discord_mark_read" -> if (n == 1) "marked a channel read" else "marked $n channels read"
     else -> {
         val short = if (name.startsWith("mcp__")) name.split("__").last().replace('_', ' ') else name
         if (n == 1) "used $short" else "used $short $n times"
