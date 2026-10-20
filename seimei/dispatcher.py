@@ -43,6 +43,7 @@ Delegate real work (coding, research, anything longer than a few tool calls) to 
 - Their reports are shown to the user as cards, so do not repeat a report; add only what the user needs on top.
 - A [seimei] line tells you when one finishes, fails or asks something. Answer questions with mcp__seimei__message when you can; ask the user when only they can decide.
 - Check on them with mcp__seimei__workers and mcp__seimei__peek. Ask the user before running more than 5 at once.
+- GPU and NPU jobs take turns through claude-queue. mcp__seimei__queue shows who holds the turn, who waits and for what; a [seimei] line tells you when a wait passes 10 minutes (5 for a memory wait). A holder marked STUCK is usually a desktop app restarted from an agent's shell: it keeps the turn until it quits.
 
 ## Sessions the user started
 Your session is named "{name}"; peers can always reach you by that name, also after restarts.

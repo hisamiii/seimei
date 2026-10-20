@@ -40,6 +40,7 @@ Nobody watches your terminal: work on the task on your own until it is done.
 Your final message is shown to the user on their phone as your report: start it with a one-line summary, keep it short.
 If you are blocked on a decision only the user can make, call mcp__shikigami__ask with the question and end your turn.
 Subagents are fine for searches and lookups; they run on {subagents}. No big parallel fan-outs.
+Your commands take GPU/NPU turns through claude-queue. To start or restart a desktop app, run it outside the queue with `env -u LD_PRELOAD systemd-run --user --collect <app>`: started straight from your shell, it holds the GPU turn until it quits and stalls everyone else's GPU jobs.
 """
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 # The context a shikigami may fill before it compacts: the user keeps most at 256-400k, 1m only where really needed.
@@ -381,6 +382,20 @@ class Pool:
         if sid:
             labels[sid] = "seimei (you)"
         return labels
+
+    def queue_names(self) -> dict[str, str]:
+        """Who each claude-queue name is: shikigami, seimei and the user's sessions (by CLAUDE_QUEUE in their env)."""
+        out = {re.sub(r"[^A-Za-z0-9_]", "_", w.name): f"shikigami {w.name}" for w in self.workers.values()}
+        out["seimei"] = "seimei (you)"
+        for s in sessions.live({}):
+            try:
+                env = Path(f"/proc/{s['pid']}/environ").read_bytes().split(b"\0")
+            except OSError:
+                continue
+            q = next((e[13:].decode() for e in env if e.startswith(b"CLAUDE_QUEUE=")), None)
+            if q and q not in out:
+                out[q] = f"session \"{s['name']}\""
+        return out
 
     def running(self) -> int:
         return sum(w.rec["state"] in ACTIVE for w in self.workers.values())

@@ -1,11 +1,13 @@
 """The dispatcher's own tools, served in-process as the `seimei` MCP server."""
 
+import asyncio
 import os
 import time
 from pathlib import Path
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
+from . import queue as cq
 from . import sessions as sess
 from .events import EventLog
 from .files import MAX_BYTES, Files
@@ -145,6 +147,14 @@ def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), upl
 
     own = pool.own_sessions
 
+    @tool("queue", "claude-queue right now: which queued command holds the GPU/NPU turn (pid, session, RSS, GPU "
+          "memory, how long, STUCK when its command ended but it still holds the turn, GUI app), which device opens "
+          "wait and for what (another command, a bench, free memory), and how long. Use it when a job seems stuck "
+          "on its GPU or NPU.", {})
+    async def queue(args):
+        snap = await asyncio.to_thread(cq.snapshot, pool.queue_names())
+        return text(cq.describe(snap))
+
     @tool("sessions", "List every running Claude Code session on the laptop: name, status (idle, busy, waiting with "
           "what for, shell, parked), kind, folder and last activity. Includes the user's own sessions.", {})
     async def sessions(args):
@@ -192,5 +202,5 @@ def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), upl
     async def usage(args):
         return text(pool.dispatcher.usage.report())
 
-    return create_sdk_mcp_server("seimei", tools=[summon, workers, peek, message, stop, show_image, send_file, sessions, session_peek,
+    return create_sdk_mcp_server("seimei", tools=[summon, workers, peek, message, stop, show_image, send_file, sessions, session_peek, queue,
                                                  usage, *extra])

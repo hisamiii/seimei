@@ -30,6 +30,7 @@ from .push import FIREBASE, Fcm, Push, make_push_tools
 from .files import Files
 from .guard import Guard
 from .server import make_app
+from .queue import QueueWatcher
 from .sessions import Watcher
 from .tools import make_tools
 from .usage import Usage
@@ -161,6 +162,7 @@ def main():
         pool.startup()
         app["dispatcher"] = asyncio.create_task(dispatcher.run())
         app["watcher"] = asyncio.create_task(watcher.run())
+        app["queue"] = asyncio.create_task(QueueWatcher(pool.queue_names, pool.notify).run())
         app["wake"] = asyncio.create_task(WakeWatch(events, pool).run())
         app["desktop"] = asyncio.create_task(desk.run())
         app["layout"] = asyncio.create_task(layout.run())
@@ -185,6 +187,7 @@ def main():
     async def stop(app):
         app["dispatcher"].cancel()
         app["watcher"].cancel()
+        app["queue"].cancel()
         app["wake"].cancel()
         app["desktop"].cancel()
         app["layout"].cancel()
