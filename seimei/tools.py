@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import subprocess
 import time
 from pathlib import Path
 
@@ -25,6 +26,39 @@ def ago(t: float) -> str:
     return f"{s // 60} min ago" if s < 3600 else f"{s // 3600} h ago" if s < 86400 else f"{s // 86400} d ago"
 
 
+def repo_of(path: str) -> str:
+    """The checkout a folder belongs to (a git worktree counts as its own), else the folder itself."""
+    try:
+        r = subprocess.run(["git", "-C", path, "rev-parse", "--show-toplevel"], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return path
+    return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else path
+
+
+def writers(pool: Pool, w, own: dict[str, str]) -> str | None:
+    """A heads-up when someone else already works in the new worker's checkout: an active shikigami there, or a
+    busy session of the user's in that project. Home is no checkout, so a worker in ~ gets none."""
+    home = str(Path.home())
+    if w.rec["cwd"] == home:
+        return None
+    root = repo_of(w.rec["cwd"])
+    busy = [f"{x.name} (shikigami, {x.rec['state']})" for x in list(pool.workers.values())
+            if x.id != w.id and x.rec["state"] in ACTIVE and x.rec["cwd"] != home
+            and (x.rec["cwd"] == w.rec["cwd"] or repo_of(x.rec["cwd"]) == root)]
+    project = sess.project_of(root + "/x")
+    try:
+        busy += [f"{s['name']} (the user's session, busy)" for s in sess.listing(own) if s["status"] == "busy"
+                 and (s["cwd"] == root or s["cwd"].startswith(root + "/") or (project and s.get("project") == project))]
+    except OSError:
+        pass
+    if not busy:
+        return None
+    short = root.replace(home, "~", 1)
+    return (f"Heads-up: {', '.join(busy)} also {'works' if len(busy) == 1 else 'work'} in {short}. Two writers in one "
+            f"checkout can overwrite each other's changes. If both edit files there, stop this one and summon it in "
+            f"its own worktree (git -C {short} worktree add ../{Path(root).name}-{w.name}).")
+
+
 def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), uploads=None):
     @tool("summon", "Start a shikigami: a worker Claude Code session that works on a task on its own and reports back. "
           "Pick a short lowercase name, the folder the task is about, and a model (opus for real work, sonnet for "
@@ -34,7 +68,7 @@ def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), upl
               "properties": {
                   "name": {"type": "string", "description": "short lowercase name, like npu-dma or readme-fix"},
                   "task": {"type": "string", "description": "the full instructions; the worker sees nothing else"},
-                  "cwd": {"type": "string", "description": "folder to work in, default ~"},
+                  "cwd": {"type": "string", "description": "the project folder the task is about; ~ only when the task is about home"},
                   "model": {"type": "string", "enum": ["opus", "sonnet", "haiku"], "default": "opus"},
                   "effort": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max"],
                              "description": "reasoning effort; leave out for the user's default"},
@@ -54,8 +88,9 @@ def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), upl
         except Exception as e:
             return text(f"Could not summon: {e}", error=True)
         r = w.rec
+        crowd = await asyncio.to_thread(writers, pool, w, own())
         return text(f"Summoned {w.name} ({w.id}) in {r['cwd']} on {r['model']}, effort {r['effort'] or 'default'}, "
-                    f"context {r['context_cap']}, subagents on {r['subagents']}.")
+                    f"context {r['context_cap']}, subagents on {r['subagents']}." + (f"\n\n{crowd}" if crowd else ""))
 
     @tool("workers", "List shikigami from the last day with their state and one-line summary.", {})
     async def workers(args):

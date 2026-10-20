@@ -38,6 +38,7 @@ PROMPT = """\
 You are `{name}`, a worker summoned by seimei, the user's dispatcher on their laptop (Arch, niri).
 Nobody watches your terminal: work on the task on your own until it is done.
 Your final message is shown to the user on their phone as your report: start it with a one-line summary, keep it short.
+Before reporting done, run the checks that prove it (tests, build, a command, a screenshot) and list them with their result in the report. If you could not verify, say so in the first line.
 If you are blocked on a decision only the user can make, call mcp__shikigami__ask with the question and end your turn.
 Subagents are fine for searches and lookups; they run on {subagents}. No big parallel fan-outs.
 Your commands take GPU/NPU turns through claude-queue. To start or restart a desktop app, run it outside the queue with `env -u LD_PRELOAD systemd-run --user --collect <app>`: started straight from your shell, it holds the GPU turn until it quits and stalls everyone else's GPU jobs.
@@ -131,6 +132,8 @@ class Worker:
             system_prompt={"type": "preset", "preset": "claude_code",
                            "append": PROMPT.format(name=r["name"], subagents=r.get("subagents") or "haiku")},
             mcp_servers={"shikigami": self._tools()},
+            # Workers talk to the user through their report and ask, never to other sessions directly.
+            disallowed_tools=["SendMessage", "ListAgents"],
             env=self._env(),
             **({"effort": r["effort"]} if r.get("effort") else {}),
             extra_args={"name": f"shikigami {r['name']}"},
