@@ -437,7 +437,9 @@ def make_queue_tools(approvals) -> list:
     @tool("queue_policy", "Show or set claude-queue's policies (cqd): bench_window (\"22:00-08:00\" or null), "
           "couple_gpu_npu, exempt (agents never frozen, first in line), interactive ({who: [queue names]}), "
           "mem_reserve_gb, mem_default_gb, mem_wait_timeout, wait_event_min, holder_idle_min, lease_linger_s, "
-          "external_idle_min, contam_desktop_pct, max_freeze_s, rehome, desktop_names, desktop_args, gate (on/off). "
+          "external_idle_s (agent jobs wait this long after the user's own GPU/NPU use), external_idle_bench_s "
+          "(a bench's cool-down after it), desktop_busy_bench_pct (desktop GPU use above it holds a bench), "
+          "contam_desktop_pct, max_freeze_s, rehome, desktop_names, desktop_args, gate (on/off). "
           "No key: all of them. Change only what the user asked for.", {
               "type": "object", "properties": {"key": {"type": "string"}, "value": {}}})
     async def queue_policy(a):
