@@ -196,9 +196,10 @@ class Dispatcher:
                     yield {"type": "user", "message": {"role": "user", "content": content}, "parent_tool_use_id": None}
                 await self.client.query(one())
 
-    async def send(self, text: str, images: list[tuple[str, str, str]] = (), files: list[dict] = ()):
-        """images: (file name, media type, base64 data) from the phone; files: stored uploads (see uploads.py)."""
-        self.events.add({"type": "user", "text": text, **({"images": [n for n, _, _ in images]} if images else {}),
+    async def send(self, text: str, images: list[tuple[str, str, str]] = (), files: list[dict] = (), cid: str | None = None):
+        """images: (file name, media type, base64 data) from the phone; files: stored uploads (see uploads.py); cid: the
+        client's id for its optimistic bubble, echoed in the event."""
+        self.events.add({"type": "user", "text": text, **({"cid": cid} if cid else {}), **({"images": [n for n, _, _ in images]} if images else {}),
                          **({"files": [{k: f[k] for k in ("id", "name", "size", "kind")} for f in files]} if files else {})})
         if files:
             text += ("\n\n" if text else "") + (

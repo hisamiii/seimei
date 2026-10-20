@@ -322,7 +322,8 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
             except (ValueError, binascii.Error, AttributeError) as e:
                 raise web.HTTPBadRequest(text=str(e)[:200])
             saved.append((name, kind, base64.b64encode(data).decode()))
-        await dispatcher.send(text, saved, infos)
+        cid = str(body.get("cid") or "")[:40] or None
+        await dispatcher.send(text, saved, infos, cid)
         return web.json_response({"ok": True})
 
     async def upload(request):

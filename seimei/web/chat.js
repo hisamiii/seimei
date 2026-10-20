@@ -559,6 +559,10 @@ export function onDelta(text) {
 export function addEvent(ev) {
   // The user's own message always comes into view, even sent while scrolled up.
   const stick = nearBottom() || ev.type === 'user';
+  if (ev.type === 'user' && ev.cid && pending.has(ev.cid)) {
+    pending.get(ev.cid).remove();
+    pending.delete(ev.cid);
+  }
   if (ev.type === 'assistant') clearLive();
   main.add(ev);
   if (live) thread.append(live);
@@ -629,26 +633,60 @@ $('composer').addEventListener('submit', async (e) => {
   input.value = '';
   autosize();
   renderAttachments();
+  saveDraft();
+  deliver(text, sending);
+});
+
+// The message shows at once, dimmed, until the laptop echoes it back (QA U1); a failed one offers a retry.
+const pending = new Map();
+
+function pendingBubble(cid, text, sending) {
+  const node = el('div', 'msg user pending');
+  const imgs = sending.filter((a) => a.kind === 'image');
+  if (imgs.length) {
+    const pics = el('div', `pics n${Math.min(imgs.length, 3)}${text ? '' : ' only'}`);
+    imgs.forEach((a) => { const i = el('img', 'pic'); i.src = a.url; pics.append(i); });
+    node.append(pics);
+  }
+  const docs = sending.filter((a) => a.kind === 'file');
+  if (docs.length) {
+    const box = el('div', 'files');
+    docs.forEach((a) => box.append(el('div', 'fchip', a.name)));
+    node.append(box);
+  }
+  if (text) node.append(document.createTextNode(text));
+  node.dataset.cid = cid;
+  return node;
+}
+
+async function deliver(text, sending) {
+  const cid = Math.random().toString(36).slice(2, 12);
+  const node = pendingBubble(cid, text, sending);
+  pending.set(cid, node);
+  thread.append(node);
+  if (live) thread.append(live);
+  hello();
   toBottom();
   try {
     // Files upload as soon as they are picked; wait for any still on the way.
     await Promise.all(sending.map((a) => a.upload).filter(Boolean));
     if (sending.some((a) => a.kind === 'file' && !a.id)) throw new Error('upload');
-    await post('api/send', { text, images: sending.filter((a) => a.kind === 'image').map((a) => ({ data: a.data })),
+    await post('api/send', { text, cid, images: sending.filter((a) => a.kind === 'image').map((a) => ({ data: a.data })),
       files: sending.filter((a) => a.kind === 'file').map((a) => a.id) });
-    if (!input.value) saveDraft();
-    sending.forEach((a) => a.url && URL.revokeObjectURL(a.url));
   } catch {
-    input.value = text;
-    // A file whose upload failed is gone; the rest wait for another try.
-    attachments.unshift(...sending.filter((a) => a.kind !== 'file' || a.id));
-    renderAttachments();
-    saveDraft();
-    autosize();
-    main.add({ type: 'system', level: 'error', text: 'Could not send that. Try again.' });
-    render();
+    if (!pending.has(cid)) return;
+    node.classList.add('failed');
+    const again = el('button', 'retry sl', 'Not sent. Tap to retry');
+    again.type = 'button';
+    again.addEventListener('click', () => {
+      pending.delete(cid);
+      node.remove();
+      // A file whose upload failed is gone; the rest go again.
+      deliver(text, sending.filter((a) => a.kind !== 'file' || a.id));
+    });
+    node.append(again);
   }
-});
+}
 
 input.addEventListener('input', () => { autosize(); render(); saveDraft(); });
 input.addEventListener('keydown', (e) => {
