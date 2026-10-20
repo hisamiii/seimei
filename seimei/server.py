@@ -42,6 +42,9 @@ def load_web() -> tuple[str, dict[str, bytes]]:
 # Everything else needs a session. The page at / decides between the app and the login screen itself.
 PUBLIC = {("GET", "/"), ("POST", "/api/auth/password"), ("POST", "/api/auth/passkey/options"),
           ("POST", "/api/auth/passkey/login")}
+# The app's own login calls: it sends no Origin, and a code or a keystore signature is the proof.
+DEVICE_PUBLIC = {("POST", "/api/devices/claim"), ("POST", "/api/devices/challenge"), ("POST", "/api/devices/login")}
+PUBLIC |= DEVICE_PUBLIC
 
 
 async def write_event(resp: web.StreamResponse, ev: dict):
@@ -50,7 +53,8 @@ async def write_event(resp: web.StreamResponse, ev: dict):
 
 
 def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files, approvals: Approvals,
-             tool_guard: Guard, watcher: Watcher, desk: Desktop, auth: Auth | None, origins: set[str]) -> web.Application:
+             tool_guard: Guard, watcher: Watcher, desk: Desktop, auth: Auth | None, origins: set[str],
+             app_dir: Path | None = None) -> web.Application:
     @web.middleware
     async def guard(request: web.Request, handler):
         # Never trust the peer address: cloudflared connects from localhost too.
@@ -59,7 +63,9 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
             return web.Response(status=401, text="log in first")
         if public and request.method == "POST" and (request.content_length or 0) > 64 << 10:
             return web.Response(status=413, text="too large")
-        if request.method == "POST" and (request.headers.get("Origin") not in origins
+        # A bearer token is never sent on its own, so the app's calls need no Origin; cookies do.
+        app_call = (request.method, request.path) in DEVICE_PUBLIC or (auth and auth.bearer(request))
+        if request.method == "POST" and ((not app_call and request.headers.get("Origin") not in origins)
                                          or request.content_type != "application/json"):
             return web.Response(status=403, text="forbidden")
         resp = await handler(request)
@@ -122,6 +128,63 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
 
     async def me(request):
         return web.json_response({"auth": bool(auth), "passkeys": len(auth.data["passkeys"]) if auth else 0})
+
+    async def pair(request):
+        # Only a browser login hands out codes: a phone cannot pair further phones.
+        if auth.bearer(request):
+            return web.json_response({"error": "pair from the web page"}, status=403)
+        code, exp = auth.pair_code()
+        return web.json_response({"code": code, "expires": exp})
+
+    async def claim(request):
+        body = await request.json()
+        try:
+            device = auth.claim(str(body.get("code", "")), str(body.get("name", "")), str(body.get("public_key", "")))
+        except Exception as e:
+            await asyncio.sleep(1)
+            return web.json_response({"error": str(e)[:200]}, status=401)
+        events.add({"type": "system", "text": f"A phone was paired: {auth.device(device)['name']}."})
+        return web.json_response({"device": device})
+
+    async def device_challenge(request):
+        body = await request.json()
+        try:
+            return web.json_response({"nonce": auth.device_challenge(str(body.get("device", "")))})
+        except ValueError:
+            return web.json_response({"error": "unknown device"}, status=401)
+
+    async def device_login(request):
+        body = await request.json()
+        try:
+            token = auth.device_login(str(body.get("device", "")), str(body.get("nonce", "")),
+                                      str(body.get("signature", "")), request.headers.get("User-Agent", ""))
+        except Exception:
+            return web.json_response({"error": "login failed"}, status=401)
+        return web.json_response({"token": token})
+
+    async def devices(request):
+        mine = (auth.current(request) or {}).get("device")
+        return web.json_response({"devices": [{**d, "this": d["id"] == mine} for d in auth.devices()]})
+
+    async def revoke(request):
+        if not auth.revoke(request.match_info["id"]):
+            raise web.HTTPNotFound()
+        return web.json_response({"ok": True})
+
+    async def app_info(request):
+        meta = app_dir and app_dir / "app.json"
+        if not meta or not meta.exists() or not (app_dir / "seimei.apk").exists():
+            return web.json_response({"available": False})
+        return web.json_response({"available": True, **json.loads(meta.read_text()),
+                                  "size": (app_dir / "seimei.apk").stat().st_size})
+
+    async def apk(request):
+        path = app_dir and app_dir / "seimei.apk"
+        if not path or not path.exists():
+            raise web.HTTPNotFound()
+        return web.FileResponse(path, headers={"Content-Type": "application/vnd.android.package-archive",
+                                               "Content-Disposition": 'attachment; filename="seimei.apk"',
+                                               "Cache-Control": "no-store"})
 
     async def logout(request):
         auth.end_session(request)
@@ -325,6 +388,8 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     app.router.add_get("/api/screen", screen)
     app.router.add_get("/api/desktop", desktop_state)
     app.router.add_get("/api/sessions/{pid:[0-9]+}", session)
+    app.router.add_get("/api/app", app_info)
+    app.router.add_get("/api/app/seimei.apk", apk)
     app.router.add_get("/api/workers", workers_all)
     app.router.add_get("/api/workers/{id}", worker_history)
     app.router.add_post("/api/workers/{id}/send", worker_send)
@@ -337,5 +402,11 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
         app.router.add_post("/api/auth/passkey/register/options", register_options)
         app.router.add_post("/api/auth/passkey/register", register)
         app.router.add_post("/api/auth/logout", logout)
+        app.router.add_post("/api/devices/pair", pair)
+        app.router.add_post("/api/devices/claim", claim)
+        app.router.add_post("/api/devices/challenge", device_challenge)
+        app.router.add_post("/api/devices/login", device_login)
+        app.router.add_get("/api/devices", devices)
+        app.router.add_post("/api/devices/{id}/revoke", revoke)
     app.router.add_get("/static/{version}/{path:.+}", static)
     return app

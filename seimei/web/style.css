@@ -430,6 +430,17 @@ body.login { display: grid; place-items: center; grid-template-rows: 1fr; paddin
 .sheet-body.scroll .wlog { flex: none; overflow: visible; }
 
 /* Activity log */
+/* Phone app sheet */
+.pblock { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; padding: 16px 0 4px; }
+.pcode { display: flex; flex-direction: column; gap: 6px; }
+.pcode b { font: 500 34px/1.2 var(--mono); letter-spacing: .08em; color: var(--primary); user-select: all; }
+.psec { margin: 20px 0 4px; font-size: 14px; font-weight: 500; color: var(--text-2); }
+.prow { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--container-high); }
+.prow:first-child { border-top: 0; }
+.ptext { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ptext b { font-weight: 500; }
+.ptext span { font-size: 13px; color: var(--text-3); }
+
 .alist { display: flex; flex-direction: column; }
 .aday { font-size: 12px; font-weight: 500; color: var(--text-3); padding: 12px 0 4px; }
 .arow { display: flex; flex-direction: column; gap: 3px; padding: 8px 0; border-top: 1px solid var(--container-high); }

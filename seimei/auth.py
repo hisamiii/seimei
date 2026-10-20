@@ -1,4 +1,5 @@
-"""Login: a password set on the laptop, passkeys (fingerprint) added after the first login, cookie sessions."""
+"""Login: a password set on the laptop, passkeys (fingerprint) added after the first login, cookie sessions,
+and paired phones running the seimei app, which sign a challenge with a key kept in the phone's keystore."""
 
 import asyncio
 import hashlib
@@ -10,6 +11,9 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import webauthn
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 from webauthn.helpers import base64url_to_bytes, bytes_to_base64url
 from webauthn.helpers.structs import (
     AuthenticatorSelectionCriteria,
@@ -27,6 +31,14 @@ SCRYPT = {"n": 2**15, "r": 8, "p": 1}
 # so someone guessing the password cannot lock the owner out.
 FREE_FAILURES = 5
 MAX_LOCK = 15 * 60
+# Pairing codes: short enough to type, single use, a few minutes. Too many wrong codes void every open code.
+PAIR_SECONDS = 5 * 60
+CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ"
+CODE_LEN = 8
+MAX_CLAIM_FAILURES = 10
+# The app holds its session in memory and logs in again with the fingerprint each time it opens.
+DEVICE_SESSION_HOURS = 12
+DEVICE_LOGIN = b"seimei device login\n"
 
 
 def scrypt(password: str, salt: bytes, n: int, r: int, p: int) -> bytes:
@@ -45,6 +57,8 @@ class Auth:
         self.challenges: dict[str, tuple[str, float]] = {}
         self.failures = 0
         self.locked_until = 0.0
+        self.claim_failures = 0
+        self.nonces: dict[str, tuple[str, float]] = {}
 
     def load(self):
         """Pick up changes made by the CLI (passwd, logout-all, passkeys --clear) while the server runs."""
@@ -57,6 +71,8 @@ class Auth:
         self.data = json.loads(self.path.read_text()) if mtime else {}
         self.data.setdefault("passkeys", [])
         self.data.setdefault("sessions", {})
+        self.data.setdefault("devices", [])
+        self.data.setdefault("pairing", [])
         self.mtime = mtime
 
     def save(self):
@@ -102,26 +118,43 @@ class Auth:
     def _key(token: str) -> str:
         return hashlib.sha256(token.encode()).hexdigest()
 
-    def new_session(self, how: str, agent: str) -> str:
+    def new_session(self, how: str, agent: str, device: str | None = None) -> str:
         self.load()
         token = secrets.token_urlsafe(32)
         now = time.time()
         sessions = self.data["sessions"]
         for k in [k for k, s in sessions.items() if s["exp"] < now]:
             del sessions[k]
-        sessions[self._key(token)] = {"created": now, "exp": now + SESSION_DAYS * 86400, "how": how, "agent": agent[:200]}
+        life = DEVICE_SESSION_HOURS * 3600 if device else SESSION_DAYS * 86400
+        sessions[self._key(token)] = {"created": now, "exp": now + life, "how": how, "agent": agent[:200],
+                                      **({"device": device} if device else {})}
         self.save()
         return token
 
-    def session(self, request) -> bool:
+    @staticmethod
+    def bearer(request) -> str | None:
+        h = request.headers.get("Authorization", "")
+        return h[7:].strip() or None if h.startswith("Bearer ") else None
+
+    def _token(self, request) -> str | None:
+        return self.bearer(request) or request.cookies.get(self.cookie)
+
+    def current(self, request) -> dict | None:
         self.load()
-        token = request.cookies.get(self.cookie)
+        token = self._token(request)
         s = token and self.data["sessions"].get(self._key(token))
-        return bool(s and s["exp"] > time.time())
+        if not s or s["exp"] <= time.time():
+            return None
+        if "device" in s and not any(d["id"] == s["device"] for d in self.data["devices"]):
+            return None
+        return s
+
+    def session(self, request) -> bool:
+        return self.current(request) is not None
 
     def end_session(self, request):
         self.load()
-        token = request.cookies.get(self.cookie)
+        token = self._token(request)
         if token and self.data["sessions"].pop(self._key(token), None):
             self.save()
 
@@ -190,3 +223,83 @@ class Auth:
         key["sign_count"] = v.new_sign_count
         key["used"] = time.time()
         self.save()
+
+    # ---------- paired phones ----------
+
+    def pair_code(self) -> tuple[str, float]:
+        """A one-time code the app trades for pairing its keystore key."""
+        self.load()
+        now = time.time()
+        code = "".join(secrets.choice(CODE_ALPHABET) for _ in range(CODE_LEN))
+        self.data["pairing"] = [c for c in self.data["pairing"] if c["exp"] > now] + [
+            {"hash": self._key(code), "exp": now + PAIR_SECONDS}]
+        self.save()
+        return f"{code[:4]}-{code[4:]}", now + PAIR_SECONDS
+
+    @staticmethod
+    def public_key(b64: str) -> ec.EllipticCurvePublicKey:
+        key = serialization.load_der_public_key(base64url_to_bytes(b64))
+        if not isinstance(key, ec.EllipticCurvePublicKey) or key.curve.name != "secp256r1":
+            raise ValueError("the device key must be EC P-256")
+        return key
+
+    def claim(self, code: str, name: str, public_key: str) -> str:
+        """Pair a phone: a valid code plus its public key gives it a device id."""
+        self.load()
+        now = time.time()
+        code = "".join(ch for ch in code.upper() if ch.isalnum())
+        open_codes = [c for c in self.data["pairing"] if c["exp"] > now]
+        match = next((c for c in open_codes if hmac.compare_digest(c["hash"], self._key(code))), None)
+        if not match:
+            self.claim_failures += 1
+            if self.claim_failures >= MAX_CLAIM_FAILURES:
+                self.claim_failures = 0
+                self.data["pairing"] = []
+                self.save()
+            raise ValueError("wrong or expired code")
+        self.public_key(public_key)
+        self.claim_failures = 0
+        device = {"id": secrets.token_urlsafe(12), "name": name.strip()[:60] or "phone",
+                  "public_key": public_key, "created": now}
+        self.data["pairing"] = [c for c in open_codes if c is not match]
+        self.data["devices"].append(device)
+        self.save()
+        return device["id"]
+
+    def device(self, device_id: str) -> dict | None:
+        self.load()
+        return next((d for d in self.data["devices"] if d["id"] == device_id), None)
+
+    def device_challenge(self, device_id: str) -> str:
+        if not self.device(device_id):
+            raise ValueError("unknown device")
+        now = time.time()
+        self.nonces = {n: v for n, v in self.nonces.items() if v[1] > now}
+        nonce = secrets.token_urlsafe(32)
+        self.nonces[nonce] = (device_id, now + CHALLENGE_SECONDS)
+        return nonce
+
+    def device_login(self, device_id: str, nonce: str, signature: str, agent: str) -> str:
+        entry = self.nonces.pop(nonce, None)
+        device = self.device(device_id)
+        if not entry or entry[0] != device_id or entry[1] < time.time() or not device:
+            raise ValueError("unknown or expired challenge")
+        try:
+            self.public_key(device["public_key"]).verify(
+                base64url_to_bytes(signature), DEVICE_LOGIN + nonce.encode(), ec.ECDSA(hashes.SHA256()))
+        except InvalidSignature:
+            raise ValueError("bad signature")
+        device["used"] = time.time()
+        return self.new_session("device", agent, device=device_id)
+
+    def devices(self) -> list[dict]:
+        self.load()
+        return [{k: d.get(k) for k in ("id", "name", "created", "used")} for d in self.data["devices"]]
+
+    def revoke(self, device_id: str) -> bool:
+        self.load()
+        before = len(self.data["devices"])
+        self.data["devices"] = [d for d in self.data["devices"] if d["id"] != device_id]
+        self.data["sessions"] = {k: v for k, v in self.data["sessions"].items() if v.get("device") != device_id}
+        self.save()
+        return len(self.data["devices"]) < before

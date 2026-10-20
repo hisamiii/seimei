@@ -1,4 +1,5 @@
-"""python -m seimei [--dev] [--model MODEL] | passwd | passkeys [--clear] | logout-all | screen-password [--clear]"""
+"""python -m seimei [--dev] [--model MODEL] | passwd | passkeys [--clear] | logout-all | screen-password [--clear]
+| pair | devices [--revoke ID]"""
 
 import argparse
 import asyncio
@@ -35,7 +36,7 @@ STATE = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / 
 MIN_PASSWORD = 8
 
 
-def account(auth: Auth, cmd: str, clear: bool, state: Path):
+def account(auth: Auth, cmd: str, clear: bool, state: Path, revoke: str | None = None):
     """Recovery lives on the laptop: these never go through the web page."""
     if cmd == "screen-password":
         path = state / UNLOCK
@@ -74,15 +75,28 @@ def account(auth: Auth, cmd: str, clear: bool, state: Path):
             print(f"{k['name'] or 'unnamed':30} added {datetime.fromtimestamp(k['created']):%Y-%m-%d}, last used {used}")
         if not auth.data["passkeys"]:
             print("No passkeys.")
+    elif cmd == "pair":
+        code, exp = auth.pair_code()
+        print(f"Pairing code: {code} (type it into the seimei app before {datetime.fromtimestamp(exp):%H:%M})")
+    elif cmd == "devices":
+        if revoke:
+            print("Revoked." if auth.revoke(revoke) else f"No device {revoke}.")
+        for d in auth.devices():
+            used = datetime.fromtimestamp(d["used"]).strftime("%Y-%m-%d %H:%M") if d.get("used") else "never"
+            print(f"{d['id']}  {d['name']:24} paired {datetime.fromtimestamp(d['created']):%Y-%m-%d}, last login {used}")
+        if not auth.devices():
+            print("No paired phones.")
 
 
 def main():
     ap = argparse.ArgumentParser(prog="seimei")
-    ap.add_argument("command", nargs="?", choices=["serve", "passwd", "passkeys", "logout-all", "screen-password"],
+    ap.add_argument("command", nargs="?", choices=["serve", "passwd", "passkeys", "logout-all", "screen-password", "pair", "devices"],
                     default="serve")
     ap.add_argument("--dev", action="store_true", help="local testing: no login, port + 1, separate session")
     ap.add_argument("--model", help="override the dispatcher model")
+    ap.add_argument("--login", action="store_true", help="with --dev: keep the login on")
     ap.add_argument("--clear", action="store_true", help="with passkeys: remove them all")
+    ap.add_argument("--revoke", metavar="ID", help="with devices: unpair that phone and end its sessions")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
@@ -94,7 +108,7 @@ def main():
     state.mkdir(parents=True, exist_ok=True)
 
     if args.command != "serve":
-        return account(Auth(state, origin), args.command, args.clear, state)
+        return account(Auth(state, origin), args.command, args.clear, state, args.revoke)
 
     disp = dict(cfg.get("dispatcher", {}))
     if args.model:
@@ -106,8 +120,9 @@ def main():
         port += 1
         disp.setdefault("name", "seimei-dev")
         origins = {f"http://localhost:{port}", f"http://127.0.0.1:{port}"}
-        auth = None
-        logging.warning("DEV MODE: no login on http://localhost:%d, state in %s", port, state)
+        # --login keeps the login on, for testing it and the app's pairing.
+        auth = Auth(state, f"http://localhost:{port}") if args.login else None
+        logging.warning("DEV MODE (%s): http://localhost:%d, state in %s", "login on" if auth else "no login", port, state)
     else:
         origins = {origin}
         auth = Auth(state, origin)
@@ -129,7 +144,7 @@ def main():
     watcher = Watcher(events, pool.own_sessions, lambda s: dispatcher.note(
         f"The user's session \"{s['name']}\" finished a turn" + (" and asks a question" if s["question"] else "")
         + f" ({time.strftime('%H:%M')}).", key=f"finished:{s['pid']}"))
-    app = make_app(events, dispatcher, pool, files, approvals, guard, watcher, desk, auth, origins)
+    app = make_app(events, dispatcher, pool, files, approvals, guard, watcher, desk, auth, origins, state / "app")
 
     async def start(app):
         approvals.startup()
