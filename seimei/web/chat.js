@@ -251,22 +251,29 @@ const fileIcon = (kind) => FILE_ICON[kind] || FILE_ICON.doc;
 export const size = (n) => (n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 const KIND_LABEL = { pdf: 'PDF', archive: 'Archive', audio: 'Audio', video: 'Video', image: 'Image', code: 'Code', text: 'Text', file: 'File' };
 
+// The laptop deletes files after 30 days (uploads.py KEEP_DAYS); older chips show as expired.
+const KEEP = 30 * 86400;
+
 // A file as a download chip; the laptop always serves it as an attachment, never rendered.
-export function fileChip(f) {
-  const a = el('a', 'fchip sl');
-  a.href = `api/uploads/${f.id}`;
-  a.download = f.name;
+export function fileChip(f, t) {
+  const expired = t && Date.now() / 1000 - t > KEEP;
+  const a = el(expired ? 'div' : 'a', `fchip${expired ? ' expired' : ' sl'}`);
+  if (!expired) {
+    a.href = `api/uploads/${f.id}`;
+    a.download = f.name;
+  }
   const ic = el('span', 'ic');
   ic.append(svg(fileIcon(f.kind), 20));
   const txt = el('span', 'txt');
-  txt.append(el('b', null, f.name), el('small', null, `${size(f.size)} · ${KIND_LABEL[f.kind] || 'File'}`));
-  a.append(ic, txt, svg('M12 4v11M7 10.5l5 5 5-5M5 20h14', 18));
+  txt.append(el('b', null, f.name), el('small', null, expired ? 'Expired' : `${size(f.size)} · ${KIND_LABEL[f.kind] || 'File'}`));
+  a.append(ic, txt);
+  if (!expired) a.append(svg('M12 4v11M7 10.5l5 5 5-5M5 20h14', 18));
   return a;
 }
 
 function sentFile(ev) {
   const fig = el('figure', 'shown file');
-  fig.append(fileChip({ ...ev, id: ev.file }));
+  fig.append(fileChip({ ...ev, id: ev.file }, ev.t));
   if (ev.caption) fig.append(el('figcaption', null, ev.caption));
   return fig;
 }
@@ -282,7 +289,7 @@ export function message(ev) {
     }
     if (ev.files?.length) {
       const box = el('div', 'files');
-      ev.files.forEach((f) => box.append(fileChip(f)));
+      ev.files.forEach((f) => box.append(fileChip(f, ev.t)));
       node.append(box);
     }
     if (ev.text) node.append(document.createTextNode(ev.text));

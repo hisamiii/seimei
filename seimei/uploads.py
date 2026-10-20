@@ -4,15 +4,20 @@ Untrusted data. Each file sits alone in <state>/uploads/<id>/<safe name>, mode 6
 run or imported, and is only ever served as a download (application/octet-stream, attachment).
 """
 
+import asyncio
+import logging
 import mimetypes
 import os
 import re
 import shutil
+import time
 import unicodedata
 import uuid
 from pathlib import Path
 
 MAX_BYTES = 50 << 20
+# Files go after KEEP_DAYS; pages and the app show older chips as expired, a day before the file is really gone.
+KEEP_DAYS = 30
 ID = re.compile(r"^[0-9a-f]{32}$")
 
 
@@ -84,6 +89,27 @@ class Uploads:
         shutil.copyfile(src, path)
         path.chmod(0o600)
         return self.info(fid)
+
+    def prune(self, now: float | None = None) -> int:
+        """Delete files older than KEEP_DAYS + 1 day; returns how many went."""
+        cut = (now or time.time()) - (KEEP_DAYS + 1) * 86400
+        gone = 0
+        for d in self.dir.iterdir():
+            if not (d.is_dir() and ID.match(d.name)):
+                continue
+            try:
+                if max((p.stat().st_mtime for p in d.iterdir()), default=d.stat().st_mtime) < cut:
+                    shutil.rmtree(d)
+                    gone += 1
+            except OSError as e:
+                logging.warning("could not prune upload %s: %s", d.name, e)
+        return gone
+
+    async def run(self):
+        while True:
+            if n := await asyncio.to_thread(self.prune):
+                logging.info("pruned %d old upload(s)", n)
+            await asyncio.sleep(6 * 3600)
 
     def path(self, fid: str) -> Path | None:
         if not ID.match(fid or ""):

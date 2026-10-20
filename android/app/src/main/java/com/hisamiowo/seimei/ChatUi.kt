@@ -55,6 +55,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
@@ -119,7 +120,7 @@ fun Row(item: Item, vm: Seimei, onPicture: (String) -> Unit) {
         is Item.Worker -> WorkerCard(item)
         is Item.Approval -> ApprovalCard(item, vm)
         is Item.Sent -> Column(Modifier.fillMaxWidth()) {
-            FileChip(vm, item.file, Modifier.widthIn(max = 320.dp))
+            FileChip(vm, item.file, Modifier.widthIn(max = 320.dp), expired = expired(item.t))
             if (item.caption.isNotEmpty()) Text(item.caption, fontSize = 13.sp, color = LocalExtra.current.text3, modifier = Modifier.padding(top = 6.dp))
         }
         is Item.Shown -> Column(Modifier.fillMaxWidth()) {
@@ -200,7 +201,7 @@ fun UserMsg(m: Item.Msg, vm: Seimei, onPicture: (String) -> Unit) {
                 if (m.text.isNotEmpty() || m.files.isNotEmpty()) Spacer(Modifier.size(8.dp))
             }
             for (f in m.files) {
-                FileChip(vm, f, Modifier.fillMaxWidth(), onUser = true)
+                FileChip(vm, f, Modifier.fillMaxWidth(), onUser = true, expired = expired(m.t))
                 Spacer(Modifier.size(6.dp))
             }
             if (m.text.isNotEmpty()) SelectionContainer {
@@ -225,16 +226,19 @@ fun kindIcon(kind: String) = when (kind) {
 
 /** A laptop file: first tap saves it to Downloads, then a tap opens it. */
 @Composable
-fun FileChip(vm: Seimei, f: FileRef, modifier: Modifier = Modifier, onUser: Boolean = false) {
+fun FileChip(vm: Seimei, f: FileRef, modifier: Modifier = Modifier, onUser: Boolean = false, expired: Boolean = false) {
     val cs = MaterialTheme.colorScheme
     val fg = if (onUser) cs.onPrimaryContainer else cs.onSurface
     val sub = if (onUser) cs.onPrimaryContainer.copy(alpha = .75f) else LocalExtra.current.text3
     val saving = f.id in vm.saving
     val saved = f.id in vm.savedIds
+    // A copy already in Downloads still opens after the laptop deleted its file.
+    val gone = expired && !saved
     Row(
         modifier.clip(RoundedCornerShape(16.dp))
             .background(if (onUser) cs.onPrimaryContainer.copy(alpha = .1f) else cs.surfaceContainerHigh)
-            .clickable { vm.fileTap(f) }
+            .alpha(if (gone) .6f else 1f)
+            .clickable(enabled = !gone) { vm.fileTap(f) }
             .padding(start = 10.dp, end = 14.dp, top = 10.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -245,13 +249,15 @@ fun FileChip(vm: Seimei, f: FileRef, modifier: Modifier = Modifier, onUser: Bool
         Column(Modifier.weight(1f)) {
             Text(f.name, color = fg, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(when {
+                gone -> "Expired"
                 saving -> "Saving to Downloads…"
                 saved -> "In Downloads · tap to open"
                 else -> "${sizeText(f.size)} · ${KIND_LABEL[f.kind] ?: "File"}"
             }, color = sub, fontSize = 12.sp)
         }
         Spacer(Modifier.width(8.dp))
-        if (saving) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = sub)
+        if (gone) Unit
+        else if (saving) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = sub)
         else Icon(if (saved) Icons.open else Icons.download, if (saved) "Open" else "Download", Modifier.size(18.dp), tint = sub)
     }
 }

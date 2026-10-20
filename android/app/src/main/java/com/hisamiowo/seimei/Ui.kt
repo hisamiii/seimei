@@ -370,6 +370,7 @@ fun AppScreen(vm: Seimei) {
         if (!WindowInsets.isImeVisible) NavBar(vm)
     }
     AgentSheet(vm)
+    if (vm.about) AboutSheet(vm) { vm.about = false }
 }
 
 @Composable
@@ -400,9 +401,25 @@ fun Header(vm: Seimei) {
             }
         }
         Box {
-            IconButton({ menu = true }) { Icon(Icons.more, "Menu") }
+            IconButton({ menu = true }) {
+                Box {
+                    Icon(Icons.more, if (vm.release != null) "Menu, update available" else "Menu")
+                    if (vm.release != null) Box(Modifier.align(Alignment.TopEnd).size(8.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary))
+                }
+            }
             DropdownMenu(menu, { menu = false }) {
                 val ctx = LocalContext.current
+                val r = vm.release
+                DropdownMenuItem(
+                    text = { Text(if (r != null) "Update to ${r.version}" else "About seimei",
+                        color = if (r != null) MaterialTheme.colorScheme.primary else Color.Unspecified) },
+                    trailingIcon = if (r != null) ({ Box(Modifier.size(8.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary)) }) else null,
+                    onClick = {
+                        menu = false
+                        vm.about = true
+                        vm.checkUpdate()
+                    },
+                )
                 if (Push.configured) DropdownMenuItem(
                     text = { Text("Notifications") },
                     onClick = {

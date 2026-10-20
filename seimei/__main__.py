@@ -160,6 +160,7 @@ def main():
         app["desktop"] = asyncio.create_task(desk.run())
         app["layout"] = asyncio.create_task(layout.run())
         app["push"] = asyncio.create_task(push.run())
+        app["uploads"] = asyncio.create_task(uploads.run())
 
         def stop_key():
             # `systemctl --user kill -s USR1 seimei` from a niri bind: stop driving and end the turn.
@@ -181,6 +182,7 @@ def main():
         app["desktop"].cancel()
         app["layout"].cancel()
         app["push"].cancel()
+        app["uploads"].cancel()
         await push.sender.close()
         await pool.close()
 

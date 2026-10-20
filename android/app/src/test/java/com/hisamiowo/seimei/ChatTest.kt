@@ -90,7 +90,9 @@ class ChatTest {
         assertEquals(listOf(FileRef("ab12", "notes.txt", 2048, "text")), (c.items.last() as Item.Msg).files)
         // The event's own id must not stand in for the file's.
         c.add(ev("file", kv = arrayOf("file" to "cd34", "name" to "a.pdf", "size" to (3 shl 20), "kind" to "pdf", "caption" to "c")))
-        assertEquals(Item.Sent((c.items.last() as Item.Sent).key, FileRef("cd34", "a.pdf", 3L shl 20, "pdf"), "c"), c.items.last())
+        assertEquals(Item.Sent((c.items.last() as Item.Sent).key, FileRef("cd34", "a.pdf", 3L shl 20, "pdf"), "c", 1_800_000_000.0), c.items.last())
+        assertEquals(false, expired(1_800_000_000.0, now = 1_800_000_000.0 + 29 * 86400))
+        assertEquals(true, expired(1_800_000_000.0, now = 1_800_000_000.0 + 31 * 86400))
         assertEquals("2 KB", sizeText(2048))
         assertEquals("3.0 MB", sizeText(3L shl 20))
     }

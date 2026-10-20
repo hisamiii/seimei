@@ -24,13 +24,18 @@ sealed interface Item {
     ) : Item
     data class Shown(override val key: String, val file: String, val caption: String) : Item
     /** A file seimei handed over to download. */
-    data class Sent(override val key: String, val file: FileRef, val caption: String) : Item
+    data class Sent(override val key: String, val file: FileRef, val caption: String, val t: Double = 0.0) : Item
 }
 
 /** A file stored on the laptop (uploads.py), downloaded only when tapped. */
 data class FileRef(val id: String, val name: String, val size: Long, val kind: String)
 
 fun JSONObject.fileRef(id: String = str("id")) = FileRef(id, str("name"), optLong("size"), str("kind"))
+
+/** The laptop deletes files after this long (uploads.py KEEP_DAYS); older chips show as expired. */
+const val KEEP_SECONDS = 30 * 86400.0
+
+fun expired(t: Double, now: Double = System.currentTimeMillis() / 1000.0) = t > 0 && now - t > KEEP_SECONDS
 
 fun sizeText(n: Long) = if (n >= 1 shl 20) "%.1f MB".format(n / 1048576.0) else "${maxOf(1L, Math.round(n / 1024.0))} KB"
 
@@ -137,7 +142,7 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault()) {
             }
             "image" -> put(Item.Shown(key, ev.str("file"), ev.str("caption")))
             // "file", not "id": the event log numbers every event with its own id.
-            "file" -> put(Item.Sent(key, ev.fileRef(ev.str("file")), ev.str("caption")))
+            "file" -> put(Item.Sent(key, ev.fileRef(ev.str("file")), ev.str("caption"), t))
             "approval" -> {
                 val aid = ev.str("aid")
                 approvals[aid] = put(Item.Approval(key, aid, ev.str("who"), ev.str("action"), ev.str("target"),

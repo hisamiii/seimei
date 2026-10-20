@@ -88,9 +88,20 @@ class Api(server: String) {
         return JSONObject(await(req) { it.string() })
     }
 
-    /** Streams a laptop file into [out]. */
-    suspend fun download(path: String, out: OutputStream) = await(request(path).build()) { body ->
-        out.sink().buffer().use { it.writeAll(body.source()) }
+    /** Streams a laptop file into [out], telling [progress] the bytes so far. */
+    suspend fun download(path: String, out: OutputStream, progress: (Long) -> Unit = {}) = await(request(path).build()) { body ->
+        val src = body.source()
+        val buf = okio.Buffer()
+        var done = 0L
+        out.sink().buffer().use { sink ->
+            while (true) {
+                val n = src.read(buf, 1L shl 16)
+                if (n < 0) break
+                sink.write(buf, n)
+                done += n
+                progress(done)
+            }
+        }
     }
 
     @Volatile

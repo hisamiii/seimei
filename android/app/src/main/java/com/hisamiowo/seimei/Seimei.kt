@@ -206,6 +206,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 phase = Phase.Ready
                 start()
                 registerPush()
+                checkUpdate()
             } catch (e: HttpError) {
                 authError = "Login failed (${e.code})."
             } catch (e: IOException) {
@@ -257,7 +258,9 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         Push.visible = true
         // Anything pushed while away is on screen now.
         Push.clear(getApplication<Application>())
+        installAllowed = Updater.canInstall(getApplication())
         if (phase != Phase.Ready) return
+        if (System.currentTimeMillis() - lastCheck > 60_000) checkUpdate()
         // Back after a while away: ask for the fingerprint again.
         if (backgroundSince > 0 && System.currentTimeMillis() - backgroundSince > LOCK_AFTER) return lock()
         connect()
@@ -678,6 +681,42 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         if (pictures.isNotEmpty()) attach(pictures)
     }
 
+    // ---------- app updates ----------
+
+    /** A newer release on the laptop, or null. */
+    var release by mutableStateOf<Release?>(null)
+        private set
+    var checking by mutableStateOf(false)
+        private set
+    var installAllowed by mutableStateOf(false)
+        private set
+    var about by mutableStateOf(false)
+    private var lastCheck = 0L
+
+    fun checkUpdate() {
+        if (!Updater.enabled || checking) return
+        checking = true
+        lastCheck = System.currentTimeMillis()
+        viewModelScope.launch {
+            try {
+                val a = api.get("api/app")
+                val code = a.optInt("code")
+                release = if (a.optBoolean("available") && code > BuildConfig.VERSION_CODE)
+                    Release(a.str("version"), code, a.optLong("size")) else null
+            } catch (e: IOException) {
+            } catch (e: JSONException) {
+            } finally {
+                checking = false
+            }
+        }
+    }
+
+    fun installUpdate() {
+        val r = release ?: return
+        if (Updater.state is Updating.Downloading) return
+        viewModelScope.launch { Updater.install(getApplication(), api, r) }
+    }
+
     // ---------- files from the laptop ----------
 
     /** laptop file id -> its copy in Downloads. */
@@ -717,7 +756,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 uri?.let { withContext(Dispatchers.IO + NonCancellable) { cr.delete(it, null, null) } }
                 if (e !is kotlinx.coroutines.CancellationException) {
-                    chat.local("Could not download ${f.name}.")
+                    chat.local(if ((e as? HttpError)?.code == 404) "${f.name} has expired on the laptop." else "Could not download ${f.name}.")
                     publish()
                 }
             } finally {
