@@ -206,10 +206,11 @@ def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), upl
 
     own = pool.own_sessions
 
-    @tool("queue", "claude-queue right now: which queued command holds the GPU/NPU turn (pid, session, RSS, GPU "
-          "memory, how long, STUCK when its command ended but it still holds the turn, GUI app), which device opens "
-          "wait and for what (another command, a bench, free memory), and how long. Use it when a job seems stuck "
-          "on its GPU or NPU.", {})
+    @tool("queue", "claude-queue right now: which queued command holds the GPU/NPU turn (pid, session, memory, how "
+          "long, about how long it has left, STUCK when its command ended but it still holds the turn), which device "
+          "opens wait, in which order, for what (another command, a bench, free memory) and roughly when they start, "
+          "agents frozen by a bench, idle memory hogs, and whether grants are closed after a GPU fault. Use it when a "
+          "job seems stuck on its GPU or NPU.", {})
     async def queue(args):
         snap = await asyncio.to_thread(cq.snapshot, pool.queue_names())
         return text(cq.describe(snap))

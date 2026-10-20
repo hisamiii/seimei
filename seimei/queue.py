@@ -1,11 +1,15 @@
 """claude-queue as seen from outside: who holds the GPU/NPU turn, who waits for it and for how long.
 
-Holders mirror devgate: only processes under queue.slice block a queued device open. Waits come from devgate's
+cqd (claude-queue's scheduler daemon, $CLAUDE_QUEUE_DIR/cqd.sock) is the source when it runs: it knows classes,
+ETAs, memory needs and frozen agents, and streams its own events. Without it the snapshot comes from /proc:
+holders mirror devgate (only processes under queue.slice block a queued device open) and waits come from devgate's
 records, $CLAUDE_QUEUE_DIR/waits/<pid> = "<starttime> <since> <bench|pid|memory> <blocker pid> <device>"."""
 
 import asyncio
 import fnmatch
+import json
 import logging
+import socket
 import os
 import re
 import time
@@ -26,6 +30,45 @@ STUCK = 600
 def queue_dir() -> Path:
     return Path(os.environ.get("SEIMEI_QUEUE_DIR") or
                 Path(os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/claude-queue-{os.getuid()}") / "claude-queue")
+
+
+def cqd_sock() -> Path:
+    return Path(os.environ.get("SEIMEI_CQD_SOCK") or queue_dir() / "cqd.sock")
+
+
+def cqd(req: dict, timeout: float = 3) -> dict | None:
+    """One request to cqd, or None when it does not run."""
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(timeout)
+            s.connect(str(cqd_sock()))
+            s.sendall((json.dumps(req) + "\n").encode())
+            buf = b""
+            while not buf.endswith(b"\n"):
+                chunk = s.recv(1 << 16)
+                if not chunk:
+                    break
+                buf += chunk
+        return json.loads(buf)
+    except (OSError, ValueError):
+        return None
+
+
+def _from_cqd(c: dict, names: dict) -> dict:
+    """cqd's snapshot in this module's shape, plus what only cqd knows (class, state, ETA, need, frozen, hogs)."""
+    now = c["t"]
+    holders = []
+    for h in c["holders"]:
+        age = now - h["since"]
+        holders.append({**h, "pid": h["pids"][0] if h["pids"] else 0, "who": names.get(h["agent"], h["agent"]),
+                        "command": h["cmd"], "comm": "", "rss": int(h["mem_gb"] * (1 << 30)), "gpu_mem": 0,
+                        "age": age, "gui": False, "ended": h["state"] == "detached",
+                        "stuck": h["state"] == "detached" and age >= STUCK})
+    waits = [{**w, "who": names.get(w["agent"], w["agent"]), "waited": w["waited_s"], "command": w["cmd"]}
+             for w in c["waiters"]]
+    return {"cqd": True, "holders": holders, "waits": waits, "outside": len(c.get("desktop", [])),
+            "bench": c["bench"], "mem_free": int(c["mem_available_gb"] * (1 << 30)), "headroom": c["headroom_gb"],
+            "frozen": c["frozen"], "hogs": c["hogs"], "grants_open": c["grants_open"]}
 
 
 def _read(path: str) -> str:
@@ -120,8 +163,15 @@ def _ended(scope: str, procs: dict[str, str]) -> bool:
 
 
 def snapshot(names: dict[str, str] | None = None) -> dict:
-    """Holders and waits right now. names maps queue names (CLAUDE_QUEUE) to who they are."""
+    """Holders and waits right now, from cqd when it runs. names maps queue names (CLAUDE_QUEUE) to who they are."""
     names = names or {}
+    if (c := cqd({"op": "status"})) and "holders" in c:
+        return _from_cqd(c, names)
+    return proc_snapshot(names)
+
+
+def proc_snapshot(names: dict[str, str]) -> dict:
+    """The /proc view, for when cqd is down."""
     patterns = (os.environ.get("CLAUDE_QUEUE_DEVICES") or DEVICES).split(":")
     now, boot = time.time(), _boot()
     procs = {p: _cgroup(p) for p in os.listdir("/proc") if p.isdigit()}
@@ -165,7 +215,7 @@ def snapshot(names: dict[str, str] | None = None) -> dict:
     waits.sort(key=lambda w: w["since"])
     mem = re.search(r"^MemAvailable:\s+(\d+) kB", _read("/proc/meminfo"), re.M)
     lock = queue_dir() / "bench.lock"
-    return {"holders": holders, "waits": waits, "outside": outside, "bench": _bench_running(lock),
+    return {"cqd": False, "holders": holders, "waits": waits, "outside": outside, "bench": _bench_running(lock),
             "mem_free": int(mem.group(1)) << 10 if mem else 0}
 
 
@@ -199,11 +249,23 @@ def mins(s: float) -> str:
 def holder_line(h: dict) -> str:
     flags = [f for f, on in (("STUCK: its command ended but it still holds the turn", h["stuck"]),
                              ("graphics app, no compute device", h["gui"])) if on]
+    if "eta_s" in h:  # from cqd
+        if h["state"] == "external":
+            return (f"pid {h['pid']} {h['command'][:80]}: outside the queue, holds {', '.join(h['devices'])} for "
+                    f"{mins(h['age'])}, idle {mins(h['idle_s'])}")
+        left = (f"~{mins(h['eta_s'])} left" if h["eta_s"] is not None else
+                "past its usual duration" if h["known"] else "duration unknown")
+        busy = f", GPU busy {h['busy_pct']}%" if h.get("busy_pct") is not None else ""
+        return (f"{h['id']} pid {h['pid']} ({h['who']}) {h['command'][:80]}: holds {'+'.join(h['res'])} for "
+                f"{mins(h['age'])} ({h['state']}), {left}, memory {h['mem_gb']} GB (needs ~{h['need_gb']}){busy}"
+                + (f" [{'; '.join(flags)}]" if flags else ""))
     return (f"pid {h['pid']} ({h['who']}) {h['command'][:80]}: holds {', '.join(h['devices'])} for {mins(h['age'])}, "
             f"RSS {gib(h['rss'])}, GPU memory {gib(h['gpu_mem'])}" + (f" [{'; '.join(flags)}]" if flags else ""))
 
 
 def blocker_text(w: dict, snap: dict) -> str:
+    if w.get("blocked_by"):
+        return w["blocked_by"]
     if w["kind"] == "bench":
         return "a running bench"
     if w["kind"] == "memory":
@@ -215,6 +277,9 @@ def blocker_text(w: dict, snap: dict) -> str:
 
 def describe(snap: dict) -> str:
     lines = []
+    if snap.get("grants_open") is False:
+        lines.append("GRANTS CLOSED: cqd saw a GPU/NPU fault in the kernel log. Check dmesg; the user reopens "
+                     "them with `cq grants on`.")
     if snap["bench"]:
         lines.append("A bench is running: queued GPU/NPU opens wait for it.")
     if snap["holders"]:
@@ -224,12 +289,21 @@ def describe(snap: dict) -> str:
         lines.append("No queued command holds the GPU/NPU turn.")
     if snap["waits"]:
         lines.append("Waiting:")
-        lines += [f"- pid {w['pid']} ({w['who']}) {w['command'][:80]}: waited {mins(w['waited'])} for "
-                  f"{blocker_text(w, snap)}" for w in snap["waits"]]
+        lines += [f"- {'#' + str(w['pos']) + ' ' if 'pos' in w else ''}pid {w['pid']} ({w['who']}) "
+                  f"{w['command'][:80]}: waited {mins(w['waited'])}"
+                  + (f", starts in ~{mins(w['eta_s'])}" if w.get("eta_s") is not None else "")
+                  + f", blocked by {blocker_text(w, snap)}" for w in snap["waits"]]
     else:
         lines.append("Nothing waits.")
-    lines.append(f"{gib(snap['mem_free'])} memory free. {snap['outside']} processes outside the queue (desktop, "
-                 "browsers, open_app) use the GPU too; they never block the queue.")
+    if snap.get("frozen"):
+        lines.append(f"Frozen by a bench: {', '.join(snap['frozen'])}.")
+    lines.append(f"{gib(snap['mem_free'])} memory free" + (f", headroom {snap['headroom']} GB" if "headroom" in snap
+                 else "") + f". {snap['outside']} desktop processes outside the queue (desktop, browsers, open_app) "
+                 "use the GPU too; they never block the queue.")
+    for h in snap.get("hogs", []):
+        lines.append(f"Idle memory hog: {h['name']} holds {h['rss_gb']} GB, idle {h['idle_min']} min.")
+    if not snap.get("cqd"):
+        lines.append("(cqd is not running: this view comes from /proc, without ETAs.)")
     if any(h["stuck"] for h in snap["holders"]):
         lines.append("A stuck holder is usually an app restarted from an agent's shell. It keeps the turn until it "
                      "quits; ask the user before closing a window they use. Restart it outside the queue with "
@@ -238,7 +312,9 @@ def describe(snap: dict) -> str:
 
 
 class QueueWatcher:
-    """Tells the dispatcher once per wait when a queued GPU/NPU open has waited too long, naming the blocker."""
+    """Relays cqd's events (long waits, memory blocks, idle or detached holders, desktop apps moved out of the queue,
+    GPU faults) to the dispatcher. While cqd is down it falls back to telling once per wait when a queued GPU/NPU
+    open has waited too long, naming the blocker."""
 
     def __init__(self, names, notify):
         self.names = names  # () -> {queue name: who}
@@ -274,9 +350,40 @@ class QueueWatcher:
                             f"queue:{':'.join(key)}"))
         return out
 
+    def relay(self, ev: dict):
+        """One cqd event. Events are keyed per job, so a repeat replaces the earlier note."""
+        if ev.get("type") != "event" or ev.get("event") == "cqd_restart":
+            return
+        names = self.names()
+        line = ev["text"]
+        if who := names.get(ev.get("agent", "")):
+            line = f"{line} [{ev['agent']} = {who}]"
+        self.notify(f"claude-queue: {line}", urgent=ev.get("level") == "wake", key=f"cqd:{ev['key']}")
+
+    async def stream(self) -> bool:
+        """Follows cqd's watch stream until it ends; False when cqd is not there."""
+        try:
+            reader, writer = await asyncio.open_unix_connection(str(cqd_sock()), limit=1 << 22)
+        except OSError:
+            return False
+        try:
+            writer.write(b'{"op": "watch"}\n')
+            await writer.drain()
+            async for line in reader:
+                try:
+                    self.relay(json.loads(line))
+                except (ValueError, KeyError):
+                    continue
+        finally:
+            writer.close()
+        return True
+
     async def run(self, every: float = 30):
         while True:
             try:
+                if await self.stream():
+                    await asyncio.sleep(2)  # cqd restarted: reconnect
+                    continue
                 for line, key in await asyncio.to_thread(self.check):
                     self.notify(line, urgent=True, key=key)
             except Exception:
