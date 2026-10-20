@@ -59,6 +59,30 @@ def writers(pool: Pool, w, own: dict[str, str]) -> str | None:
             f"its own worktree (git -C {short} worktree add ../{Path(root).name}-{w.name}).")
 
 
+# Tools the dispatcher rarely needs: they stay behind tool search (their names show, the full schema loads on demand).
+# Every other seimei tool is loaded up front, so the everyday ones never cost a ToolSearch round trip.
+DEFERRED = {"discord_search", "discord_edit", "discord_delete", "discord_react", "discord_mark_read", "browser_read",
+            "browser_switch", "browser_download", "browser_downloads", "scroll", "notifications", "send_file",
+            "restore_desktop", "unlock_screen"}
+
+
+def always_load(server: dict, deferred: set[str]) -> dict:
+    """Mark a server's tools, except the deferred ones, with the MCP _meta flag Claude Code reads to keep a tool in
+    the prompt instead of behind tool search. The SDK's tool() has no field for it, so the listing is wrapped."""
+    srv = server["instance"]
+    entry = srv.get_request_handler("tools/list")
+
+    async def listed(ctx, params):
+        res = await entry.handler(ctx, params)
+        for t in res.tools:
+            if t.name not in deferred:
+                t.meta = {**(t.meta or {}), "anthropic/alwaysLoad": True}
+        return res
+
+    srv.add_request_handler("tools/list", entry.params_type, listed)
+    return server
+
+
 def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), uploads=None):
     @tool("summon", "Start a shikigami: a worker Claude Code session that works on a task on its own and reports back. "
           "Pick a short lowercase name, the folder the task is about, and a model (opus for real work, sonnet for "
@@ -237,5 +261,5 @@ def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), upl
     async def usage(args):
         return text(pool.dispatcher.usage.report())
 
-    return create_sdk_mcp_server("seimei", tools=[summon, workers, peek, message, stop, show_image, send_file, sessions, session_peek, queue,
-                                                 usage, *extra])
+    return always_load(create_sdk_mcp_server("seimei", tools=[summon, workers, peek, message, stop, show_image, send_file,
+                                                              sessions, session_peek, queue, usage, *extra]), DEFERRED)

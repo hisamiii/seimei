@@ -61,3 +61,5 @@ def write_json(path: Path, data, private: bool = False):
 # One stream-json line from claude can carry a whole image a tool read (base64); the SDK's 1 MB default killed
 # sessions that read a picture over ~750 KB.
 STREAM_BUFFER = 64 << 20
+# Sessions seimei starts leave out the user's claude.ai connectors (Gmail, Drive, Docs).
+NO_CONNECTORS = {"ENABLE_CLAUDEAI_MCP_SERVERS": "false"}

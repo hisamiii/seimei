@@ -54,7 +54,7 @@ def failed(e: Exception) -> dict:
 
 def make_desktop_tools(desk: Desktop, files: Files, events: EventLog, layout=None) -> list:
     @tool("desktop", "The laptop's niri desktop: outputs, workspaces with their windows (id, app, title; focused, urgent, "
-          "opened by seimei), the keyboard layout and whether the screen is locked. Start here before acting.", {})
+          "opened by seimei), the keyboard layout and whether the screen is locked (input tools refuse while it is). Start here before acting.", {})
     async def overview(args):
         try:
             return text(await asyncio.to_thread(desk.overview))

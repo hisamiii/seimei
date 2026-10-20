@@ -29,7 +29,7 @@ from claude_agent_sdk import (
 
 from . import sessions
 from .events import EventLog
-from .util import STREAM_BUFFER, queue_env, result_text, summarize, write_json
+from .util import NO_CONNECTORS, STREAM_BUFFER, queue_env, result_text, summarize, write_json
 
 log = logging.getLogger("seimei.workers")
 
@@ -52,6 +52,17 @@ IDLE_DISCONNECT = 600
 # real turn before calling the worker done.
 TRIVIAL_GRACE = 30
 TRIVIAL = {"", "No response requested."}
+# Built-in tools a shikigami has no use for: scheduling, notebooks, worktree switching, remote triggers, design sync,
+# and talking to other sessions (its report and ask go through seimei).
+OFF_TOOLS = ["Workflow", "NotebookEdit", "CronCreate", "CronDelete", "CronList", "RemoteTrigger", "PushNotification",
+             "DesignSync", "EnterWorktree", "ExitWorktree", "ScheduleWakeup", "SendMessage", "ListAgents"]
+# The only skills a shikigami sees (the rest, like the claude.ai document bundle, only fill its context).
+SKILLS = ["code-review", "simplify"]
+# A worker cut off by a restart is resumed with this; one resumed this often within the window stays interrupted
+# instead (a crash loop would otherwise keep poking it).
+RESUME = "continue: seimei restarted, check your state first"
+RESUME_CAP = 3
+RESUME_WINDOW = 3600
 # Seconds to gather a burst of events into one message for the dispatcher.
 BATCH = 3
 RECENT = 24 * 3600
@@ -133,7 +144,8 @@ class Worker:
                            "append": PROMPT.format(name=r["name"], subagents=r.get("subagents") or "haiku")},
             mcp_servers={"shikigami": self._tools()},
             # Workers talk to the user through their report and ask, never to other sessions directly.
-            disallowed_tools=["SendMessage", "ListAgents"],
+            disallowed_tools=OFF_TOOLS,
+            skills=SKILLS,
             env=self._env(),
             **({"effort": r["effort"]} if r.get("effort") else {}),
             extra_args={"name": f"shikigami {r['name']}"},
@@ -143,7 +155,9 @@ class Worker:
 
     def _env(self) -> dict:
         r = self.rec
-        env = {**queue_env(r["name"]), "CLAUDE_CODE_SUBAGENT_MODEL": r.get("subagents") or "haiku"}
+        # No auto-memory: a shikigami reports what it learned, and seimei decides what is kept.
+        env = {**queue_env(r["name"]), **NO_CONNECTORS, "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
+               "CLAUDE_CODE_SUBAGENT_MODEL": r.get("subagents") or "haiku"}
         if cap := CONTEXTS.get(r.get("context_cap") or ""):
             env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = str(cap)
         return env
@@ -379,14 +393,47 @@ class Pool:
         recs = json.loads(self.path.read_text()) if self.path.exists() else []
         self.workers: dict[str, Worker] = {r["id"]: Worker(self, r) for r in recs}
 
-    def startup(self):
-        """Workers that were running when seimei stopped lost their turn; say so. An asking one had ended its turn
-        already: it keeps waiting, and the answer resumes its session."""
+    def startup(self) -> list[str]:
+        """Workers that were running when seimei stopped lost their turn: each is resumed with a note to check its
+        state first (one never started gets its task again). An asking one had ended its turn already: it keeps
+        waiting, and the answer resumes its session. Returns the names resumed."""
+        now = time.time()
+        resumed = []
         for w in self.workers.values():
-            if w.rec["state"] == "running":
-                w.log.close_open_tools()
+            if w.rec["state"] != "running":
+                continue
+            w.log.close_open_tools()
+            recent = [t for t in w.rec.get("resumes", []) if now - t < RESUME_WINDOW]
+            if len(recent) >= RESUME_CAP:
                 w._set("interrupted", summary="Interrupted by a seimei restart.")
                 self.report(w, "interrupted", "")
+                continue
+            w.rec["resumes"] = recent + [now]
+            resumed.append(w)
+        if resumed:
+            asyncio.get_running_loop().create_task(self._resume_all(resumed))
+        return [w.name for w in resumed]
+
+    async def _resume_all(self, ws: list[Worker]):
+        """Resume them together, then say once which ones went on (a failed one reports as interrupted)."""
+        ok = await asyncio.gather(*(self._resume(w) for w in ws))
+        names = ", ".join(w.name for w, good in zip(ws, ok) if good)
+        if names:
+            self.events.add({"type": "system", "text": f"Resumed after the restart: {names}."})
+            self.notify(f"seimei restarted; resumed shikigami {names} (told to check their state first)")
+
+    async def _resume(self, w: Worker) -> bool:
+        try:
+            if w.rec.get("started"):
+                await w.send(RESUME)
+            else:
+                await w.send(w.rec.get("task", ""), shown="(its task again: seimei restarted before it began)")
+            return True
+        except Exception as e:
+            log.warning("resuming %s failed: %s", w.name, e)
+            w._set("interrupted", summary="Interrupted by a seimei restart.")
+            self.report(w, "interrupted", "")
+            return False
 
     def tell(self, worker: str, line: str, urgent: bool = False, key: str | None = None):
         """One event line for the dispatcher about a shikigami. Lines that come close together go as one
