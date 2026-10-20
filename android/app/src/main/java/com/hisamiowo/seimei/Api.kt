@@ -81,7 +81,15 @@ class Api(server: String) {
         val body = object : RequestBody() {
             override fun contentType() = OCTET
             override fun writeTo(sink: BufferedSink) {
-                open().use { sink.writeAll(it.source()) }
+                // Anything but an IOException thrown here would crash OkHttp's thread, not fail the call.
+                val input = try {
+                    open()
+                } catch (e: IOException) {
+                    throw e
+                } catch (e: Exception) {
+                    throw IOException("cannot read the file", e)
+                }
+                input.use { sink.writeAll(it.source()) }
             }
         }
         val req = request("api/upload?name=" + URLEncoder.encode(name, "UTF-8")).post(body).build()

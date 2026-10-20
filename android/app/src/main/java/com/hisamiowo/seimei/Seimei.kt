@@ -39,6 +39,9 @@ import java.util.Base64
 
 enum class Phase { Pair, Locked, Ready }
 
+/** Text and files another app handed over through the share sheet. */
+data class Shared(val text: String, val uris: List<Uri>)
+
 sealed interface Attachment {
     class Photo(val data: String, val preview: ImageBitmap) : Attachment
 
@@ -207,6 +210,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 start()
                 registerPush()
                 checkUpdate()
+                pendingShare?.let { pendingShare = null; applyShare(it) }
             } catch (e: HttpError) {
                 authError = "Login failed (${e.code})."
             } catch (e: IOException) {
@@ -667,7 +671,13 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             attachments = attachments + doc
             doc.job = viewModelScope.launch {
                 try {
+                    // Open it here first: a share whose read grant is gone fails with a message, not mid-upload.
+                    withContext(Dispatchers.IO) { cr.openInputStream(uri)?.close() ?: throw IOException("cannot read $name") }
                     doc.id = api.upload(name) { cr.openInputStream(uri) ?: throw IOException("cannot read $name") }.str("id")
+                } catch (e: SecurityException) {
+                    attachments = attachments - doc
+                    chat.local("seimei may not read $name. Share it again from the app it is in.")
+                    publish()
                 } catch (e: IOException) {
                     attachments = attachments - doc
                     val why = (e as? HttpError)?.let { try { JSONObject(it.body).str("error") } catch (x: JSONException) { "" } }
@@ -679,6 +689,22 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             }
         }
         if (pictures.isNotEmpty()) attach(pictures)
+    }
+
+    // ---------- sharing from other apps ----------
+
+    /** What another app shared, held until the fingerprint unlock when the app was locked. */
+    private var pendingShare: Shared? = null
+
+    /** Shared text joins the draft and shared files the attachments; nothing goes out until the user taps Send. */
+    fun share(s: Shared) {
+        show("chat")
+        if (phase == Phase.Ready && api.token != null) applyShare(s) else pendingShare = s
+    }
+
+    private fun applyShare(s: Shared) {
+        if (s.text.isNotBlank()) edit(listOf(draft.trimEnd(), s.text.trim()).filter { it.isNotEmpty() }.joinToString("\n"))
+        if (s.uris.isNotEmpty()) attachFiles(s.uris)
     }
 
     // ---------- app updates ----------

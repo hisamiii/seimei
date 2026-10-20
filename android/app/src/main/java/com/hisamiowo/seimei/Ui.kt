@@ -3,6 +3,8 @@ package com.hisamiowo.seimei
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.net.Uri
+import androidx.core.content.IntentCompat
 import android.content.pm.PackageManager
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -200,6 +202,7 @@ class MainActivity : ComponentActivity() {
             override fun onStop(owner: LifecycleOwner) = vm.onStop()
         })
         openTab(intent)
+        if (savedInstanceState == null) takeShare(intent)
         setContent {
             SeimeiTheme(vm.dynamicColor) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
@@ -216,6 +219,21 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         openTab(intent)
+        takeShare(intent)
+    }
+
+    /** The share sheet: a link or text from a browser, photos, any files. */
+    private fun takeShare(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_SEND && intent?.action != Intent.ACTION_SEND_MULTIPLE) return
+        val uris = if (intent.action == Intent.ACTION_SEND)
+            listOfNotNull(IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java))
+        else IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java).orEmpty()
+        val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString().orEmpty()
+        val subject = intent.getStringExtra(Intent.EXTRA_SUBJECT).orEmpty()
+        // A browser shares the page title as the subject and the link as the text.
+        val body = if (subject.isNotBlank() && !text.contains(subject)) "$subject\n$text".trim() else text
+        intent.action = null
+        if (body.isNotBlank() || uris.isNotEmpty()) vm.share(Shared(body, uris))
     }
 
     /** A tapped notification names the tab it is about. */
