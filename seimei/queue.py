@@ -421,8 +421,8 @@ def make_queue_tools(approvals) -> list:
         action = a["action"]
         if action == "revoke" and a.get("kill"):
             snap = await asyncio.to_thread(snapshot)
-            h = next((h for h in snap["holders"] if a.get("target") in (h.get("id"), str(h["pid"]), h["agent"])), None)
-            what = f"{h['agent']} {h['command'][:80]}" if h else str(a.get("target"))
+            h = next((h for h in snap["holders"] if a.get("target") in (h.get("id"), str(h["pid"]), h.get("agent"))), None)
+            what = f"{h.get('agent', h['who'])} {h['command'][:80]}" if h else str(a.get("target"))
             outcome = await approvals.hold({"action": "desktop", "target": f"stop the GPU/NPU job {what}",
                                             "detail": "SIGTERM to the whole command (its systemd scope)"}, "seimei", None)
             if outcome != "approved":

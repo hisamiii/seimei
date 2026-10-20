@@ -63,7 +63,7 @@ def writers(pool: Pool, w, own: dict[str, str]) -> str | None:
 # Every other seimei tool is loaded up front, so the everyday ones never cost a ToolSearch round trip.
 DEFERRED = {"discord_search", "discord_edit", "discord_delete", "discord_react", "discord_mark_read", "browser_read",
             "browser_switch", "browser_download", "browser_downloads", "scroll", "notifications", "send_file",
-            "restore_desktop", "unlock_screen"}
+            "restore_desktop", "unlock_screen", "queue_control", "queue_policy", "queue_history"}
 
 
 def always_load(server: dict, deferred: set[str]) -> dict:
