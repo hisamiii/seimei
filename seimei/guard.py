@@ -45,7 +45,8 @@ PIPED = [
 PATH_KEYS = ("file_path", "notebook_path", "path")
 # Driving kitty: only seimei may type into a session's window, on the user's tap in the app.
 KITTY_RC = re.compile(r"\bkitt(y|en)\s+(\+kitten\s+)?@|\bkitten\s+remote|kitty_rc|KITTY_(LISTEN_ON|PUBLIC_KEY)|"
-                      r"/run/user/\d+/kitty-\d+|\$\{?XDG_RUNTIME_DIR\}?/kitty-")
+                      r"/run/user/\d+/kitty-\d+|\$\{?XDG_RUNTIME_DIR\}?/kitty-|"
+                      r"\bseimei\.kitty\b|from\s+seimei\s+import\s+[^;\n]*\bkitty\b")
 
 
 def _paths_in(inp: dict, cwd: str) -> list[Path]:

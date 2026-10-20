@@ -25,6 +25,7 @@ from claude_agent_sdk import (
     tool,
 )
 
+from . import sessions
 from .events import EventLog
 from .util import queue_env, result_text, summarize, write_json
 
@@ -71,6 +72,15 @@ class Worker:
         r = self.rec
         return {**{k: r.get(k) for k in ("id", "name", "state", "cwd", "model", "created", "updated", "summary", "question", "doing")},
                 "started": bool(r.get("started"))}
+
+    def brief(self) -> dict:
+        """Project and context use from the worker's transcript, like the user's sessions show."""
+        path = sessions.transcript({"sessionId": self.rec["session_id"], "cwd": self.rec["cwd"]}) if self.rec.get("started") else None
+        try:
+            b = sessions.brief(path) if path else {}
+        except OSError:
+            b = {}
+        return {"project": b.get("project") or sessions.project_of(self.rec["cwd"] + "/x"), "context": b.get("context")}
 
     def _set(self, state: str, **kw):
         self.rec.update(state=state, updated=time.time(), **kw)
@@ -285,7 +295,7 @@ class Pool:
 
     def listing(self) -> dict:
         now = time.time()
-        recent = [w.info() for w in self.workers.values()
+        recent = [{**w.info(), **w.brief()} for w in self.workers.values()
                   if w.rec["state"] in ACTIVE or now - w.rec.get("updated", 0) < RECENT]
         return {"type": "workers", "list": recent, "total": len(self.workers)}
 

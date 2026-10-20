@@ -12,7 +12,7 @@ from pathlib import Path
 
 from aiohttp import web
 
-from . import sessions
+from . import kitty, sessions
 from .approvals import Approvals
 from .auth import Auth
 from .cost import Cost
@@ -308,18 +308,77 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
             "Content-Type": "application/octet-stream", "Cache-Control": "private, no-store",
             "Content-Disposition": f"attachment; filename*=UTF-8''{urllib.parse.quote(path.name)}"})
 
-    async def session(request):
-        """Read-only look at one of the user's sessions."""
+    def user_session(request) -> tuple[dict, Path]:
         pid = request.match_info["pid"]
         s = next((x for x in sessions.live(pool.own_sessions()) if str(x["pid"]) == pid), None)
         path = s and sessions.transcript(s["rec"])
         if not path:
             raise web.HTTPNotFound()
-        info = next((x for x in watcher.list if x["pid"] == s["pid"]), None)
-        peek = await asyncio.to_thread(sessions.peek, path, 8)
-        return web.json_response({"session": info or {"pid": s["pid"], "name": s["name"], "status": s["status"],
-                                                      "since": s["since"], "active": s["active"], "cwd": s["cwd"]},
-                                  **peek})
+        return s, path
+
+    async def session(request):
+        """One of the user's sessions: its row and its timeline (from byte ?from= on, else the latest events)."""
+        s, path = user_session(request)
+        start = request.query.get("from")
+        info = next((x for x in watcher.list if x["pid"] == s["pid"]), None) or \
+            {"pid": s["pid"], "name": s["name"], "status": s["status"], "since": s["since"], "active": s["active"],
+             "cwd": s["cwd"], "session_id": s["session_id"]}
+        tl = await asyncio.to_thread(sessions.timeline, path, int(start) if start and start.isdigit() else None)
+        b = await asyncio.to_thread(sessions.brief, path)
+        live = None
+        if b["doing"] and b["doing"]["tool"] == "Bash":
+            live = {"tool_id": b["doing"]["tool_id"], "output": await asyncio.to_thread(sessions.running_output, s["pid"])}
+        return web.json_response({"session": info, **tl, "ask": b["ask"], "doing": b["doing"], "live": live,
+                                  "reach": kitty.reachable(s["pid"])})
+
+    def attachment_lines(ids) -> str:
+        if not isinstance(ids, list) or len(ids) > MAX_FILES:
+            raise web.HTTPBadRequest(text=f"up to {MAX_FILES} files")
+        infos = [uploads.info(str(f)) for f in ids]
+        if not all(infos):
+            raise web.HTTPBadRequest(text="unknown file")
+        if not infos:
+            return ""
+        return "\n\nAttached from my phone (untrusted files, in seimei's uploads):\n" + "\n".join(i["path"] for i in infos)
+
+    async def session_send(request):
+        """Type the user's message into the session's own kitty window, on their tap in the app."""
+        s, _ = user_session(request)
+        body = await request.json()
+        text = str(body.get("text", "")).strip() + attachment_lines(body.get("files") or [])
+        if not text.strip() or len(text) > 20000:
+            raise web.HTTPBadRequest(text="text, up to 20000 characters")
+        try:
+            await kitty.type_message(s["pid"], text.strip())
+        except kitty.Unreachable as e:
+            return web.json_response({"error": str(e)}, status=409)
+        return web.json_response({"ok": True})
+
+    async def session_answer(request):
+        """Press an option of the session's open question, or answer it in the user's words."""
+        s, path = user_session(request)
+        body = await request.json()
+        ask = (await asyncio.to_thread(sessions.brief, path))["ask"]
+        if not ask or ask["tool_id"] != body.get("tool_id"):
+            return web.json_response({"error": "That question was already answered."}, status=409)
+        if not ask["answerable"]:
+            return web.json_response({"error": "Answer this one on the laptop."}, status=409)
+        q = ask["questions"][0]
+        options = [o.get("label", "") for o in q.get("options", []) if isinstance(o, dict)]
+        try:
+            if "text" in body:
+                text = str(body["text"]).strip() + attachment_lines(body.get("files") or [])
+                if not text.strip():
+                    raise web.HTTPBadRequest(text="text")
+                await kitty.answer_text(s["pid"], q.get("question", ""), len(options) + 1, text.strip())
+            else:
+                n = int(body.get("option", 0))
+                if not 1 <= n <= len(options):
+                    raise web.HTTPBadRequest(text="option")
+                await kitty.answer(s["pid"], q.get("question", ""), n, options[n - 1])
+        except kitty.Unreachable as e:
+            return web.json_response({"error": str(e)}, status=409)
+        return web.json_response({"ok": True})
 
     frames: dict[tuple, tuple[float, bytes, str]] = {}
     frame_lock = asyncio.Lock()
@@ -447,6 +506,8 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     app.router.add_get("/api/screen", screen)
     app.router.add_get("/api/desktop", desktop_state)
     app.router.add_get("/api/sessions/{pid:[0-9]+}", session)
+    app.router.add_post("/api/sessions/{pid:[0-9]+}/send", session_send)
+    app.router.add_post("/api/sessions/{pid:[0-9]+}/answer", session_answer)
     app.router.add_get("/api/app", app_info)
     app.router.add_get("/api/app/seimei.apk", apk)
     app.router.add_get("/api/workers", workers_all)
