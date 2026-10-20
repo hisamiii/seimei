@@ -111,6 +111,17 @@ def blocked(tool: str, inp: dict, cwd: str) -> str | None:
     return None
 
 
+def excerpt(tool: str, inp: dict, n: int = 120) -> str:
+    """A short what-it-was for an event line: the command, the path, or the input."""
+    text = str(inp.get("command") or inp.get("file_path") or inp.get("notebook_path") or inp.get("url") or "") or _brief(inp)
+    text = " ".join(text.split())
+    return f"{tool} {text if len(text) <= n else text[:n - 1] + '…'}"
+
+
+# A shikigami tool failing this many times in a row is worth the dispatcher's attention.
+REPEATS = 3
+
+
 def _brief(inp: dict) -> str:
     text = json.dumps(inp, ensure_ascii=False)
     return text if len(text) <= 1500 else text[:1500] + "…"
@@ -121,6 +132,13 @@ class Guard:
         self.events = events
         self.approvals = approvals
         self.path = state_dir / "audit.jsonl"
+        # Pool.tell(worker id, line, urgent=, key=): what a shikigami's calls ran into, for the dispatcher.
+        self.tell = None
+        self.fails: dict[tuple[str, str], int] = {}
+
+    def _tell(self, worker: str | None, line: str, urgent: bool = False, key: str | None = None):
+        if worker and self.tell:
+            self.tell(worker, line, urgent=urgent, key=key)
 
     def audit(self, rec: dict):
         """Append one line; the log is rotated by renaming, never trimmed."""
@@ -167,13 +185,17 @@ class Guard:
             if why := blocked(tool, args, cwd):
                 self.audit({**rec, "decision": "blocked", "why": why})
                 self.events.add({"type": "system", "level": "error", "text": f"Blocked {who}: {why}."})
+                self._tell(worker, f"the guard blocked {why}: {excerpt(tool, args)}")
                 return {"hookSpecificOutput": {
                     "hookEventName": "PreToolUse", "permissionDecision": "deny",
                     "permissionDecisionReason": f"seimei's guard blocks {why}. This rule protects against prompt "
                     "injection and has no override; if the user really wants it, they do it themselves."}}
             if what := check(tool, args):
+                card = f"{what['action']}: {what['target']}"
+                self._tell(worker, f"waits on an approval card ({card})", key=f"approval:{tool_use_id}")
                 outcome = await self.approvals.hold(what, who, worker)
                 self.audit({**rec, "decision": outcome})
+                self._tell(worker, f"approval card ({card}) {outcome}", key=f"approval:{tool_use_id}")
                 if outcome == "approved":
                     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
                                                    "permissionDecisionReason": "The user approved this on their phone."}}
@@ -185,8 +207,19 @@ class Guard:
             return {}
 
         async def failed(inp, tool_use_id, ctx):
-            self.audit({"event": "failed", "id": tool_use_id, "error": str(inp.get("error", ""))[:300]})
+            error = str(inp.get("error", ""))[:300]
+            self.audit({"event": "failed", "id": tool_use_id, "error": error})
+            if worker:
+                k = (worker, inp.get("tool_name", "?"))
+                self.fails[k] = n = self.fails.get(k, 0) + 1
+                if n == REPEATS:
+                    self._tell(worker, f"{k[1]} failed {n} times in a row, last: {' '.join(error.split())[:200]}", urgent=True)
+            return {}
+
+        async def done(inp, tool_use_id, ctx):
+            self.fails.pop((worker, inp.get("tool_name", "?")), None)
             return {}
 
         return {"PreToolUse": [HookMatcher(hooks=[pre], timeout=HOOK_TIMEOUT)],
-                "PostToolUseFailure": [HookMatcher(hooks=[failed])]}
+                "PostToolUseFailure": [HookMatcher(hooks=[failed])],
+                **({"PostToolUse": [HookMatcher(hooks=[done])]} if worker else {})}

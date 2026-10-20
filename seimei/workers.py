@@ -46,6 +46,8 @@ EFFORTS = ("low", "medium", "high", "xhigh", "max")
 CONTEXTS = {"256k": 256_000, "400k": 400_000, "1m": 1_000_000}
 ACTIVE = {"running", "asking"}
 IDLE_DISCONNECT = 600
+# Seconds to gather a burst of events into one message for the dispatcher.
+BATCH = 3
 RECENT = 24 * 3600
 
 
@@ -224,6 +226,10 @@ class Worker:
         try:
             async for msg in client.receive_messages():
                 self._handle(msg)
+            if self.rec["state"] in ACTIVE:
+                # The stream ended without a result: the claude process is gone.
+                self._set("failed", summary="The session's process exited.")
+                self.pool.report(self, "failed", "The session's process exited mid-turn (crashed or killed).")
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -311,6 +317,8 @@ class Pool:
         self.path = state_dir / "workers.json"
         self.dispatcher = None
         self.guard = None
+        self._batch: dict[str, tuple[str, bool, int]] = {}
+        self._flush_at: asyncio.TimerHandle | None = None
         recs = json.loads(self.path.read_text()) if self.path.exists() else []
         self.workers: dict[str, Worker] = {r["id"]: Worker(self, r) for r in recs}
 
@@ -320,6 +328,30 @@ class Pool:
             if w.rec["state"] in ACTIVE:
                 w._set("interrupted", summary="Interrupted by a seimei restart.")
                 self.report(w, "interrupted", "")
+
+    def tell(self, worker: str, line: str, urgent: bool = False, key: str | None = None):
+        """One event line for the dispatcher about a shikigami. Lines that come close together go as one
+        message; repeats collapse. Urgent ones go now; the rest join a running dispatcher turn, or wait for
+        its next one."""
+        w = self.workers.get(worker)
+        line = f"shikigami {w.name} ({w.id}) {line}" if w else line
+        k = key or line
+        old = self._batch.pop(k, None)
+        self._batch[k] = (line, urgent or bool(old and old[1]), (old[2] + 1) if old and not key else 1)
+        if not self._flush_at:
+            self._flush_at = asyncio.get_running_loop().call_later(BATCH, self._flush)
+
+    def _flush(self):
+        self._flush_at = None
+        batch, self._batch = list(self._batch.items()), {}
+        if not batch or not self.dispatcher:
+            return
+        lines = [line + (f" (×{n})" if n > 1 else "") for _, (line, _, n) in batch]
+        if any(u for _, (_, u, _) in batch) or self.dispatcher.busy:
+            self.dispatcher.wake("\n".join(lines) if len(lines) == 1 else "Shikigami events:\n" + "\n".join(f"- {l}" for l in lines))
+        else:
+            for k, (line, _, n) in batch:
+                self.dispatcher.note(line + (f" (×{n})" if n > 1 else ""), key=f"w:{k}")
 
     async def close(self):
         """On shutdown: end every worker process. Running ones are marked interrupted on the next start."""
@@ -383,8 +415,4 @@ class Pool:
         line = {"done": f"finished: {first_line(text, 300)}", "failed": f"failed: {first_line(text, 300)}",
                 "asking": f"asks: {text[:1000]}", "stopped": "was stopped",
                 "interrupted": "was interrupted by a seimei restart"}[event]
-        note = f"shikigami {w.name} ({w.id}) {line}"
-        if event in ("failed", "asking"):
-            self.dispatcher.wake(note)
-        else:
-            self.dispatcher.note(note)
+        self.tell(w.id, line, urgent=event in ("failed", "asking", "interrupted"), key=f"report:{w.id}")
