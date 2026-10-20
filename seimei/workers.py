@@ -47,6 +47,10 @@ EFFORTS = ("low", "medium", "high", "xhigh", "max")
 CONTEXTS = {"256k": 256_000, "400k": 400_000, "1m": 1_000_000}
 ACTIVE = {"running", "asking"}
 IDLE_DISCONNECT = 600
+# A turn with nothing to say (a stale task notification replayed on resume) is no report: wait this long for the
+# real turn before calling the worker done.
+TRIVIAL_GRACE = 30
+TRIVIAL = {"", "No response requested."}
 # Seconds to gather a burst of events into one message for the dispatcher.
 BATCH = 3
 RECENT = 24 * 3600
@@ -68,6 +72,8 @@ class Worker:
         self.stopping = False
         self.last_text = ""
         self.idle_timer: asyncio.TimerHandle | None = None
+        self.grace: asyncio.TimerHandle | None = None
+        self.turn_text = False
         # Subagents still working in the background: the turn may end before they report back.
         self.tasks: dict[str, str] = {}
 
@@ -223,9 +229,12 @@ class Worker:
         if self.client and self.rec["state"] in ACTIVE:
             self.stopping = True
             await self.client.interrupt()
-            if self.tasks and self.rec["state"] == "running":
-                # No turn runs while it only waits for subagents, so no result will say it stopped.
+            if (self.tasks or self.grace) and self.rec["state"] == "running":
+                # No turn runs while it only waits for subagents (or after a trivial turn), so no result will say it stopped.
                 self.tasks.clear()
+                if self.grace:
+                    self.grace.cancel()
+                    self.grace = None
                 self.stopping = False
                 self._set("stopped", summary="Stopped.")
                 self.pool.report(self, "stopped", "")
@@ -262,10 +271,15 @@ class Worker:
         elif isinstance(msg, AssistantMessage):
             if msg.parent_tool_use_id:
                 return
+            if any(isinstance(b, ToolUseBlock) or isinstance(b, TextBlock) and b.text.strip() not in TRIVIAL for b in msg.content):
+                self._turn_goes_on()
             for b in msg.content:
                 if isinstance(b, TextBlock) and b.text.strip():
-                    self.last_text = b.text
                     self._add({"type": "assistant", "text": b.text})
+                    if b.text.strip() in TRIVIAL:
+                        continue
+                    self.last_text = b.text
+                    self.turn_text = True
                     self._doing({"text": first_line(b.text)})
                 elif isinstance(b, ToolUseBlock):
                     summary = summarize(b.input)
@@ -283,13 +297,29 @@ class Worker:
         elif isinstance(msg, RateLimitEvent):
             self.pool.dispatcher.rate_limit(msg)
 
+    def _turn_goes_on(self):
+        """A new turn after the worker settled (its queued message, a subagent's report): it runs again."""
+        if self.grace:
+            self.grace.cancel()
+            self.grace = None
+        if self.rec["state"] in ("done", "failed"):
+            if self.idle_timer:
+                self.idle_timer.cancel()
+                self.idle_timer = None
+            self._set("running", question=None)
+
     def _finish(self, msg: ResultMessage):
         if self.pool.dispatcher and self.pool.dispatcher.usage:
             fresh = not self.rec.get("turns")
             self.rec["turns"] = self.rec.get("turns", 0) + 1
             self.pool.dispatcher.usage.turn(f"shikigami {self.name}", msg.session_id, msg.model_usage, fresh)
-        text = (msg.result if isinstance(msg.result, str) and msg.result.strip() else self.last_text).strip()
-        if self.rec["state"] == "asking":
+        said = msg.result.strip() if isinstance(msg.result, str) else ""
+        trivial = said == "No response requested." or not said and not self.turn_text
+        self.turn_text = False
+        if not trivial and said:
+            self.last_text = said
+        text = (said or self.last_text).strip()
+        if self.rec["state"] == "asking" or trivial and self.rec["state"] in ("done", "failed", "stopped"):
             pass
         elif self.stopping:
             self._set("stopped", summary="Stopped.")
@@ -302,9 +332,25 @@ class Worker:
         elif msg.is_error:
             self._set("failed", summary=first_line(text) or msg.subtype)
             self.pool.report(self, "failed", text or msg.subtype)
+        elif trivial and self.rec["state"] == "running":
+            # Nothing said: most likely a replayed notification ahead of the user's message, so no report yet.
+            self.grace = asyncio.get_running_loop().call_later(TRIVIAL_GRACE, self._settle)
+            return
         else:
             self._set("done", summary=first_line(text), result=text[:4000])
             self.pool.report(self, "done", text)
+        self._idle()
+
+    def _settle(self):
+        """No turn followed a trivial one: done, with the last thing it said."""
+        self.grace = None
+        if self.rec["state"] == "running" and not self.tasks:
+            text = self.last_text.strip()
+            self._set("done", summary=first_line(text), result=text[:4000])
+            self.pool.report(self, "done", text)
+            self._idle()
+
+    def _idle(self):
         self.stopping = False
         loop = asyncio.get_running_loop()
         self.idle_timer = loop.call_later(IDLE_DISCONNECT, lambda: asyncio.ensure_future(self._park()))
