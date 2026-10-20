@@ -256,6 +256,8 @@ def holder_line(h: dict) -> str:
         left = (f"~{mins(h['eta_s'])} left" if h["eta_s"] is not None else
                 "past its usual duration" if h["known"] else "duration unknown")
         busy = f", GPU busy {h['busy_pct']}%" if h.get("busy_pct") is not None else ""
+        if p := h.get("paused"):
+            busy += f", paused by {p['by']} ({p['why']})"
         return (f"{h['id']} pid {h['pid']} ({h['who']}) {h['command'][:80]}: holds {'+'.join(h['res'])} for "
                 f"{mins(h['age'])} ({h['state']}), {left}, memory {h['mem_gb']} GB (needs ~{h['need_gb']}){busy}"
                 + (f" [{'; '.join(flags)}]" if flags else ""))
@@ -409,12 +411,14 @@ def make_queue_tools(approvals) -> list:
           "interactive, bench, batch), hold / unhold (a waiter keeps its place but does not start), admit (let a "
           "memory-blocked waiter start once), revoke (stop counting a lease; its processes keep their devices; "
           "kill=true instead sends SIGTERM to the command, after the user approves), park / unpark (freeze an idle "
-          "agent memory hog and swap it out; never one holding a GPU/NPU), grants (to: on or off; cqd closes them "
+          "agent memory hog and swap it out; never one holding a GPU/NPU), pause / resume (freeze a running GPU job "
+          "and thaw it; cqd refuses NPU users and exempt agents, and thaws it at once if its GPU work does not "
+          "drain), grants (to: on or off; cqd closes them "
           "after a GPU/NPU fault, check dmesg first). target: a waiter or lease id from the queue tool (W12, L3), a "
           "pid or a queue name; a hog's name for park.", {
               "type": "object",
               "properties": {"action": {"type": "string", "enum": ["bump", "hold", "unhold", "admit", "revoke",
-                                                                   "park", "unpark", "grants"]},
+                                                                   "park", "unpark", "pause", "resume", "grants"]},
                              "target": {"type": "string"}, "to": {"type": "string"}, "kill": {"type": "boolean"}},
               "required": ["action"]})
     async def queue_control(a):
@@ -428,8 +432,9 @@ def make_queue_tools(approvals) -> list:
             if outcome != "approved":
                 return text(f"The user {outcome} it; nothing changed.", error=True)
             action = "kill"
+        # A pause waits until the job's GPU work drained (preempt_settle_s).
         r = await asyncio.to_thread(cqd, {"op": "control", "action": action, "target": a.get("target"),
-                                          "to": a.get("to")})
+                                          "to": a.get("to")}, 30 if action == "pause" else 3)
         if r is None:
             return text("cqd is not running.", error=True)
         return text(json.dumps(r), error="error" in r)
@@ -439,7 +444,8 @@ def make_queue_tools(approvals) -> list:
           "mem_reserve_gb, mem_default_gb, mem_wait_timeout, wait_event_min, holder_idle_min, lease_linger_s, "
           "external_idle_s (agent jobs wait this long after the user's own GPU/NPU use), external_idle_bench_s "
           "(a bench's cool-down after it), desktop_busy_bench_pct (desktop GPU use above it holds a bench), "
-          "contam_desktop_pct, max_freeze_s, rehome, desktop_names, desktop_args, gate (on/off). "
+          "contam_desktop_pct, preempt_gpu (a bench may pause a long batch GPU job), preempt_min_eta_s, "
+          "preempt_settle_s, max_freeze_s, rehome, desktop_names, desktop_args, gate (on/off). "
           "No key: all of them. Change only what the user asked for.", {
               "type": "object", "properties": {"key": {"type": "string"}, "value": {}}})
     async def queue_policy(a):
