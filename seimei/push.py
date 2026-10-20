@@ -239,7 +239,7 @@ class Push:
             tag = "k:" + key.strip()[:60]
             n = self.keyed[tag] = self.keyed.get(tag, 0) + 1
             # Later pings on the key update the notification; only urgent ones sound again.
-            data = {"title": title, "body": body + (f"\n({n} updates)" if n > 1 else ""),
+            data = {"title": title, "body": "\n".join(x for x in (body, f"({n} updates)" if n > 1 else "") if x),
                     "alert": int(sound and (n == 1 or level == "urgent"))}
         else:
             tag = LEVELS[level]

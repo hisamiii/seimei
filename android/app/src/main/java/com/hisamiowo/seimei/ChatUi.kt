@@ -602,7 +602,7 @@ fun Picture(vm: Seimei, name: String, modifier: Modifier, crop: Boolean = false,
     val bmp by produceState<ImageBitmap?>(null, name) { value = vm.image(name) }
     val b = bmp
     if (b == null) Box(modifier.then(if (crop) Modifier else Modifier.aspectRatio(ratio ?: (4f / 3))).background(MaterialTheme.colorScheme.surfaceContainerHigh))
-    else Image(b, null, modifier.then(if (crop) Modifier else Modifier.aspectRatio(b.width.toFloat() / b.height)),
+    else Image(b, "Picture, tap to open", modifier.then(if (crop) Modifier else Modifier.aspectRatio(b.width.toFloat() / b.height)),
         contentScale = if (crop) ContentScale.Crop else ContentScale.Fit)
 }
 
