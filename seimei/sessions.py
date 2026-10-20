@@ -1,6 +1,7 @@
 """Every Claude Code session on the laptop, read from Claude Code's own session registry and transcripts."""
 
 import asyncio
+import calendar
 import json
 import logging
 import os
@@ -220,8 +221,7 @@ def _rows(path: Path, start: int) -> tuple[list[dict], int]:
 
 def _t(row: dict) -> float:
     try:
-        return time.mktime(time.strptime(row.get("timestamp", "")[:19], "%Y-%m-%dT%H:%M:%S")) - time.timezone \
-            if row.get("timestamp") else 0
+        return calendar.timegm(time.strptime(row["timestamp"][:19], "%Y-%m-%dT%H:%M:%S")) if row.get("timestamp") else 0
     except ValueError:
         return 0
 
@@ -277,6 +277,27 @@ def brief(path: Path) -> dict:
     if len(_briefs) > 200:
         _briefs.pop(next(iter(_briefs)))
     return out
+
+
+_screen_asks: dict[int, tuple[float, dict | None]] = {}
+
+
+def screen_ask(rec: dict) -> dict | None:
+    """The question a waiting session shows on screen, read once per status change."""
+    pid, at = rec.get("pid"), rec.get("statusUpdatedAt", 0)
+    if rec.get("status") != "waiting" or kitty.reachable(pid):
+        return None
+    hit = _screen_asks.get(pid)
+    if hit and hit[0] == at:
+        return hit[1]
+    try:
+        ask = kitty.question(kitty.screen_sync(pid))
+    except kitty.Unreachable:
+        ask = None
+    _screen_asks[pid] = (at, ask)
+    if len(_screen_asks) > 100:
+        _screen_asks.pop(next(iter(_screen_asks)))
+    return ask
 
 
 def asking(path: Path) -> bool:
@@ -363,7 +384,7 @@ def listing(own: dict[str, str]) -> list[dict]:
             b = brief(path) if path else {}
         except OSError:
             b = {}
-        ask = b.get("ask")
+        ask = b.get("ask") or screen_ask(rec)
         out.append({"pid": s["pid"], "name": s["name"], "session_id": s["session_id"],
                     "status": rec.get("status", "?"), "waiting_for": rec.get("waitingFor"),
                     "since": s["since"], "active": s["active"], "cwd": s["cwd"], "kind": s["kind"],

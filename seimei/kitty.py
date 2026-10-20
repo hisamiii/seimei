@@ -7,8 +7,10 @@ nothing is sent into a prompt or dialog it was not meant for.
 """
 
 import asyncio
+import hashlib
 import os
 import re
+import subprocess
 from pathlib import Path
 
 PASSWORD = Path.home() / ".local/share/seimei/kitty-rc.conf"
@@ -176,6 +178,58 @@ def _question_block(screen_text: str) -> str | None:
     if head is None:
         return None
     return re.sub(r"\s+", " ", " ".join(rows[head:]))
+
+
+def question(screen_text: str) -> dict | None:
+    """The single-select question open on screen, shaped like a transcript's AskUserQuestion, or None.
+
+    Claude Code does not always write a pending question to the transcript, but it is always on screen."""
+    rows = [_plain(r).rstrip() for r in _rows(screen_text) if _plain(r).strip()]
+    if not rows or not any(re.search(r"Enter to select · ↑/↓ to navigate", r) for r in rows[-4:]):
+        return None
+    head = max((i for i, r in enumerate(rows) if re.match(r"^\s*[☐☒✔]\s", r)), default=None)
+    if head is None:
+        return None
+    header = re.sub(r"^\s*[☐☒✔]\s*", "", rows[head]).strip()
+    text, options, other = [], [], None
+    for r in rows[head + 1:]:
+        if RULE.match(r) or re.search(r"Enter to select", r):
+            break
+        m = re.match(r"^\s*(?:❯\s*)?(\d+)\.\s+(.*)$", r)
+        if m:
+            label = m.group(2).strip()
+            if re.match(r"^Type something\.?$", label):
+                other = int(m.group(1))
+                continue
+            options.append({"label": label, "description": ""})
+        elif other is None and options:
+            o = options[-1]
+            o["description"] = (o["description"] + " " + r.strip()).strip()
+        elif other is None:
+            text.append(r.strip())
+    q = " ".join(text).strip()
+    if not q or not options:
+        return None
+    key = hashlib.sha1(f"{q}\n{[o['label'] for o in options]}".encode()).hexdigest()[:16]
+    return {"tool_id": f"screen:{key}", "since": None, "answerable": True, "other": other,
+            "questions": [{"question": q, "header": header, "multiSelect": False, "options": options}]}
+
+
+def screen_sync(pid: int) -> str:
+    """get-text for a caller outside the event loop (the session scan)."""
+    w = window(pid)
+    pw = _password()
+    if not pw:
+        raise Unreachable("Remote control is not set up on the laptop.")
+    env = {**os.environ, "KITTY_PUBLIC_KEY": w["key"], "KITTY_RC_PASSWORD": pw}
+    try:
+        r = subprocess.run(["kitten", "@", "--to", w["to"], "--password-env", "KITTY_RC_PASSWORD", "get-text",
+                            "--match", f"id:{w['id']}"], env=env, capture_output=True, text=True, timeout=10)
+    except subprocess.TimeoutExpired:
+        raise Unreachable("kitty did not answer.")
+    if r.returncode:
+        raise Unreachable("kitty refused.")
+    return r.stdout
 
 
 def _visible(screen_text: str, question: str, n: int, label: str) -> bool:

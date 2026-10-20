@@ -310,11 +310,13 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
 
     def user_session(request) -> tuple[dict, Path]:
         pid = request.match_info["pid"]
-        s = next((x for x in sessions.live(pool.own_sessions()) if str(x["pid"]) == pid), None)
-        path = s and sessions.transcript(s["rec"])
-        if not path:
+        own = pool.own_sessions()
+        s = next((x for x in sessions.live(own) if str(x["pid"]) == pid), None)
+        # Only the user's own sessions: never seimei, a dev seimei or a shikigami.
+        if not s or s["pid"] not in {x["pid"] for x in sessions.listing(own)}:
             raise web.HTTPNotFound()
-        return s, path
+        # A session gets its transcript with its first message.
+        return s, sessions.transcript(s["rec"])
 
     async def session(request):
         """One of the user's sessions: its row and its timeline (from byte ?from= on, else the latest events)."""
@@ -323,12 +325,16 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
         info = next((x for x in watcher.list if x["pid"] == s["pid"]), None) or \
             {"pid": s["pid"], "name": s["name"], "status": s["status"], "since": s["since"], "active": s["active"],
              "cwd": s["cwd"], "session_id": s["session_id"]}
-        tl = await asyncio.to_thread(sessions.timeline, path, int(start) if start and start.isdigit() else None)
-        b = await asyncio.to_thread(sessions.brief, path)
+        if path:
+            tl = await asyncio.to_thread(sessions.timeline, path, int(start) if start and start.isdigit() else None)
+            b = await asyncio.to_thread(sessions.brief, path)
+        else:
+            tl, b = {"events": [], "next": 0}, {"ask": None, "doing": None}
+        ask = b["ask"] or await asyncio.to_thread(sessions.screen_ask, s["rec"])
         live = None
         if b["doing"] and b["doing"]["tool"] == "Bash":
             live = {"tool_id": b["doing"]["tool_id"], "output": await asyncio.to_thread(sessions.running_output, s["pid"])}
-        return web.json_response({"session": info, **tl, "ask": b["ask"], "doing": b["doing"], "live": live,
+        return web.json_response({"session": info, **tl, "ask": ask, "doing": b["doing"], "live": live,
                                   "reach": kitty.reachable(s["pid"])})
 
     def attachment_lines(ids) -> str:
@@ -358,7 +364,11 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
         """Press an option of the session's open question, or answer it in the user's words."""
         s, path = user_session(request)
         body = await request.json()
-        ask = (await asyncio.to_thread(sessions.brief, path))["ask"]
+        ask = path and (await asyncio.to_thread(sessions.brief, path))["ask"]
+        if not ask:
+            # Read the screen fresh: the cached one may predate this question.
+            sessions._screen_asks.pop(s["pid"], None)
+            ask = await asyncio.to_thread(sessions.screen_ask, s["rec"])
         if not ask or ask["tool_id"] != body.get("tool_id"):
             return web.json_response({"error": "That question was already answered."}, status=409)
         if not ask["answerable"]:
@@ -370,7 +380,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
                 text = str(body["text"]).strip() + attachment_lines(body.get("files") or [])
                 if not text.strip():
                     raise web.HTTPBadRequest(text="text")
-                await kitty.answer_text(s["pid"], q.get("question", ""), len(options) + 1, text.strip())
+                await kitty.answer_text(s["pid"], q.get("question", ""), ask.get("other") or len(options) + 1, text.strip())
             else:
                 n = int(body.get("option", 0))
                 if not 1 <= n <= len(options):
@@ -460,7 +470,8 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
 
     async def worker_send(request):
         w = worker(request)
-        text = str((await request.json()).get("text", "")).strip()
+        body = await request.json()
+        text = (str(body.get("text", "")).strip() + attachment_lines(body.get("files") or [])).strip()
         if not text:
             raise web.HTTPBadRequest()
         try:

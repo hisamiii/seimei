@@ -1,7 +1,7 @@
 // The page: the stream from the laptop, the four tabs, and the header and navigation bar around them.
 import { $, S, hooks, finePointer } from './util.js';
 import { render, onDelta, clearLive, addEvent, loadHistory, autosize, waitingApprovals, toBottom } from './chat.js';
-import { setWorkers, setSessions, sheetEvent, agentCounts, showAgents } from './agents.js';
+import { setWorkers, setSessions, sheetEvent, agentCounts, showAgents, pageOpen, closePage } from './agents.js';
 import { showScreen, hideScreen } from './screen.js';
 import { setUsage, renderUsage, tone } from './usage.js';
 import { account } from './account.js';
@@ -60,6 +60,7 @@ for (const b of document.querySelectorAll('.nav-item')) b.addEventListener('clic
 
 window.addEventListener('popstate', () => {
   if (!sheet.wrap.hidden) return closeSheet(true);
+  if (pageOpen()) return closePage();
   show(location.hash.slice(1) || 'chat');
 });
 

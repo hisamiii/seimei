@@ -43,6 +43,7 @@ export function phrase(name, n) {
   if (/^(Agent|Task)$/.test(name)) return `started ${plural(n, 'an agent', 'agents')}`;
   if (/^(TodoWrite|TaskCreate|TaskUpdate|TaskList|TaskGet)$/.test(name)) return 'updated its tasks';
   if (name === 'ToolSearch') return 'loaded tools';
+  if (name === 'AskUserQuestion') return n === 1 ? 'asked you a question' : `asked you ${n} questions`;
   if (name === 'mcp__seimei__workers') return 'checked the shikigami';
   if (name === 'mcp__seimei__peek') return n === 1 ? 'looked in on a shikigami' : `looked in on shikigami ${n} times`;
   if (name === 'mcp__seimei__message') return n === 1 ? 'messaged a shikigami' : `sent ${n} shikigami messages`;
@@ -67,6 +68,25 @@ export function phrase(name, n) {
   if (name === 'mcp__seimei__discord_mark_read') return n === 1 ? 'marked a channel read' : `marked ${n} channels read`;
   const short = name.startsWith('mcp__') ? name.split('__').pop().replace(/_/g, ' ') : name;
   return n === 1 ? `used ${short}` : `used ${short} ${n} times`;
+}
+
+// What a call that is still running does, for the live pill and the Agents list.
+export function doing(name) {
+  if (name === 'Bash') return 'running a command';
+  if (name === 'Read') return 'reading a file';
+  if (/^(Edit|Write|MultiEdit|NotebookEdit)$/.test(name)) return 'editing a file';
+  if (/^(Grep|Glob)$/.test(name)) return 'searching the files';
+  if (name === 'WebSearch') return 'searching the web';
+  if (name === 'WebFetch') return 'opening a page';
+  if (/^(Agent|Task)$/.test(name)) return 'running an agent';
+  const short = name.startsWith('mcp__') ? name.split('__').pop().replace(/_/g, ' ') : name;
+  return `using ${short}`;
+}
+
+// How long something has run: 42s, 4m 12s, 1h 5m.
+export function elapsed(since) {
+  const s = Math.max(0, Math.floor(Date.now() / 1000 - since));
+  return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h ${Math.floor(s % 3600 / 60)}m`;
 }
 
 function iconFor(name) {
@@ -111,8 +131,45 @@ class Activity {
     this.label();
   }
 
+  // The call still running, under the chip: its command and its last output lines, and how long it has run.
+  live(id, info) {
+    const r = this.rows.get(id);
+    if (!r || !r.row.classList.contains('run')) return false;
+    if (!this.box) {
+      this.box = el('div', 'livebox');
+      this.cmd = el('code', 'cmd');
+      this.tail = el('pre', 'tail');
+      this.box.append(this.cmd, this.tail);
+      this.chip.after(this.box);
+    }
+    const changed = this.live_ !== id;
+    this.live_ = id;
+    this.liveName = info.tool;
+    this.since = info.since;
+    this.cmd.textContent = info.what || '';
+    this.tail.textContent = (info.output || []).join('\n');
+    this.tail.hidden = !info.output?.length;
+    this.node.classList.add('running');
+    if (changed) this.label();
+    this.tick();
+    return true;
+  }
+
+  tick() {
+    if (this.clock && this.since) this.clock.textContent = elapsed(this.since);
+  }
+
+  unlive() {
+    this.box?.remove();
+    this.box = null;
+    this.live_ = null;
+    this.node.classList.remove('running');
+    this.label();
+  }
+
   result(ev) {
     const r = this.rows.get(ev.tool_id);
+    if (ev.tool_id === this.live_) this.unlive();
     if (!r || !r.row.classList.contains('run')) return;
     r.row.classList.remove('run');
     r.row.classList.toggle('err', ev.error);
@@ -122,15 +179,21 @@ class Activity {
   }
 
   label() {
-    const parts = [...this.counts].map(([name, n]) => phrase(name, n));
+    const counts = new Map(this.counts);
+    if (this.live_) counts.set(this.liveName, counts.get(this.liveName) - 1);
+    const parts = [...counts].filter(([, n]) => n > 0).map(([name, n]) => phrase(name, n));
+    if (this.live_) parts.push(doing(this.liveName));
     const text = parts.join(', ');
     const chev = svg(ICON.chev);
     chev.classList.add('chev');
+    this.clock = this.live_ ? el('span', 'clock') : null;
     this.chip.replaceChildren(
       this.running ? el('span', 'spin') : svg(iconFor(this.first)),
       el('span', null, text.charAt(0).toUpperCase() + text.slice(1)),
+      ...(this.clock ? [this.clock] : []),
       chev,
     );
+    this.tick();
   }
 }
 
@@ -356,6 +419,18 @@ export class Renderer {
     }
     const node = this.put(el('div', `note ${ev.level || ''}`, ev.text));
     this.notes.set(ev.text, { node, t: ev.t || 0, n: 1 });
+  }
+
+  // The call that runs now (a session's open tool call); false when it is not drawn here.
+  live(info) {
+    const a = info && this.tools.get(info.tool_id);
+    if (this.liveAct && this.liveAct !== a) this.liveAct.unlive();
+    this.liveAct = a && a.live(info.tool_id, info) ? a : null;
+    return !!this.liveAct;
+  }
+
+  tick() {
+    this.liveAct?.tick();
   }
 
   add(ev) {
