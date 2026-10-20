@@ -22,6 +22,7 @@ from .desktop import UNLOCK, Desktop
 from .layout import Layout
 from .desktop_tools import make_desktop_tools
 from .music import make_music_tools
+from .cost import Cost
 from .files import Files
 from .guard import Guard
 from .server import make_app
@@ -144,7 +145,7 @@ def main():
     watcher = Watcher(events, pool.own_sessions, lambda s: dispatcher.note(
         f"The user's session \"{s['name']}\" finished a turn" + (" and asks a question" if s["question"] else "")
         + f" ({time.strftime('%H:%M')}).", key=f"finished:{s['pid']}"))
-    app = make_app(events, dispatcher, pool, files, approvals, guard, watcher, desk, auth, origins, state / "app")
+    app = make_app(events, dispatcher, pool, files, approvals, guard, watcher, desk, auth, origins, state / "app", Cost())
 
     async def start(app):
         approvals.startup()

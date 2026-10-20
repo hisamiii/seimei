@@ -14,6 +14,7 @@ from aiohttp import web
 from . import sessions
 from .approvals import Approvals
 from .auth import Auth
+from .cost import Cost
 from .dispatcher import Dispatcher
 from .events import EventLog
 from . import desktop as dt
@@ -54,7 +55,7 @@ async def write_event(resp: web.StreamResponse, ev: dict):
 
 def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files, approvals: Approvals,
              tool_guard: Guard, watcher: Watcher, desk: Desktop, auth: Auth | None, origins: set[str],
-             app_dir: Path | None = None) -> web.Application:
+             app_dir: Path | None = None, cost: Cost | None = None) -> web.Application:
     @web.middleware
     async def guard(request: web.Request, handler):
         # Never trust the peer address: cloudflared connects from localhost too.
@@ -318,6 +319,14 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     async def usage(request):
         return web.json_response(dispatcher.usage.snapshot() if dispatcher.usage else {})
 
+    async def cost_view(request):
+        if not cost:
+            return web.json_response({})
+        if time.time() - cost.scanned > 10:
+            await asyncio.to_thread(cost.scan)
+        week = ((dispatcher.usage.snapshot()["windows"].get("seven_day") or {}) if dispatcher.usage else {}).get("resets_at")
+        return web.json_response(await asyncio.to_thread(cost.summary, week))
+
     async def decide(request):
         body = await request.json()
         if body.get("decision") not in ("approve", "deny"):
@@ -388,6 +397,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     app.router.add_get("/api/files/{name}", file)
     app.router.add_post("/api/approvals/{aid}", decide)
     app.router.add_get("/api/usage", usage)
+    app.router.add_get("/api/cost", cost_view)
     app.router.add_get("/api/audit", audit)
     app.router.add_get("/api/screen", screen)
     app.router.add_get("/api/desktop", desktop_state)

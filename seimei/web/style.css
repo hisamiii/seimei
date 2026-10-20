@@ -418,6 +418,18 @@ body.login { display: grid; place-items: center; grid-template-rows: 1fr; paddin
 .urow b { font-weight: 500; font-size: 14px; }
 .urow time { font-size: 12px; color: var(--text-3); text-align: right; }
 .urow span { grid-column: 1 / 3; font-size: 13px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.cost { display: flex; flex-direction: column; gap: 8px; }
+.crow { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 2px 8px; padding: 10px 0; border: 0; border-top: 1px solid var(--container-high); background: none; text-align: left; }
+.crow:first-child { border-top: 0; }
+.crow b { font-weight: 500; font-size: 15px; }
+.crow .amt { font-size: 20px; font-variant-numeric: tabular-nums; }
+.crow small { grid-column: 1 / 3; font-size: 12px; color: var(--text-3); }
+.crow .chev { color: var(--text-3); transition: transform .2s var(--ease); }
+.crow.open .chev { transform: rotate(90deg); }
+.cmodels { display: flex; flex-direction: column; gap: 6px; padding: 0 0 10px; }
+.cmodel { display: grid; grid-template-columns: 1fr auto; gap: 0 12px; background: var(--surface-low); border-radius: 14px; padding: 8px 12px; font-size: 14px; }
+.cmodel .amt { font-variant-numeric: tabular-nums; }
+.cmodel small { grid-column: 1 / 3; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 
 .squestion { background: #45393e; color: #ffdcc4; border-radius: 16px; padding: 12px 14px; font-size: 14px; display: flex; flex-direction: column; gap: 6px; }
 .squestion p { margin: 4px 0 0; color: var(--text); }
