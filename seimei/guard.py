@@ -33,7 +33,7 @@ SECRETS = [
     (".config/gh/hosts.yml", "the GitHub token", r"gh/hosts\.yml"),
     (".local/share/keyrings", "the keyring", r"keyrings"),
 ]
-SECRET_WORDS = [(name, re.compile(rf"(?<![\w-]){pat}(?![\w-])")) for _, name, pat in SECRETS]
+SECRET_WORDS = [(name, re.compile(rf"(?<![\w-])(?:{pat})(?![\w-])")) for _, name, pat in SECRETS]
 DOWNLOADERS = r"(curl|wget|fetch|aria2c|http|xh)"
 INTERPRETERS = r"(sudo\s+|doas\s+)?((ba|z|da|fi|k)?sh|python3?|perl|ruby|node|php)\b"
 PIPED = [
