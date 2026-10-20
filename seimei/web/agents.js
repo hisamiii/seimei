@@ -1,5 +1,5 @@
 // Shikigami and the user's own Claude sessions: the Agents list, and the full-screen page of one of them.
-import { $, S, hooks, el, svg, clock, home, short, when, getJSON, finePointer, toLogin, ICON } from './util.js';
+import { $, S, hooks, el, svg, clock, at as atTime, home, short, when, getJSON, finePointer, toLogin, ICON } from './util.js';
 import { Renderer, doing as doingPhrase, elapsed } from './chat.js';
 import { sheet, showSheet, closeSheet } from './sheet.js';
 
@@ -9,11 +9,12 @@ const sp = $('spage');
 export const ACTIVE = new Set(['starting', 'running', 'asking']);
 
 function stateText(w) {
-  const at = clock(w.updated);
+  const at = atTime(w.updated);
+  const since = at.replace(/^at /, '').replace(/^on /, '');
   return {
-    starting: 'Starting', running: `Working since ${at}`, asking: 'Waiting for your answer', done: `Finished at ${at}`,
-    failed: `Failed at ${at}`, stopped: `Stopped at ${at}`, interrupted: `Interrupted at ${at}`,
-    laptop: `Open on the laptop since ${at}`,
+    starting: 'Starting', running: `Working since ${since}`, asking: 'Waiting for your answer', done: `Finished ${at}`,
+    failed: `Failed ${at}`, stopped: `Stopped ${at}`, interrupted: `Interrupted ${at}`,
+    laptop: `Open on the laptop since ${since}`,
   }[w.state] || w.state;
 }
 
@@ -115,7 +116,7 @@ function fromWorker(w) {
   return {
     kind: 'worker', id: w.id, name: w.name, project: w.project, context: w.context, state, since: w.updated,
     line: state === 'ask' ? (w.question || 'Asks a question') : state === 'work' ? workerLine(w) : (w.summary || stateText(w)),
-    bad: w.state === 'failed',
+    bad: w.state === 'failed', end: w.state,
   };
 }
 
@@ -124,7 +125,7 @@ function fromSession(s) {
   const state = asking ? 'ask' : s.status === 'busy' ? 'work' : 'idle';
   return {
     kind: 'session', id: s.pid, name: s.name, project: s.project, context: s.context, state, since: s.since,
-    line: s.question ? (s.ask || 'Asks a question') : asking ? `Waiting for ${s.waiting_for || 'you'} on the laptop`
+    line: s.question ? (s.ask || 'Asks a question') : asking ? (s.waiting_text || 'Waiting on the laptop')
       : state === 'work' ? sessionLine(s.doing) : (s.line || 'Idle'),
     fresh: state === 'idle' && s.active > (seen[s.session_id] || 0) + 1,
   };
@@ -146,11 +147,13 @@ setInterval(() => { if (S.tab === 'agents') renderAgents(); }, 30000);
 
 const Q_ICON = 'M4 5h16v11H9l-5 4zM10 9.2a2 2 0 1 1 2.6 1.9c-.4.2-.6.5-.6.9M12 13.6v.1';
 const ARC = 'M12 3a9 9 0 1 1-9 9';
+// How a finished shikigami ended, when not by finishing (QA U6).
+const END = { stopped: 'M7.5 7.5h9v9h-9z', interrupted: 'M4 12a8 8 0 1 0 2.4-5.7M4 4.5v4h4' };
 
 function tile(x) {
   const t = el('span', `tile ${x.state}${x.bad ? ' bad' : ''}`);
   t.style.setProperty('--c', tint(x.project));
-  const icon = x.state === 'work' ? ARC : x.state === 'ask' ? Q_ICON : x.bad ? 'M12 7v6M12 17v.01' : ICON.check;
+  const icon = x.state === 'work' ? ARC : x.state === 'ask' ? Q_ICON : x.bad ? 'M12 7v6M12 17v.01' : END[x.end] || ICON.check;
   t.append(svg(icon, 20));
   return t;
 }
@@ -188,15 +191,6 @@ export function renderAgents() {
   const by = (st) => items.filter((x) => x.state === st).sort((a, b) => b.since - a.since);
   const ask = by('ask'), work = by('work'), idle = by('idle');
   const parts = [];
-  const counts = el('div', 'acounts');
-  for (const [n, label, cls] of [[ask.length, 'needs you', 'ask'], [work.length, 'working', 'work'], [idle.length, 'idle', 'idle']]) {
-    if (n) {
-      const c = el('span', cls);
-      c.append(el('i'), `${n} ${label}`);
-      counts.append(c);
-    }
-  }
-  if (counts.childElementCount) parts.push(counts);
   if (ask.length) parts.push(group('Needs you', 'ask', ask));
   if (work.length) parts.push(group('Working', 'work', work));
   if (idle.length) parts.push(group('Idle', 'idle', idle));
@@ -235,6 +229,13 @@ let P = null;
 function ring(pct) {
   const b = el('button', 'ring sl');
   b.type = 'button';
+  // No context figure yet: an info button, not an empty track that reads as a spinner (QA U9).
+  if (pct == null) {
+    b.classList.add('info');
+    b.setAttribute('aria-label', 'Session details');
+    b.append(svg('M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v5M12 7.5v.01', 22));
+    return b;
+  }
   const n = Math.max(0, Math.min(100, pct ?? 0));
   b.setAttribute('aria-label', pct == null ? 'Session details' : `Context ${n}% used. Session details`);
   b.innerHTML = `<svg width="34" height="34" viewBox="0 0 36 36" aria-hidden="true"><circle class="t" cx="18" cy="18" r="15"/>`
@@ -342,7 +343,7 @@ function blocked() {
   const s = P.row;
   if (s.reach) return s.reach;
   if (P.ask && !P.ask.answerable) return 'Answer on the laptop.';
-  if (s.status === 'waiting' && !s.question) return `Waiting on the laptop (${s.waiting_for || 'a prompt'}).`;
+  if (s.status === 'waiting' && !s.question) return `${s.waiting_text || 'Waiting on the laptop'}. Answer it there.`;
   return null;
 }
 
@@ -523,7 +524,7 @@ function details() {
   if (r.context_cap) facts.append(el('span', null, `compacts at ${r.context_cap}`));
   if (r.subagents) facts.append(el('span', null, `subagents on ${r.subagents}`));
   if (r.context != null) facts.append(el('span', null, `context ${r.context}% used`));
-  facts.append(el('span', null, P.kind === 'worker' ? `started ${clock(r.created)}` : `last active ${clock(r.active)}`));
+  facts.append(el('span', null, P.kind === 'worker' ? `started ${atTime(r.created)}` : `last active ${atTime(r.active)}`));
   if (P.kind === 'worker' && r.state !== 'laptop' && r.started !== false) facts.append(laptopButton(r));
   body.push(facts);
   if (P.kind === 'worker' && r.task) body.push(taskRow(r.task));

@@ -187,6 +187,9 @@ object Icons {
     val usage = icon("M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 1 0 0-17z", stroke = 1.8f)
     val star = icon("M12 2 17.88 20.09 2.49 8.91h19.02L6.12 20.09Z", stroke = 1.6f)
     val check = icon("M5 12.5l4.5 4.5L19 7.5")
+    val stopped = icon("M7.5 7.5h9v9h-9z")
+    val info = icon("M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v5M12 7.5v.01", stroke = 1.8f)
+    val restarted = icon("M4 12a8 8 0 1 0 2.4-5.7M4 4.5v4h4")
     val chev = icon("M9 6l6 6-6 6")
     val send = icon("M12 19V5M5.5 11.5 12 5l6.5 6.5", stroke = 2.4f)
     val photo = icon("M6.5 4.5h11a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3h-11a3 3 0 0 1-3-3v-9a3 3 0 0 1 3-3zM9 8.4a1.6 1.6 0 1 0 0 3.2 1.6 1.6 0 1 0 0-3.2zM20.5 15.5l-4.2-4.2a1.5 1.5 0 0 0-2.1 0L5.5 19.5", stroke = 1.8f)
@@ -513,9 +516,12 @@ fun NavBar(vm: Seimei) {
                     val ic = mapOf("chat" to Icons.chat, "agents" to Icons.agents, "screen" to Icons.screen, "usage" to Icons.usage)[tab]!!
                     BadgedBox(badge = {
                         when {
-                            tab == "agents" && working > 0 -> Badge(containerColor = if (asks > 0) LocalExtra.current.warn else MaterialTheme.colorScheme.primary,
-                                contentColor = MaterialTheme.colorScheme.onPrimary) { Text(if (working > 99) "99+" else "$working") }
-                            tab == "agents" && asks > 0 -> Badge(containerColor = LocalExtra.current.warn)
+                            // What needs the user counts first, in orange; otherwise how many work.
+                            tab == "agents" && (asks > 0 || working > 0) -> {
+                                val n = if (asks > 0) asks else working
+                                Badge(containerColor = if (asks > 0) LocalExtra.current.warn else MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary) { Text(if (n > 99) "99+" else "$n") }
+                            }
                             tab == "chat" && vm.tab != "chat" && (vm.unread || vm.waiting > 0) -> Badge(containerColor = MaterialTheme.colorScheme.primary)
                         }
                     }) { if (tab == "usage") UsageRing(vm) else Icon(ic, null) }

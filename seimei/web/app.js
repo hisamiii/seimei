@@ -83,11 +83,12 @@ function chrome() {
   // Idle and working go without saying in the chat (its working line shows a turn); only problems and asks show.
   $('status').hidden = !text || (S.tab === 'chat' && (s === 'idle' || s === 'working'));
 
+  // What needs the user counts first, in orange; otherwise how many work (QA U4).
   const count = $('nav-count');
-  count.hidden = !working;
-  count.textContent = working > 99 ? '99+' : working;
+  const n = asks || working;
+  count.hidden = !n;
+  count.textContent = n > 99 ? '99+' : n;
   count.classList.toggle('attn', asks > 0);
-  $('nav-agents-dot').hidden = !(asks && !working);
   $('nav-chat-dot').hidden = !(S.tab !== 'chat' && (S.unread || waitingApprovals().length));
   const label = [working && `${working} working`, asks && `${asks} waiting for you`].filter(Boolean).join(', ');
   $('nav-agents').setAttribute('aria-label', label ? `Agents, ${label}` : 'Agents');

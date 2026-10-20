@@ -1,6 +1,6 @@
 // The conversation with seimei: rendering events, live text, approval cards, and the composer.
 import { md } from './md.js';
-import { $, S, hooks, el, svg, clock, dayKey, dayLabel, plural, post, view, finePointer, toLogin, ICON } from './util.js';
+import { $, S, hooks, el, svg, clock, dayKey, dayLabel, home, plural, post, view, finePointer, toLogin, ICON } from './util.js';
 import { openWorker } from './agents.js';
 
 export const log = $('log');
@@ -109,6 +109,7 @@ class Activity {
     this.counts = new Map();
     this.rows = new Map();
     this.running = 0;
+    this.failed = 0;
     this.first = null;
     this.chip.addEventListener('click', () => {
       this.calls.hidden = !this.calls.hidden;
@@ -175,6 +176,7 @@ class Activity {
     r.row.classList.toggle('err', ev.error);
     r.out.textContent = ev.text || '(no output)';
     this.running--;
+    if (ev.error) this.failed++;
     this.label();
   }
 
@@ -183,7 +185,9 @@ class Activity {
     if (this.live_) counts.set(this.liveName, counts.get(this.liveName) - 1);
     const parts = [...counts].filter(([, n]) => n > 0).map(([name, n]) => phrase(name, n));
     if (this.live_) parts.push(doing(this.liveName));
-    const text = parts.join(', ');
+    const text = parts.join(', ') + (this.failed ? ` · ${this.failed} failed` : '');
+    // A failure shows on the collapsed chip too, not only in its row (QA U5).
+    this.chip.classList.toggle('err', this.failed > 0);
     const chev = svg(ICON.chev);
     chev.classList.add('chev');
     this.clock = this.live_ ? el('span', 'clock') : null;
@@ -260,6 +264,16 @@ const outcomes = new Map();
 const LOCK = 'M7 11V8a5 5 0 0 1 10 0v3M6 11h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1z';
 const OUTCOME = { approved: 'Approved', denied: 'Denied', expired: 'No answer in 10 min, denied', restart: 'Cancelled by a seimei restart' };
 
+const SUB = { message: 'a session you started', desktop: 'a desktop action', discord: 'a Discord action' };
+
+export function approvalSub(ev) {
+  if (ev.action === 'edit') return home((ev.detail || '').split('\n')[0]);
+  if (ev.action !== 'command') return SUB[ev.action] || '';
+  const words = new Set((ev.detail || '').split(/[\s'"=]+/));
+  const s = (S.sessions || []).find((x) => x.name && words.has(x.name));
+  return s ? `session ${s.name}${s.project ? ` · ${s.project}` : ''}` : '';
+}
+
 function approvalCard(ev) {
   const card = el('div', 'wcard approval');
   const badge = el('span', 'badge');
@@ -269,9 +283,9 @@ function approvalCard(ev) {
   // Cards from before messages went card-free (2026-10-19) held SendMessage text.
   const message = ev.action === 'message';
   title.append(el('b', null, `${ev.who} wants to ${message ? `message ${ev.target}` : ev.target}`));
-  const SUB = { message: 'a session you started', edit: 'a file edit', desktop: 'a desktop action', discord: 'a Discord action' };
-  const sub = SUB[ev.action] || (/niri|window/.test(ev.target) ? 'a desktop command' : 'a session command');
-  title.append(el('span', 'sub', sub));
+  // The subtitle names what it touches, not the title again (QA D8): the session a command names, the file an edit writes.
+  const sub = approvalSub(ev);
+  if (sub) title.append(el('span', 'sub', sub));
   head.append(badge, title);
   const body = el('div', `body ${message || ev.action === 'discord' ? 'task' : 'cmd'}`, ev.detail);
   const foot = el('div', 'foot');
@@ -513,6 +527,7 @@ export function render() {
   const typing = input.value.trim() !== '' || attachments.length > 0;
   stopBtn.hidden = !(S.session.busy && !typing);
   sendBtn.hidden = !stopBtn.hidden;
+  sendBtn.disabled = !typing;
   hooks.chrome();
 }
 

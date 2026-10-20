@@ -115,7 +115,7 @@ class Watches:
                 sid = str(s.get("session_id") or s.get("pid"))
                 q = s.get("question") if isinstance(s.get("question"), str) else ""
                 status = s.get("status", "")
-                asks = q or (s.get("waiting_for") or "you" if status.startswith("waiting") else "")
+                asks = q or (s.get("waiting_text") or "Waiting on the laptop" if status.startswith("waiting") else "")
                 was = self.sessions.get(sid)
                 self.sessions[sid] = (status, asks)
                 if was is None:

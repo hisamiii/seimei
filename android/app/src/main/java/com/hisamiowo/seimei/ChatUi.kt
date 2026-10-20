@@ -11,6 +11,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
@@ -407,16 +408,22 @@ fun ActivityChip(a: Item.Activity, live: JSONObject? = null) {
     val running = a.calls.any { it.running }
     val id = live?.str("tool_id")
     if (id != null && a.calls.any { it.id == id && it.running }) return LivePill(a, live, open) { open = !open }
+    // A failure shows on the collapsed chip too, not only in its row.
+    val failed = a.calls.count { it.error }
+    val err = MaterialTheme.colorScheme.error
     Column(Modifier.animateContentSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(
-            Modifier.clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.surfaceContainer).clickable { open = !open }
+            Modifier.clip(RoundedCornerShape(50))
+                .background(if (failed > 0) err.copy(alpha = .14f).compositeOver(MaterialTheme.colorScheme.surfaceContainer) else MaterialTheme.colorScheme.surfaceContainer)
+                .clickable { open = !open }
                 .padding(start = 12.dp, end = 10.dp, top = 7.dp, bottom = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (running) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-            else Icon(iconFor(a.calls.first().name), null, Modifier.size(16.dp), tint = LocalExtra.current.text3)
+            else Icon(iconFor(a.calls.first().name), null, Modifier.size(16.dp), tint = if (failed > 0) err else LocalExtra.current.text3)
             Spacer(Modifier.width(8.dp))
-            Text(activityLabel(a.calls), fontSize = 13.sp, color = LocalExtra.current.text2, modifier = Modifier.weight(1f, fill = false),
+            Text(activityLabel(a.calls) + if (failed > 0) " · $failed failed" else "", fontSize = 13.sp,
+                color = if (failed > 0) err else LocalExtra.current.text2, modifier = Modifier.weight(1f, fill = false),
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.width(4.dp))
             Icon(Icons.chev, null, Modifier.size(14.dp).then(if (open) Modifier.rotate90() else Modifier), tint = LocalExtra.current.text3)
@@ -553,9 +560,15 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
     val cs = MaterialTheme.colorScheme
     var sent by remember(a.aid) { mutableStateOf(false) }
     val message = a.action == "message"
-    val sub = mapOf("message" to "a session you started", "edit" to "a file edit", "desktop" to "a desktop action",
-        "discord" to "a Discord action")[a.action]
-        ?: if (Regex("niri|window").containsMatchIn(a.target)) "a desktop command" else "a session command"
+    // The subtitle names what it touches, not the title again: the session a command names, the file an edit writes.
+    val sub = when (a.action) {
+        "edit" -> home(a.detail.substringBefore('\n'))
+        "command" -> a.detail.split(Regex("[\\s'\"=]+")).toSet().let { words ->
+            vm.sessions.firstOrNull { it.str("name").isNotEmpty() && it.str("name") in words }
+                ?.let { s -> "session ${s.str("name")}" + s.str("project").let { if (it.isEmpty()) "" else " · $it" } }
+        }
+        else -> mapOf("message" to "a session you started", "desktop" to "a desktop action", "discord" to "a Discord action")[a.action]
+    }
     val (bg, fg) = when (a.outcome) {
         null -> cs.primaryContainer to cs.onPrimaryContainer
         "approved" -> OK_BG to LocalExtra.current.ok

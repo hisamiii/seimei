@@ -102,17 +102,22 @@ val PEACH = Color(0xFFFAB387)
 val MAUVE = Color(0xFFCBA6F7)
 val ASK_BG = Color(0xFF2A2633)
 
+/** "at 10:28 PM" today, "on 18 Oct at 10:28 PM" another day. */
+fun atTime(t: Double): String =
+    if (dayOf(t) == LocalDate.now()) "at ${clock(t)}" else "on ${dayOf(t).format(DateTimeFormatter.ofPattern("d MMM"))} at ${clock(t)}"
+
 fun stateText(w: JSONObject): String {
-    val at = clock(w.optDouble("updated", 0.0))
+    val at = atTime(w.optDouble("updated", 0.0))
+    val since = at.removePrefix("at ").removePrefix("on ")
     return when (w.str("state")) {
         "starting" -> "Starting"
-        "running" -> "Working since $at"
+        "running" -> "Working since $since"
         "asking" -> "Waiting for your answer"
-        "done" -> "Finished at $at"
-        "failed" -> "Failed at $at"
-        "stopped" -> "Stopped at $at"
-        "interrupted" -> "Interrupted at $at"
-        "laptop" -> "Open on the laptop since $at"
+        "done" -> "Finished $at"
+        "failed" -> "Failed $at"
+        "stopped" -> "Stopped $at"
+        "interrupted" -> "Interrupted $at"
+        "laptop" -> "Open on the laptop since $since"
         else -> w.str("state")
     }
 }
@@ -164,6 +169,8 @@ fun tint(project: String): Color {
 data class Agent(
     val kind: String, val id: String, val name: String, val project: String, val context: Int?, val state: String,
     val since: Double, val line: String, val fresh: Boolean = false, val bad: Boolean = false,
+    /** A finished shikigami's end state (stopped, interrupted, ...), for its tile icon. */
+    val end: String = "",
 )
 
 fun JSONObject.context(): Int? = if (has("context") && !isNull("context")) optInt("context") else null
@@ -178,7 +185,7 @@ fun fromWorker(w: JSONObject): Agent {
             "work" -> workerLine(w)
             else -> w.str("summary").ifEmpty { stateText(w) }
         },
-        bad = st == "failed",
+        bad = st == "failed", end = st,
     )
 }
 
@@ -190,7 +197,7 @@ fun fromSession(s: JSONObject, seen: JSONObject): Agent {
         "session", s.optLong("pid").toString(), s.str("name"), s.str("project"), s.context(), state, s.optDouble("since", 0.0),
         when {
             q -> s.str("ask").ifEmpty { "Asks a question" }
-            asking -> "Waiting for ${s.str("waiting_for").ifEmpty { "you" }} on the laptop"
+            asking -> s.str("waiting_text").ifEmpty { "Waiting on the laptop" }
             state == "work" -> sessionLine(s.optJSONObject("doing"))
             else -> s.str("line").ifEmpty { "Idle" }
         },
@@ -231,16 +238,6 @@ fun AgentsTab(vm: Seimei) {
         return
     }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp)) {
-        item("counts") {
-            Row(Modifier.padding(start = 8.dp, top = 14.dp, bottom = 2.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                for ((n, label, color) in listOf(Triple(ask.size, "needs you", PEACH), Triple(work.size, "working", MAUVE),
-                    Triple(idle.size, "idle", Color(0xFF6C7086)))) if (n > 0) Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(8.dp).clip(CircleShape).background(color))
-                    Spacer(Modifier.width(6.dp))
-                    Text("$n $label", fontSize = 14.sp, color = LocalExtra.current.text3)
-                }
-            }
-        }
         for ((title, color, list) in listOf(Triple("Needs you", PEACH, ask), Triple("Working", MAUVE, work), Triple("Idle", LocalExtraText3, idle))) {
             if (list.isEmpty()) continue
             item("h-$title") { GroupTitle(title, color) }
@@ -280,7 +277,12 @@ fun AgentTile(a: Agent) {
         when (a.state) {
             "work" -> CircularProgressIndicator(Modifier.size(20.dp), color = color, strokeWidth = 2.4.dp, trackColor = Color.Transparent)
             "ask" -> Icon(Icons.question, null, Modifier.size(20.dp), tint = color)
-            else -> Icon(if (a.bad) Icons.alert else Icons.check, null, Modifier.size(20.dp), tint = color)
+            else -> Icon(when {
+                a.bad -> Icons.alert
+                a.end == "stopped" -> Icons.stopped
+                a.end == "interrupted" -> Icons.restarted
+                else -> Icons.check
+            }, null, Modifier.size(20.dp), tint = color)
         }
     }
 }
@@ -290,21 +292,24 @@ fun AgentRow(a: Agent, now: Long, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(RoundedCornerShape(18.dp))
             .background(if (a.state == "ask") ASK_BG else Color.Transparent).clickable(onClick = onClick)
-            .padding(10.dp).alpha(if (a.state == "done") .75f else 1f),
+            .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         AgentTile(a)
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(a.name, fontSize = 15.5.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false))
-                if (a.kind == "worker") {
-                    Spacer(Modifier.width(8.dp))
-                    Text("shikigami", fontSize = 11.sp, color = LocalExtra.current.text2, modifier = Modifier.clip(RoundedCornerShape(50))
-                        .background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(horizontal = 7.dp, vertical = 1.dp))
+                // Name and tag take the room left of the time, so the time lines up at the right edge.
+                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                    Text(a.name, fontSize = 15.5.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        color = if (a.state == "done") LocalExtra.current.text2 else Color.Unspecified, modifier = Modifier.weight(1f, fill = false))
+                    if (a.kind == "worker") {
+                        Spacer(Modifier.width(8.dp))
+                        Text("shikigami", fontSize = 11.sp, color = LocalExtra.current.text2, modifier = Modifier.clip(RoundedCornerShape(50))
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(horizontal = 7.dp, vertical = 1.dp))
+                    }
                 }
-                Spacer(Modifier.weight(1f).width(8.dp))
+                Spacer(Modifier.width(8.dp))
                 if (a.fresh) {
                     Box(Modifier.size(8.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary))
                     Spacer(Modifier.width(6.dp))
@@ -333,13 +338,18 @@ fun ContextRing(pct: Int?, onClick: () -> Unit) {
             .semantics { contentDescription = if (pct == null) "Session details" else "Context $n% used. Session details" },
         contentAlignment = Alignment.Center,
     ) {
+        // No context figure yet: an info icon, not an empty track that reads as a spinner.
+        if (pct == null) {
+            Icon(Icons.info, null, Modifier.size(22.dp), tint = LocalExtra.current.text2)
+            return@Box
+        }
         Canvas(Modifier.size(32.dp)) {
             val w = 3.dp.toPx()
             val r = Size(size.width - w, size.height - w)
             drawArc(track, 0f, 360f, false, Offset(w / 2, w / 2), r, style = Stroke(w))
             drawArc(fill, -90f, 360f * n / 100, false, Offset(w / 2, w / 2), r, style = Stroke(w, cap = StrokeCap.Round))
         }
-        if (pct != null) Text("$n", fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, color = LocalExtra.current.text2)
+        Text("$n", fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, color = LocalExtra.current.text2, style = TNUM)
     }
 }
 
@@ -349,7 +359,7 @@ fun blocked(pg: Page): String? {
     pg.reach?.let { return it }
     val ask = pg.ask
     if (ask != null && !ask.optBoolean("answerable")) return "Answer on the laptop."
-    if (pg.row.str("status") == "waiting" && ask == null) return "Waiting on the laptop (${pg.row.str("waiting_for").ifEmpty { "a prompt" }})."
+    if (pg.row.str("status") == "waiting" && ask == null) return "${pg.row.str("waiting_text").ifEmpty { "Waiting on the laptop" }}. Answer it there."
     return null
 }
 
@@ -562,7 +572,7 @@ fun Details(vm: Seimei, pg: Page) {
                 if (r.str("context_cap").isNotEmpty()) Fact("compacts at ${r.str("context_cap")}")
                 if (r.str("subagents").isNotEmpty()) Fact("subagents on ${r.str("subagents")}")
                 r.context()?.let { Fact("context $it% used") }
-                Fact(if (pg.kind == "worker") "started ${clock(r.optDouble("created"))}" else "last active ${clock(r.optDouble("active"))}")
+                Fact(if (pg.kind == "worker") "started ${atTime(r.optDouble("created"))}" else "last active ${atTime(r.optDouble("active"))}")
                 val state = r.str("state")
                 if (pg.kind == "worker" && state != "laptop" && r.optBoolean("started")) {
                     // A running worker gets stopped first, so it takes a second tap.

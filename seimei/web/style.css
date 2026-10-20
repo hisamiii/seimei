@@ -33,6 +33,8 @@
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
+::selection { background: color-mix(in srgb, var(--primary) 35%, transparent); }
+
 /* Catppuccin Mocha arranged as Material 3 tonal roles. */
 :root {
   color-scheme: dark;
@@ -138,8 +140,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .msg.assistant > :first-child { margin-top: 0; }
 .msg.assistant > :last-child { margin-bottom: 0; }
 .msg.assistant p { margin: 0 0 .7em; }
-.msg.assistant h3, .msg.assistant h4, .msg.assistant h5, .msg.assistant h6 { margin: 1em 0 .4em; font-size: 16px; font-weight: 600; line-height: 1.3; }
-.msg.assistant h3 { font-size: 17px; }
+/* # ## ### render as h3 h4 h5: a clear step between levels (QA D2). */
+.msg.assistant h3, .msg.assistant h4, .msg.assistant h5, .msg.assistant h6 { margin: 1.2em 0 .4em; font-size: 15.5px; font-weight: 600; line-height: 1.3; }
+.msg.assistant h3 { font-size: 20px; letter-spacing: -.01em; }
+.msg.assistant h4 { font-size: 17px; }
 .msg.assistant ul, .msg.assistant ol { margin: 0 0 .7em; padding-left: 1.4em; }
 .msg.assistant li { margin: .15em 0; }
 .msg.assistant li > ul, .msg.assistant li > ol { margin: .15em 0 0; }
@@ -153,10 +157,20 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .msg.assistant pre code { background: none; padding: 0; font: inherit; }
 .msg.assistant blockquote { margin: 0 0 .7em; padding: 2px 0 2px 14px; color: var(--text-2); box-shadow: inset 2px 0 var(--outline); }
 .msg.assistant hr { border: 0; height: 1px; background: var(--container-high); margin: 1em 0; }
-.msg.assistant .table { overflow-x: auto; margin: 0 0 .7em; background: var(--container); border-radius: 16px; }
+/* Wide tables scroll; a shade at the edge shows there is more (the covers scroll with the content, the shades don't). */
+.msg.assistant .table {
+  overflow-x: auto; margin: 0 0 .7em; border-radius: 16px;
+  background:
+    linear-gradient(90deg, var(--container) 30%, transparent) 0 0 / 40px 100% no-repeat local,
+    linear-gradient(270deg, var(--container) 30%, transparent) 100% 0 / 40px 100% no-repeat local,
+    linear-gradient(90deg, rgb(0 0 0 / .45), transparent) 0 0 / 14px 100% no-repeat scroll,
+    linear-gradient(270deg, rgb(0 0 0 / .45), transparent) 100% 0 / 14px 100% no-repeat scroll,
+    var(--container);
+}
 .msg.assistant table { border-collapse: collapse; font-size: 14px; min-width: 100%; }
 .msg.assistant th, .msg.assistant td { padding: 8px 12px; text-align: left; vertical-align: top; }
-.msg.assistant th { font-weight: 600; color: var(--text-2); }
+.msg.assistant th { font-weight: 600; color: var(--text-2); white-space: nowrap; }
+.msg.assistant td { min-width: 7ch; }
 .msg.assistant tr + tr td, .msg.assistant tbody tr:first-child td { box-shadow: inset 0 1px var(--container-highest); }
 
 /* Collapsed tool activity: one assist chip per run of tool calls */
@@ -166,8 +180,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
   border: 0; border-radius: 10px; background: var(--container); color: var(--text-2); font-size: 13px; text-align: left;
 }
 .chip svg { flex: none; }
+/* 48 px touch targets without changing the look (QA D12). */
+.chip { position: relative; }
+.chip::before { content: ""; position: absolute; inset: -6px 0; }
 .chip .spin { width: 6px; height: 6px; border-radius: 50%; background: var(--primary); animation: pulse 1.6s ease-in-out infinite; }
 .chip .chev { transition: transform .2s var(--ease); }
+.chip.err { background: color-mix(in srgb, var(--error) 14%, var(--container)); color: var(--error); }
 .activity.open .chev { transform: rotate(90deg); }
 .calls { align-self: stretch; background: var(--surface-lowest); border-radius: 16px; padding: 6px; display: flex; flex-direction: column; }
 .call {
@@ -216,6 +234,8 @@ body.offline .thread { opacity: .45; transition: opacity .4s; }
   background: var(--primary); color: var(--on-primary); display: grid; place-items: center;
 }
 .fab.tonal { background: var(--primary-container); color: var(--on-primary-container); }
+/* M3 disabled: 12% on-surface container, 38% content (QA D6). */
+.fab:disabled { background: color-mix(in srgb, var(--text) 12%, transparent); color: color-mix(in srgb, var(--text) 38%, transparent); cursor: default; }
 .fab .square { width: 14px; height: 14px; border-radius: 4px; background: currentColor; }
 body.offline .composer { opacity: .5; pointer-events: none; }
 
@@ -303,7 +323,7 @@ body.login { display: grid; place-items: center; grid-template-rows: 1fr; paddin
 .wcard .body pre { padding: 10px 12px; overflow-x: auto; background: var(--surface-lowest); border-radius: 12px; font: 12.5px/1.55 var(--mono); }
 .wcard .body pre code { background: none; padding: 0; }
 .wcard .body a { color: var(--primary); }
-.wcard .more { align-self: flex-start; border: 0; background: none; color: var(--primary); font-size: 13px; font-weight: 500; padding: 4px 8px; margin: -4px -8px; border-radius: 8px; }
+.wcard .more { align-self: flex-start; border: 0; background: none; color: var(--primary); font-size: 13px; font-weight: 500; padding: 15px 8px; margin: -15px -8px; border-radius: 8px; }
 
 .run { --t-bg: #3d3552; --t-fg: #ecdcff; --t-dot: #cba6f7; }
 .ask { --t-bg: #45393e; --t-fg: #ffdcc4; --t-dot: #fab387; }
@@ -368,9 +388,11 @@ body.login { display: grid; place-items: center; grid-template-rows: 1fr; paddin
 .attachments { max-width: 720px; margin: 0 auto 8px; display: flex; gap: 8px; overflow-x: auto; }
 .att { position: relative; flex: none; width: 72px; height: 72px; border-radius: 14px; overflow: hidden; background: var(--container); }
 .att img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* A 44 px button in the corner; the visible 24 px circle is its background. */
 .att .remove {
-  position: absolute; top: 4px; right: 4px; width: 24px; height: 24px; border: 0; border-radius: 50%;
-  background: rgb(17 17 27 / .75); color: var(--text); display: grid; place-items: center;
+  position: absolute; top: 0; right: 0; width: 44px; height: 44px; border: 0; padding: 4px 4px 16px 16px;
+  background: radial-gradient(circle at calc(100% - 16px) 16px, rgb(17 17 27 / .75) 12px, transparent 12.5px);
+  color: var(--text); display: grid; place-items: center;
 }
 .msg .pics { display: grid; gap: 4px; margin: -6px -11px 8px; }
 .msg .pics.only { margin-bottom: -6px; }
@@ -410,7 +432,7 @@ body.login { display: grid; place-items: center; grid-template-rows: 1fr; paddin
 .wcard.approval .body.task { max-height: 9em; overflow: auto; }
 .wcard.approval .foot { display: flex; align-items: center; gap: 4px; margin: 2px -6px -4px 0; min-height: 40px; }
 .wcard.approval .foot .left { flex: 1; font-size: 13px; color: var(--text-3); }
-.wcard.approval.settled .body { max-height: 4.4em; overflow: hidden; color: var(--text-2); }
+.wcard.approval.settled .body { max-height: 4.4em; overflow: hidden; color: var(--text-2); -webkit-mask-image: linear-gradient(#000 55%, transparent); mask-image: linear-gradient(#000 55%, transparent); }
 .wcard.approval.approved .foot .left { color: var(--ok); }
 .wcard.approval.denied .foot .left, .wcard.approval.expired .foot .left { color: var(--error); }
 .wcard.approval.approved .badge { background: #2b3b33; color: var(--ok); }
@@ -611,11 +633,6 @@ body.typing .composer { padding-bottom: 10px; }
 .taskd .full { padding: 0 16px 14px 54px; font-size: 14px; color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 30vh; overflow: auto; }
 
 /* Agents list: grouped by what needs the user; a tile tinted by project */
-.acounts { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 14px 6px 2px; font-size: 14px; color: var(--text-3); }
-.acounts span { display: flex; align-items: center; gap: 6px; }
-.acounts i { width: 8px; height: 8px; border-radius: 4px; background: var(--outline); }
-.acounts .ask i { background: var(--warn); }
-.acounts .work i { background: var(--primary); }
 .agroup { display: flex; flex-direction: column; gap: 2px; margin-top: 14px; }
 .agroup h2 { margin: 0; padding: 0 8px 6px; font-size: 13px; font-weight: 500; letter-spacing: .02em; color: var(--text-3); }
 .agroup.ask h2 { color: var(--warn); }
@@ -625,7 +642,7 @@ body.typing .composer { padding-bottom: 10px; }
   background: none; color: var(--text); text-align: left;
 }
 .agent.ask { background: #2a2633; }
-.agroup.done .agent { opacity: .75; }
+.agroup.done .agent .top b { color: var(--text-2); }
 .tile {
   flex: none; width: 42px; height: 42px; border-radius: 14px; display: grid; place-items: center;
   color: var(--c); background: color-mix(in srgb, var(--c) 18%, transparent);
@@ -667,6 +684,7 @@ body.spage-open { overflow: hidden; }
 .ring .t { stroke: var(--container-highest); }
 .ring .f { stroke: var(--text-3); stroke-linecap: round; }
 .ring.hot .f { stroke: var(--warn); }
+.ring.info { color: var(--text-2); }
 .ring span { position: absolute; font: 600 10.5px var(--sans); font-variant-numeric: tabular-nums; }
 .stl { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; padding: 8px 16px 12px; }
 .stl > * { width: 100%; max-width: 720px; margin-left: auto; margin-right: auto; }
@@ -692,7 +710,6 @@ body.spage-open { overflow: hidden; }
 .snote.error { color: var(--error); }
 .scomposer { display: flex; align-items: flex-end; gap: 8px; }
 .scomposer .field textarea { min-height: 52px; padding: 15px 18px 15px 8px; }
-.scomposer .fab:disabled { opacity: .45; cursor: default; }
 .scomposer textarea:disabled { opacity: .6; }
 .sfoot .attachments { margin: 0 0 8px; }
 

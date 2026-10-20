@@ -374,6 +374,17 @@ def timeline(path: Path, start: int | None = None, events: int = 400) -> dict:
     return {"events": out, "next": nxt}
 
 
+
+# What Claude Code writes in waitingFor, as a sentence (QA U7).
+WAITING = {"dialog open": "A dialog is open on the laptop", "input needed": "Needs your input on the laptop",
+           "sandbox request": "A sandboxed command wants network access", "goal proposal": "Proposed a session goal"}
+
+
+def waiting_text(w: str | None) -> str:
+    if not w:
+        return "Waiting on the laptop"
+    return WAITING.get(w) or f"Waiting on the laptop: {w}"
+
 def listing(own: dict[str, str]) -> list[dict]:
     """The user's running sessions for the page: seimei's and parked terminals left out."""
     out = []
@@ -390,6 +401,7 @@ def listing(own: dict[str, str]) -> list[dict]:
         ask = b.get("ask") or screen_ask(rec)
         out.append({"pid": s["pid"], "name": s["name"], "session_id": s["session_id"],
                     "status": rec.get("status", "?"), "waiting_for": rec.get("waitingFor"),
+                    "waiting_text": waiting_text(rec.get("waitingFor")),
                     "since": s["since"], "active": s["active"], "cwd": s["cwd"], "kind": s["kind"],
                     "question": bool(ask), "ask": ask and ask["questions"][0].get("question", "") if ask and ask["questions"] else None,
                     "project": b.get("project") or (project_of(s["cwd"] + "/x") if s["cwd"] != HOME else None),

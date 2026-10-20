@@ -63,6 +63,13 @@ export const short = (t) => {
 };
 
 // A clock time today, a date before that.
+// "at 10:28 PM" today, "on 18 Oct at 10:28 PM" another day (QA U8).
+export function at(t) {
+  const d = new Date(t * 1000);
+  if (d.toDateString() === new Date().toDateString()) return `at ${clock(t)}`;
+  return `on ${d.toLocaleDateString([], { day: 'numeric', month: 'short' })} at ${clock(t)}`;
+}
+
 export function when(t) {
   const d = new Date(t * 1000);
   return d.toDateString() === new Date().toDateString() ? clock(t) : d.toLocaleDateString([], { day: 'numeric', month: 'short' });
