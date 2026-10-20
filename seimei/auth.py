@@ -294,7 +294,22 @@ class Auth:
 
     def devices(self) -> list[dict]:
         self.load()
-        return [{k: d.get(k) for k in ("id", "name", "created", "used")} for d in self.data["devices"]]
+        return [{**{k: d.get(k) for k in ("id", "name", "created", "used")}, "push": bool(d.get("push"))} for d in self.data["devices"]]
+
+    def set_push(self, device_id: str, token: str | None):
+        """The phone's Firebase token for notifications; None stops them."""
+        self.load()
+        for d in self.data["devices"]:
+            if d["id"] == device_id and d.get("push") != token:
+                if token:
+                    d["push"] = token
+                else:
+                    d.pop("push", None)
+                self.save()
+
+    def push_devices(self) -> list[dict]:
+        self.load()
+        return [d for d in self.data["devices"] if d.get("push")]
 
     def revoke(self, device_id: str) -> bool:
         self.load()

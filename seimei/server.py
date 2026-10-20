@@ -15,6 +15,7 @@ from . import sessions
 from .approvals import Approvals
 from .auth import Auth
 from .cost import Cost
+from .push import Push
 from .dispatcher import Dispatcher
 from .events import EventLog
 from . import desktop as dt
@@ -55,7 +56,7 @@ async def write_event(resp: web.StreamResponse, ev: dict):
 
 def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files, approvals: Approvals,
              tool_guard: Guard, watcher: Watcher, desk: Desktop, auth: Auth | None, origins: set[str],
-             app_dir: Path | None = None, cost: Cost | None = None) -> web.Application:
+             app_dir: Path | None = None, cost: Cost | None = None, push: Push | None = None) -> web.Application:
     @web.middleware
     async def guard(request: web.Request, handler):
         # Never trust the peer address: cloudflared connects from localhost too.
@@ -167,6 +168,15 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
         mine = (auth.current(request) or {}).get("device")
         return web.json_response({"devices": [{**d, "this": d["id"] == mine} for d in auth.devices()]})
 
+    async def push_token(request):
+        """The app hands over its Firebase token after each login; an empty one turns notifications off."""
+        device = (auth.current(request) or {}).get("device")
+        if not device:
+            raise web.HTTPForbidden(text="only the phone app registers for notifications")
+        token = str((await request.json()).get("token") or "")[:4096]
+        auth.set_push(device, token or None)
+        return web.json_response({"ok": True, "sending": bool(push and push.sender and push.sender.ready)})
+
     async def revoke(request):
         if not auth.revoke(request.match_info["id"]):
             raise web.HTTPNotFound()
@@ -211,6 +221,10 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
                                            "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
         await resp.prepare(request)
         q = events.subscribe()
+        # A phone with its stream open has the app on screen, so it gets no pushes meanwhile.
+        device = auth and (auth.current(request) or {}).get("device")
+        if push:
+            push.opened(device)
         try:
             for ev in events.after(last):
                 await write_event(resp, ev)
@@ -244,6 +258,8 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
             pass
         finally:
             events.unsubscribe(q)
+            if push:
+                push.closed(device)
         return resp
 
     async def send(request):
@@ -422,5 +438,6 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
         app.router.add_post("/api/devices/login", device_login)
         app.router.add_get("/api/devices", devices)
         app.router.add_post("/api/devices/{id}/revoke", revoke)
+        app.router.add_post("/api/devices/push", push_token)
     app.router.add_get("/static/{version}/{path:.+}", static)
     return app

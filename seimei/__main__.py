@@ -23,6 +23,7 @@ from .layout import Layout
 from .desktop_tools import make_desktop_tools
 from .music import make_music_tools
 from .cost import Cost
+from .push import Fcm, Push, make_push_tools
 from .files import Files
 from .guard import Guard
 from .server import make_app
@@ -138,14 +139,15 @@ def main():
     usage = Usage(events, state)
     desk = Desktop(events, lambda t: dispatcher.note(t), state / UNLOCK)
     layout = Layout(desk, approvals, events, state)
+    push = Push(events, auth, Fcm(state / "firebase/service-account.json"), state)
     dispatcher = Dispatcher(disp, events, state, make_tools(pool, files, events, make_desktop_tools(desk, files, events, layout)
-                                                                 + make_music_tools(approvals)),
+                                                                 + make_music_tools(approvals) + make_push_tools(push)),
                             guard, usage)
     pool.dispatcher, pool.guard = dispatcher, guard
     watcher = Watcher(events, pool.own_sessions, lambda s: dispatcher.note(
         f"The user's session \"{s['name']}\" finished a turn" + (" and asks a question" if s["question"] else "")
         + f" ({time.strftime('%H:%M')}).", key=f"finished:{s['pid']}"))
-    app = make_app(events, dispatcher, pool, files, approvals, guard, watcher, desk, auth, origins, state / "app", Cost())
+    app = make_app(events, dispatcher, pool, files, approvals, guard, watcher, desk, auth, origins, state / "app", Cost(), push)
 
     async def start(app):
         approvals.startup()
@@ -155,6 +157,7 @@ def main():
         app["wake"] = asyncio.create_task(WakeWatch(events, pool).run())
         app["desktop"] = asyncio.create_task(desk.run())
         app["layout"] = asyncio.create_task(layout.run())
+        app["push"] = asyncio.create_task(push.run())
 
         def stop_key():
             # `systemctl --user kill -s USR1 seimei` from a niri bind: stop driving and end the turn.
@@ -175,6 +178,8 @@ def main():
         app["wake"].cancel()
         app["desktop"].cancel()
         app["layout"].cancel()
+        app["push"].cancel()
+        await push.sender.close()
         await pool.close()
 
     app.on_startup.append(start)
