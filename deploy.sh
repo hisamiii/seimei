@@ -13,6 +13,22 @@ for u in seimei.service seimei-tunnel.service; do
     cp --remove-destination "$app/$u" "$units/$u"
 done
 systemctl --user daemon-reload
+# The Waterfox connector: its native-messaging host runs from the production checkout; the extension is packed
+# for the user to install once (about:addons, Install Add-on From File).
+hosts="$HOME/.mozilla/native-messaging-hosts"
+mkdir -p "$hosts"
+printf '{"name": "seimei", "description": "seimei connector", "path": "%s", "type": "stdio", "allowed_extensions": ["seimei@localhost"]}\n' \
+    "$app/browser/host.py" > "$hosts/seimei.json"
+python3 - "$app/browser" "$HOME/.local/share/seimei/seimei-waterfox.xpi" <<'PY'
+import sys, zipfile
+from pathlib import Path
+src, out = Path(sys.argv[1]), Path(sys.argv[2])
+tmp = out.with_suffix(".tmp")
+with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
+    for f in ("manifest.json", "background.js", "read.js", "icon.svg"):
+        z.write(src / f, f)
+tmp.replace(out)
+PY
 systemctl --user reenable seimei.service seimei-tunnel.service 2>/dev/null
 # Wait up to 5 minutes for 20 quiet seconds and no open Approve/Deny card, so no turn or held call is cut off.
 python3 - <<'PY'

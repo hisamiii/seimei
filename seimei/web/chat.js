@@ -49,6 +49,13 @@ export function phrase(name, n) {
   if (name === 'mcp__seimei__stop') return 'stopped a shikigami';
   if (name === 'mcp__seimei__show_image') return n === 1 ? 'showed you an image' : `showed you ${n} images`;
   if (name === 'mcp__seimei__send_file') return n === 1 ? 'sent you a file' : `sent you ${n} files`;
+  if (name === 'mcp__seimei__browser_tabs') return 'looked at your tabs';
+  if (name === 'mcp__seimei__browser_read') return n === 1 ? 'read a page' : `read ${n} page parts`;
+  if (name === 'mcp__seimei__browser_open') return n === 1 ? 'opened a tab' : `opened ${n} tabs`;
+  if (name === 'mcp__seimei__browser_switch') return 'switched tabs';
+  if (name === 'mcp__seimei__browser_close') return 'closed tabs';
+  if (name === 'mcp__seimei__browser_download') return n === 1 ? 'started a download' : `started ${n} downloads`;
+  if (name === 'mcp__seimei__browser_downloads') return 'checked the downloads';
   const short = name.startsWith('mcp__') ? name.split('__').pop().replace(/_/g, ' ') : name;
   return n === 1 ? `used ${short}` : `used ${short} ${n} times`;
 }

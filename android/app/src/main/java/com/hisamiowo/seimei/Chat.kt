@@ -192,6 +192,13 @@ fun phrase(name: String, n: Int): String = when {
     name == "mcp__seimei__stop" -> "stopped a shikigami"
     name == "mcp__seimei__show_image" -> if (n == 1) "showed you an image" else "showed you $n images"
     name == "mcp__seimei__send_file" -> if (n == 1) "sent you a file" else "sent you $n files"
+    name == "mcp__seimei__browser_tabs" -> "looked at your tabs"
+    name == "mcp__seimei__browser_read" -> if (n == 1) "read a page" else "read $n page parts"
+    name == "mcp__seimei__browser_open" -> if (n == 1) "opened a tab" else "opened $n tabs"
+    name == "mcp__seimei__browser_switch" -> "switched tabs"
+    name == "mcp__seimei__browser_close" -> "closed tabs"
+    name == "mcp__seimei__browser_download" -> if (n == 1) "started a download" else "started $n downloads"
+    name == "mcp__seimei__browser_downloads" -> "checked the downloads"
     else -> {
         val short = if (name.startsWith("mcp__")) name.split("__").last().replace('_', ' ') else name
         if (n == 1) "used $short" else "used $short $n times"

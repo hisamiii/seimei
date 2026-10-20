@@ -24,6 +24,7 @@ from .desktop_tools import make_desktop_tools
 from .music import make_music_tools
 from .cost import Cost
 from .uploads import Uploads
+from .browser import Browser, make_browser_tools, socket_path
 from .push import FIREBASE, Fcm, Push, make_push_tools
 from .files import Files
 from .guard import Guard
@@ -136,6 +137,7 @@ def main():
     pool = Pool(events, state)
     files = Files(state)
     uploads = Uploads(state)
+    browser = Browser(socket_path(args.dev))
     approvals = Approvals(events)
     guard = Guard(events, approvals, state)
     usage = Usage(events, state)
@@ -143,7 +145,8 @@ def main():
     layout = Layout(desk, approvals, events, state)
     push = Push(events, auth, Fcm(FIREBASE / "service-account.json"), state)
     dispatcher = Dispatcher(disp, events, state, make_tools(pool, files, events, make_desktop_tools(desk, files, events, layout)
-                                                                 + make_music_tools(approvals) + make_push_tools(push), uploads),
+                                                                 + make_music_tools(approvals) + make_push_tools(push)
+                                                                 + make_browser_tools(browser, approvals), uploads),
                             guard, usage)
     pool.dispatcher, pool.guard = dispatcher, guard
     watcher = Watcher(events, pool.own_sessions, lambda s: dispatcher.note(
@@ -161,6 +164,7 @@ def main():
         app["layout"] = asyncio.create_task(layout.run())
         app["push"] = asyncio.create_task(push.run())
         app["uploads"] = asyncio.create_task(uploads.run())
+        app["browser"] = asyncio.create_task(browser.run())
 
         def stop_key():
             # `systemctl --user kill -s USR1 seimei` from a niri bind: stop driving and end the turn.
@@ -183,6 +187,7 @@ def main():
         app["layout"].cancel()
         app["push"].cancel()
         app["uploads"].cancel()
+        app["browser"].cancel()
         await push.sender.close()
         await pool.close()
 
