@@ -70,7 +70,8 @@ body {
   color: var(--text);
   font: 15px/1.55 var(--sans);
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto auto 1fr auto;
+  grid-template-columns: minmax(0, 1fr);
   height: 100dvh;
   -webkit-tap-highlight-color: transparent;
 }
@@ -105,6 +106,54 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .status[data-s="idle"] .dot { background: var(--ok); }
 .status[data-s="away"] .dot, .status[data-s="connecting"] .dot { background: none; box-shadow: inset 0 0 0 1px var(--text-3); }
 .status[data-s="starting"] .dot { background: var(--warn); }
+
+/* Rows by role: the Chat | Trajectory tabs only show on the chat tab and leave an empty row elsewhere. */
+body > .bar { grid-row: 1; }
+.ltabs { grid-row: 2; }
+body > main { grid-row: 3; }
+body > .bottom { grid-row: 4; }
+body:not([data-tab="chat"]) .ltabs { display: none; }
+
+/* Chat | Trajectory: the conversation, and what happened on its own */
+.ltabs { display: flex; gap: 4px; padding: 0 16px 4px; }
+.ltab {
+  position: relative; display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px;
+  border: 0; border-radius: 12px; background: none; color: var(--text-3); font: 500 14px var(--sans);
+}
+.ltab.on { color: var(--text); }
+.ltab.on::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: 0; height: 3px; border-radius: 3px 3px 0 0; background: var(--primary); }
+.ltab .cnt {
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--primary); color: var(--on-primary);
+  font: 600 11px/18px var(--sans); text-align: center; font-variant-numeric: tabular-nums;
+}
+.fold {
+  align-self: center; display: flex; align-items: center; gap: 8px; max-width: 100%; min-height: 32px; padding: 4px 14px;
+  border: 0; border-radius: 999px; background: var(--container); color: var(--text-3); font: 500 13px var(--sans);
+}
+.fold span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fold b { flex: none; color: var(--primary); font-weight: 500; }
+.trig { display: flex; align-items: center; gap: 8px; margin: 6px 0 -6px; color: var(--text-3); font-size: 12.5px; }
+.trig::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 3px; background: var(--primary); }
+.reply-btn {
+  display: block; margin-top: 8px; min-height: 32px; padding: 0 14px; border: 1px solid var(--outline); border-radius: 16px;
+  background: none; color: var(--primary); font: 500 13px var(--sans);
+}
+.traj-empty { align-self: center; max-width: 34ch; margin: 48px 0; text-align: center; color: var(--text-3); font-size: 14px; }
+.re {
+  display: flex; align-items: center; gap: 6px; width: fit-content; max-width: 100%; margin: 0 0 6px; padding: 4px 10px 4px 8px;
+  border: 0; border-radius: 10px; background: var(--container); color: var(--text-3); font: 400 12.5px/1.35 var(--sans); text-align: left;
+}
+.re svg { flex: none; opacity: .8; }
+.re span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg.user .re { margin-left: auto; background: color-mix(in srgb, var(--on-primary-container) 12%, transparent); color: var(--on-primary-container); white-space: nowrap; }
+.flash { animation: flash 1.2s var(--ease); }
+@keyframes flash { 0%, 40% { box-shadow: 0 0 0 3px var(--primary); } 100% { box-shadow: 0 0 0 3px transparent; } }
+.quote {
+  max-width: 720px; margin: 0 auto 8px; display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 12px;
+  border-radius: 14px; background: var(--container-high); color: var(--text-2); font-size: 13px;
+}
+.quote > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.quote button { width: 32px; height: 32px; border: 0; border-radius: 50%; background: none; color: var(--text-3); display: grid; place-items: center; }
 
 /* Conversation sheet */
 .log {
@@ -744,3 +793,34 @@ body.spage-open { overflow: hidden; }
   background: var(--text); color: var(--surface); font-size: 14px; box-shadow: 0 4px 16px rgb(0 0 0 / .35);
 }
 .snack[hidden] { display: none; }
+
+/* Navigation rail on wide screens and in short landscape (QA D4/U16): the bottom bar moves to the left edge and
+   the chat pane and its composer read as one surface beside it. */
+@media (min-width: 840px), (orientation: landscape) and (max-height: 520px) {
+  body { grid-template-columns: 88px minmax(0, 1fr); }
+  body > .bar, .ltabs, body > main { grid-column: 2; }
+  .bottom { display: contents; }
+  .composer { grid-column: 2; grid-row: 4; background: var(--surface-low); margin: 0 24px 0 0; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+  body > main.page { grid-row: 3 / 5; }
+  .navbar {
+    grid-column: 1; grid-row: 1 / -1; flex-direction: column; justify-content: flex-start; gap: 12px;
+    height: auto; max-width: none; margin: 0; padding: 88px 0 12px; background: var(--surface);
+  }
+  .nav-item { flex: none; height: 56px; }
+  body.typing .navbar { display: flex; }
+}
+/* Wide: the header and the tabs line up with the 720 px content column. */
+@media (min-width: 840px) {
+  .bar, .ltabs { width: 100%; max-width: 752px; margin: 0 auto; box-sizing: border-box; }
+}
+/* Short landscape: a compact one-line header, gone while typing so the chat keeps its space. */
+@media (orientation: landscape) and (max-height: 520px) {
+  .bar { height: 48px; }
+  .bar .avatar { width: 32px; height: 32px; }
+  .bar .titles { display: flex; align-items: baseline; gap: 12px; }
+  .bar h1 { font-size: 18px; }
+  .ltab { height: 34px; }
+  .navbar { padding-top: 8px; gap: 4px; }
+  .nav-item { height: 52px; }
+  body.typing .bar, body.typing .ltabs { display: none; }
+}

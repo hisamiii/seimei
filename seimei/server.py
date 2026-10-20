@@ -323,7 +323,14 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
                 raise web.HTTPBadRequest(text=str(e)[:200])
             saved.append((name, kind, base64.b64encode(data).decode()))
         cid = str(body.get("cid") or "")[:40] or None
-        await dispatcher.send(text, saved, infos, cid)
+        # "Reply in chat" from the trajectory: the message of seimei's that this one answers.
+        try:
+            reply = events.events[int(body["reply"]) - 1] if body.get("reply") else None
+        except (ValueError, TypeError, IndexError):
+            reply = None
+        if reply and reply.get("type") != "assistant":
+            reply = None
+        await dispatcher.send(text, saved, infos, cid, reply)
         return web.json_response({"ok": True})
 
     async def upload(request):

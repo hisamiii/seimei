@@ -26,9 +26,18 @@
   </div>
 </header>
 
+<nav class="ltabs" id="ltabs" role="tablist" aria-label="Chat or trajectory">
+  <button class="ltab sl on" type="button" role="tab" id="lt-chat" aria-selected="true">Chat</button>
+  <button class="ltab sl" type="button" role="tab" id="lt-traj" aria-selected="false">Trajectory<span class="cnt" id="traj-count" hidden></span></button>
+</nav>
+
 <main class="log" id="log" aria-label="Chat">
   <div class="thread" id="thread" aria-live="polite">
     <button class="older sl" id="older" hidden>Load earlier</button>
+  </div>
+  <div class="thread" id="traj" aria-live="polite" hidden>
+    <button class="older sl" id="older-t" hidden>Load earlier</button>
+    <p class="traj-empty" id="traj-empty">Shikigami reports, restarts and what seimei did about them show here.</p>
   </div>
   <div class="hello" id="hello" hidden>
     <img src="static/star.svg" alt="" width="56" height="56">
@@ -58,6 +67,7 @@
 <div class="bottom">
 <form class="composer" id="composer">
   <div class="attachments" id="attachments" hidden></div>
+  <div class="quote" id="quote" hidden><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg><span id="quote-text"></span><button class="sl" type="button" id="quote-x" aria-label="Cancel the reply"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
   <div class="composer-inner">
     <div class="field">
       <button class="attach sl" type="button" id="attach" aria-label="Attach photos or files"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11.5l-7.8 7.8a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></svg></button>

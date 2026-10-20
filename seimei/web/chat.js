@@ -5,7 +5,8 @@ import { openWorker } from './agents.js';
 
 export const log = $('log');
 export const thread = $('thread');
-const older = $('older'), working = $('working');
+export const traj = $('traj');
+const older = $('older'), olderT = $('older-t'), working = $('working');
 const input = $('input'), sendBtn = $('send'), stopBtn = $('stop');
 
 let live = null;
@@ -20,7 +21,9 @@ export const toBottom = () => {
 };
 log.addEventListener('scroll', () => { pinned = nearBottom(); }, { passive: true });
 // Pictures loading, fonts swapping in and card buttons all grow the thread after it is drawn.
-new ResizeObserver(() => { if (pinned) log.scrollTop = log.scrollHeight; }).observe(thread);
+const grow = new ResizeObserver(() => { if (pinned) log.scrollTop = log.scrollHeight; });
+grow.observe(thread);
+grow.observe(traj);
 
 // ---------- tool activity ----------
 
@@ -389,6 +392,7 @@ export function message(ev) {
   const node = el('div', `msg ${ev.type}`);
   if (ev.type === 'assistant') node.innerHTML = md(ev.text);
   else {
+    if (ev.quote) node.append(anchor(ev.quote, ev.quote_id, 't'));
     if (ev.images?.length) {
       const pics = el('div', `pics n${Math.min(ev.images.length, 3)}${ev.text ? '' : ' only'}`);
       ev.images.forEach((n, i) => pics.append(pic(n, ev.sizes?.[i])));
@@ -424,22 +428,91 @@ function limitText(ev) {
 // A system line repeated within this many seconds counts up on the first one instead of showing again.
 const REPEAT = 900;
 
-// Turns events into nodes. One instance appends live; a fresh one renders older pages for prepending.
+// Events in lane "t" happened on their own (see events.py): they render in the trajectory, and the chat folds
+// each run of them into one line.
+export const inTraj = (ev) => ev.lane === 't';
+
+// Texts of the user's and seimei's messages by event id, for reply anchors and quotes.
+const said = new Map();
+const REPLY = 'M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11';
+const ENDED = { done: 'finished', failed: 'failed', stopped: 'was stopped', interrupted: 'was interrupted' };
+
+function foldLabel(ev) {
+  if (ev.type === 'worker') return `${ev.name} ${ENDED[ev.event] || ev.event}`;
+  if (ev.type === 'system') return ev.text.replace(/\.$/, '');
+  if (ev.type === 'rate_limit') return limitText(ev);
+  return '';
+}
+
+// A chip quoting the message this one answers; a tap goes to it (lane c: the chat, t: the trajectory).
+function anchor(text, id, lane) {
+  const b = el('button', 're sl');
+  b.type = 'button';
+  b.dataset.goto = id;
+  b.dataset.lane = lane;
+  const flat = text.replace(/\s+/g, ' ').trim();
+  b.append(svg(REPLY, 14), el('span', null, flat.length > 60 ? `${flat.slice(0, 60)}…` : flat));
+  return b;
+}
+
+// Turns events into nodes. One instance appends live; a fresh one renders older pages for prepending. The chat
+// and the trajectory share the open question cards (asks), so a report in one settles a card in the other.
 export class Renderer {
-  constructor(target, before = null) {
+  constructor(target, before = null, { lane = 'c', asks = new Map() } = {}) {
     this.target = target;
     this.before = before;
+    this.lane = lane;
     this.day = null;
     this.activity = null;
     this.tools = new Map();
     this.notes = new Map();
     // Shikigami whose "asks" card is still open: any later event about them settles it.
-    this.asks = new Map();
+    this.asks = asks;
+    // Chat: the open fold line, the last message of the user's, and whether something sits after it.
+    this.folded = null;
+    this.lastUser = null;
+    this.between = false;
+    // Trajectory: the dispatcher turn being drawn.
+    this.turn = null;
+    this.cur = null;
   }
 
   put(node) {
+    if (this.cur && !node.dataset.id) node.dataset.id = this.cur;
     this.target.insertBefore(node, this.before);
     return node;
+  }
+
+  daily(ev) {
+    if (ev.t && dayKey(ev.t) !== this.day) {
+      this.day = dayKey(ev.t);
+      this.put(el('div', 'note day', dayLabel(ev.t)));
+    }
+  }
+
+  // An event of the trajectory, seen from the chat: one line per run, naming what happened.
+  fold(ev) {
+    if (ev.type === 'tool_result' || ev.type === 'approval_done') return;
+    this.cur = ev.id;
+    this.daily(ev);
+    if (!this.folded?.node.isConnected) {
+      const node = this.put(el('button', 'fold sl'));
+      node.type = 'button';
+      node.dataset.goto = ev.id;
+      node.dataset.lane = 't';
+      this.folded = { node, reports: [], notes: [] };
+      this.activity = null;
+      this.between = true;
+    }
+    // Shikigami reports are named first; notes only when nothing else happened.
+    const f = this.folded;
+    const l = foldLabel(ev);
+    const list = ev.type === 'worker' ? f.reports : f.notes;
+    if (l && !list.includes(l)) list.push(l);
+    const all = [...f.reports, ...f.notes];
+    const shown = all.slice(0, Math.max(1, Math.min(3, f.reports.length)));
+    const what = all.length ? shown.join(', ') + (all.length > shown.length ? ` and ${all.length - shown.length} more` : '') : 'seimei acted on its own';
+    f.node.replaceChildren(el('span', null, what), el('b', null, 'Trajectory'));
   }
 
   note(ev) {
@@ -468,10 +541,15 @@ export class Renderer {
 
   add(ev) {
     if (ev.type === 'approval_done') return settle(ev.aid, ev.outcome);
-    if (ev.t && dayKey(ev.t) !== this.day) {
-      this.day = dayKey(ev.t);
-      this.put(el('div', 'note day', dayLabel(ev.t)));
-    }
+    this.cur = ev.id;
+    if (ev.type !== 'tool_result') this.folded = null;
+    this.daily(ev);
+    // Each dispatcher turn in the trajectory opens with what started it.
+    if (this.lane === 't' && ev.turn && ev.turn !== this.turn && ev.type !== 'tool_result') {
+      this.turn = ev.turn;
+      this.activity = null;
+      this.put(el('div', 'trig', ev.why ? `after ${ev.why}` : 'on its own'));
+    } else if (this.lane === 't' && !ev.turn) this.turn = null;
     // The summoned card already says it.
     if (ev.type === 'tool' && ev.name === 'mcp__seimei__summon') return;
     if (ev.type === 'tool') {
@@ -488,8 +566,28 @@ export class Renderer {
       return;
     }
     this.activity = null;
-    if (ev.type === 'user' || ev.type === 'assistant') this.put(message(ev));
-    else if (ev.type === 'system') this.note(ev);
+    if (ev.type === 'user' || ev.type === 'assistant') {
+      if (ev.text) said.set(ev.id, ev.text);
+      const node = this.put(message(ev));
+      if (ev.type === 'user') {
+        this.lastUser = ev.id;
+        this.between = false;
+      } else if (ev.re && (ev.re !== this.lastUser || this.between) && said.has(ev.re)) {
+        // A reply far from what it answers says which message that was.
+        node.prepend(anchor(said.get(ev.re), ev.re, 'c'));
+        this.between = false;
+      }
+      if (this.lane === 't' && ev.type === 'assistant') {
+        const b = el('button', 'reply-btn sl', 'Reply in chat');
+        b.type = 'button';
+        b.dataset.reply = ev.id;
+        node.append(b);
+      }
+      return;
+    }
+    // What the turn itself shows (lane c: a summoned card, a picture) does not come between.
+    if (ev.lane !== 'c') this.between = true;
+    if (ev.type === 'system') this.note(ev);
     else if (ev.type === 'worker') {
       const open = this.asks.get(ev.worker);
       if (open && ev.event !== 'summoned') {
@@ -507,7 +605,17 @@ export class Renderer {
   }
 }
 
-export const main = new Renderer(thread);
+const asks = new Map();
+export const main = new Renderer(thread, null, { asks });
+export const trail = new Renderer(traj, null, { lane: 't', asks });
+
+// One event, drawn where it belongs: the trajectory gets it whole, the chat a fold line.
+function route(ev, chat = main, t = trail) {
+  if (inTraj(ev)) {
+    t.add(ev);
+    chat.fold(ev);
+  } else chat.add(ev);
+}
 
 // ---------- live state ----------
 
@@ -538,11 +646,12 @@ export function clearLive() {
 }
 
 let frame = 0;
-export function onDelta(text) {
+// Streaming text of the running turn, in the lane the turn belongs to.
+export function onDelta(text, lane) {
   const stick = nearBottom();
   if (!live) {
     live = el('div', 'msg assistant live');
-    thread.append(live);
+    (lane === 't' ? traj : thread).append(live);
     render();
   }
   liveText += text;
@@ -564,25 +673,103 @@ export function addEvent(ev) {
     pending.delete(ev.cid);
   }
   if (ev.type === 'assistant') clearLive();
-  main.add(ev);
-  if (live) thread.append(live);
+  route(ev);
+  if (live) live.parentNode.append(live);
+  count(ev);
   hello();
   if (stick) toBottom();
 }
 
-// An empty chat greets instead of showing a blank sheet (QA U14).
+// An empty chat greets instead of showing a blank sheet (QA U14); an empty trajectory says what will show.
 function hello() {
-  $('hello').hidden = [...thread.children].some((c) => !c.matches('.older, .note.day, [hidden]'));
+  const empty = (t) => ![...t.children].some((c) => !c.matches('.older, .note.day, .traj-empty, [hidden]'));
+  $('hello').hidden = S.lane === 't' || !empty(thread);
+  $('traj-empty').hidden = !empty(traj);
 }
+
+// ---------- chat | trajectory ----------
+
+S.lane = 'c';
+const SEEN = 'seimei.trajSeen';
+let seen = 0, unseen = 0, lastTraj = 0;
+try { seen = +localStorage.getItem(SEEN) || 0; } catch {}
+// Where each lane was left; null: at the bottom.
+const scrolls = { c: null, t: null };
+
+// What counts toward the Trajectory badge: reports, notes and seimei's own words, not its tool calls.
+const worth = (ev) => inTraj(ev) && /^(assistant|worker|system|rate_limit)$/.test(ev.type);
+
+function count(ev) {
+  if (!worth(ev)) return;
+  lastTraj = Math.max(lastTraj, ev.id);
+  if (ev.id <= seen) return;
+  if (S.lane === 't' && S.tab === 'chat' && !document.hidden) return markSeen(ev.id);
+  unseen++;
+  badge();
+}
+
+function markSeen(id = null) {
+  seen = Math.max(seen, id ?? lastTraj);
+  unseen = 0;
+  try { localStorage.setItem(SEEN, String(seen)); } catch {}
+  badge();
+}
+
+function badge() {
+  const c = $('traj-count');
+  c.hidden = !unseen;
+  c.textContent = unseen > 99 ? '99+' : unseen;
+  $('lt-traj').setAttribute('aria-label', unseen ? `Trajectory, ${unseen} new` : 'Trajectory');
+}
+
+export function showLane(lane, goto = null) {
+  if (lane !== S.lane) {
+    scrolls[S.lane] = pinned ? null : log.scrollTop;
+    S.lane = lane;
+    thread.hidden = lane !== 'c';
+    traj.hidden = lane !== 't';
+    for (const [id, l] of [['lt-chat', 'c'], ['lt-traj', 't']]) {
+      $(id).classList.toggle('on', l === lane);
+      $(id).setAttribute('aria-selected', String(l === lane));
+    }
+    log.setAttribute('aria-label', lane === 't' ? 'Trajectory' : 'Chat');
+    if (live && live.parentNode !== (lane === 't' ? traj : thread)) live.hidden = true;
+    else if (live) live.hidden = false;
+    hello();
+    if (scrolls[lane] === null) toBottom();
+    else {
+      log.scrollTop = scrolls[lane];
+      pinned = nearBottom();
+    }
+  }
+  if (lane === 't') markSeen();
+  const node = goto && (lane === 't' ? traj : thread).querySelector(`[data-id="${goto}"]`);
+  if (node) {
+    node.scrollIntoView({ block: 'center' });
+    pinned = nearBottom();
+    node.classList.remove('flash');
+    void node.offsetWidth;
+    node.classList.add('flash');
+  }
+}
+$('lt-chat').addEventListener('click', () => showLane('c'));
+$('lt-traj').addEventListener('click', () => showLane('t'));
+document.addEventListener('visibilitychange', () => { if (!document.hidden && S.lane === 't' && S.tab === 'chat') markSeen(); });
 
 // ---------- history ----------
 
 let firstId = null;
 
 export function loadHistory(r) {
-  r.events.forEach((ev) => main.add(ev));
+  r.events.forEach((ev) => route(ev));
   firstId = r.events[0]?.id ?? null;
-  older.hidden = !firstId || firstId <= 1;
+  older.hidden = olderT.hidden = !firstId || firstId <= 1;
+  // The first visit starts with nothing unseen; later ones count what came while away.
+  const t = r.events.filter(worth);
+  lastTraj = t.at(-1)?.id || 0;
+  if (!seen) markSeen(lastTraj);
+  unseen = t.filter((ev) => ev.id > seen).length;
+  badge();
   hello();
   toBottom();
 }
@@ -594,15 +781,20 @@ async function loadOlder() {
   if (!r || !r.events.length) return;
   const height = log.scrollHeight;
   const anchor = older.nextSibling;
-  const page = new Renderer(thread, anchor);
-  r.events.forEach((ev) => page.add(ev));
+  const anchorT = traj.querySelector(':scope > :not(.older, .traj-empty)');
+  const page = new Renderer(thread, anchor, { asks });
+  const pageT = new Renderer(traj, anchorT, { lane: 't', asks });
+  r.events.forEach((ev) => route(ev, page, pageT));
   // Drop the day chip that now repeats right after the inserted page.
-  if (anchor?.classList?.contains('day') && anchor.textContent === dayLabel(r.events.at(-1).t)) anchor.remove();
+  for (const a of [anchor, anchorT]) {
+    if (a?.classList?.contains('day') && a.textContent === dayLabel(r.events.at(-1).t)) a.remove();
+  }
   firstId = r.events[0].id;
-  older.hidden = firstId <= 1;
+  older.hidden = olderT.hidden = firstId <= 1;
   log.scrollTop += log.scrollHeight - height;
 }
 older.addEventListener('click', loadOlder);
+olderT.addEventListener('click', loadOlder);
 
 // ---------- composer ----------
 
@@ -634,14 +826,32 @@ $('composer').addEventListener('submit', async (e) => {
   autosize();
   renderAttachments();
   saveDraft();
-  deliver(text, sending);
+  const reply = replyTo;
+  quoteOff();
+  deliver(text, sending, reply);
 });
+
+// "Reply in chat" on a message of seimei's in the trajectory: the next message answers it.
+let replyTo = null;
+function replyIn(id) {
+  replyTo = { id, text: said.get(id) || '' };
+  $('quote-text').textContent = `Replying to: ${replyTo.text.replace(/\s+/g, ' ').trim()}`;
+  $('quote').hidden = false;
+  showLane('c');
+  input.focus();
+}
+function quoteOff() {
+  replyTo = null;
+  $('quote').hidden = true;
+}
+$('quote-x').addEventListener('click', quoteOff);
 
 // The message shows at once, dimmed, until the laptop echoes it back (QA U1); a failed one offers a retry.
 const pending = new Map();
 
-function pendingBubble(cid, text, sending) {
+function pendingBubble(cid, text, sending, reply) {
   const node = el('div', 'msg user pending');
+  if (reply) node.append(anchor(reply.text, reply.id, 't'));
   const imgs = sending.filter((a) => a.kind === 'image');
   if (imgs.length) {
     const pics = el('div', `pics n${Math.min(imgs.length, 3)}${text ? '' : ' only'}`);
@@ -659,19 +869,20 @@ function pendingBubble(cid, text, sending) {
   return node;
 }
 
-async function deliver(text, sending) {
+async function deliver(text, sending, reply = null) {
   const cid = Math.random().toString(36).slice(2, 12);
-  const node = pendingBubble(cid, text, sending);
+  const node = pendingBubble(cid, text, sending, reply);
   pending.set(cid, node);
+  if (S.lane !== 'c') showLane('c');
   thread.append(node);
-  if (live) thread.append(live);
+  if (live?.parentNode === thread) thread.append(live);
   hello();
   toBottom();
   try {
     // Files upload as soon as they are picked; wait for any still on the way.
     await Promise.all(sending.map((a) => a.upload).filter(Boolean));
     if (sending.some((a) => a.kind === 'file' && !a.id)) throw new Error('upload');
-    await post('api/send', { text, cid, images: sending.filter((a) => a.kind === 'image').map((a) => ({ data: a.data })),
+    await post('api/send', { text, cid, reply: reply?.id, images: sending.filter((a) => a.kind === 'image').map((a) => ({ data: a.data })),
       files: sending.filter((a) => a.kind === 'file').map((a) => a.id) });
   } catch {
     if (!pending.has(cid)) return;
@@ -682,7 +893,7 @@ async function deliver(text, sending) {
       pending.delete(cid);
       node.remove();
       // A file whose upload failed is gone; the rest go again.
-      deliver(text, sending.filter((a) => a.kind !== 'file' || a.id));
+      deliver(text, sending.filter((a) => a.kind !== 'file' || a.id), reply);
     });
     node.append(again);
   }
@@ -812,8 +1023,13 @@ $('composer').addEventListener('drop', (e) => {
   addFiles([...(e.dataTransfer?.files || [])]);
 });
 
-// Tap a message to see when it was sent; tap a shikigami card to open it; tap a picture to zoom.
-thread.addEventListener('click', (e) => {
+// Tap a message to see when it was sent; tap a shikigami card to open it; tap a picture to zoom; tap a fold line or
+// an anchor to go to what it names.
+function onTap(e) {
+  const goto = e.target.closest('[data-goto]');
+  if (goto) return showLane(goto.dataset.lane, +goto.dataset.goto);
+  const reply = e.target.closest('.reply-btn');
+  if (reply) return replyIn(+reply.dataset.reply);
   if (e.target.matches('img.pic')) {
     const n = e.target.dataset.name;
     return view(e.target.src, n ? { full: `api/files/${n}`, save: `api/files/${n}?download=1` } : {});
@@ -825,4 +1041,6 @@ thread.addEventListener('click', (e) => {
   const t = msg.querySelector(':scope > .time');
   if (t) t.remove();
   else if (msg.dataset.t) msg.append(el('span', 'time', clock(+msg.dataset.t)));
-});
+}
+thread.addEventListener('click', onTap);
+traj.addEventListener('click', onTap);

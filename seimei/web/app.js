@@ -1,6 +1,6 @@
 // The page: the stream from the laptop, the four tabs, and the header and navigation bar around them.
 import { $, S, hooks, clock, finePointer, viewing, closeView } from './util.js';
-import { render, onDelta, clearLive, addEvent, loadHistory, autosize, waitingApprovals, toBottom } from './chat.js';
+import { render, onDelta, clearLive, addEvent, loadHistory, autosize, waitingApprovals, toBottom, showLane } from './chat.js';
 import { setWorkers, setSessions, sheetEvent, agentCounts, showAgents, pageOpen, closePage } from './agents.js';
 import { showScreen, hideScreen } from './screen.js';
 import { setUsage, renderUsage, tone } from './usage.js';
@@ -31,6 +31,7 @@ function show(tab) {
   if (tab === 'chat') {
     S.unread = false;
     if (was !== 'chat') requestAnimationFrame(toBottom);
+    if (S.lane === 't') showLane('t');
   } else if (tab === 'agents') showAgents();
   else if (tab === 'screen') showScreen();
   else if (tab === 'usage') renderUsage();
@@ -120,14 +121,15 @@ function handle(ev) {
     if (ev.id <= lastId) return;
     lastId = ev.id;
     addEvent(ev);
-    if (S.tab !== 'chat' && /^(assistant|approval|worker|image)$/.test(ev.type)) S.unread = true;
+    // The chat dot is for the conversation; the trajectory keeps its own count.
+    if (S.tab !== 'chat' && ev.lane !== 't' && /^(assistant|approval|worker|image)$/.test(ev.type)) S.unread = true;
     render();
   } else if (ev.type === 'state') {
     S.session = ev;
     if (!ev.busy) clearLive();
     render();
   } else if (ev.type === 'delta') {
-    onDelta(ev.text);
+    onDelta(ev.text, ev.lane);
   } else if (ev.type === 'workers') {
     setWorkers(ev);
   } else if (ev.type === 'w') {

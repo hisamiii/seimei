@@ -5,6 +5,9 @@ import json
 import time
 from pathlib import Path
 
+# Events the dispatcher's own turn produces: they go where the turn goes.
+TURN = {"assistant", "tool", "tool_result", "image", "file"}
+
 
 class EventLog:
     def __init__(self, path: Path):
@@ -17,6 +20,9 @@ class EventLog:
                         self.events.append(json.loads(line))
         self.file = path.open("a")
         self.subs: set[asyncio.Queue] = set()
+        # The running dispatcher turn: {"lane": "c", "re": id of the user message it answers} or {"lane": "t",
+        # "turn": id, "why": what started it}; {} between turns. The dispatcher sets it.
+        self.turn: dict = {}
 
     @property
     def last_id(self) -> int:
@@ -24,12 +30,28 @@ class EventLog:
 
     def add(self, ev: dict) -> dict:
         """Persist an event and send it to every client."""
-        ev = {**ev, "id": self.last_id + 1, "t": time.time()}
+        ev = {**ev, **self.lane(ev), "id": self.last_id + 1, "t": time.time()}
         self.events.append(ev)
         self.file.write(json.dumps(ev) + "\n")
         self.file.flush()
         self._send(ev)
         return ev
+
+    def lane(self, ev: dict) -> dict:
+        """Where an event shows: lane "t" is the trajectory (what happened on its own: shikigami reports, restarts,
+        notes, and dispatcher turns an event started); the rest is the chat, which keeps the user's conversation
+        and anything that needs them (questions, approvals, a reached limit). Old events have no lane: chat."""
+        kind, what = ev["type"], ev.get("event")
+        if "lane" in ev:
+            return {}
+        if kind in TURN or (kind == "worker" and what == "summoned"):
+            # The answered message only matters on the reply text.
+            return {k: v for k, v in self.turn.items() if k != "re" or kind == "assistant"}
+        if kind == "worker" and what not in ("asking", "replied"):
+            return {"lane": "t"}
+        if kind == "system" or (kind == "rate_limit" and ev.get("status") != "rejected"):
+            return {"lane": "t"}
+        return {}
 
     def flash(self, ev: dict):
         """Send a transient event (text deltas, state) that is never stored or replayed."""
