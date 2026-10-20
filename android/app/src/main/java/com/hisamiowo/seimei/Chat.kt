@@ -17,12 +17,15 @@ sealed interface Item {
     data class Worker(
         override val key: String, val event: String, val name: String, val worker: String,
         val text: String, val model: String, val cwd: String, val effort: String = "", val contextCap: String = "",
+        /** An "asks" card that something later settled: "Answered" or "Closed". */
+        val settled: String? = null,
     ) : Item
     data class Approval(
         override val key: String, val aid: String, val who: String, val action: String, val target: String,
         val detail: String, val expires: Double, val outcome: String?,
     ) : Item
-    data class Shown(override val key: String, val file: String, val caption: String) : Item
+    /** w and h: the picture's size from the laptop (0 when unknown), so its space is kept before it loads. */
+    data class Shown(override val key: String, val file: String, val caption: String, val w: Int = 0, val h: Int = 0) : Item
     /** A file seimei handed over to download. */
     data class Sent(override val key: String, val file: FileRef, val caption: String, val t: Double = 0.0) : Item
 }
@@ -58,6 +61,8 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault()) {
     private val notes = HashMap<String, Int>()
     private val approvals = HashMap<String, Int>()
     private val outcomes = HashMap<String, String>()
+    /** Shikigami id -> its open "asks" card; a later event about it settles the card. */
+    private val asks = HashMap<String, Int>()
     private var seq = 0
 
     val waiting get() = approvals.keys.count { it !in outcomes }
@@ -138,7 +143,14 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault()) {
             "system" -> note(ev.str("text"), ev.str("level"), t, key)
             "worker" -> {
                 val event = ev.str("event")
-                if (event in WORKER_CARDS) {
+                val id = ev.str("worker")
+                if (event != "summoned") asks.remove(id)?.let { i ->
+                    (items[i] as? Item.Worker)?.let { items[i] = it.copy(settled = if (event == "replied" || event == "done") "Answered" else "Closed") }
+                }
+                if (event == "replied") {
+                    put(Item.Note(key, "You ${if (ev.optBoolean("asked")) "answered" else "messaged"} ${ev.str("name")}: ${ev.str("text")}", ""))
+                } else if (event in WORKER_CARDS) {
+                    if (event == "asking") asks[id] = items.size
                     put(Item.Worker(key, event, ev.str("name"), ev.str("worker"), ev.str("text"), ev.str("model"), ev.str("cwd"),
                         ev.str("effort"), ev.str("context_cap")))
                 } else {
@@ -146,7 +158,7 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault()) {
                     put(Item.Note(key, "${ev.str("name")} $what", ""))
                 }
             }
-            "image" -> put(Item.Shown(key, ev.str("file"), ev.str("caption")))
+            "image" -> put(Item.Shown(key, ev.str("file"), ev.str("caption"), ev.optInt("w"), ev.optInt("h")))
             // "file", not "id": the event log numbers every event with its own id.
             "file" -> put(Item.Sent(key, ev.fileRef(ev.str("file")), ev.str("caption"), t))
             "approval" -> {

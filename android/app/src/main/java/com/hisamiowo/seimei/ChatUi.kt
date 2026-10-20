@@ -11,6 +11,17 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import kotlinx.coroutines.launch
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.runtime.rememberCoroutineScope
@@ -166,7 +177,11 @@ fun Row(item: Item, vm: Seimei, live: JSONObject? = null, onPicture: (String) ->
             if (item.caption.isNotEmpty()) Text(item.caption, fontSize = 13.sp, color = LocalExtra.current.text3, modifier = Modifier.padding(top = 6.dp))
         }
         is Item.Shown -> Column(Modifier.fillMaxWidth()) {
-            Picture(vm, item.file, Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable { onPicture(item.file) })
+            // Never more than twice its own size (a 16 px icon stays small, at least 48dp) and at most 480dp tall.
+            val density = LocalDensity.current.density
+            val maxW = if (item.w > 0) maxOf(48f, 2f * item.w / density).dp else Dp.Infinity
+            Picture(vm, item.file, Modifier.widthIn(max = maxW).heightIn(max = 480.dp).clip(RoundedCornerShape(16.dp)).clickable { onPicture(item.file) },
+                ratio = if (item.w > 0 && item.h > 0) item.w.toFloat() / item.h else null)
             if (item.caption.isNotEmpty()) Text(item.caption, fontSize = 13.sp, color = LocalExtra.current.text3, modifier = Modifier.padding(top = 6.dp))
         }
     }
@@ -514,8 +529,9 @@ fun WorkerCard(w: Item.Worker) {
     }
     var open by rememberSaveable(w.key) { mutableStateOf(false) }
     var clipped by remember { mutableStateOf(false) }
-    Card(highlight = w.event == "asking") {
-        CardHead(icon, bg, fg, title, if (w.event == "summoned") listOf(w.model, w.effort, w.contextCap, home(w.cwd)).filter { it.isNotEmpty() }.joinToString(" · ") else null, mono = true)
+    Card(highlight = w.event == "asking" && w.settled == null) {
+        CardHead(icon, bg, fg, title, if (w.event == "summoned") listOf(w.model, w.effort, w.contextCap, home(w.cwd)).filter { it.isNotEmpty() }.joinToString(" · ")
+            else w.settled, mono = w.event == "summoned")
         if (w.text.isNotEmpty()) {
             val max = if (open) Int.MAX_VALUE else if (w.event == "summoned") 3 else 6
             if (w.event == "summoned") Text(w.text, fontSize = 14.sp, color = LocalExtra.current.text2, maxLines = max, overflow = TextOverflow.Ellipsis,
@@ -529,7 +545,8 @@ fun WorkerCard(w: Item.Worker) {
     }
 }
 
-val OUTCOME = mapOf("approved" to "Approved", "denied" to "Denied", "expired" to "No answer in 10 min, denied")
+val OUTCOME = mapOf("approved" to "Approved", "denied" to "Denied", "expired" to "No answer in 10 min, denied",
+    "restart" to "Cancelled by a seimei restart")
 
 @Composable
 fun ApprovalCard(a: Item.Approval, vm: Seimei) {
@@ -581,19 +598,70 @@ fun minutesLeft(expires: Double) = kotlin.math.ceil((expires - System.currentTim
 // ---------- pictures ----------
 
 @Composable
-fun Picture(vm: Seimei, name: String, modifier: Modifier, crop: Boolean = false) {
+fun Picture(vm: Seimei, name: String, modifier: Modifier, crop: Boolean = false, ratio: Float? = null) {
     val bmp by produceState<ImageBitmap?>(null, name) { value = vm.image(name) }
     val b = bmp
-    if (b == null) Box(modifier.then(if (crop) Modifier else Modifier.aspectRatio(4f / 3)).background(MaterialTheme.colorScheme.surfaceContainerHigh))
+    if (b == null) Box(modifier.then(if (crop) Modifier else Modifier.aspectRatio(ratio ?: (4f / 3))).background(MaterialTheme.colorScheme.surfaceContainerHigh))
     else Image(b, null, modifier.then(if (crop) Modifier else Modifier.aspectRatio(b.width.toFloat() / b.height)),
         contentScale = if (crop) ContentScale.Crop else ContentScale.Fit)
 }
 
+/** A picture full screen: the thumbnail at once, the original once loaded. Pinch or double-tap to zoom, drag to
+ *  look around, tap to close (when not zoomed); Save puts the original in Pictures/seimei. */
 @Composable
 fun Zoom(vm: Seimei, name: String, close: () -> Unit) {
-    Dialog(close, DialogProperties(usePlatformDefaultWidth = false)) {
-        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .92f)).clickable { close() }, contentAlignment = Alignment.Center) {
-            Picture(vm, name, Modifier.fillMaxWidth())
+    val thumb by produceState<ImageBitmap?>(null, name) { value = vm.image(name) }
+    val full by produceState<ImageBitmap?>(null, name) { value = vm.image(name, full = true) }
+    val b = full ?: thumb
+    var scale by remember { mutableFloatStateOf(1f) }
+    var offset by remember { mutableStateOf(Offset.Zero) }
+    var size by remember { mutableStateOf(IntSize.Zero) }
+    // Keeps the zoomed picture over the screen: no dragging it off into the black.
+    fun clamp(o: Offset, s: Float) = Offset(
+        o.x.coerceIn(-size.width * (s - 1) / 2, size.width * (s - 1) / 2),
+        o.y.coerceIn(-size.height * (s - 1) / 2, size.height * (s - 1) / 2),
+    )
+    Dialog(close, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        Box(
+            Modifier.fillMaxSize().background(Color.Black).onSizeChanged { size = it }
+                .pointerInput(Unit) {
+                    detectTapGestures(onTap = { if (scale == 1f) close() }, onDoubleTap = { p ->
+                        if (scale > 1f) {
+                            scale = 1f
+                            offset = Offset.Zero
+                        } else {
+                            scale = 2.5f
+                            offset = clamp((Offset(size.width / 2f, size.height / 2f) - p) * 1.5f, 2.5f)
+                        }
+                    })
+                }
+                .pointerInput(Unit) {
+                    detectTransformGestures { _, pan, zoom, _ ->
+                        scale = (scale * zoom).coerceIn(1f, 8f)
+                        offset = if (scale == 1f) Offset.Zero else clamp(offset + pan, scale)
+                    }
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            if (b == null) CircularProgressIndicator(color = Color.White)
+            else Image(b, null, Modifier.fillMaxSize().graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                translationX = offset.x
+                translationY = offset.y
+            }, contentScale = ContentScale.Fit)
+            Row(Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val saving = name in vm.picturesSaving
+                val saved = name in vm.picturesSaved
+                FilledTonalIconButton({ vm.savePicture(name) }, enabled = !saving && !saved) {
+                    when {
+                        saving -> CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        saved -> Icon(Icons.check, "Saved to Pictures/seimei", Modifier.size(20.dp))
+                        else -> Icon(Icons.download, "Save the original", Modifier.size(20.dp))
+                    }
+                }
+                FilledTonalIconButton(close) { Icon(Icons.close, "Close", Modifier.size(20.dp)) }
+            }
         }
     }
 }

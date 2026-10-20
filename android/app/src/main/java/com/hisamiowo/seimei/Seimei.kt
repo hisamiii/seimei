@@ -996,24 +996,63 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         return Attachment.Photo(Base64.getEncoder().encodeToString(bytes), bmp.asImageBitmap())
     }
 
-    /** A picture from the laptop, fetched with the login token and kept in a small cache. */
-    suspend fun image(name: String): ImageBitmap? {
-        images.get(name)?.let { return it }
+    /** A picture from the laptop, fetched with the login token: the chat-sized thumbnail (kept in a small cache),
+     *  or the original for the full-screen view (not cached: it can be big). */
+    suspend fun image(name: String, full: Boolean = false): ImageBitmap? {
+        if (!full) images.get(name)?.let { return it }
+        val cap = if (full) 4096 else 2048
         return try {
-            val bytes = api.bytes("api/files/$name")
+            val bytes = api.bytes(if (full) "api/files/$name" else "api/files/$name?w=thumb")
             val bmp = withContext(Dispatchers.Default) {
                 ImageDecoder.decodeBitmap(ImageDecoder.createSource(bytes)) { dec, info, _ ->
                     val side = maxOf(info.size.width, info.size.height)
-                    if (side > 2048) {
-                        val f = 2048f / side
+                    if (side > cap) {
+                        val f = cap.toFloat() / side
                         dec.setTargetSize((info.size.width * f).toInt(), (info.size.height * f).toInt())
                     }
                 }.asImageBitmap()
             }
-            images.put(name, bmp)
+            if (!full) images.put(name, bmp)
             bmp
         } catch (e: Exception) {
             null
+        }
+    }
+
+    /** Pictures saved from the full-screen view this run, and the ones on their way. */
+    var picturesSaved by mutableStateOf(setOf<String>())
+        private set
+    var picturesSaving by mutableStateOf(setOf<String>())
+        private set
+
+    /** Saves the original into Pictures/seimei. */
+    fun savePicture(name: String) {
+        if (name in picturesSaving || name in picturesSaved) return
+        picturesSaving = picturesSaving + name
+        val cr = getApplication<Application>().contentResolver
+        viewModelScope.launch {
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, "seimei-${name.take(8)}.${name.substringAfterLast('.')}")
+                put(MediaStore.Images.Media.MIME_TYPE, mimeOf(name))
+                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/seimei")
+                put(MediaStore.Images.Media.IS_PENDING, 1)
+            }
+            var uri: Uri? = null
+            try {
+                uri = withContext(Dispatchers.IO) { cr.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) } ?: throw IOException("no Pictures")
+                val out = withContext(Dispatchers.IO) { cr.openOutputStream(uri) } ?: throw IOException("cannot write")
+                out.use { api.download("api/files/$name", it) }
+                withContext(Dispatchers.IO) { cr.update(uri, ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }, null, null) }
+                picturesSaved = picturesSaved + name
+            } catch (e: Exception) {
+                uri?.let { withContext(Dispatchers.IO + NonCancellable) { cr.delete(it, null, null) } }
+                if (e !is kotlinx.coroutines.CancellationException) {
+                    chat.local("Could not save the picture.")
+                    publish()
+                }
+            } finally {
+                picturesSaving = picturesSaving - name
+            }
         }
     }
 
