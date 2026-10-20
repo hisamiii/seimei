@@ -29,12 +29,14 @@ object Push {
         Triple("approval", "Approvals", NotificationManager.IMPORTANCE_HIGH),
         Triple("question", "Questions", NotificationManager.IMPORTANCE_HIGH),
         Triple("reply", "Replies", NotificationManager.IMPORTANCE_LOW),
+        Triple("ping", "Pings", NotificationManager.IMPORTANCE_DEFAULT),
         Triple("urgent", "Urgent", NotificationManager.IMPORTANCE_HIGH),
     )
     private val ABOUT = mapOf(
         "approval" to "A card waits for your OK: a session command, a file edit, a desktop action.",
         "question" to "A shikigami or one of your sessions asks something. At most one every few minutes.",
         "reply" to "seimei's reply, when you sent a message and left the app before it came. Silent.",
+        "ping" to "Things you asked seimei to tell you about: an APK is up, a render or a run finished.",
         "urgent" to "Rare emergencies seimei flags itself.",
     )
 
@@ -77,9 +79,10 @@ class Notify : FirebaseMessagingService() {
 
     override fun onMessageReceived(msg: RemoteMessage) {
         val d = msg.data
-        val kind = d["kind"] ?: return
-        val tag = d["tag"] ?: kind
         val nm = getSystemService(NotificationManager::class.java)
+        // A kind from a newer laptop than this app knows still shows, on the Pings channel.
+        val kind = (d["kind"] ?: return).let { if (nm.getNotificationChannel(it) != null) it else "ping" }
+        val tag = d["tag"] ?: kind
         if (d["cancel"] == "1") return nm.cancel(tag, 0)
         if (Push.visible) return
         val open = PendingIntent.getActivity(
@@ -106,7 +109,7 @@ class Notify : FirebaseMessagingService() {
 
     companion object {
         const val MAUVE = 0xFFCBA6F7.toInt()
-        val PUBLIC = mapOf("approval" to "Approval waiting", "question" to "A question for you", "reply" to "seimei replied",
+        val PUBLIC = mapOf("approval" to "Approval waiting", "question" to "A question for you", "reply" to "seimei replied", "ping" to "Update from seimei",
             "urgent" to "seimei: urgent")
     }
 }

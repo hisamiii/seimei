@@ -1,7 +1,8 @@
 """Phone notifications through Firebase Cloud Messaging, following the user's rules.
 
 - Sound: approval cards; questions from shikigami or the user's own sessions, at most one push per
-  QUESTION_GAP ("2 agents need you"); the dispatcher's urgent flag for rare emergencies.
+  QUESTION_GAP ("2 agents need you"); pings the dispatcher sends for things the user asked to hear about
+  (bundled until the user opens the app); its urgent flag for rare emergencies.
 - Silent: the dispatcher's reply, only when the user sent a message and then left the app.
 - Nothing while the app is open on that phone. Each kind has one notification that later pushes replace,
   and it is withdrawn once it no longer applies (card decided, question answered).
@@ -115,12 +116,15 @@ class Push:
         self.last_question = 0.0
         self.later: asyncio.TimerHandle | None = None
         self.sent: list[tuple[str, dict]] = []
+        # Pings since the user last had the app open; a new one shows them all.
+        self.pings: list[tuple[str, str]] = []
 
     # ---------- which phones have the app open ----------
 
     def opened(self, device: str | None, request=None):
         if device:
             self.open.setdefault(device, []).append(request)
+            self.pings.clear()
 
     def closed(self, device: str | None, request=None):
         if device and request in self.open.get(device, []):
@@ -255,6 +259,15 @@ class Push:
     def urgent(self, text: str):
         self._fire({"kind": "urgent", "tag": "urgent", "title": "seimei: urgent", "body": text[:600], "alert": 1, "tab": "chat"})
 
+    def ping(self, title: str, body: str):
+        """Something the user asked to hear about (a build is up, a run finished): sound, normal priority."""
+        self.pings = [*self.pings[-9:], (title.strip()[:120] or "seimei", body.strip()[:400])]
+        if len(self.pings) == 1:
+            title, body = self.pings[0]
+        else:
+            title, body = f"{len(self.pings)} updates", "\n".join(f"{t}: {b}" if b else t for t, b in self.pings)
+        self._fire({"kind": "ping", "tag": "ping", "title": title, "body": body[:900], "alert": 1, "tab": "chat"})
+
     def _save(self, before: set):
         if self.notified != before:
             self.path.write_text(json.dumps({"notified": sorted(self.notified)}))
@@ -266,11 +279,22 @@ def make_push_tools(push: Push) -> list:
     @tool("urgent", "Push an urgent notification with sound to the user's phone. Only for rare emergencies that cannot "
           "wait for them to look: something broke badly, data at risk, a deadline about to pass. Your replies, "
           "approval cards and questions from shikigami or sessions already notify on their own; never use this "
-          "for them, for finished work or for good news.", {"text": str})
+          "for them. Finished work the user wants to hear about goes through notify.", {"text": str})
     async def urgent(args):
         push.urgent(str(args.get("text", "")))
         phones = len(push._phones())
         return {"content": [{"type": "text", "text": f"Sent to {phones} phone(s)." if phones else
                              "Not sent: no paired phone with notifications, or the app is open right now."}]}
 
-    return [urgent]
+    @tool("notify", "Push a notification with sound to the user's phone, for things they asked to be pinged about: "
+          "an APK is up, a render is done, a run finished. Title short (what happened), body one or two sentences. "
+          "Your ordinary replies already notify on their own when the user left the app, so don't repeat them here; "
+          "emergencies go through urgent. Several pings while the user is away show together in one notification.",
+          {"title": str, "body": str})
+    async def notify(args):
+        push.ping(str(args.get("title", "")), str(args.get("body", "")))
+        phones = len(push._phones())
+        return {"content": [{"type": "text", "text": f"Sent to {phones} phone(s)." if phones else
+                             "Not sent: no paired phone with notifications, or the app is open right now (they see the chat)."}]}
+
+    return [urgent, notify]
