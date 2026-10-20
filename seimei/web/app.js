@@ -1,5 +1,5 @@
 // The page: the stream from the laptop, the four tabs, and the header and navigation bar around them.
-import { $, S, hooks, finePointer, viewing, closeView } from './util.js';
+import { $, S, hooks, clock, finePointer, viewing, closeView } from './util.js';
 import { render, onDelta, clearLive, addEvent, loadHistory, autosize, waitingApprovals, toBottom } from './chat.js';
 import { setWorkers, setSessions, sheetEvent, agentCounts, showAgents, pageOpen, closePage } from './agents.js';
 import { showScreen, hideScreen } from './screen.js';
@@ -76,6 +76,11 @@ function chrome() {
   else if (S.tab === 'agents') {
     s = asks ? 'waiting' : working ? 'working' : 'idle';
     text = [working && `${working} working`, asks && `${asks} ${asks === 1 ? 'needs' : 'need'} you`].filter(Boolean).join(' · ') || 'nothing running';
+  }
+  // Away: the other tabs show the last known state, and say so (QA U2).
+  if (S.tab !== 'chat' && !S.online && S.awaySince) {
+    s = 'away';
+    text = `offline since ${clock(S.awaySince / 1000)} · last known state`;
   }
   $('title').textContent = TITLES[S.tab];
   $('status').dataset.s = s;

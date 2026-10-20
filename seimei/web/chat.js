@@ -1,6 +1,6 @@
 // The conversation with seimei: rendering events, live text, approval cards, and the composer.
 import { md } from './md.js';
-import { $, S, hooks, el, svg, clock, dayKey, dayLabel, home, plural, post, view, finePointer, toLogin, ICON } from './util.js';
+import { $, S, hooks, el, svg, clock, dayKey, dayLabel, home, plural, post, view, snack, finePointer, toLogin, ICON } from './util.js';
 import { openWorker } from './agents.js';
 
 export const log = $('log');
@@ -562,7 +562,13 @@ export function addEvent(ev) {
   if (ev.type === 'assistant') clearLive();
   main.add(ev);
   if (live) thread.append(live);
+  hello();
   if (stick) toBottom();
+}
+
+// An empty chat greets instead of showing a blank sheet (QA U14).
+function hello() {
+  $('hello').hidden = [...thread.children].some((c) => !c.matches('.older, .note.day, [hidden]'));
 }
 
 // ---------- history ----------
@@ -573,6 +579,7 @@ export function loadHistory(r) {
   r.events.forEach((ev) => main.add(ev));
   firstId = r.events[0]?.id ?? null;
   older.hidden = !firstId || firstId <= 1;
+  hello();
   toBottom();
 }
 
@@ -616,6 +623,7 @@ $('composer').addEventListener('submit', async (e) => {
   const sending = attachments.splice(0);
   if ((!text && !sending.length) || !S.online) {
     attachments.push(...sending);
+    if (!S.online) snack('Not connected to the laptop yet. Your message stays here.');
     return;
   }
   input.value = '';

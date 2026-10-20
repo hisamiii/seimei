@@ -108,7 +108,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 /* Conversation sheet */
 .log {
-  overflow-y: auto; overscroll-behavior: contain;
+  position: relative; overflow-y: auto; overscroll-behavior: contain;
   background: var(--surface-low); border-radius: 28px 28px 0 0;
   padding: 12px 16px 16px;
 }
@@ -349,9 +349,6 @@ body.login { display: grid; place-items: center; grid-template-rows: 1fr; paddin
 .sheet .wbadge.run span { animation: pulse 2s ease-in-out infinite; }
 .sheet .whead h2 { margin: 0; font-size: 22px; font-weight: 500; letter-spacing: -.01em; overflow-wrap: anywhere; }
 .sheet .whead .sub { font-size: 13px; color: var(--text-3); }
-.facts { display: flex; flex-wrap: wrap; gap: 8px; }
-.facts span { display: flex; align-items: center; min-height: 30px; padding: 0 12px; border-radius: 8px; box-shadow: inset 0 0 0 1px #585b70; font-size: 13px; color: var(--text-2); }
-.facts .mono { font-family: var(--mono); font-size: 12px; }
 .question { background: #45393e; color: #ffdcc4; border-radius: 16px; padding: 12px 14px; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .wlog {
   flex: 1; min-height: 120px; overflow-y: auto; overscroll-behavior: contain;
@@ -538,7 +535,6 @@ body.login { display: grid; place-items: center; grid-template-rows: 1fr; paddin
 .wstext { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .wstitle { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wsapp { font-size: 13px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.facts .laptop-btn { min-height: 30px; padding: 0 12px 0 10px; border-radius: 8px; gap: 6px; font-size: 13px; }
 
 /* Tabs: an M3 short navigation bar, sharing one bottom block with the composer */
 .log { padding-bottom: 40px; }
@@ -614,13 +610,21 @@ body.typing .composer { padding-bottom: 10px; }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 4s; } }
 .page .meter { background: var(--container); }
 
-/* Shikigami sheet: On laptop reads like the facts beside it; the task is one tonal row that unfolds */
-.facts .pill-btn {
-  display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 12px 0 10px; border: 0; border-radius: 8px;
-  background: none; box-shadow: inset 0 0 0 1px #585b70; color: var(--primary); font: 500 13px var(--sans);
+/* Details sheet: facts as a key/value list, actions as full-width tonal buttons */
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 8px 18px; margin: 0; font-size: 14px; line-height: 20px; }
+.kv dt { color: var(--text-3); }
+.kv dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
+.kv dd.mono { font: 13px/20px var(--mono); }
+.dactions { display: flex; flex-direction: column; gap: 8px; }
+.dbtn {
+  display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 48px; padding: 0 20px; border: 0;
+  border-radius: 99px; background: var(--primary-container); color: var(--on-primary-container); font: 500 14px var(--sans);
 }
-.facts .pill-btn span { display: inline; min-height: 0; padding: 0; box-shadow: none; color: inherit; font-size: inherit; }
-.facts .pill-btn:disabled { opacity: .5; }
+.dbtn span { display: inline; }
+.dbtn.stop { background: color-mix(in srgb, var(--error) 16%, var(--container)); color: var(--error); }
+.dbtn .square { width: 12px; height: 12px; border-radius: 3px; background: currentColor; }
+.dbtn:disabled { opacity: .5; }
+.qopt .sent { margin-left: auto; font-size: 12px; color: var(--primary); }
 .taskd { flex: none; border-radius: 16px; background: var(--container-high); overflow: hidden; }
 .taskd-head { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 8px 14px 8px 10px; border: 0; background: none; text-align: left; }
 .taskd .ic { flex: none; width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; background: var(--tonal); color: var(--on-tonal); }
@@ -724,3 +728,15 @@ body.spage-open { overflow: hidden; }
 .activity.running .calls { margin: 8px 8px 0; align-self: stretch; }
 .dhead h2 { margin: 0; font-size: 22px; font-weight: 500; overflow-wrap: anywhere; }
 .dhead .sub { font-size: 13px; color: var(--text-3); }
+
+/* Empty chat (QA U14) and the snackbar (QA U15) */
+.hello { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; pointer-events: none; color: var(--text-2); font-size: 17px; }
+.hello b { font-weight: 500; }
+.hello img { opacity: .9; }
+.hello[hidden] { display: none; }
+.snack {
+  position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 30;
+  max-width: min(560px, calc(100vw - 32px)); padding: 14px 16px; border-radius: 8px;
+  background: var(--text); color: var(--surface); font-size: 14px; box-shadow: 0 4px 16px rgb(0 0 0 / .35);
+}
+.snack[hidden] { display: none; }

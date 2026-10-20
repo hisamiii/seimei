@@ -1,5 +1,5 @@
 // Shikigami and the user's own Claude sessions: the Agents list, and the full-screen page of one of them.
-import { $, S, hooks, el, svg, clock, at as atTime, home, short, when, getJSON, finePointer, toLogin, ICON } from './util.js';
+import { $, S, hooks, el, svg, clock, at as atTime, home, short, when, getJSON, snack, finePointer, toLogin, ICON } from './util.js';
 import { Renderer, doing as doingPhrase, elapsed } from './chat.js';
 import { sheet, showSheet, closeSheet } from './sheet.js';
 
@@ -265,7 +265,7 @@ function head() {
   P.ring.replaceWith(r);
   P.ring = r;
   if (P.kind === 'worker') {
-    P.stop.hidden = !ACTIVE.has(P.row.state);
+    P.stop.hidden = !ACTIVE.has(P.row.state) || P.row.state === 'asking';
     question(P.row.state === 'asking' ? { text: P.row.question } : null);
   }
   composerState();
@@ -321,6 +321,15 @@ async function answer(body, btn) {
   }
   note(null);
   poll(true);
+  // The keys may not land on the laptop: if the same question is still open after 10 s, it can be answered again (QA U10).
+  btn?.append(el('span', 'sent', 'Sent'));
+  const key = P.askKey;
+  setTimeout(() => {
+    if (!P || P.askKey !== key) return;
+    btn?.classList.remove('picked');
+    btn?.querySelector('.sent')?.remove();
+    for (const b of P.qbox.querySelectorAll('button')) b.disabled = !P.ask?.answerable || !!P.row.reach;
+  }, 10000);
   return true;
 }
 
@@ -422,7 +431,8 @@ function sendState() {
   const typing = P.input.value.trim() !== '' || P.files.length > 0;
   P.send.disabled = P.input.disabled || !typing;
   if (P.kind === 'worker') {
-    P.stop.hidden = !ACTIVE.has(P.row.state) || typing;
+    // Asking: the answer goes through Send (disabled until typed); Stop is in the details sheet (QA U11).
+    P.stop.hidden = !ACTIVE.has(P.row.state) || P.row.state === 'asking' || typing;
     P.send.hidden = !P.stop.hidden;
   }
 }
@@ -516,25 +526,43 @@ function details() {
   const titles = el('div', 'dhead');
   titles.append(el('h2', null, r.name), el('div', 'sub', P.kind === 'worker' ? 'Shikigami' : `Session ${r.kind || ''}`.trim()));
   body.push(titles);
-  const facts = el('div', 'facts');
-  facts.append(el('span', 'mono', home(r.cwd)));
-  if (r.model) facts.append(el('span', null, r.model));
+  // Facts as a quiet key/value list; what can be done sits below as buttons (QA U12).
+  const facts = el('dl', 'kv');
+  const fact = (k, v, cls) => v && facts.append(el('dt', null, k), el('dd', cls, v));
+  fact('Folder', home(r.cwd), 'mono');
+  fact('Model', r.model);
   const effort = r.effort || r.effort_now;
-  if (effort) facts.append(el('span', null, `effort ${effort}${r.effort || P.kind !== 'worker' ? '' : ' (default)'}`));
-  if (r.context_cap) facts.append(el('span', null, `compacts at ${r.context_cap}`));
-  if (r.subagents) facts.append(el('span', null, `subagents on ${r.subagents}`));
-  if (r.context != null) facts.append(el('span', null, `context ${r.context}% used`));
-  facts.append(el('span', null, P.kind === 'worker' ? `started ${atTime(r.created)}` : `last active ${atTime(r.active)}`));
-  if (P.kind === 'worker' && r.state !== 'laptop' && r.started !== false) facts.append(laptopButton(r));
+  fact('Effort', effort && `${effort}${r.effort || P.kind !== 'worker' ? '' : ' (default)'}`);
+  fact('Compacts at', r.context_cap);
+  fact('Subagents', r.subagents);
+  fact('Context', r.context != null && `${r.context}% used`);
+  fact(P.kind === 'worker' ? 'Started' : 'Last active', cap(atTime(P.kind === 'worker' ? r.created : r.active).replace(/^at /, 'today at ')));
   body.push(facts);
+  const actions = el('div', 'dactions');
+  if (P.kind === 'worker' && r.state !== 'laptop' && r.started !== false) actions.append(laptopButton(r));
+  if (P.kind === 'worker' && ACTIVE.has(r.state)) actions.append(stopButton(r));
+  if (actions.childElementCount) body.push(actions);
   if (P.kind === 'worker' && r.task) body.push(taskRow(r.task));
   if (P.kind === 'session') body.push(el('p', 'usage-note', r.reach ? r.reach : 'Messages you send here are typed into this session\'s window on the laptop.'));
   sheet.body.replaceChildren(...body);
   showSheet('details');
 }
 
+function stopButton(w) {
+  const b = el('button', 'dbtn stop sl');
+  b.type = 'button';
+  const sq = el('span', 'square');
+  b.append(sq, el('span', null, `Stop ${w.name}`));
+  b.addEventListener('click', async () => {
+    b.disabled = true;
+    await postJSON(`api/workers/${encodeURIComponent(w.id)}/stop`, {});
+    closeSheet();
+  });
+  return b;
+}
+
 function laptopButton(w) {
-  const b = el('button', 'pill-btn sl');
+  const b = el('button', 'dbtn sl');
   b.type = 'button';
   const label = el('span', null, 'On laptop');
   b.append(svg(ICON.laptop, 16), label);
@@ -666,7 +694,7 @@ function build(kind, id, row) {
 
 export async function openPage(kind, id) {
   const r = kind === 'worker' ? await getJSON(`api/workers/${encodeURIComponent(id)}`) : await getJSON(`api/sessions/${id}`);
-  if (!r) return;
+  if (!r) return snack('Could not reach the laptop.');
   const reopen = P && P.kind === kind && P.id === id;
   if (kind === 'worker') {
     const live = S.workers.find((x) => x.id === id);

@@ -85,6 +85,16 @@ export async function post(path, body) {
   return r.json();
 }
 
+// A short note at the bottom for taps that could not do anything (QA U15).
+let snackTimer = 0;
+export function snack(text) {
+  const s = $('snack');
+  s.textContent = text;
+  s.hidden = false;
+  clearTimeout(snackTimer);
+  snackTimer = setTimeout(() => { s.hidden = true; }, 4000);
+}
+
 export async function getJSON(path) {
   const r = await fetch(path).catch(() => null);
   if (r?.status === 401) toLogin();

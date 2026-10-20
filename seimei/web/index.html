@@ -30,6 +30,10 @@
   <div class="thread" id="thread" aria-live="polite">
     <button class="older sl" id="older" hidden>Load earlier</button>
   </div>
+  <div class="hello" id="hello" hidden>
+    <img src="static/star.svg" alt="" width="56" height="56">
+    <b>Ask seimei anything</b>
+  </div>
   <div class="working" id="working" hidden>working</div>
   <section class="card" id="fp-card" hidden>
     <span class="badge"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M7 20c.6-1.6 1-3.6 1-6.5a4 4 0 0 1 8 0c0 1.2-.1 2.4-.3 3.5M11.2 21c.5-2 .8-4.5.8-7.5M4.5 16.5c.3-1 .5-2 .5-3a7 7 0 0 1 12-4.9M19 11c.2.8.2 1.7.1 2.6M15 20.5c.3-.8.5-1.6.6-2.5"/></svg></span>
@@ -64,6 +68,7 @@
     <button class="fab tonal sl" type="button" id="stop" aria-label="Stop" hidden><span class="square"></span></button>
   </div>
 </form>
+<div class="snack" id="snack" role="status" hidden></div>
 <nav class="navbar" aria-label="Sections">
   <button class="nav-item sl" type="button" data-tab="chat" id="nav-chat"><span class="ind"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M6 4.5h12A2.5 2.5 0 0 1 20.5 7v8a2.5 2.5 0 0 1-2.5 2.5h-7L6.5 21v-3.5H6A2.5 2.5 0 0 1 3.5 15V7A2.5 2.5 0 0 1 6 4.5z"/></svg><i class="ndot" id="nav-chat-dot" hidden></i></span>Chat</button>
   <button class="nav-item sl" type="button" data-tab="agents" id="nav-agents"><span class="ind"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 13.9 8.6 19.5 10.5 13.9 12.4 12 18 10.1 12.4 4.5 10.5 10.1 8.6ZM18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/></svg><i class="nbadge" id="nav-count" hidden></i></span>Agents</button>
