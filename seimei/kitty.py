@@ -215,6 +215,28 @@ def question(screen_text: str) -> dict | None:
             "questions": [{"question": q, "header": header, "multiSelect": False, "options": options}]}
 
 
+DASHES = re.compile(r"^\s*╌{8,}")
+
+
+def permission(screen_text: str) -> str | None:
+    """The permission prompt open on screen, as "Bash command: touch /tmp/x", or None."""
+    rows = [_plain(r).rstrip() for r in _rows(screen_text, 40)]
+    if not any(re.search(r"Do you want to (proceed|make this edit|create)", r) for r in rows[-12:]):
+        return None
+    top = max((i for i, r in enumerate(rows) if RULE.match(r)), default=None)
+    if top is None or top + 1 >= len(rows):
+        return None
+    title = rows[top + 1].strip()
+    dashes = [i for i, r in enumerate(rows) if i > top and DASHES.match(r)]
+    end = next(i for i, r in enumerate(rows) if re.search(r"Do you want to", r))
+    # Under the title: a target (the file to edit) or a description; between dashed rules: the command or new content.
+    head = [r.strip() for r in rows[top + 2:dashes[0] if dashes else end] if r.strip()]
+    head = [r for r in head if not re.match(r"^(Tip:|auto mode|mode\b)", r) and "choose \"switch to" not in r]
+    boxed = " ".join(r.strip() for r in rows[dashes[0] + 1:dashes[1]]) if len(dashes) >= 2 else ""
+    body = boxed if "command" in title.lower() and boxed else " ".join(head) or boxed
+    return f"{title}: {body}" if body else title
+
+
 def screen_sync(pid: int) -> str:
     """get-text for a caller outside the event loop (the session scan)."""
     w = window(pid)

@@ -414,6 +414,9 @@ class SessionEvents:
 
     def scan(self, rows: list[dict]) -> list[tuple[str, bool, str | None]]:
         out = []
+        # Sessions working in an agent's scratch folder are test fixtures, not the user's work.
+        if not os.environ.get("SEIMEI_TEST_SESSIONS"):
+            rows = [r for r in rows if not Path(r["cwd"] or "/").is_relative_to(CLAUDE / "jobs")]
         now = {r["pid"]: r for r in rows}
         for pid, r in now.items():
             who = f'session "{r["name"]}"'
@@ -444,7 +447,7 @@ class SessionEvents:
                 d = r.get("doing") or {}
                 perm = d.get("tool_id") or r.get("waiting_for") or "?"
                 if perm != st["perm"]:
-                    what = f"{d.get('tool', '')} {d.get('what', '')}".strip() or r.get("waiting_for") or "something"
+                    what = f"{d.get('tool', '')} {d.get('what', '')}".strip() or _prompt_on_screen(pid) or r.get("waiting_for") or "something"
                     out.append((f"{who} waits on the laptop for a permission prompt: {what[:200]}", True, f"perm:{pid}"))
             st["perm"] = perm
             if was == "busy" and r["status"] == "idle":
@@ -488,6 +491,14 @@ class SessionEvents:
                     out.append((f"{who}: {name} failed 3 times in a row, last: {text[:200]}", True, None))
             else:
                 st["fails"].pop(name, None)
+
+
+def _prompt_on_screen(pid: int) -> str | None:
+    """The prompt's tool and command from the session's window: the transcript gets the call only once it runs."""
+    try:
+        return kitty.permission(kitty.screen_sync(pid))
+    except kitty.Unreachable:
+        return None
 
 
 def _oomd() -> str:
