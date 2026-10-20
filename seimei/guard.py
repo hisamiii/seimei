@@ -28,6 +28,7 @@ SECRETS = [
     (".local/share/seimei/dev/unlock", "the screen password", r"seimei/dev/unlock"),
     (".local/share/seimei/signing", "the app signing key", r"seimei/signing"),
     (".local/share/seimei/firebase", "the Firebase key", r"seimei/firebase"),
+    (".local/share/seimei/kitty-rc.conf", "the kitty remote-control password", r"seimei/kitty-rc(\.conf)?"),
     (".claude/.credentials.json", "the Claude login", r"\.credentials\.json"),
     (".cloudflared", "the tunnel credentials", r"\.cloudflared"),
     (".config/gh/hosts.yml", "the GitHub token", r"gh/hosts\.yml"),
@@ -42,6 +43,9 @@ PIPED = [
     re.compile(rf"\b((ba|z)?sh|eval|source)\s+(-c\s+)?[\"']?\$\(\s*{DOWNLOADERS}\b"),
 ]
 PATH_KEYS = ("file_path", "notebook_path", "path")
+# Driving kitty: only seimei may type into a session's window, on the user's tap in the app.
+KITTY_RC = re.compile(r"\bkitt(y|en)\s+(\+kitten\s+)?@|\bkitten\s+remote|kitty_rc|KITTY_(LISTEN_ON|PUBLIC_KEY)|"
+                      r"/run/user/\d+/kitty-\d+|\$\{?XDG_RUNTIME_DIR\}?/kitty-")
 
 
 def _paths_in(inp: dict, cwd: str) -> list[Path]:
@@ -98,6 +102,8 @@ def blocked(tool: str, inp: dict, cwd: str) -> str | None:
     for name, word in SECRET_WORDS:
         if word.search(flat):
             return f"reading {name}"
+    if KITTY_RC.search(flat):
+        return "driving kitty by remote control (only the user, from the app, types into sessions)"
     for argv in commands(flat):
         if argv and (what := _rm_home(argv, cwd)):
             return f"deleting {what}"
