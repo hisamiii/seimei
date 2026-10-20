@@ -55,7 +55,7 @@ sealed interface Attachment {
 }
 
 /** A message shown before the laptop echoes it back (QA U1); a failed one waits for a retry tap. */
-class Pending(val cid: String, val text: String, val sending: List<Attachment>) {
+class Pending(val cid: String, val text: String, val sending: List<Attachment>, val reply: Pair<Long, String>? = null) {
     var failed by mutableStateOf(false)
 }
 
@@ -109,7 +109,24 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         private set
     var items by mutableStateOf<List<Item>>(emptyList())
         private set
+    /** The trajectory: what happened on its own (see Chat.fold); the chat shows a line for each run of it. */
+    var trail by mutableStateOf<List<Item>>(emptyList())
+        private set
+    /** Which of the two the chat tab shows: "c" (chat) or "t" (trajectory). */
+    var lane by mutableStateOf("c")
+        private set
+    /** Trajectory events the user has not seen yet. */
+    var unseen by mutableStateOf(0)
+        private set
+    /** The message of seimei's that the next send answers ("Reply in chat"): its event id and text. */
+    var replyTo by mutableStateOf<Pair<Long, String>?>(null)
+        private set
+    /** A row to scroll to and flash, by key, in the lane on screen. */
+    var goto by mutableStateOf<String?>(null)
     var live by mutableStateOf("")
+        private set
+    /** The lane of the turn streaming into live. */
+    var liveLane by mutableStateOf("c")
         private set
     var waiting by mutableStateOf(0)
         private set
@@ -155,6 +172,8 @@ class Seimei(app: Application) : AndroidViewModel(app) {
 
     private var events = ArrayList<JSONObject>()
     private var chat = Chat()
+    private var trailChat = Chat(lane = "t")
+    private var lastTraj = 0L
     private var lastId = 0L
     private var firstId = 0L
     private var stream: Job? = null
@@ -370,6 +389,11 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         val echoed = events.map { it.str("cid") }.toSet()
         pending.removeAll { it.cid in echoed }
         rebuild()
+        // The first visit starts with nothing unseen; later ones count what came while away.
+        val worth = events.filter { it.worth() }
+        lastTraj = maxOf(lastTraj, worth.lastOrNull()?.optLong("id") ?: 0)
+        if (prefs.trajSeen == 0L) prefs.trajSeen = lastTraj
+        unseen = worth.count { it.optLong("id") > prefs.trajSeen }
     }
 
     fun loadOlder() {
@@ -392,14 +416,56 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     }
 
     private fun rebuild() {
-        chat = Chat()
-        events.forEach(chat::add)
+        val asks = Asks()
+        chat = Chat(asks = asks)
+        trailChat = Chat(lane = "t", asks = asks)
+        events.forEach(::route)
         publish()
+    }
+
+    /** One event, drawn where it belongs: the trajectory gets it whole, the chat a fold line. */
+    private fun route(ev: JSONObject) {
+        if (ev.inTraj()) {
+            trailChat.add(ev)
+            chat.fold(ev)
+        } else chat.add(ev)
     }
 
     private fun publish() {
         items = chat.items.toList()
+        trail = trailChat.items.toList()
         waiting = chat.waiting
+    }
+
+    // ---------- chat | trajectory ----------
+
+    fun showLane(l: String, key: String? = null) {
+        lane = l
+        if (l == "t") markSeen()
+        goto = key
+    }
+
+    private fun markSeen() {
+        prefs.trajSeen = maxOf(prefs.trajSeen, lastTraj)
+        unseen = 0
+    }
+
+    private fun count(ev: JSONObject) {
+        if (!ev.worth()) return
+        val id = ev.optLong("id")
+        lastTraj = maxOf(lastTraj, id)
+        if (id <= prefs.trajSeen) return
+        if (lane == "t" && tab == "chat" && foreground && page == null) markSeen() else unseen++
+    }
+
+    /** "Reply in chat" on a message of seimei's in the trajectory: the next send answers it. */
+    fun replyIn(id: Long) {
+        replyTo = id to (trailChat.said[id] ?: "")
+        showLane("c")
+    }
+
+    fun cancelReply() {
+        replyTo = null
     }
 
     private fun setState(ev: JSONObject) {
@@ -423,14 +489,19 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             if (type == "assistant") live = ""
             if (type == "user" && ev.str("cid").isNotEmpty()) pending.removeAll { it.cid == ev.str("cid") }
             events.add(ev)
-            chat.add(ev)
+            route(ev)
             publish()
-            if (tab != "chat" && type in setOf("assistant", "approval", "worker", "image", "file")) unread = true
+            count(ev)
+            // The chat dot is for the conversation; the trajectory keeps its own count.
+            if (tab != "chat" && !ev.inTraj() && type in setOf("assistant", "approval", "worker", "image", "file")) unread = true
             return
         }
         when (type) {
             "state" -> setState(ev)
-            "delta" -> live += ev.str("text")
+            "delta" -> {
+                if (live.isEmpty()) liveLane = if (ev.str("lane") == "t") "t" else "c"
+                live += ev.str("text")
+            }
             "workers" -> takeWorkers(ev.optJSONArray("list").objects())
             "sessions" -> takeSessions(ev.optJSONArray("list").objects())
             "w" -> workerEvent(ev)
@@ -443,7 +514,10 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     fun show(t: String) {
         tab = t
         when (t) {
-            "chat" -> unread = false
+            "chat" -> {
+                unread = false
+                if (lane == "t") markSeen()
+            }
             "agents" -> refreshAll(force = true)
             "usage" -> refreshCost()
         }
@@ -763,13 +837,16 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         }
         edit("")
         attachments = emptyList()
-        deliver(Pending(java.util.UUID.randomUUID().toString().take(12), text, sending))
+        val reply = replyTo
+        replyTo = null
+        if (lane != "c") lane = "c"
+        deliver(Pending(java.util.UUID.randomUUID().toString().take(12), text, sending, reply))
     }
 
     fun retry(p: Pending) {
         pending.remove(p)
         // A file whose upload failed is gone; the rest go again.
-        deliver(Pending(p.cid + "r", p.text, p.sending.filter { it !is Attachment.Doc || it.id != null }))
+        deliver(Pending(p.cid + "r", p.text, p.sending.filter { it !is Attachment.Doc || it.id != null }, p.reply))
     }
 
     private fun deliver(p: Pending) {
@@ -783,7 +860,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 val imgs = JSONArray()
                 p.sending.filterIsInstance<Attachment.Photo>().forEach { imgs.put(JSONObject().put("data", it.data)) }
                 api.post("api/send", JSONObject().put("text", p.text).put("cid", p.cid).put("images", imgs)
-                    .put("files", JSONArray(docs.map { it.id })))
+                    .put("files", JSONArray(docs.map { it.id })).apply { p.reply?.let { put("reply", it.first) } })
             } catch (e: IOException) {
                 if (p in pending) p.failed = true
             }

@@ -3,6 +3,11 @@ package com.hisamiowo.seimei
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -101,7 +106,8 @@ fun ChatTab(vm: Seimei) {
     // Newest at the bottom: a reversed list keeps the reader pinned to the end while things arrive.
     val state = rememberLazyListState()
     var zoom by remember { mutableStateOf<String?>(null) }
-    val rows = vm.items.asReversed()
+    val traj = vm.lane == "t"
+    val rows = (if (traj) vm.trail else vm.items).asReversed()
     val scope = rememberCoroutineScope()
     // The list keeps its first visible row in place when rows are added below it, so after a burst of new rows
     // the first visible index says nothing about where the reader is. Whether they follow the end is judged only
@@ -111,7 +117,7 @@ fun ChatTab(vm: Seimei) {
         snapshotFlow { Triple(state.isScrollInProgress, state.firstVisibleItemIndex, state.firstVisibleItemScrollOffset) }
             .collect { (moving, i, off) -> if (moving) follow = i == 0 && off < 160 }
     }
-    val newest = vm.items.lastOrNull()
+    val newest = rows.firstOrNull()
     LaunchedEffect(newest?.key, vm.live.isEmpty(), vm.busy) {
         if (vm.focus != null) return@LaunchedEffect
         // A card waiting for the user's OK always comes into view.
@@ -128,16 +134,40 @@ fun ChatTab(vm: Seimei) {
         }
     }
     // Rows sit after the away card and the live or working row, when those show.
-    val lead = listOf(!vm.online && vm.awaySince != null, vm.live.isNotEmpty() || (vm.online && vm.busy && vm.waiting == 0)).count { it } +
-        vm.pending.size
+    val liveHere = vm.live.isNotEmpty() && vm.liveLane == vm.lane
+    val lead = listOf(!vm.online && vm.awaySince != null, liveHere || (vm.online && vm.busy && vm.waiting == 0)).count { it } +
+        if (traj) 0 else vm.pending.size
+    // A tapped notification names an event; it may sit in either lane.
     LaunchedEffect(vm.focus, rows.size) {
         val id = vm.focus ?: return@LaunchedEffect
         val i = rows.indexOfFirst { it.key == "e$id" }
         if (i >= 0) {
             state.scrollToItem(lead + i)
             vm.focus = null
+        } else if ((if (traj) vm.items else vm.trail).any { it.key == "e$id" }) vm.showLane(if (traj) "c" else "t")
+    }
+    // A fold line or an anchor was tapped: go to the row it names and flash it.
+    var flashing by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(vm.goto, vm.lane) {
+        val key = vm.goto ?: return@LaunchedEffect
+        vm.goto = null
+        val i = rows.indexOfFirst { it.key == key }
+        if (i < 0) return@LaunchedEffect
+        follow = false
+        state.scrollToItem(lead + i, -200)
+        flashing = key
+        delay(1400)
+        flashing = null
+    }
+    // Each lane starts at its newest row.
+    LaunchedEffect(vm.lane) {
+        if (vm.goto == null) {
+            state.scrollToItem(0)
+            follow = true
         }
     }
+    Column(Modifier.fillMaxSize()) {
+    LaneTabs(vm)
     Box(Modifier.fillMaxSize()) {
     LazyColumn(
         Modifier.fillMaxSize(),
@@ -147,11 +177,13 @@ fun ChatTab(vm: Seimei) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         if (!vm.online && vm.awaySince != null) item(key = "away") { Away(vm) }
-        if (vm.live.isNotEmpty()) item(key = "live") { Md(vm.live) }
+        if (liveHere) item(key = "live") { Md(vm.live) }
         else if (vm.online && vm.busy && vm.waiting == 0) item(key = "working") { Working() }
-        items(vm.pending.asReversed(), key = { "p" + it.cid }) { PendingMsg(it, vm) }
+        if (!traj) items(vm.pending.asReversed(), key = { "p" + it.cid }) { PendingMsg(it, vm) }
         items(rows, key = { it.key }, contentType = { it::class }) { row ->
-            Row(row, vm) { zoom = it }
+            Box(if (row.key == flashing) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp)) else Modifier) {
+                Row(row, vm) { zoom = it }
+            }
         }
         if (vm.hasOlder) item(key = "older") {
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -159,12 +191,14 @@ fun ChatTab(vm: Seimei) {
             }
         }
     }
-    // An empty chat greets instead of showing a blank sheet.
-    if (vm.items.isEmpty() && vm.pending.isEmpty() && !vm.hasOlder && vm.online) Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+    // An empty chat greets instead of showing a blank sheet; an empty trajectory says what will show.
+    if (!traj && vm.items.isEmpty() && vm.pending.isEmpty() && !vm.hasOlder && vm.online) Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
         Mark(56)
         Spacer(Modifier.height(14.dp))
         Text("Ask seimei anything", fontSize = 17.sp, color = LocalExtra.current.text2)
     }
+    if (traj && vm.trail.isEmpty() && !vm.hasOlder) Text("Shikigami reports, restarts and what seimei did about them show here.",
+        Modifier.align(Alignment.Center).padding(horizontal = 48.dp), fontSize = 14.sp, color = LocalExtra.current.text3, textAlign = TextAlign.Center)
     // Scrolled up: a way back to the end, which also shows that something new may be there.
     if (!follow) SmallFloatingActionButton(
         { scope.launch { state.animateScrollToItem(0); follow = true } },
@@ -172,14 +206,95 @@ fun ChatTab(vm: Seimei) {
         containerColor = MaterialTheme.colorScheme.secondaryContainer,
     ) { Icon(Icons.down, "Jump to the newest") }
     }
+    }
     zoom?.let { Zoom(vm, it) { zoom = null } }
+}
+
+/** Chat | Trajectory: the conversation, and what happened on its own. */
+@Composable
+fun LaneTabs(vm: Seimei) {
+    Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        LaneTab("Chat", vm.lane == "c", 0) { vm.showLane("c") }
+        LaneTab("Trajectory", vm.lane == "t", vm.unseen) { vm.showLane("t") }
+    }
+}
+
+@Composable
+fun LaneTab(label: String, on: Boolean, count: Int, click: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Column(
+        Modifier.width(IntrinsicSize.Max).clip(RoundedCornerShape(12.dp)).clickable(onClick = click)
+            .semantics(mergeDescendants = true) {
+                role = Role.Tab
+                selected = on
+                if (count > 0) stateDescription = "$count new"
+            }
+            .padding(horizontal = 12.dp),
+    ) {
+        Row(Modifier.height(41.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(label, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = if (on) cs.onSurface else LocalExtra.current.text3)
+            if (count > 0) {
+                Spacer(Modifier.width(8.dp))
+                Box(Modifier.heightIn(min = 18.dp).widthIn(min = 18.dp).clip(RoundedCornerShape(9.dp)).background(cs.primary).padding(horizontal = 5.dp),
+                    contentAlignment = Alignment.Center) {
+                    Text(if (count > 99) "99+" else "$count", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = cs.onPrimary)
+                }
+            }
+        }
+        Box(Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp)).background(if (on) cs.primary else Color.Transparent))
+    }
+}
+
+/** A chip quoting the message this one answers; a tap goes to it. */
+@Composable
+fun AnchorChip(a: Anchor, vm: Seimei, onUser: Boolean = false) {
+    val cs = MaterialTheme.colorScheme
+    val fg = if (onUser) cs.onPrimaryContainer else LocalExtra.current.text3
+    Row(
+        Modifier.padding(bottom = 6.dp).clip(RoundedCornerShape(10.dp))
+            .background(if (onUser) cs.onPrimaryContainer.copy(alpha = .12f) else cs.surfaceContainer)
+            .clickable { vm.showLane(a.lane, a.goto) }.padding(start = 8.dp, end = 10.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.reply, null, Modifier.size(14.dp), tint = fg.copy(alpha = .8f))
+        Spacer(Modifier.width(6.dp))
+        Text(a.text, fontSize = 12.5.sp, color = fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** A run of trajectory events, as one line in the chat. */
+@Composable
+fun FoldPill(f: Item.Fold, vm: Seimei) {
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Row(
+            Modifier.heightIn(min = 32.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceContainer)
+                .clickable { vm.showLane("t", f.goto) }.padding(horizontal = 14.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(f.text, Modifier.weight(1f, fill = false), fontSize = 13.sp, fontWeight = FontWeight.Medium, color = LocalExtra.current.text3,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.width(8.dp))
+            Text("Trajectory", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary)
+        }
+    }
+}
+
+@Composable
+fun TrigRow(t: Item.Trig) {
+    Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(6.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary))
+        Spacer(Modifier.width(8.dp))
+        Text(t.text, fontSize = 12.5.sp, color = LocalExtra.current.text3)
+    }
 }
 
 @Composable
 fun Row(item: Item, vm: Seimei, live: JSONObject? = null, onPicture: (String) -> Unit) {
     when (item) {
         is Item.Day -> NotePill(dayLabel(item.t), "", day = true)
-        is Item.Msg -> if (item.role == "user") UserMsg(item, vm, onPicture) else AssistantMsg(item)
+        is Item.Msg -> if (item.role == "user") UserMsg(item, vm, onPicture) else AssistantMsg(item, vm)
+        is Item.Fold -> FoldPill(item, vm)
+        is Item.Trig -> TrigRow(item)
         is Item.Note -> NotePill(item.text + if (item.n > 1) "  ×${item.n}" else "", item.level)
         is Item.Activity -> ActivityChip(item, live)
         is Item.Worker -> WorkerCard(item)
@@ -260,6 +375,7 @@ fun UserMsg(m: Item.Msg, vm: Seimei, onPicture: (String) -> Unit) {
                 .padding(horizontal = 16.dp, vertical = 11.dp),
             horizontalAlignment = Alignment.End,
         ) {
+            m.anchor?.let { AnchorChip(it, vm, onUser = true) }
             if (m.images.isNotEmpty()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     for (name in m.images.take(3)) {
@@ -294,6 +410,7 @@ fun PendingMsg(p: Pending, vm: Seimei) {
                 .padding(horizontal = 16.dp, vertical = 11.dp),
             horizontalAlignment = Alignment.End,
         ) {
+            p.reply?.let { AnchorChip(Anchor(anchorText(it.second), "e${it.first}", "t"), vm, onUser = true) }
             val photos = p.sending.filterIsInstance<Attachment.Photo>()
             if (photos.isNotEmpty()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -364,11 +481,14 @@ fun FileChip(vm: Seimei, f: FileRef, modifier: Modifier = Modifier, onUser: Bool
 }
 
 @Composable
-fun AssistantMsg(m: Item.Msg) {
+fun AssistantMsg(m: Item.Msg, vm: Seimei) {
     var time by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().clickable(indication = null, interactionSource = null) { time = !time }) {
+        m.anchor?.let { AnchorChip(it, vm) }
         Md(m.text)
         if (time) Text(clock(m.t), fontSize = 12.sp, color = LocalExtra.current.text3, modifier = Modifier.padding(top = 4.dp))
+        if (m.reply > 0) androidx.compose.material3.OutlinedButton({ vm.replyIn(m.reply) }, Modifier.padding(top = 8.dp).heightIn(min = 32.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp)) { Text("Reply in chat", fontSize = 13.sp) }
     }
 }
 
@@ -742,6 +862,19 @@ fun Composer(vm: Seimei) {
     var menu by remember { mutableStateOf(false) }
     val cs = MaterialTheme.colorScheme
     Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 8.dp)) {
+        vm.replyTo?.let { (_, text) ->
+            Row(
+                Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(14.dp)).background(cs.surfaceContainerHigh)
+                    .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.reply, null, Modifier.size(16.dp), tint = LocalExtra.current.text2)
+                Spacer(Modifier.width(8.dp))
+                Text("Replying to: ${text.replace(Regex("\\s+"), " ").trim()}", Modifier.weight(1f), fontSize = 13.sp, color = LocalExtra.current.text2,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                IconButton(vm::cancelReply, Modifier.size(40.dp)) { Icon(Icons.close, "Cancel the reply", Modifier.size(16.dp)) }
+            }
+        }
         if (vm.attachments.isNotEmpty()) Row(Modifier.padding(bottom = 8.dp).horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             for (a in vm.attachments) Box {

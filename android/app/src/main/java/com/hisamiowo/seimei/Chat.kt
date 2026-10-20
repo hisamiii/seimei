@@ -10,8 +10,14 @@ sealed interface Item {
     val key: String
 
     data class Day(override val key: String, val t: Double) : Item
+    /** anchor: the message this one answers, when something sits between them; reply: the event id "Reply in chat"
+     *  answers (a message of seimei's in the trajectory), 0 for none. */
     data class Msg(override val key: String, val role: String, val text: String, val images: List<String>, val t: Double,
-                   val files: List<FileRef> = emptyList()) : Item
+                   val files: List<FileRef> = emptyList(), val anchor: Anchor? = null, val reply: Long = 0) : Item
+    /** A run of trajectory events, as one line in the chat; goto is the key of the first one. */
+    data class Fold(override val key: String, val text: String, val goto: String) : Item
+    /** What started a dispatcher turn in the trajectory: "after app-tester finished". */
+    data class Trig(override val key: String, val text: String) : Item
     data class Note(override val key: String, val text: String, val level: String, val n: Int = 1, val t: Double = 0.0) : Item
     data class Activity(override val key: String, val calls: List<Call>) : Item
     data class Worker(
@@ -29,6 +35,22 @@ sealed interface Item {
     /** A file seimei handed over to download. */
     data class Sent(override val key: String, val file: FileRef, val caption: String, val t: Double = 0.0) : Item
 }
+
+/** A chip quoting another message; a tap goes to it (lane "c": the chat, "t": the trajectory). */
+data class Anchor(val text: String, val goto: String, val lane: String)
+
+fun anchorText(text: String) = text.replace(Regex("\\s+"), " ").trim().let { if (it.length > 60) it.take(60) + "…" else it }
+
+/** Events in lane "t" happened on their own (events.py): the trajectory gets them whole, the chat a fold line. */
+fun JSONObject.inTraj() = str("lane") == "t"
+
+/** What counts toward the Trajectory badge: reports, notes and seimei's own words, not its tool calls. */
+fun JSONObject.worth() = inTraj() && str("type") in setOf("assistant", "worker", "system", "rate_limit")
+
+/** Shikigami id -> its open "asks" card, wherever it was drawn: a report in the trajectory settles a card in the chat. */
+class Asks : HashMap<String, Pair<Chat, Int>>()
+
+private val ENDED = mapOf("done" to "finished", "failed" to "failed", "stopped" to "was stopped", "interrupted" to "was interrupted")
 
 /** A file stored on the laptop (uploads.py), downloaded only when tapped. */
 data class FileRef(val id: String, val name: String, val size: Long, val kind: String)
@@ -53,16 +75,24 @@ fun dayOf(t: Double, zone: ZoneId = ZoneId.systemDefault()): LocalDate =
 
 fun JSONObject.str(k: String) = optString(k, "").let { if (it == "null") "" else it }
 
-class Chat(private val zone: ZoneId = ZoneId.systemDefault()) {
+class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: String = "c", private val asks: Asks = Asks()) {
     val items = ArrayList<Item>()
+    /** Texts of messages by event id, for anchors and "Reply in chat". */
+    val said = HashMap<Long, String>()
+    // Chat: the open fold line and what it names, the user's last message, and whether something sits after it.
+    private var fold = -1
+    private val reports = ArrayList<String>()
+    private val notesSeen = ArrayList<String>()
+    private var lastUser = 0L
+    private var between = false
+    // Trajectory: the dispatcher turn being drawn.
+    private var turn = 0L
     private var day: LocalDate? = null
     private var activity = -1
     private val tools = HashMap<String, Int>()
     private val notes = HashMap<String, Int>()
     private val approvals = HashMap<String, Int>()
     private val outcomes = HashMap<String, String>()
-    /** Shikigami id -> its open "asks" card; a later event about it settles the card. */
-    private val asks = HashMap<String, Int>()
     private var seq = 0
 
     val waiting get() = approvals.keys.count { it !in outcomes }
@@ -88,21 +118,14 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault()) {
         put(Item.Note("local${seq++}", text, level))
     }
 
-    fun add(ev: JSONObject) {
-        val type = ev.str("type")
-        val t = ev.optDouble("t", 0.0).let { if (it.isNaN()) 0.0 else it }
+    private fun keyOf(ev: JSONObject) = when (val id = ev.opt("id")) {
         // The event log numbers events; a session's transcript names them by uuid.
-        val key = when (val id = ev.opt("id")) {
-            is Number -> "e${id.toLong()}"
-            is String -> "s$id"
-            else -> "x${seq++}"
-        }
-        if (type == "approval_done") {
-            val aid = ev.str("aid")
-            outcomes[aid] = ev.str("outcome")
-            approvals[aid]?.let { i -> items[i] = (items[i] as Item.Approval).copy(outcome = outcomes[aid]) }
-            return
-        }
+        is Number -> "e${id.toLong()}"
+        is String -> "s$id"
+        else -> "x${seq++}"
+    }
+
+    private fun daily(t: Double) {
         if (t > 0) {
             val d = dayOf(t, zone)
             if (d != day) {
@@ -110,6 +133,60 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault()) {
                 put(Item.Day("d$d", t))
             }
         }
+    }
+
+    private fun settle(i: Int, word: String) {
+        (items[i] as? Item.Worker)?.let { items[i] = it.copy(settled = word) }
+    }
+
+    /** An event of the trajectory, seen from the chat: one line per run, naming the shikigami reports first. */
+    fun fold(ev: JSONObject) {
+        val type = ev.str("type")
+        if (type == "tool_result" || type == "approval_done") return
+        daily(ev.optDouble("t", 0.0).let { if (it.isNaN()) 0.0 else it })
+        val key = keyOf(ev)
+        if (fold < 0) {
+            reports.clear()
+            notesSeen.clear()
+            fold = put(Item.Fold("f$key", "", key))
+            activity = -1
+            between = true
+        }
+        val label = when (type) {
+            "worker" -> "${ev.str("name")} ${ENDED[ev.str("event")] ?: ev.str("event")}"
+            "system" -> ev.str("text").removeSuffix(".")
+            "rate_limit" -> limitText(ev)
+            else -> ""
+        }
+        val list = if (type == "worker") reports else notesSeen
+        if (label.isNotEmpty() && label !in list) list.add(label)
+        val all = reports + notesSeen
+        val shown = all.take(maxOf(1, minOf(3, reports.size)))
+        val text = if (all.isEmpty()) "seimei acted on its own"
+            else shown.joinToString(", ") + if (all.size > shown.size) " and ${all.size - shown.size} more" else ""
+        items[fold] = (items[fold] as Item.Fold).copy(text = text)
+    }
+
+    fun add(ev: JSONObject) {
+        val type = ev.str("type")
+        val t = ev.optDouble("t", 0.0).let { if (it.isNaN()) 0.0 else it }
+        val key = keyOf(ev)
+        if (type == "approval_done") {
+            val aid = ev.str("aid")
+            outcomes[aid] = ev.str("outcome")
+            approvals[aid]?.let { i -> items[i] = (items[i] as Item.Approval).copy(outcome = outcomes[aid]) }
+            return
+        }
+        if (type != "tool_result") fold = -1
+        daily(t)
+        // Each dispatcher turn in the trajectory opens with what started it.
+        val turnId = ev.optLong("turn")
+        if (lane == "t" && turnId > 0 && turnId != turn && type != "tool_result") {
+            turn = turnId
+            activity = -1
+            val why = ev.str("why")
+            put(Item.Trig("g$key", if (why.isEmpty()) "on its own" else "after $why"))
+        } else if (lane == "t" && turnId == 0L) turn = 0
         // The summoned card already says it.
         if (type == "tool" && ev.str("name") == "mcp__seimei__summon") return
         if (type == "tool") {
@@ -133,24 +210,41 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault()) {
             return
         }
         activity = -1
-        when (type) {
-            "user", "assistant" -> {
-                val imgs = ev.optJSONArray("images")
-                val files = ev.optJSONArray("files")
-                put(Item.Msg(key, type, ev.str("text"), List(imgs?.length() ?: 0) { imgs!!.getString(it) }, t,
-                    List(files?.length() ?: 0) { files!!.getJSONObject(it).fileRef() }))
+        val id = ev.optLong("id")
+        if (type == "user" || type == "assistant") {
+            if (id > 0) said[id] = ev.str("text")
+            val re = ev.optLong("re")
+            val anchor = when {
+                type == "user" && ev.str("quote").isNotEmpty() -> Anchor(anchorText(ev.str("quote")), "e${ev.optLong("quote_id")}", "t")
+                // A reply far from what it answers says which message that was.
+                type == "assistant" && re > 0 && (re != lastUser || between) && said.containsKey(re) -> Anchor(anchorText(said[re]!!), "e$re", "c")
+                else -> null
             }
+            if (type == "user") {
+                lastUser = id
+                between = false
+            } else if (anchor != null) between = false
+            val imgs = ev.optJSONArray("images")
+            val files = ev.optJSONArray("files")
+            put(Item.Msg(key, type, ev.str("text"), List(imgs?.length() ?: 0) { imgs!!.getString(it) }, t,
+                List(files?.length() ?: 0) { files!!.getJSONObject(it).fileRef() }, anchor,
+                if (lane == "t" && type == "assistant") id else 0))
+            return
+        }
+        // What the turn itself shows (lane c: a summoned card, a picture) does not come between.
+        if (ev.str("lane") != "c") between = true
+        when (type) {
             "system" -> note(ev.str("text"), ev.str("level"), t, key)
             "worker" -> {
                 val event = ev.str("event")
-                val id = ev.str("worker")
-                if (event != "summoned") asks.remove(id)?.let { i ->
-                    (items[i] as? Item.Worker)?.let { items[i] = it.copy(settled = if (event == "replied" || event == "done") "Answered" else "Closed") }
+                val wid = ev.str("worker")
+                if (event != "summoned") asks.remove(wid)?.let { (owner, i) ->
+                    owner.settle(i, if (event == "replied" || event == "done") "Answered" else "Closed")
                 }
                 if (event == "replied") {
                     put(Item.Note(key, "You ${if (ev.optBoolean("asked")) "answered" else "messaged"} ${ev.str("name")}: ${ev.str("text")}", ""))
                 } else if (event in WORKER_CARDS) {
-                    if (event == "asking") asks[id] = items.size
+                    if (event == "asking") asks[wid] = this to items.size
                     put(Item.Worker(key, event, ev.str("name"), ev.str("worker"), ev.str("text"), ev.str("model"), ev.str("cwd"),
                         ev.str("effort"), ev.str("context_cap")))
                 } else {

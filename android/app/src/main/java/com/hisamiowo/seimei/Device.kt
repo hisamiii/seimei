@@ -41,6 +41,10 @@ class Prefs(ctx: Context) {
     var pushToken: String?
         get() = p.getString("pushToken", null)
         set(v) = p.edit().putString("pushToken", v).apply()
+    /** The newest trajectory event the user has seen; 0 before the first visit. */
+    var trajSeen: Long
+        get() = p.getLong("trajSeen", 0L)
+        set(v) = p.edit().putLong("trajSeen", v).apply()
     var askedNotifications: Boolean
         get() = p.getBoolean("askedNotifications", false)
         set(v) = p.edit().putBoolean("askedNotifications", v).apply()

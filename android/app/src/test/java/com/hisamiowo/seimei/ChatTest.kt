@@ -121,8 +121,10 @@ class ChatTest {
         assertEquals("Running make · 4m", r.line)
         val asking = JSONObject().put("pid", 8).put("name", "q").put("status", "waiting").put("question", true).put("ask", "Keep 4?")
         assertEquals("ask" to "Keep 4?", fromSession(asking, seen).let { it.state to it.line })
-        val prompt = JSONObject().put("pid", 9).put("name", "p").put("status", "waiting").put("waiting_for", "approve Bash")
-        assertEquals("Waiting for approve Bash on the laptop", fromSession(prompt, seen).line)
+        // The laptop words the wait (sessions.py waiting_text); without it the row says only where it waits.
+        val prompt = JSONObject().put("pid", 9).put("name", "p").put("status", "waiting").put("waiting_text", "Waiting for your OK to run Bash")
+        assertEquals("Waiting for your OK to run Bash", fromSession(prompt, seen).line)
+        assertEquals("Waiting on the laptop", fromSession(JSONObject().put("pid", 11).put("status", "waiting"), seen).line)
         val idle = JSONObject().put("pid", 10).put("name", "i").put("status", "idle").put("line", "Done.").put("context", 41)
         assertEquals(41, fromSession(idle, seen).context)
         assertNull(fromSession(prompt, seen).context)
@@ -136,6 +138,57 @@ class ChatTest {
         assertEquals(Color(0xFF94E2D5), tint("yah"))
         assertEquals(Color(0xFFEBA0AC), tint("tmc-lab"))
         assertEquals(Color(0xFFF9E2AF), tint("seimei"))
+    }
+
+    /** Routes like the view model: trajectory events whole into one Chat, a fold line into the other. */
+    private fun lanes(vararg evs: JSONObject): Pair<Chat, Chat> {
+        val asks = Asks()
+        val chat = Chat(utc, asks = asks)
+        val trail = Chat(utc, "t", asks)
+        for (e in evs) if (e.inTraj()) { trail.add(e); chat.fold(e) } else chat.add(e)
+        return chat to trail
+    }
+
+    @Test fun trajectoryFoldsIntoOneLine() {
+        val (chat, trail) = lanes(
+            ev("user", kv = arrayOf("text" to "go")),
+            ev("worker", kv = arrayOf("event" to "done", "worker" to "w1", "name" to "app-tester", "text" to "ok", "lane" to "t")),
+            ev("system", kv = arrayOf("text" to "Session is back.", "lane" to "t")),
+            ev("worker", kv = arrayOf("event" to "failed", "worker" to "w2", "name" to "asr-bench", "text" to "no", "lane" to "t")),
+            ev("assistant", kv = arrayOf("text" to "noted", "lane" to "t", "turn" to 5, "why" to "app-tester finished")),
+        )
+        val f = chat.items.filterIsInstance<Item.Fold>().single()
+        assertEquals("app-tester finished, asr-bench failed and 1 more", f.text)
+        assertTrue(chat.items.none { it is Item.Worker })
+        assertEquals(2, trail.items.filterIsInstance<Item.Worker>().size)
+        assertEquals("after app-tester finished", trail.items.filterIsInstance<Item.Trig>().single().text)
+        assertEquals(5L, trail.items.filterIsInstance<Item.Msg>().single().reply)
+        assertEquals("noted", trail.said[5L])
+    }
+
+    @Test fun anchorOnlyWhenSomethingSitsBetween() {
+        val (chat, _) = lanes(
+            ev("user", kv = arrayOf("text" to "first question")),
+            ev("assistant", kv = arrayOf("text" to "right below", "lane" to "c", "re" to 1)),
+            ev("worker", kv = arrayOf("event" to "asking", "worker" to "w1", "name" to "x", "text" to "which?")),
+            ev("assistant", kv = arrayOf("text" to "after a card", "lane" to "c", "re" to 1)),
+        )
+        val msgs = chat.items.filterIsInstance<Item.Msg>()
+        assertNull(msgs[1].anchor)
+        assertEquals(Anchor("first question", "e1", "c"), msgs[2].anchor)
+    }
+
+    @Test fun reportInTrajectorySettlesAskInChat() {
+        val (chat, _) = lanes(
+            ev("worker", kv = arrayOf("event" to "asking", "worker" to "w1", "name" to "x", "text" to "which?")),
+            ev("worker", kv = arrayOf("event" to "done", "worker" to "w1", "name" to "x", "text" to "ok", "lane" to "t")),
+        )
+        assertEquals("Answered", chat.items.filterIsInstance<Item.Worker>().single().settled)
+    }
+
+    @Test fun quotedReplyShowsItsAnchor() {
+        val (chat, _) = lanes(ev("user", kv = arrayOf("text" to "ship it", "quote" to "app-tester is done", "quote_id" to 9)))
+        assertEquals(Anchor("app-tester is done", "e9", "t"), chat.items.filterIsInstance<Item.Msg>().single().anchor)
     }
 }
 
