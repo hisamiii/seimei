@@ -208,6 +208,7 @@ const WORKER = {
 
 function workerCard(ev) {
   const kind = WORKER[ev.event];
+  if (ev.event === 'replied') return el('div', 'note', `You ${ev.asked ? 'answered' : 'messaged'} ${ev.name}: ${ev.text}`);
   if (!kind) {
     const what = ev.event === 'stopped' ? 'was stopped' : 'was interrupted by a restart';
     return el('div', 'note', `${ev.name} ${what}`);
@@ -230,21 +231,28 @@ function workerCard(ev) {
     if (ev.event === 'summoned') body.textContent = ev.text;
     else body.innerHTML = md(ev.text);
     card.append(body);
-    requestAnimationFrame(() => {
-      if (body.scrollHeight > body.clientHeight + 4) {
-        card.classList.add('clipped');
-        const more = el('button', 'more sl', 'Show more');
-        more.type = 'button';
-        more.addEventListener('click', () => {
-          card.classList.toggle('open');
-          more.textContent = card.classList.contains('open') ? 'Show less' : 'Show more';
-        });
-        card.append(more);
-      }
-    });
+    clipWatch.observe(body);
   }
   return card;
 }
+
+// Long card bodies get "Show more". Measured when the body has a size: a card drawn on a hidden tab has none yet (QA B8).
+const clipWatch = new ResizeObserver((entries) => {
+  for (const { target: body } of entries) {
+    if (!body.clientHeight) continue;
+    clipWatch.unobserve(body);
+    const card = body.parentElement;
+    if (body.scrollHeight <= body.clientHeight + 4 || card.querySelector('.more')) continue;
+    card.classList.add('clipped');
+    const more = el('button', 'more sl', 'Show more');
+    more.type = 'button';
+    more.addEventListener('click', () => {
+      card.classList.toggle('open');
+      more.textContent = card.classList.contains('open') ? 'Show less' : 'Show more';
+    });
+    card.append(more);
+  }
+});
 
 // Cards by approval id, and outcomes seen so far (an older page can load a card after its outcome).
 const approvals = new Map();
@@ -311,8 +319,10 @@ function tick() {
 }
 setInterval(tick, 20000);
 
-function pic(name) {
+function pic(name, size) {
   const img = el('img', 'pic');
+  // The aspect ratio reserves the picture's space before it loads, so the thread does not jump.
+  if (size?.[0] && size?.[1]) img.style.aspectRatio = `${size[0]} / ${size[1]}`;
   img.src = `api/files/${name}?w=thumb`;
   img.dataset.name = name;
   img.loading = 'lazy';
@@ -367,7 +377,7 @@ export function message(ev) {
   else {
     if (ev.images?.length) {
       const pics = el('div', `pics n${Math.min(ev.images.length, 3)}${ev.text ? '' : ' only'}`);
-      ev.images.forEach((n) => pics.append(pic(n)));
+      ev.images.forEach((n, i) => pics.append(pic(n, ev.sizes?.[i])));
       node.append(pics);
     }
     if (ev.files?.length) {
@@ -383,7 +393,10 @@ export function message(ev) {
 
 function shown(ev) {
   const fig = el('figure', 'shown');
-  fig.append(pic(ev.file));
+  const img = pic(ev.file, ev.w && [ev.w, ev.h]);
+  // As wide as it fits, never upscaled, and no taller than 60vh: the same box the loaded picture gets.
+  if (ev.w && ev.h) img.style.width = `min(100%, ${ev.w}px, calc(60vh * ${(ev.w / ev.h).toFixed(4)}))`;
+  fig.append(img);
   if (ev.caption) fig.append(el('figcaption', null, ev.caption));
   return fig;
 }
@@ -406,6 +419,8 @@ export class Renderer {
     this.activity = null;
     this.tools = new Map();
     this.notes = new Map();
+    // Shikigami whose "asks" card is still open: any later event about them settles it.
+    this.asks = new Map();
   }
 
   put(node) {
@@ -461,7 +476,16 @@ export class Renderer {
     this.activity = null;
     if (ev.type === 'user' || ev.type === 'assistant') this.put(message(ev));
     else if (ev.type === 'system') this.note(ev);
-    else if (ev.type === 'worker') this.put(workerCard(ev));
+    else if (ev.type === 'worker') {
+      const open = this.asks.get(ev.worker);
+      if (open && ev.event !== 'summoned') {
+        open.classList.replace('asking', 'asked');
+        open.querySelector('.title').append(el('span', 'meta', ev.event === 'replied' || ev.event === 'done' ? 'Answered' : 'Closed'));
+        this.asks.delete(ev.worker);
+      }
+      const card = this.put(workerCard(ev));
+      if (ev.event === 'asking') this.asks.set(ev.worker, card);
+    }
     else if (ev.type === 'image') this.put(shown(ev));
     else if (ev.type === 'file') this.put(sentFile(ev));
     else if (ev.type === 'approval') this.put(approvalCard(ev));

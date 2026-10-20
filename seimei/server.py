@@ -225,13 +225,21 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
         resp.del_cookie(auth.cookie, path="/")
         return resp
 
+    def sized(ev: dict) -> dict:
+        """Pictures carry their size, so lazy images keep their space before they load (QA B13)."""
+        if ev.get("type") == "image" and "w" not in ev and (d := files.dims(ev.get("file", ""))):
+            ev["w"], ev["h"] = d
+        if ev.get("images") and "sizes" not in ev:
+            ev["sizes"] = [files.dims(n) or [0, 0] for n in ev["images"]]
+        return ev
+
     async def history(request):
         try:
             before = int(request.query["before"]) if "before" in request.query else None
             limit = min(int(request.query.get("limit", 200)), 1000)
         except ValueError:
             raise web.HTTPBadRequest()
-        return web.json_response({"events": events.before(before, limit), "last": events.last_id,
+        return web.json_response({"events": [sized(e) for e in events.before(before, limit)], "last": events.last_id,
                                   "state": dispatcher.state(), "workers": pool.listing()["list"]})
 
     async def stream(request):
@@ -249,7 +257,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
             push.opened(device, request)
         try:
             for ev in events.after(last):
-                await write_event(resp, ev)
+                await write_event(resp, sized(ev))
                 last = ev["id"]
             await write_event(resp, dispatcher.state())
             await write_event(resp, pool.listing())
@@ -275,7 +283,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
                     if ev["id"] <= last:
                         continue
                     last = ev["id"]
-                await write_event(resp, ev)
+                await write_event(resp, sized(ev))
         except ConnectionResetError:
             pass
         finally:
@@ -516,10 +524,14 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
         text = (shown + attachment_lines(body.get("files") or [])).strip()
         if not text:
             raise web.HTTPBadRequest()
+        asked = w.rec["state"] == "asking"
         try:
             await w.send(text, shown=shown, files=chips(infos))
         except RuntimeError as e:
             return web.json_response({"error": str(e)}, status=409)
+        # The main chat says the user answered or messaged it (QA U17); an open "asks" card settles on it (B5).
+        events.add({"type": "worker", "event": "replied", "worker": w.id, "name": w.name, "asked": asked,
+                    "text": (shown or "(files)")[:200]})
         dispatcher.note(f"the user messaged shikigami {w.name} ({w.id}) directly: {text[:500]}")
         return web.json_response({"ok": True})
 

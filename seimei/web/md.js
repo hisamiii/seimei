@@ -14,7 +14,8 @@ function inline(src) {
   s = s.replace(/https?:\/\/[^\s<>()]*[^\s<>().,;:!?'"]/g, (u) => put(link(u, esc(u))));
   s = esc(s)
     .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/(^|[^\w*])\*([^*\n]+)\*(?![\w*])/g, '$1<em>$2</em>')
+    // Emphasis hugs its text: `a * b * c` stays arithmetic.
+    .replace(/(^|[^\w*])\*([^*\s](?:[^*\n]*[^*\s])?)\*(?![\w*])/g, '$1<em>$2</em>')
     .replace(/(^|\W)_([^_\n]+)_(?!\w)/g, '$1<em>$2</em>')
     .replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
   return s.replace(/\u0000(\d+)\u0000/g, (_, i) => slots[i]);
@@ -35,6 +36,7 @@ function cells(row) {
 }
 
 function list(lines, i) {
+  const first = i;
   const base = indent(lines[i]);
   const ordered = (l) => /^\s*\d/.test(l);
   const tag = ordered(lines[i]) ? 'ol' : 'ul';
@@ -57,7 +59,9 @@ function list(lines, i) {
     i++;
   }
   const lis = items.map(([first, ...rest]) => `<li>${inline(first)}${rest.length ? md(rest.join('\n')) : ''}</li>`);
-  return [`<${tag}>${lis.join('')}</${tag}>`, i];
+  // A list that goes on after a code block keeps its numbers (2. after 1.).
+  const start = tag === 'ol' ? parseInt(lines[first].trim(), 10) : 1;
+  return [`<${tag}${start > 1 ? ` start="${start}"` : ''}>${lis.join('')}</${tag}>`, i];
 }
 
 export function md(src) {

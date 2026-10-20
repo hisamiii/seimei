@@ -39,6 +39,7 @@ class Files:
         self.dir.mkdir(exist_ok=True)
         self.thumbs = self.dir / "thumbs"
         self.thumbs.mkdir(exist_ok=True)
+        self.sizes: dict[str, list[int] | None] = {}
 
     def save(self, data: bytes) -> tuple[str, str]:
         """Store image bytes; returns (name, media type)."""
@@ -56,6 +57,17 @@ class Files:
             return None
         p = self.dir / name
         return p if p.is_file() else None
+
+    def dims(self, name: str) -> list[int] | None:
+        """[width, height] of a stored image (only its header is read), so pages can reserve its space."""
+        if name not in self.sizes:
+            p = self.path(name)
+            try:
+                with Image.open(p) as im:
+                    self.sizes[name] = list(im.size)
+            except (OSError, ValueError, TypeError):
+                self.sizes[name] = None
+        return self.sizes[name]
 
     def thumb(self, name: str) -> Path | None:
         """The chat-sized picture: a cached WebP, or the original when it is small already or animated."""
