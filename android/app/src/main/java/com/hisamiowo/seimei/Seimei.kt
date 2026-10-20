@@ -131,6 +131,10 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     var tab by mutableStateOf("chat")
         private set
 
+    /** Counts the user's sends from the chat: the chat jumps to the end on each. */
+    var sent by mutableStateOf(0)
+        private set
+
     /** An event the chat should scroll to (a tapped "reply ready"), once it has loaded. */
     var focus by mutableStateOf<Long?>(null)
     var unread by mutableStateOf(false)
@@ -741,6 +745,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         if ((text.isEmpty() && sending.isEmpty()) || !online) return
         edit("")
         attachments = emptyList()
+        sent++
         viewModelScope.launch {
             val docs = sending.filterIsInstance<Attachment.Doc>()
             try {

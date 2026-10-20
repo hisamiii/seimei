@@ -214,6 +214,11 @@ class Worker:
             await self.client.query(text)
 
     async def stop(self):
+        if not self.client and self.rec["state"] == "asking":
+            # Asking after a restart: no process runs, so stopping only ends the wait.
+            self._set("stopped", summary="Stopped.", question=None)
+            self.pool.report(self, "stopped", "")
+            return
         if self.client and self.rec["state"] in ACTIVE:
             self.stopping = True
             await self.client.interrupt()
@@ -325,9 +330,10 @@ class Pool:
         self.workers: dict[str, Worker] = {r["id"]: Worker(self, r) for r in recs}
 
     def startup(self):
-        """Workers that were running when seimei stopped lost their turn; say so."""
+        """Workers that were running when seimei stopped lost their turn; say so. An asking one had ended its turn
+        already: it keeps waiting, and the answer resumes its session."""
         for w in self.workers.values():
-            if w.rec["state"] in ACTIVE:
+            if w.rec["state"] == "running":
                 w._set("interrupted", summary="Interrupted by a seimei restart.")
                 self.report(w, "interrupted", "")
 

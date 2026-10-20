@@ -1,5 +1,5 @@
 // The page: the stream from the laptop, the four tabs, and the header and navigation bar around them.
-import { $, S, hooks, finePointer } from './util.js';
+import { $, S, hooks, finePointer, viewing, closeView } from './util.js';
 import { render, onDelta, clearLive, addEvent, loadHistory, autosize, waitingApprovals, toBottom } from './chat.js';
 import { setWorkers, setSessions, sheetEvent, agentCounts, showAgents, pageOpen, closePage } from './agents.js';
 import { showScreen, hideScreen } from './screen.js';
@@ -59,8 +59,11 @@ function go(tab) {
 for (const b of document.querySelectorAll('.nav-item')) b.addEventListener('click', () => go(b.dataset.tab));
 
 window.addEventListener('popstate', () => {
+  if (viewing()) return closeView(true);
   if (!sheet.wrap.hidden) return closeSheet(true);
-  if (pageOpen()) return closePage();
+  // Closing a sheet over the page goes back to the page's own entry: the page stays.
+  if (pageOpen() && !history.state?.spage) return closePage();
+  if (pageOpen()) return;
   show(location.hash.slice(1) || 'chat');
 });
 

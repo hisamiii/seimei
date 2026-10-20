@@ -188,6 +188,7 @@ object Icons {
     val alert = icon("M12 7v6M12 17v.01")
     val dash = icon("M7 12h10")
     val back = icon("M15 5l-7 7 7 7")
+    val down = icon("M12 5v14M5.5 12.5 12 19l6.5-6.5", stroke = 2.2f)
     val question = icon("M4 5h16v11H9l-5 4zM10 9.2a2 2 0 1 1 2.6 1.9c-.4.2-.6.5-.6.9M12 13.6v.1")
 }
 

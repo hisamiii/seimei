@@ -116,6 +116,8 @@ export function view(src, { full = null, save = null } = {}) {
   vimg.src = src;
   vsave.hidden = !save;
   if (save) vsave.href = save;
+  // Its own step of history, so the phone's back button closes it instead of leaving the page.
+  if (viewer.hidden) history.pushState({ viewer: true }, '');
   viewer.hidden = false;
   if (full && full !== src) {
     const big = new Image();
@@ -124,10 +126,15 @@ export function view(src, { full = null, save = null } = {}) {
   }
 }
 
-function close() {
+export const viewing = () => !viewer.hidden;
+
+export function closeView(fromHistory = false) {
+  if (viewer.hidden) return;
   viewer.hidden = true;
   token++;
+  if (!fromHistory && history.state?.viewer) history.back();
 }
+const close = () => closeView();
 
 const pts = new Map();
 let pinch = null;

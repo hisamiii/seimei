@@ -11,6 +11,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import kotlinx.coroutines.launch
+import androidx.compose.material3.SmallFloatingActionButton
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -83,11 +87,30 @@ fun ChatTab(vm: Seimei) {
     val state = rememberLazyListState()
     var zoom by remember { mutableStateOf<String?>(null) }
     val rows = vm.items.asReversed()
-    // The list keeps its first visible row in place when rows are added below it, which would leave
-    // something new just off screen. A reader at the bottom (or a row or two above it) follows the end.
-    val newest = vm.items.lastOrNull()?.key
-    LaunchedEffect(newest, vm.live.isEmpty(), vm.busy) {
-        if (state.firstVisibleItemIndex <= 2 && vm.focus == null) state.scrollToItem(0)
+    val scope = rememberCoroutineScope()
+    // The list keeps its first visible row in place when rows are added below it, so after a burst of new rows
+    // the first visible index says nothing about where the reader is. Whether they follow the end is judged only
+    // while the list scrolls (their finger, or our own jump to the end).
+    var follow by remember { mutableStateOf(true) }
+    LaunchedEffect(state) {
+        snapshotFlow { Triple(state.isScrollInProgress, state.firstVisibleItemIndex, state.firstVisibleItemScrollOffset) }
+            .collect { (moving, i, off) -> if (moving) follow = i == 0 && off < 160 }
+    }
+    val newest = vm.items.lastOrNull()
+    LaunchedEffect(newest?.key, vm.live.isEmpty(), vm.busy) {
+        if (vm.focus != null) return@LaunchedEffect
+        // A card waiting for the user's OK always comes into view.
+        if (follow || (newest is Item.Approval && newest.outcome == null)) {
+            state.scrollToItem(0)
+            follow = true
+        }
+    }
+    // Sending always jumps to the end, even from far up.
+    LaunchedEffect(vm.sent) {
+        if (vm.sent > 0) {
+            follow = true
+            state.scrollToItem(0)
+        }
     }
     // Rows sit after the away card and the live or working row, when those show.
     val lead = listOf(!vm.online && vm.awaySince != null, vm.live.isNotEmpty() || (vm.online && vm.busy && vm.waiting == 0)).count { it }
@@ -99,6 +122,7 @@ fun ChatTab(vm: Seimei) {
             vm.focus = null
         }
     }
+    Box(Modifier.fillMaxSize()) {
     LazyColumn(
         Modifier.fillMaxSize(),
         state = state,
@@ -117,6 +141,13 @@ fun ChatTab(vm: Seimei) {
                 TextButton({ vm.loadOlder() }, enabled = !vm.loadingOlder) { Text("Load earlier") }
             }
         }
+    }
+    // Scrolled up: a way back to the end, which also shows that something new may be there.
+    if (!follow) SmallFloatingActionButton(
+        { scope.launch { state.animateScrollToItem(0); follow = true } },
+        Modifier.align(Alignment.BottomEnd).padding(16.dp),
+        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+    ) { Icon(Icons.down, "Jump to the newest") }
     }
     zoom?.let { Zoom(vm, it) { zoom = null } }
 }

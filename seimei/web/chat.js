@@ -518,7 +518,8 @@ export function onDelta(text) {
 
 // A logged event: draw it, keep the streaming reply last, and follow the bottom.
 export function addEvent(ev) {
-  const stick = nearBottom();
+  // The user's own message always comes into view, even sent while scrolled up.
+  const stick = nearBottom() || ev.type === 'user';
   if (ev.type === 'assistant') clearLive();
   main.add(ev);
   if (live) thread.append(live);
@@ -581,6 +582,7 @@ $('composer').addEventListener('submit', async (e) => {
   input.value = '';
   autosize();
   renderAttachments();
+  toBottom();
   try {
     // Files upload as soon as they are picked; wait for any still on the way.
     await Promise.all(sending.map((a) => a.upload).filter(Boolean));
