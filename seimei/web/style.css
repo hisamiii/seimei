@@ -793,6 +793,37 @@ body.spage-open { overflow: hidden; }
   background: var(--text); color: var(--surface); font-size: 14px; box-shadow: 0 4px 16px rgb(0 0 0 / .35);
 }
 .snack[hidden] { display: none; }
+.snack:has(button) { display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 16px; min-width: min(344px, calc(100vw - 32px)); }
+.snack:has(button)[hidden] { display: none; }
+.snack span { flex: 1; }
+.snack button { flex: none; min-height: 36px; padding: 0 12px; border: 0; border-radius: 18px; background: none; color: #8839ef; font: 600 14px var(--sans); }
+
+/* Agents archive (#43): one row at the end of the list, a searchable page, a banner on an archived agent */
+.archrow { display: flex; align-items: center; gap: 14px; width: 100%; min-height: 64px; margin-top: 10px; padding: 10px; border: 0; border-radius: 18px; background: none; color: var(--text); text-align: left; }
+.archrow .txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.archrow .txt b { font-size: 15.5px; font-weight: 500; }
+.archrow .txt span { font-size: 13.5px; color: var(--text-3); }
+.archrow > svg { flex: none; color: var(--text-3); }
+.agent.arch .tile { opacity: .7; }
+.ahead { display: flex; align-items: center; gap: 4px; margin: 0 0 4px -8px; }
+.ahead .back { flex: none; width: 48px; height: 48px; border: 0; border-radius: 24px; background: none; display: grid; place-items: center; color: var(--text); }
+.ahead h2 { flex: 1; margin: 0; font-size: 18px; font-weight: 500; }
+.ahead .count { color: var(--text-3); font-size: 13px; padding-right: 8px; }
+.asearch { display: flex; align-items: center; gap: 10px; height: 48px; margin: 4px 0 8px; padding: 0 16px; border-radius: 24px; background: var(--container-high); color: var(--text-3); }
+.asearch input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; color: var(--text); font: 15px var(--sans); }
+.asearch input::-webkit-search-cancel-button { filter: invert(.7); }
+.asearch:focus-within { box-shadow: inset 0 0 0 2px var(--primary); }
+mark { background: color-mix(in srgb, var(--primary) 30%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
+.archbar { flex: none; display: flex; align-items: center; gap: 12px; width: calc(100% - 32px); max-width: 720px; margin: 0 auto 4px; padding: 8px 8px 8px 14px; border-radius: 16px; background: var(--container); color: var(--text-2); font-size: 14px; line-height: 1.4; }
+.archbar[hidden] { display: none; }
+.archbar svg { flex: none; color: var(--text-3); }
+.archbar span { flex: 1; }
+.archbar button { flex: none; min-height: 40px; padding: 0 12px; border: 0; border-radius: 20px; background: none; color: var(--primary); font: 500 14px var(--sans); white-space: nowrap; }
+.dbtn.tonal { background: var(--container-high); color: var(--text); }
+.mwho { padding: 0 8px 10px; color: var(--text-3); font-size: 14px; }
+.mopt { display: flex; gap: 16px; align-items: flex-start; width: 100%; padding: 12px 8px; border: 0; border-radius: 14px; background: none; color: var(--text); text-align: left; font-size: 16px; }
+.mopt small { display: block; color: var(--text-3); font-size: 13.5px; margin-top: 2px; line-height: 1.4; }
+.mopt svg { flex: none; margin-top: 1px; color: var(--text-2); }
 
 /* Navigation rail on wide screens and in short landscape (QA D4/U16): the bottom bar moves to the left edge and
    the chat pane and its composer read as one surface beside it. */

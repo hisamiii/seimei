@@ -156,7 +156,7 @@ def main():
                             guard, usage)
     pool.dispatcher, pool.guard = dispatcher, guard
     guard.tell = pool.tell
-    watcher = Watcher(events, pool.own_sessions, pool.notify)
+    watcher = Watcher(events, pool.own_sessions, pool.notify, pool.archive)
     app = make_app(events, dispatcher, pool, files, approvals, guard, watcher, desk, auth, origins, state / "app", Cost(), push, uploads)
 
     async def start(app):
@@ -165,6 +165,7 @@ def main():
         pool.startup()
         app["dispatcher"] = asyncio.create_task(dispatcher.run())
         app["watcher"] = asyncio.create_task(watcher.run())
+        app["archive"] = asyncio.create_task(pool.sweep())
         app["queue"] = asyncio.create_task(QueueWatcher(pool.queue_names, pool.notify, events.flash).run())
         app["wake"] = asyncio.create_task(WakeWatch(events, pool).run())
         app["desktop"] = asyncio.create_task(desk.run())
@@ -194,6 +195,7 @@ def main():
     async def stop(app):
         app["dispatcher"].cancel()
         app["watcher"].cancel()
+        app["archive"].cancel()
         app["queue"].cancel()
         app["wake"].cancel()
         app["desktop"].cancel()

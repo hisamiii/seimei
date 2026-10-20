@@ -1,5 +1,11 @@
 package com.hisamiowo.seimei
 
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.material3.rememberSwipeToDismissBoxState
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.material3.ButtonDefaults
@@ -175,6 +181,9 @@ data class Agent(
     val since: Double, val line: String, val fresh: Boolean = false, val bad: Boolean = false,
     /** A finished shikigami's end state (stopped, interrupted, ...), for its tile icon. */
     val end: String = "",
+    /** Hidden from the list (#43); find: what the Archived search looks in. */
+    val archived: Boolean = false,
+    val find: List<String> = emptyList(),
 )
 
 fun JSONObject.context(): Int? = if (has("context") && !isNull("context")) optInt("context") else null
@@ -189,7 +198,8 @@ fun fromWorker(w: JSONObject): Agent {
             "work" -> workerLine(w)
             else -> w.str("summary").ifEmpty { stateText(w) }
         },
-        bad = st == "failed", end = st,
+        bad = st == "failed", end = st, archived = w.optBoolean("archived"),
+        find = listOf(w.str("name"), w.str("task"), w.str("summary")),
     )
 }
 
@@ -206,12 +216,13 @@ fun fromSession(s: JSONObject, seen: JSONObject): Agent {
             else -> s.str("line").ifEmpty { "Idle" }
         },
         fresh = state == "idle" && s.optDouble("active", 0.0) > seen.optDouble(s.str("session_id"), 0.0) + 1,
+        archived = s.optBoolean("archived"), find = listOf(s.str("name"), s.str("project"), s.str("line")),
     )
 }
 
 /** Working agents, and how many things wait on the user. */
 fun agentCounts(vm: Seimei): Pair<Int, Int> {
-    val all = vm.workers.map(::fromWorker) + vm.sessions.map { fromSession(it, vm.seen) }
+    val all = (vm.workers.map(::fromWorker) + vm.sessions.map { fromSession(it, vm.seen) }).filter { !it.archived }
     return all.count { it.state == "work" } to all.count { it.state == "ask" }
 }
 
@@ -226,14 +237,18 @@ fun AgentsTab(vm: Seimei) {
             value = System.currentTimeMillis()
         }
     }
+    if (vm.archOpen) return ArchiveList(vm, now)
     var showAll by remember { mutableStateOf(false) }
-    val items = vm.workers.filter { it.str("state") in ACTIVE }.map(::fromWorker) + vm.sessions.map { fromSession(it, vm.seen) }
+    val items = (vm.workers.filter { it.str("state") in ACTIVE }.map(::fromWorker) + vm.sessions.map { fromSession(it, vm.seen) })
+        .filter { !it.archived }
     fun by(st: String) = items.filter { it.state == st }.sortedByDescending { it.since }
     val ask = by("ask")
     val work = by("work")
     val idle = by("idle")
-    val done = (vm.allWorkers ?: vm.workers).filter { it.str("state") !in ACTIVE }.sortedByDescending { it.optDouble("updated") }
-    if (items.isEmpty() && done.isEmpty()) {
+    val done = (vm.allWorkers ?: vm.workers).filter { it.str("state") !in ACTIVE && !it.optBoolean("archived") }
+        .sortedByDescending { it.optDouble("updated") }
+    val archived = archivedAgents(vm)
+    if (items.isEmpty() && done.isEmpty() && archived.isEmpty()) {
         Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
             Text("Nothing running", fontWeight = FontWeight.Medium, fontSize = 16.sp)
             Spacer(Modifier.size(6.dp))
@@ -245,18 +260,122 @@ fun AgentsTab(vm: Seimei) {
         for ((title, color, list) in listOf(Triple("Needs you", PEACH, ask), Triple("Working", MAUVE, work), Triple("Idle", LocalExtraText3, idle))) {
             if (list.isEmpty()) continue
             item("h-$title") { GroupTitle(title, color) }
-            items(list, key = { "${it.kind}-${it.id}" }) { a -> AgentRow(a, now) { vm.open(a) } }
+            items(list, key = { "${it.kind}-${it.id}" }) { a ->
+                if (a.state == "idle") SwipeToArchive(a, vm) { AgentRow(a, now) { vm.open(a) } } else AgentRow(a, now) { vm.open(a) }
+            }
         }
         if (done.isNotEmpty()) {
             val shown = if (showAll) done else done.take(15)
             item("h-done") { GroupTitle("Finished shikigami", LocalExtraText3) }
-            items(shown.map(::fromWorker), key = { "done-${it.id}" }) { a -> AgentRow(a, now) { vm.open(a) } }
+            items(shown.map(::fromWorker), key = { "done-${it.id}" }) { a -> SwipeToArchive(a, vm) { AgentRow(a, now) { vm.open(a) } } }
             if (done.size > shown.size) item("all") {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                     TextButton({ showAll = true }) { Text("Show all ${done.size}") }
                 }
             }
         }
+        if (archived.isNotEmpty()) item("archived") { ArchivedRow(archived.size) { vm.archOpen = true } }
+    }
+}
+
+// ---------- the archive (#43): hidden from the list, never stopped or deleted ----------
+
+fun archivedAgents(vm: Seimei): List<Agent> =
+    ((vm.allWorkers ?: vm.workers).filter { it.optBoolean("archived") && it.str("state") !in ACTIVE }.map(::fromWorker) +
+        vm.sessions.filter { it.optBoolean("archived") }.map { fromSession(it, vm.seen) }).sortedByDescending { it.since }
+
+/** The text a search match shows in, and where the match sits: the line, else the task or project around it. */
+fun searchLine(a: Agent, q: String): Pair<String, Int> {
+    if (q.isEmpty()) return a.line to -1
+    val text = if (a.line.lowercase().contains(q)) a.line else a.find.drop(1).firstOrNull { it.lowercase().contains(q) } ?: a.line
+    val i = text.lowercase().indexOf(q)
+    // A match far into the line keeps a few words before it in view; the cut falls between words.
+    if (i <= 40) return text to i
+    val from = text.lastIndexOf(' ', i - 24) + 1
+    return "…" + text.substring(from) to i - from + 1
+}
+
+/** Swipe left to archive (in the Archived list: to bring it back). */
+@Composable
+fun SwipeToArchive(a: Agent, vm: Seimei, content: @Composable () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val state = rememberSwipeToDismissBoxState()
+    val scope = rememberCoroutineScope()
+    SwipeToDismissBox(
+        state,
+        backgroundContent = {
+            Row(Modifier.fillMaxSize().clip(RoundedCornerShape(18.dp)).background(cs.secondaryContainer).padding(end = 24.dp),
+                horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.shelf, null, Modifier.size(20.dp), tint = cs.onSecondaryContainer)
+                Spacer(Modifier.width(8.dp))
+                Text(if (a.archived) "Unarchive" else "Archive", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = cs.onSecondaryContainer)
+            }
+        },
+        enableDismissFromStartToEnd = false,
+        onDismiss = {
+            if (it == SwipeToDismissBoxValue.EndToStart) vm.setArchived(a, !a.archived)
+            // The list keeps a row's saved state by key: left dismissed, a row brought back by Undo would dismiss again.
+            scope.launch { state.snapTo(SwipeToDismissBoxValue.Settled) }
+        },
+    ) {
+        Box(Modifier.clip(RoundedCornerShape(18.dp)).background(cs.surface)) { content() }
+    }
+}
+
+@Composable
+fun ArchivedRow(n: Int, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(top = 10.dp).heightIn(min = 64.dp).clip(RoundedCornerShape(18.dp)).clickable(onClick = onClick).padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(42.dp).clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh), contentAlignment = Alignment.Center) {
+            Icon(Icons.shelf, null, Modifier.size(20.dp), tint = LocalExtra.current.text3)
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text("Archived", fontSize = 15.5.sp, fontWeight = FontWeight.Medium)
+            Text("$n shikigami and session${if (n == 1) "" else "s"}", fontSize = 13.5.sp, color = LocalExtra.current.text3)
+        }
+        Icon(Icons.chev, null, Modifier.size(20.dp), tint = LocalExtra.current.text3)
+    }
+}
+
+@Composable
+fun ArchiveList(vm: Seimei, now: Long) {
+    val close = {
+        vm.archOpen = false
+        vm.archQuery = ""
+    }
+    BackHandler(onBack = close)
+    val cs = MaterialTheme.colorScheme
+    val all = archivedAgents(vm)
+    val q = vm.archQuery.trim().lowercase()
+    val hits = if (q.isEmpty()) all else all.filter { a -> a.find.any { it.lowercase().contains(q) } }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp)) {
+        item("ahead") {
+            Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(close, Modifier.size(48.dp)) { Icon(Icons.back, "Back to agents", Modifier.size(22.dp)) }
+                Text("Archived", Modifier.weight(1f), fontSize = 18.sp, fontWeight = FontWeight.Medium)
+                Text(if (q.isEmpty()) "${all.size}" else "${hits.size} of ${all.size}", fontSize = 13.sp, color = LocalExtra.current.text3,
+                    modifier = Modifier.padding(end = 8.dp))
+            }
+        }
+        item("search") {
+            TextField(vm.archQuery, { vm.archQuery = it }, Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 8.dp), singleLine = true,
+                placeholder = { Text("Search names, tasks and reports") },
+                leadingIcon = { Icon(Icons.search, null, Modifier.size(20.dp)) },
+                trailingIcon = { if (vm.archQuery.isNotEmpty()) IconButton({ vm.archQuery = "" }) { Icon(Icons.close, "Clear the search", Modifier.size(18.dp)) } },
+                shape = RoundedCornerShape(24.dp),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = cs.surfaceContainerHigh, unfocusedContainerColor = cs.surfaceContainerHigh,
+                    focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
+                ))
+        }
+        if (hits.isEmpty()) item("none") {
+            Text(if (q.isEmpty()) "Nothing archived. Shikigami and idle sessions move here 12 hours after their last activity." else "Nothing archived matches.",
+                Modifier.fillMaxWidth().padding(32.dp), color = LocalExtra.current.text3, fontSize = 14.sp, textAlign = TextAlign.Center)
+        }
+        items(hits, key = { "arch-${it.kind}-${it.id}" }) { a -> SwipeToArchive(a, vm) { AgentRow(a, now, q) { vm.open(a) } } }
     }
 }
 
@@ -292,7 +411,7 @@ fun AgentTile(a: Agent) {
 }
 
 @Composable
-fun AgentRow(a: Agent, now: Long, onClick: () -> Unit) {
+fun AgentRow(a: Agent, now: Long, query: String = "", onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(RoundedCornerShape(18.dp))
             .background(if (a.state == "ask") ASK_BG else Color.Transparent).clickable(onClick = onClick)
@@ -306,7 +425,7 @@ fun AgentRow(a: Agent, now: Long, onClick: () -> Unit) {
                 // Name and tag take the room left of the time, so the time lines up at the right edge.
                 Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                     Text(a.name, fontSize = 15.5.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        color = if (a.state == "done") LocalExtra.current.text2 else Color.Unspecified, modifier = Modifier.weight(1f, fill = false))
+                        color = if (a.state == "done" || a.archived) LocalExtra.current.text2 else Color.Unspecified, modifier = Modifier.weight(1f, fill = false))
                     if (a.kind == "worker") {
                         Spacer(Modifier.width(8.dp))
                         Text("shikigami", fontSize = 11.sp, color = LocalExtra.current.text2, modifier = Modifier.clip(RoundedCornerShape(50))
@@ -323,7 +442,12 @@ fun AgentRow(a: Agent, now: Long, onClick: () -> Unit) {
             Spacer(Modifier.height(3.dp))
             Row {
                 if (a.project.isNotEmpty()) Text("${a.project} · ", fontSize = 13.5.sp, color = tint(a.project), fontWeight = FontWeight.Medium, maxLines = 1)
-                Text(a.line, fontSize = 13.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                val (line, at) = searchLine(a, query)
+                val mark = MaterialTheme.colorScheme.primary.copy(alpha = .3f)
+                Text(buildAnnotatedString {
+                    append(line)
+                    if (at >= 0) addStyle(SpanStyle(background = mark), at, at + query.length)
+                }, fontSize = 13.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     color = when (a.state) { "ask" -> PEACH; "work" -> MaterialTheme.colorScheme.onSurface; else -> LocalExtra.current.text3 })
             }
         }
@@ -396,6 +520,18 @@ fun AgentPage(vm: Seimei, pg: Page) {
                     }
                 }
                 ContextRing(a.context) { pg.details = true }
+            }
+            if (a.archived) Row(
+                Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 4.dp).clip(RoundedCornerShape(16.dp))
+                    .background(cs.surfaceContainer).padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.shelf, null, Modifier.size(20.dp), tint = LocalExtra.current.text3)
+                Spacer(Modifier.width(12.dp))
+                Text(if (pg.kind == "worker") "Archived. A message wakes it with its full context and puts it back in the list."
+                    else "Archived: hidden from the list, still running. It comes back when it does something.",
+                    Modifier.weight(1f).padding(vertical = 6.dp), fontSize = 14.sp, lineHeight = 19.sp, color = LocalExtra.current.text2)
+                TextButton({ vm.setArchived(a, false) }) { Text("Unarchive") }
             }
             // Like a chat: newest at the bottom, and a reader near the end follows it.
             val list = rememberLazyListState()
@@ -523,7 +659,7 @@ fun PageComposer(vm: Seimei, pg: Page, a: Agent) {
                 value = pg.draft,
                 onValueChange = { pg.draft = it },
                 enabled = why == null,
-                placeholder = { Text(if (why != null) "Can't reply from here right now" else if (pg.ask != null) "Your answer…" else "Message $name", maxLines = 1) },
+                placeholder = { Text(if (why != null) "Can't reply from here right now" else if (pg.ask != null) "Your answer…" else if (pg.kind == "worker" && a.archived) "Message $name to wake it" else "Message $name", maxLines = 1) },
                 leadingIcon = {
                     Box {
                         IconButton({ menu = true }, enabled = why == null) { Icon(Icons.attach, "Attach photos or files") }
@@ -632,6 +768,15 @@ fun Details(vm: Seimei, pg: Page) {
                     Spacer(Modifier.width(8.dp))
                     Text("Stop ${r.str("name")}", maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
+            }
+            val agent = if (pg.kind == "worker") fromWorker(r) else fromSession(r, vm.seen)
+            if (agent.state == "done" || agent.state == "idle") FilledTonalButton({
+                pg.details = false
+                vm.setArchived(agent, !agent.archived)
+            }, Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                Icon(Icons.shelf, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(if (agent.archived) "Unarchive" else "Archive")
             }
             if (pg.kind == "worker" && r.str("task").isNotEmpty()) TaskRow(r.str("task"))
             if (pg.kind == "session") Text(pg.reach ?: "Messages you send here are typed into this session's window on the laptop.",

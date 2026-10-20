@@ -398,6 +398,13 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     def chips(infos) -> list[dict]:
         return [{k: i[k] for k in ("id", "name", "size", "kind")} for i in infos]
 
+    async def session_archive(request):
+        """Hide one of the user's sessions from the list, or bring it back. The session keeps running."""
+        s, _ = user_session(request)
+        on = bool((await request.json()).get("archived"))
+        watcher.set_archived(s["session_id"], on)
+        return web.json_response({"archived": on})
+
     async def session_send(request):
         """Type the user's message into the session's own kitty window, on their tap in the app."""
         s, _ = user_session(request)
@@ -538,7 +545,8 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
 
     async def workers_all(request):
         ws = sorted(pool.workers.values(), key=lambda w: w.rec["created"], reverse=True)[:200]
-        return web.json_response({"workers": [w.info() for w in ws]})
+        # The task too, trimmed: the Archived list searches it.
+        return web.json_response({"workers": [{**w.info(), "task": w.rec["task"][:400]} for w in ws]})
 
     async def worker_history(request):
         w = worker(request)
@@ -567,6 +575,12 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     async def worker_stop(request):
         await worker(request).stop()
         return web.json_response({"ok": True})
+
+    async def worker_archive(request):
+        """Hide a shikigami from the Agents list, or bring it back; nothing is stopped or deleted."""
+        w = worker(request)
+        pool.set_archived(w, bool((await request.json()).get("archived")))
+        return web.json_response({"archived": w.info()["archived"]})
 
     async def worker_laptop(request):
         w = worker(request)
@@ -604,6 +618,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     app.router.add_get("/api/desktop", desktop_state)
     app.router.add_get("/api/sessions/{pid:[0-9]+}", session)
     app.router.add_post("/api/sessions/{pid:[0-9]+}/send", session_send)
+    app.router.add_post("/api/sessions/{pid:[0-9]+}/archive", session_archive)
     app.router.add_post("/api/sessions/{pid:[0-9]+}/answer", session_answer)
     app.router.add_get("/api/app", app_info)
     app.router.add_get("/api/app/seimei.apk", apk)
@@ -611,6 +626,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     app.router.add_get("/api/workers/{id}", worker_history)
     app.router.add_post("/api/workers/{id}/send", worker_send)
     app.router.add_post("/api/workers/{id}/stop", worker_stop)
+    app.router.add_post("/api/workers/{id}/archive", worker_archive)
     app.router.add_post("/api/workers/{id}/laptop", worker_laptop)
     if auth:
         app.router.add_post("/api/auth/password", login_password)

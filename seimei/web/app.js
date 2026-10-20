@@ -1,7 +1,7 @@
 // The page: the stream from the laptop, the four tabs, and the header and navigation bar around them.
 import { $, S, hooks, clock, finePointer, viewing, closeView } from './util.js';
 import { render, onDelta, clearLive, addEvent, loadHistory, autosize, waitingApprovals, toBottom, showLane } from './chat.js';
-import { setWorkers, setSessions, sheetEvent, agentCounts, showAgents, pageOpen, closePage } from './agents.js';
+import { setWorkers, setSessions, sheetEvent, agentCounts, showAgents, pageOpen, closePage, archOpen, closeArch } from './agents.js';
 import { showScreen, hideScreen } from './screen.js';
 import { setUsage, renderUsage, tone } from './usage.js';
 import { account } from './account.js';
@@ -65,6 +65,7 @@ window.addEventListener('popstate', () => {
   // Closing a sheet over the page goes back to the page's own entry: the page stays.
   if (pageOpen() && !history.state?.spage) return closePage();
   if (pageOpen()) return;
+  if (archOpen() && !history.state?.arch) return closeArch();
   show(location.hash.slice(1) || 'chat');
 });
 

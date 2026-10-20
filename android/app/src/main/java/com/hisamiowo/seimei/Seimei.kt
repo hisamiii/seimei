@@ -160,6 +160,11 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     val pending = mutableStateListOf<Pending>()
     /** A short note for a tap that could not do anything; the screen shows it once. */
     var snack by mutableStateOf<String?>(null)
+    /** What the snack's Undo does, set together with snack. */
+    var undo: (() -> Unit)? = null
+    /** The Archived list (#43) is open, and what it is searched for. */
+    var archOpen by mutableStateOf(false)
+    var archQuery by mutableStateOf("")
 
     /** An event the chat should scroll to (a tapped "reply ready"), once it has loaded. */
     var focus by mutableStateOf<Long?>(null)
@@ -762,6 +767,29 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         val pg = page ?: return
         pg.files = pg.files - d
         d.job?.cancel()
+    }
+
+    /** Hides a finished shikigami or an idle session from the list, or brings it back; nothing is stopped. */
+    fun setArchived(a: Agent, on: Boolean, offerUndo: Boolean = true) {
+        val path = if (a.kind == "worker") "api/workers/${a.id}/archive" else "api/sessions/${a.id}/archive"
+        // Shown at once; the laptop's listing follows.
+        fun flag(list: List<JSONObject>, key: String) = list.map { if (it.optString(key) == a.id) it.merged(JSONObject().put("archived", on)) else it }
+        if (a.kind == "worker") {
+            workers = flag(workers, "id")
+            allWorkers = allWorkers?.let { flag(it, "id") }
+        } else sessions = flag(sessions, "pid")
+        page?.takeIf { it.kind == a.kind && it.id == a.id }?.let { it.row = it.row.merged(JSONObject().put("archived", on)) }
+        if (offerUndo) {
+            undo = { setArchived(a, !on, false) }
+            snack = "${if (on) "Archived" else "Unarchived"} ${a.name}"
+        }
+        viewModelScope.launch {
+            try {
+                api.post(path, JSONObject().put("archived", on))
+            } catch (e: IOException) {
+                snack = "Could not reach the laptop."
+            }
+        }
     }
 
     fun workerStop(id: String) {

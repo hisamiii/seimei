@@ -527,15 +527,25 @@ class Watcher:
     """Pushes the user's sessions to the page when anything but the clock changes, and tells the dispatcher what
     they run into (notify: Pool.notify)."""
 
-    def __init__(self, events: EventLog, own, notify=None):
+    def __init__(self, events: EventLog, own, notify=None, archive=None):
         self.events = events
         self.own = own
         self.notify = notify
+        self.archive = archive
         self.list: list[dict] = []
         self.happenings = SessionEvents()
 
     def snapshot(self) -> dict:
         return {"type": "sessions", "list": self.list}
+
+    def _mark(self, rows: list[dict]):
+        for r in rows:
+            r["archived"] = bool(self.archive and self.archive.session(r))
+
+    def set_archived(self, session_id: str, on: bool):
+        self.archive.set(f"s:{session_id}", on)
+        self._mark(self.list)
+        self.events.flash(self.snapshot())
 
     async def run(self, every: float = 4):
         sig = None
@@ -543,12 +553,13 @@ class Watcher:
             try:
                 rows = await asyncio.to_thread(listing, self.own())
                 lines = await asyncio.to_thread(self.happenings.scan, rows)
+                self._mark(rows)
                 if self.notify:
                     for line, urgent, key in lines:
                         self.notify(line, urgent=urgent, key=key)
                 new = [(r["pid"], r["name"], r["status"], r["waiting_for"], r["since"], r["question"], r["project"],
                         r["line"], r["context"], (r["doing"] or {}).get("tool_id"), r["reach"],
-                        r["status"] == "busy" or round(r["active"])) for r in rows]
+                        r["status"] == "busy" or round(r["active"]), r["archived"]) for r in rows]
                 if new != sig:
                     sig, self.list = new, rows
                     self.events.flash(self.snapshot())

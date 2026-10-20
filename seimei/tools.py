@@ -116,11 +116,17 @@ def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), upl
         return text(f"Summoned {w.name} ({w.id}) in {r['cwd']} on {r['model']}, effort {r['effort'] or 'default'}, "
                     f"context {r['context_cap']}, subagents on {r['subagents']}." + (f"\n\n{crowd}" if crowd else ""))
 
-    @tool("workers", "List shikigami from the last day with their state and one-line summary.", {})
+    @tool("workers", "List shikigami from the last day with their state and one-line summary. Ones the user archived "
+          "(or that ended over 12 hours ago) are left out; archived: true lists only those, from any time.", {
+              "type": "object", "properties": {"archived": {"type": "boolean"}}})
     async def workers(args):
-        listing = pool.listing()["list"]
+        if args.get("archived"):
+            old = sorted((w for w in pool.workers.values() if pool.archive.worker(w.rec)), key=lambda w: -w.rec["updated"])
+            listing = [w.info() for w in old[:50]]
+        else:
+            listing = [w for w in pool.listing()["list"] if not w["archived"]]
         if not listing:
-            return text("No shikigami in the last day.")
+            return text("No archived shikigami." if args.get("archived") else "No shikigami in the last day.")
         return text("\n".join(f"{w['name']} ({w['id']}): {w['state']}, {ago(w['updated'])}, in {w['cwd']}"
                               + (f": {w['summary']}" if w.get("summary") else "") for w in listing))
 

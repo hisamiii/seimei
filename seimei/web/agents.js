@@ -116,7 +116,7 @@ function fromWorker(w) {
   return {
     kind: 'worker', id: w.id, name: w.name, project: w.project, context: w.context, state, since: w.updated,
     line: state === 'ask' ? (w.question || 'Asks a question') : state === 'work' ? workerLine(w) : (w.summary || stateText(w)),
-    bad: w.state === 'failed', end: w.state,
+    bad: w.state === 'failed', end: w.state, archived: !!w.archived, find: [w.name, w.task, w.summary],
   };
 }
 
@@ -128,12 +128,13 @@ function fromSession(s) {
     line: s.question ? (s.ask || 'Asks a question') : asking ? (s.waiting_text || 'Waiting on the laptop')
       : state === 'work' ? sessionLine(s.doing) : (s.line || 'Idle'),
     fresh: state === 'idle' && s.active > (seen[s.session_id] || 0) + 1,
+    archived: !!s.archived, find: [s.name, s.project, s.line],
   };
 }
 
 // The navigation badge: working agents, and whether anything waits on the user.
 export function agentCounts() {
-  const items = [...S.workers.map(fromWorker), ...S.sessions.map(fromSession)];
+  const items = [...S.workers.map(fromWorker), ...S.sessions.map(fromSession)].filter((x) => !x.archived);
   return { working: items.filter((x) => x.state === 'work').length, asks: items.filter((x) => x.state === 'ask').length };
 }
 
@@ -158,8 +159,18 @@ function tile(x) {
   return t;
 }
 
-function row(x) {
-  const b = el('button', `agent sl ${x.state}`);
+// The part of a line around a search match, with the match marked.
+function marked(text, q) {
+  const i = q ? text.toLowerCase().indexOf(q) : -1;
+  if (i < 0) return [text];
+  // A match far into the line keeps a few words before it in view; the cut falls between words.
+  const from = i > 40 ? text.lastIndexOf(' ', i - 24) + 1 : 0;
+  const m = el('mark', null, text.slice(i, i + q.length));
+  return [`${from ? '…' : ''}${text.slice(from, i)}`, m, text.slice(i + q.length)];
+}
+
+function row(x, q = '') {
+  const b = el('button', `agent sl ${x.state}${x.archived ? ' arch' : ''}`);
   b.type = 'button';
   const top = el('span', 'top');
   top.append(el('b', null, x.name));
@@ -172,29 +183,158 @@ function row(x) {
     p.style.color = tint(x.project);
     sub.append(p, ' · ');
   }
-  sub.append(el('span', 'line', x.line));
+  // A search match in the task, not the line: show the task around it.
+  const hit = q && !x.line.toLowerCase().includes(q) && x.find.find((f) => f && f !== x.name && f.toLowerCase().includes(q));
+  const line = el('span', 'line');
+  line.append(...marked(hit || x.line, q));
+  sub.append(line);
   const txt = el('span', 'txt');
   txt.append(top, sub);
   b.append(tile(x), txt);
-  b.addEventListener('click', () => openPage(x.kind, x.id));
+  let held = false;
+  b.addEventListener('click', () => { if (!held) openPage(x.kind, x.id); held = false; });
+  // Right-click, or a long press on touch: the row's menu. Only a finished or idle agent can be archived: one
+  // that works or asks always shows.
+  if (x.state !== 'done' && x.state !== 'idle') return b;
+  b.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    if (sheet.view !== 'rowmenu') rowMenu(x);
+  });
+  let timer = 0;
+  b.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'touch') return;
+    timer = setTimeout(() => { held = true; rowMenu(x); }, 550);
+  });
+  for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) b.addEventListener(ev, () => clearTimeout(timer));
   return b;
 }
 
-function group(title, cls, items) {
+function group(title, cls, items, q) {
   const sec = el('section', `agroup ${cls}`);
-  sec.append(el('h2', null, title), ...items.map(row));
+  sec.append(el('h2', null, title), ...items.map((x) => row(x, q)));
   return sec;
 }
 
+// ---------- the archive (#43): rows hidden from the list; nothing is stopped or deleted ----------
+
+const ARCH = 'M3 4h18v4H3zM5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4';
+let archView = false;
+let archQuery = '';
+
+export const archOpen = () => archView;
+export function closeArch() {
+  archView = false;
+  archQuery = '';
+  renderAgents();
+}
+
+function openArch() {
+  archView = true;
+  history.pushState({ arch: true }, '');
+  renderAgents();
+  page.scrollTop = 0;
+}
+
+export async function setArchived(x, on, undo = true) {
+  const path = x.kind === 'worker' ? `api/workers/${encodeURIComponent(x.id)}/archive` : `api/sessions/${x.id}/archive`;
+  const r = await postJSON(path, { archived: on });
+  if (!r.ok) return snack(r.error);
+  // The laptop's update follows; show it now.
+  if (x.kind === 'worker') for (const w of [...S.workers, ...(all || [])]) { if (w.id === x.id) w.archived = on; }
+  else for (const s of S.sessions) { if (s.pid === x.id) s.archived = on; }
+  if (P && P.kind === x.kind && P.id === x.id) {
+    P.row.archived = on;
+    head();
+  }
+  changed();
+  if (undo) snack(`${on ? 'Archived' : 'Unarchived'} ${x.name}`, { label: 'Undo', run: () => setArchived(x, !on, false) });
+}
+
+function rowMenu(x) {
+  const opt = (icon, label, hint, run) => {
+    const b = el('button', 'mopt sl');
+    b.type = 'button';
+    const t = el('span', null, label);
+    if (hint) t.append(el('small', null, hint));
+    b.append(svg(icon, 22), t);
+    b.addEventListener('click', () => { closeSheet(); run(); });
+    return b;
+  };
+  const who = x.kind === 'worker' ? `${x.name} · shikigami` : `${x.name} · your session${x.project ? ` in ${x.project}` : ''}`;
+  const hint = x.archived ? 'Back into the list.' : x.kind === 'session'
+    ? 'Only hides it from this list. The session keeps running, and it comes back here when it does something.'
+    : 'Hides it from this list. A message wakes it and brings it back.';
+  sheet.body.replaceChildren(el('div', 'mwho', who),
+    opt(ARCH, x.archived ? 'Unarchive' : 'Archive', hint, () => setArchived(x, !x.archived)),
+    opt('M5 12h14M13 6l6 6-6 6', 'Open', null, () => openPage(x.kind, x.id)));
+  showSheet('rowmenu');
+}
+
+function archived() {
+  return [...(all || S.workers).filter((w) => w.archived && !ACTIVE.has(w.state)).map(fromWorker),
+    ...S.sessions.filter((s) => s.archived).map(fromSession)].sort((a, b) => b.since - a.since);
+}
+
+function archRow(n) {
+  const b = el('button', 'archrow sl');
+  b.type = 'button';
+  const t = el('span', 'txt');
+  t.append(el('b', null, 'Archived'), el('span', null, `${n} shikigami and session${n === 1 ? '' : 's'}`));
+  const tl = el('span', 'tile done');
+  tl.append(svg(ARCH, 20));
+  b.append(tl, t, svg('m9 6 6 6-6 6', 20));
+  b.addEventListener('click', openArch);
+  return b;
+}
+
+function archPage() {
+  const list = archived();
+  const q = archQuery.trim().toLowerCase();
+  const hits = q ? list.filter((x) => x.find.some((f) => f && f.toLowerCase().includes(q))) : list;
+  const head = el('div', 'ahead');
+  const back = el('button', 'back sl');
+  back.type = 'button';
+  back.setAttribute('aria-label', 'Back to agents');
+  back.append(svg('M15 5l-7 7 7 7', 22));
+  back.addEventListener('click', () => history.back());
+  head.append(back, el('h2', null, 'Archived'), el('span', 'count', q ? `${hits.length} of ${list.length}` : `${list.length}`));
+  const search = el('label', 'asearch');
+  const input = el('input');
+  input.type = 'search';
+  input.placeholder = 'Search names, tasks and reports';
+  input.setAttribute('aria-label', 'Search the archive');
+  input.value = archQuery;
+  input.addEventListener('input', () => {
+    archQuery = input.value;
+    const pos = input.selectionStart;
+    renderAgents();
+    const again = page.querySelector('.asearch input');
+    again.focus();
+    again.setSelectionRange(pos, pos);
+  });
+  search.append(svg('M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-3.5-3.5', 20), input);
+  const parts = [head, search];
+  if (hits.length) parts.push(group(q ? 'Matches' : 'Newest first', 'done', hits, q));
+  else parts.push(el('div', 'empty', q ? 'Nothing archived matches.' : 'Nothing archived. Shikigami and idle sessions move here 12 hours after their last activity.'));
+  return parts;
+}
+
 export function renderAgents() {
-  const items = [...S.workers.filter((w) => ACTIVE.has(w.state)).map(fromWorker), ...S.sessions.map(fromSession)];
+  if (archView) {
+    const top = page.scrollTop;
+    page.replaceChildren(...archPage());
+    page.scrollTop = top;
+    return;
+  }
+  const items = [...S.workers.filter((w) => ACTIVE.has(w.state)).map(fromWorker), ...S.sessions.map(fromSession)]
+    .filter((x) => !x.archived);
   const by = (st) => items.filter((x) => x.state === st).sort((a, b) => b.since - a.since);
   const ask = by('ask'), work = by('work'), idle = by('idle');
   const parts = [];
   if (ask.length) parts.push(group('Needs you', 'ask', ask));
   if (work.length) parts.push(group('Working', 'work', work));
   if (idle.length) parts.push(group('Idle', 'idle', idle));
-  const done = (all || S.workers).filter((w) => !ACTIVE.has(w.state)).sort((a, b) => b.updated - a.updated);
+  const done = (all || S.workers).filter((w) => !ACTIVE.has(w.state) && !w.archived).sort((a, b) => b.updated - a.updated);
   if (done.length) {
     const shown = showAll ? done : done.slice(0, 15);
     parts.push(group('Finished shikigami', 'done', shown.map(fromWorker)));
@@ -205,6 +345,8 @@ export function renderAgents() {
       parts.push(more);
     }
   }
+  const arch = archived().length;
+  if (arch) parts.push(archRow(arch));
   if (!parts.length) {
     const empty = el('div', 'empty');
     empty.append(el('b', null, 'Nothing running'), el('span', null, 'Your Claude sessions on the laptop and the shikigami seimei summons show up here.'));
@@ -216,6 +358,10 @@ export function renderAgents() {
 }
 
 export function showAgents() {
+  if (archView && !history.state?.arch) {
+    archView = false;
+    archQuery = '';
+  }
   renderAgents();
   allFetch = 0;
   refreshAll();
@@ -267,6 +413,15 @@ function head() {
   if (P.kind === 'worker') {
     P.stop.hidden = !ACTIVE.has(P.row.state) || P.row.state === 'asking';
     question(P.row.state === 'asking' ? { text: P.row.question } : null);
+  }
+  P.banner.hidden = !P.row.archived;
+  if (P.row.archived) {
+    const un = el('button', 'sl', 'Unarchive');
+    un.type = 'button';
+    un.addEventListener('click', () => setArchived(x, false));
+    P.banner.replaceChildren(svg(ARCH, 20), el('span', null, P.kind === 'worker'
+      ? 'Archived. A message wakes it with its full context and puts it back in the list.'
+      : 'Archived: hidden from the list, still running. It comes back when it does something.'), un);
   }
   composerState();
 }
@@ -361,7 +516,9 @@ function composerState() {
   const why = blocked();
   P.input.disabled = !!why;
   P.attach.disabled = !!why;
-  P.input.placeholder = why ? 'Can\'t reply from here right now' : P.ask ? 'Your answer…' : `Message ${P.row.name.length > 22 ? `${P.row.name.slice(0, 21).trim()}…` : P.row.name}`;
+  const nm = P.row.name.length > 22 ? `${P.row.name.slice(0, 21).trim()}…` : P.row.name;
+  P.input.placeholder = why ? 'Can\'t reply from here right now' : P.ask ? 'Your answer…'
+    : P.kind === 'worker' && P.row.archived ? `Message ${nm} to wake it` : `Message ${nm}`;
   if (P.kind === 'session') {
     if (why) note(why, 'info');
     else if (P.note.classList.contains('info')) note(null);
@@ -541,6 +698,14 @@ function details() {
   const actions = el('div', 'dactions');
   if (P.kind === 'worker' && r.state !== 'laptop' && r.started !== false) actions.append(laptopButton(r));
   if (P.kind === 'worker' && ACTIVE.has(r.state)) actions.append(stopButton(r));
+  const x = P.kind === 'worker' ? fromWorker(r) : fromSession(r);
+  if (x.state === 'done' || x.state === 'idle') {
+    const b = el('button', 'dbtn tonal sl');
+    b.type = 'button';
+    b.append(svg(ARCH, 18), el('span', null, r.archived ? 'Unarchive' : 'Archive'));
+    b.addEventListener('click', () => { closeSheet(); setArchived(x, !r.archived); });
+    actions.append(b);
+  }
   if (actions.childElementCount) body.push(actions);
   if (P.kind === 'worker' && r.task) body.push(taskRow(r.task));
   if (P.kind === 'session') body.push(el('p', 'usage-note', r.reach ? r.reach : 'Messages you send here are typed into this session\'s window on the laptop.'));
@@ -665,9 +830,11 @@ function build(kind, id, row) {
   form.append(field, file, send, stop);
   const foot = el('div', 'sfoot');
   foot.append(noteEl, trayEl, form);
-  sp.replaceChildren(bar, main, foot);
+  const banner = el('div', 'archbar');
+  banner.hidden = true;
+  sp.replaceChildren(bar, banner, main, foot);
 
-  P = { kind, id, row, title, sub, ring: r, main, thread, empty, qbox, note: noteEl, tray: trayEl, input, attach, send, stop,
+  P = { kind, id, row, title, sub, ring: r, banner, main, thread, empty, qbox, note: noteEl, tray: trayEl, input, attach, send, stop,
     files: [], next: null, ask: null, askKey: undefined, pinned: true, renderer: new Renderer(thread) };
 
   main.addEventListener('scroll', () => { if (P) P.pinned = nearBottom(); }, { passive: true });

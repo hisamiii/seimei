@@ -190,6 +190,18 @@ class ChatTest {
         val (chat, _) = lanes(ev("user", kv = arrayOf("text" to "ship it", "quote" to "app-tester is done", "quote_id" to 9)))
         assertEquals(Anchor("app-tester is done", "e9", "t"), chat.items.filterIsInstance<Item.Msg>().single().anchor)
     }
+
+    @Test fun archivedSearchShowsTheMatch() {
+        val w = JSONObject().put("id", "a1").put("name", "prefill-sweep").put("state", "done").put("archived", true)
+            .put("task", "Sweep the prefill tiles and report the best").put("summary", "Report: pp2048 1612 ms at matched clock; GPU held 41 min")
+        val a = fromWorker(w)
+        assertTrue(a.archived)
+        val (line, at) = searchLine(a, "gpu")
+        assertTrue(line.startsWith("…") && !line.startsWith("…12"))
+        assertEquals("gpu", line.substring(at, at + 3).lowercase())
+        assertEquals("Sweep the prefill tiles and report the best" to 10, searchLine(a, "prefill"))
+        assertEquals(a.line to -1, searchLine(a, ""))
+    }
 }
 
 class MarkdownTest {

@@ -28,6 +28,7 @@ from claude_agent_sdk import (
 )
 
 from . import sessions
+from .archive import Archive
 from .events import EventLog
 from .util import NO_CONNECTORS, STREAM_BUFFER, queue_env, result_text, summarize, write_json
 
@@ -101,7 +102,7 @@ class Worker:
         r = self.rec
         return {**{k: r.get(k) for k in ("id", "name", "state", "cwd", "model", "effort", "context_cap", "subagents", "created",
                                          "updated", "summary", "question", "doing")},
-                "started": bool(r.get("started"))}
+                "started": bool(r.get("started")), "archived": self.pool.archive.worker(r)}
 
     def brief(self) -> dict:
         """Project and context use from the worker's transcript, like the user's sessions show."""
@@ -392,6 +393,8 @@ class Pool:
         self._flush_at: asyncio.TimerHandle | None = None
         recs = json.loads(self.path.read_text()) if self.path.exists() else []
         self.workers: dict[str, Worker] = {r["id"]: Worker(self, r) for r in recs}
+        self.archive = Archive(state_dir / "archive.json")
+        self._hidden: set[str] = set()
 
     def startup(self) -> list[str]:
         """Workers that were running when seimei stopped lost their turn: each is resumed with a note to check its
@@ -472,6 +475,19 @@ class Pool:
     def changed(self):
         write_json(self.path, [w.rec for w in self.workers.values()])
         self.events.flash(self.listing())
+
+    def set_archived(self, w: Worker, on: bool):
+        self.archive.set(f"w:{w.id}", on)
+        self.events.flash(self.listing())
+
+    async def sweep(self, every: float = 300):
+        """Auto-archiving needs no event: tell the pages when a shikigami's 12 hours run out."""
+        while True:
+            hidden = {w.id for w in self.workers.values() if self.archive.worker(w.rec)}
+            if hidden != self._hidden:
+                self._hidden = hidden
+                self.events.flash(self.listing())
+            await asyncio.sleep(every)
 
     def listing(self) -> dict:
         now = time.time()

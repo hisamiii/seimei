@@ -87,12 +87,19 @@ export async function post(path, body) {
 
 // A short note at the bottom for taps that could not do anything (QA U15).
 let snackTimer = 0;
-export function snack(text) {
+// A short message at the bottom; action ({ label, run }) adds a button such as Undo.
+export function snack(text, action = null) {
   const s = $('snack');
-  s.textContent = text;
+  s.replaceChildren(el('span', null, text));
+  if (action) {
+    const b = el('button', 'sl', action.label);
+    b.type = 'button';
+    b.addEventListener('click', () => { s.hidden = true; action.run(); });
+    s.append(b);
+  }
   s.hidden = false;
   clearTimeout(snackTimer);
-  snackTimer = setTimeout(() => { s.hidden = true; }, 4000);
+  snackTimer = setTimeout(() => { s.hidden = true; }, action ? 6000 : 4000);
 }
 
 export async function getJSON(path) {

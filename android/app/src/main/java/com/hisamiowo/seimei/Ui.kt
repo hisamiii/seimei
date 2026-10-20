@@ -3,6 +3,8 @@ package com.hisamiowo.seimei
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import android.Manifest
 import android.app.Activity
@@ -216,6 +218,8 @@ object Icons {
     val read = icon("M6 3h9l4 4v14H6zM14 3v5h5")
     val edit = icon("M4 20h4L19 9l-4-4L4 16zM13 7l4 4")
     val search = icon("M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14zM16 16l4 4")
+    /** Archive (#43): a box with a lid; Icons.archive is a package. */
+    val shelf = icon("M3 4h18v4H3zM5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4", stroke = 1.8f)
     val web = icon("M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18")
     val tool = icon("M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-2.4z")
     val laptop = icon("M5 6.5A1.5 1.5 0 0 1 6.5 5h11A1.5 1.5 0 0 1 19 6.5V15H5zM3 18h18")
@@ -420,8 +424,15 @@ fun AppScreen(vm: Seimei) {
     // Shown from its own scope: clearing vm.snack restarts this effect, which would cancel a snackbar shown inside it.
     LaunchedEffect(vm.snack) {
         val t = vm.snack ?: return@LaunchedEffect
+        val undo = vm.undo
         vm.snack = null
-        snackScope.launch { snacks.showSnackbar(t) }
+        vm.undo = null
+        snackScope.launch {
+            snacks.currentSnackbarData?.dismiss()
+            // With an action, a snackbar stays up until tapped unless given a duration.
+            val shown = snacks.showSnackbar(t, actionLabel = if (undo != null) "Undo" else null, duration = SnackbarDuration.Long)
+            if (shown == SnackbarResult.ActionPerformed) undo?.invoke()
+        }
     }
     Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().imePadding()) {
