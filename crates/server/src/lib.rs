@@ -7,7 +7,7 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use axum::Router;
@@ -23,6 +23,7 @@ use seimei_core::events::{Event, EventLog};
 use seimei_core::files::Files;
 use seimei_core::metrics::{self, WorkerEvents};
 use seimei_core::push::{self as push_mod, Push};
+use seimei_core::tasks::{self, Board};
 use seimei_core::uploads::Uploads;
 use seimei_core::usage::Usage;
 use seimei_core::util::{now, read_json, write_json};
@@ -62,7 +63,7 @@ pub struct App {
     pages: HashMap<&'static str, String>,
     pub app_dir: PathBuf,
     pub theme: PathBuf,
-    tasks: PathBuf,
+    pub board: Mutex<Board>,
     pub files: Arc<Files>,
     pub uploads: Arc<Uploads>,
     pub push: Arc<Push>,
@@ -92,6 +93,7 @@ impl App {
             let page = assets.remove(name).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
             pages.insert(name, page.replace("\"static/", &format!("\"static/{version}/")));
         }
+        let board = Mutex::new(Board::open(&state.join("tasks.json"), Some(events.clone())));
         App {
             events,
             auth,
@@ -101,7 +103,7 @@ impl App {
             pages,
             app_dir: state.join("app"),
             theme: state.join("theme.json"),
-            tasks: state.join("tasks.json"),
+            board,
             files: Arc::new(Files::new(state)),
             uploads: Arc::new(Uploads::new(state)),
             push,
@@ -224,6 +226,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/app/seimei.apk", get(apk))
         .route("/api/theme", get(theme_get).post(theme_set))
         .route("/api/tasks", get(tasks_view))
+        .route("/api/tasks/{tid}/tick", post(task_tick))
         .route("/api/presence", post(presence))
         .route("/api/files/{name}", get(file))
         .route("/api/upload", post(upload))
@@ -597,11 +600,22 @@ async fn theme_set(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> Resp
     ok(rec)
 }
 
-/// The task board, read-only until the board is ported (phase 3).
 async fn tasks_view(State(app): Shared) -> Response {
-    let data = read_json(&app.tasks).unwrap_or(json!({}));
-    let list = |k: &str| data.get(k).filter(|v| v.is_array()).cloned().unwrap_or(json!([]));
-    ok(json!({"type": "tasks", "tasks": list("tasks"), "projects": list("projects")}))
+    ok(app.board.lock().unwrap().snapshot())
+}
+
+/// The user ticks one of their own items off (or back on).
+async fn task_tick(State(app): Shared, UrlPath(tid): UrlPath<String>, bytes: Bytes) -> Response {
+    let b = match body(&bytes) {
+        Ok(b) => b,
+        Err(r) => return r,
+    };
+    let done = b["done"].as_bool().unwrap_or(false);
+    match app.board.lock().unwrap().tick(&tid, done) {
+        Ok(t) => ok(json!({"ok": true, "task": t})),
+        Err(tasks::Error::NotFound(_)) => text(StatusCode::NOT_FOUND, "no such task"),
+        Err(e) => json_status(StatusCode::FORBIDDEN, json!({"error": e.to_string()})),
+    }
 }
 
 async fn app_info(State(app): Shared) -> Response {

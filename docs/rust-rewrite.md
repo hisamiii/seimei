@@ -219,7 +219,8 @@ Python stays installed for a week as the way back (same state files).
 - **Auth.** `tauth` is new: the login scenarios over HTTP, so both servers run them. A passkey registered on Python logs in on Rust: webauthn-rs reads py_webauthn's stored COSE keys.
 - **Push.** The rules, FCM and Web Push are Rust integration tests against local fakes (`crates/server/tests/push.rs`).
 - **Read-only views.** The Agents and Usage tabs read the same state on Rust: workers listing and history, metrics, cost at API prices, the usage snapshot and the audit log, with shared cases in `tests/cases/views.json`. `tnoscreen` and `tmetrics` pass on it.
-- **Waiting for the rest of phase 3.** Until then the Rust server reports the dispatcher as disconnected, lists none of the user's sessions, and serves the task board read-only.
+- **Task board.** The board, the tasks tool and how a task follows its shikigami run in Rust over `tests/cases/tasks.json`; `ttasks` passes on it.
+- **Waiting for the rest of phase 3.** Until then the Rust server reports the dispatcher as disconnected and lists none of the user's sessions.
 
 **Size:** today's 7.8k lines of core Python and 4.3k of plugins should come to roughly 12 to 15k lines of Rust.
 The web UI (4.7k lines) and the Android app carry over unchanged. So do the Discord (Vencord, TypeScript) and

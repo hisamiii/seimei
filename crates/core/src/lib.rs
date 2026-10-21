@@ -12,6 +12,7 @@ pub mod paths;
 pub mod permissions;
 pub mod push;
 pub mod shell;
+pub mod tasks;
 pub mod transcripts;
 pub mod uploads;
 pub mod usage;
