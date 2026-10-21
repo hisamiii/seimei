@@ -1,4 +1,4 @@
-"""The dispatcher's desktop tools: seeing, arranging and driving the niri session."""
+"""The desktop tools: seeing, arranging and driving the user's graphical session, through its backend."""
 
 import asyncio
 import base64
@@ -10,7 +10,8 @@ from pathlib import Path
 from claude_agent_sdk import tool
 
 from . import desktop
-from .desktop import Desktop, NoDesktop
+from .backends import NoDesktop
+from .desktop import Desktop
 from ...events import EventLog
 from ...files import Files
 
@@ -66,7 +67,9 @@ def shot_file(folder: Path, data: bytes, mime: str) -> Path:
 
 
 def make_desktop_tools(desk: Desktop, files: Files, events: EventLog, layout=None, who: str = "seimei", worker: str | None = None) -> list:
-    @tool("desktop", "The laptop's niri desktop: outputs, workspaces with their windows (id, app, title; focused, urgent, "
+    b = desk.b
+
+    @tool("desktop", f"The {b.label} desktop: outputs, workspaces with their windows (id, app, title; focused, urgent, "
           "opened by seimei), the keyboard layout and whether the screen is locked (input tools refuse while it is). Start here before acting.", {})
     async def overview(args):
         try:
@@ -106,27 +109,22 @@ def make_desktop_tools(desk: Desktop, files: Files, events: EventLog, layout=Non
         # A path, not the pixels: an image in every result was 8% of the dispatcher's context growth.
         return text(f"{await asyncio.to_thread(shot_file, files.dir.parent / 'shots', data, mime)}\n{note}")
 
-    @tool("niri", "Run a niri action, as `niri msg action <action> <args>` takes it. Common ones: focus-window --id N, "
-          "focus-workspace <idx|name>, move-window-to-workspace --window-id N <idx|name>, close-window --id N, "
-          "fullscreen-window --id N, maximize-column, set-column-width <50%|+10%>, toggle-window-floating --id N, "
-          "toggle-overview, switch-layout <idx>, power-off-monitors, quit. Closing a window seimei did not open and "
-          "quit wait for the user's OK on their phone.", {
+    @tool(b.name, b.action_help, {
               "type": "object",
               "properties": {"action": {"type": "string"}, "args": {"type": "array", "items": {"type": "string"}}},
               "required": ["action"]})
-    async def niri(args):
+    async def native(args):
         try:
-            out = await asyncio.to_thread(desktop.action, str(args["action"]), *[str(a) for a in args.get("args") or []])
+            out = await asyncio.to_thread(b.action, str(args["action"]), *[str(a) for a in args.get("args") or []])
         except Exception as e:
             return failed(e)
         return text(out or "Done.")
 
-    @tool("niri_query", "Read-only niri state as JSON (niri msg --json <what>): outputs, workspaces, windows, "
-          "focused-window, focused-output, layers, keyboard-layouts or version. For details the desktop tool leaves out.", {
-              "type": "object", "properties": {"what": {"type": "string", "enum": list(desktop.QUERIES)}}, "required": ["what"]})
-    async def niri_query(args):
+    @tool(f"{b.name}_query", b.query_help, {
+              "type": "object", "properties": {"what": {"type": "string", "enum": list(b.QUERIES)}}, "required": ["what"]})
+    async def query(args):
         try:
-            out = await asyncio.to_thread(desktop.query, str(args.get("what")))
+            out = await asyncio.to_thread(b.query, str(args.get("what")))
         except Exception as e:
             return failed(e)
         return text(out if len(out) <= 30_000 else out[:30_000] + " … (cut at 30000 characters)")
@@ -264,7 +262,7 @@ def make_desktop_tools(desk: Desktop, files: Files, events: EventLog, layout=Non
                            + (f" | {n['body'][:300]}" if n.get("body") else ""))
         return text("\n".join(out[:limit * 2]) or "No notifications.")
 
-    @tool("unlock_screen", "Unlock the laptop's lock screen with the password the user saved for seimei. You never "
+    @tool("unlock_screen", "Unlock the lock screen with the password the user saved for seimei. You never "
           "see the password. Use it only when a task needs the desktop while the screen is locked.", {})
     async def unlock_screen(args):
         try:
@@ -272,7 +270,7 @@ def make_desktop_tools(desk: Desktop, files: Files, events: EventLog, layout=Non
         except Exception as e:
             return failed(e)
 
-    @tool("restore_desktop", "Bring back the desktop layout from before the last niri restart or reboot: apps on "
+    @tool("restore_desktop", f"Bring back the desktop layout from before the last {b.label} restart or reboot: apps on "
           "their workspaces, kitty windows in their folders, the user's Claude sessions resumed. Without go=true it "
           "only lists the plan; with go=true the user gets one Approve/Deny card for all of it.", {
               "type": "object", "properties": {"go": {"type": "boolean", "default": False}}})
@@ -293,5 +291,5 @@ def make_desktop_tools(desk: Desktop, files: Files, events: EventLog, layout=Non
             return text(f"The user {outcome} the restore." if outcome != "expired" else "No answer in 10 minutes; not restored.")
         return text("\n".join(await layout.restore(plan)))
 
-    return [overview, screenshot, niri, niri_query, open_app, type_text, press_keys, click, scroll, ui_tree, ui_action,
+    return [overview, screenshot, native, query, open_app, type_text, press_keys, click, scroll, ui_tree, ui_action,
             notifications, unlock_screen, restore_desktop]

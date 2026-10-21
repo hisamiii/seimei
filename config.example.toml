@@ -21,11 +21,16 @@ terminal = "kitty -d {cwd} --title {title}"   # opens a session for the user (a 
 [plugins]
 enabled = []
 # Built in:
-#   desktop  the niri desktop: windows, workspaces, screenshots, input (uinput), AT-SPI, notifications
+#   desktop  the desktop (niri, sway, Hyprland or X11): windows, workspaces, screenshots, input (uinput), AT-SPI
 #   discord  Discord through the Vesktop plugin in discord/
 #   browser  Waterfox (or Firefox) through the extension in browser/
 #   music    Quod Libet and the session's media players (MPRIS)
 #   queue    claude-queue / cqd: every session's commands take GPU turns through it
+
+# [plugins.desktop]
+# backend = "niri"     # niri, sway, hyprland or x11 (any EWMH window manager); found from the session when left out.
+#                      # KDE Plasma and GNOME on Wayland are not supported yet (on X11 they work as x11).
+# shell = "fish"       # the shell a restored Claude session runs in; $SHELL when left out
 
 # [plugins.queue]
 # lib = "~/.local/lib/claude-queue"   # where claude-queue's library lives

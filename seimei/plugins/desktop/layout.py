@@ -1,4 +1,4 @@
-"""The desktop layout, remembered so a new niri session (a restart or a reboot) can be brought back: apps on their
+"""The desktop layout, remembered so a new desktop session (a WM restart or a reboot) can be brought back: apps on their
 workspaces, kitty windows in their folders, and Claude sessions resumed."""
 
 import asyncio
@@ -69,7 +69,8 @@ def _kitty(pid: int, kids: dict) -> dict:
 
 
 def snapshot() -> dict:
-    wins, spaces = desktop.ipc("Windows"), desktop.ipc("Workspaces")
+    b = desktop.backend()
+    wins, spaces = b.windows(), b.workspaces()
     ws = {s["id"]: s for s in spaces}
     kids = _children()
     out = []
@@ -80,25 +81,29 @@ def snapshot() -> dict:
         if space.get("name") == desktop.WORKSPACE:
             continue
         rec = {"app_id": w["app_id"], "title": w["title"], "workspace": space.get("idx"), "output": space.get("output"),
-               "pos": w["layout"].get("pos_in_scrolling_layout"), "floating": w["is_floating"],
+               "pos": w.get("pos"), "floating": w["is_floating"],
                "argv": _argv(w["pid"]), "cwd": _cwd(w["pid"])}
         if w["app_id"] == "kitty":
             rec |= _kitty(w["pid"], kids)
         out.append(rec)
     out.sort(key=lambda r: (r["output"] or "", r["workspace"] or 99, r["pos"] or [99, 99]))
-    sock = desktop.find_socket()
-    return {"niri": sock.name if sock else None, "time": time.time(), "windows": out}
+    return {"session": b.session(), "time": time.time(), "windows": out}
 
 
-def command(rec: dict) -> str | None:
+def _session(snap: dict | None) -> str | None:
+    """Which WM session a snapshot is from (layouts saved before the backends called it "niri")."""
+    return (snap or {}).get("session", (snap or {}).get("niri"))
+
+
+def command(rec: dict, shell: str = "fish") -> str | None:
     """How to start a remembered window again."""
     if rec["app_id"] == "kitty":
         c = rec.get("claude")
         cwd = (c or {}).get("cwd") or rec.get("cwd") or str(Path.home())
         if c:
-            # Through fish, so the user's `claude` function (claude-queue) wraps it as before.
+            # Through the user's shell, so their `claude` function (claude-queue here) wraps it as before.
             claude = shlex.join(["claude", *c["args"], "--resume", c["session_id"]])
-            return f"kitty -d {shlex.quote(cwd)} fish -c {shlex.quote(claude + '; exec fish')}"
+            return f"kitty -d {shlex.quote(cwd)} {shell} -c {shlex.quote(claude + f'; exec {shell}')}"
         return f"kitty -d {shlex.quote(cwd)}"
     argv = rec.get("argv") or []
     if not argv:
@@ -109,8 +114,10 @@ def command(rec: dict) -> str | None:
 
 
 class Layout:
-    def __init__(self, desk: desktop.Desktop, approvals, events, state_dir: Path):
+    def __init__(self, desk: desktop.Desktop, approvals, events, state_dir: Path, shell: str | None = None):
         self.desk = desk
+        # The shell a resumed Claude session runs in: config [plugins.desktop] shell, else $SHELL.
+        self.shell = shell or os.path.basename(os.environ.get("SHELL") or "sh")
         self.approvals = approvals
         self.events = events
         self.path = state_dir / "layout.json"
@@ -118,7 +125,7 @@ class Layout:
         self.offered: str | None = None
 
     async def run(self):
-        """Snapshot every EVERY seconds; when niri is a new session, offer to bring the old layout back."""
+        """Snapshot every EVERY seconds; when the WM is a new session, offer to bring the old layout back."""
         while True:
             await asyncio.sleep(EVERY)
             try:
@@ -133,12 +140,12 @@ class Layout:
             return
         snap = await asyncio.to_thread(snapshot)
         saved = read_json(self.path)
-        if saved and saved.get("niri") != snap["niri"]:
-            # A new niri session: keep the old layout aside until it is restored or declined.
+        if saved and _session(saved) != snap["session"]:
+            # A new WM session: keep the old layout aside until it is restored or declined.
             os.replace(self.path, self.previous)
             saved = None
-        if self.offered != snap["niri"] and self.previous.exists():
-            self.offered = snap["niri"]
+        if self.offered != snap["session"] and self.previous.exists():
+            self.offered = snap["session"]
             asyncio.ensure_future(self.offer())
         if snap["windows"] or not saved:
             write_json(self.path, snap)
@@ -148,7 +155,7 @@ class Layout:
         if not old or time.time() - old.get("time", 0) > MAX_AGE:
             return []
         have = {}
-        for w in desktop.ipc("Windows"):
+        for w in desktop.backend().windows():
             have[w["app_id"]] = have.get(w["app_id"], 0) + 1
         out = []
         for rec in old["windows"]:
@@ -156,7 +163,7 @@ class Layout:
             if have.get(rec["app_id"], 0) > 0 and not rec.get("claude"):
                 have[rec["app_id"]] -= 1
                 continue
-            if cmd := command(rec):
+            if cmd := command(rec, self.shell):
                 out.append({**rec, "command": cmd})
         return out
 
@@ -193,8 +200,7 @@ class Layout:
                     # Spawned apps are the user's again, not seimei's.
                     desktop.OURS.pop(w["id"], None)
                     if r.get("workspace") and not r.get("floating"):
-                        await asyncio.to_thread(desktop.action, "move-window-to-workspace", "--window-id", str(w["id"]),
-                                                "--focus", "false", str(r["workspace"]))
+                        await asyncio.to_thread(desktop.backend().move_to_workspace, w["id"], str(r["workspace"]))
                 done.append(f"{r['app_id']} on workspace {r['workspace']}" + (" (resumed)" if r.get("claude") else ""))
             except Exception as e:
                 done.append(f"{r['app_id']} failed: {e}")
