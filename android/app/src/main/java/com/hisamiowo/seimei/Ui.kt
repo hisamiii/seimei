@@ -54,7 +54,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
-import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -64,11 +63,8 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -99,50 +95,12 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 
-// ---------- theme: Catppuccin Mocha arranged as Material 3 tonal roles, as on the web page ----------
-
-object Mocha {
-    val surface = Color(0xFF1E1E2E)
-    val surfaceLow = Color(0xFF181825)
-    val surfaceLowest = Color(0xFF11111B)
-    val container = Color(0xFF26263A)
-    val containerHigh = Color(0xFF313244)
-    val containerHighest = Color(0xFF3A3B50)
-    val primary = Color(0xFFCBA6F7)
-    val onPrimary = Color(0xFF2D1B47)
-    val primaryContainer = Color(0xFF3D3552)
-    val onPrimaryContainer = Color(0xFFECDCFF)
-    val tonal = Color(0xFF35384D)
-    val onTonal = Color(0xFFDFE3FF)
-    val ok = Color(0xFFA6E3A1)
-    val warn = Color(0xFFFAB387)
-    val error = Color(0xFFF38BA8)
-    val text = Color(0xFFCDD6F4)
-    val text2 = Color(0xFFBAC2DE)
-    val text3 = Color(0xFFA6ADC8)
-    val outline = Color(0xFF6C7086)
-}
-
-val MochaScheme = darkColorScheme(
-    primary = Mocha.primary, onPrimary = Mocha.onPrimary,
-    primaryContainer = Mocha.primaryContainer, onPrimaryContainer = Mocha.onPrimaryContainer,
-    secondary = Mocha.primary, onSecondary = Mocha.onPrimary,
-    secondaryContainer = Mocha.tonal, onSecondaryContainer = Mocha.onTonal,
-    tertiary = Mocha.warn,
-    background = Mocha.surface, onBackground = Mocha.text,
-    surface = Mocha.surface, onSurface = Mocha.text, onSurfaceVariant = Mocha.text3,
-    surfaceVariant = Mocha.containerHigh,
-    surfaceContainerLowest = Mocha.surfaceLowest, surfaceContainerLow = Mocha.surfaceLow,
-    surfaceContainer = Mocha.container, surfaceContainerHigh = Mocha.containerHigh,
-    surfaceContainerHighest = Mocha.containerHighest,
-    outline = Mocha.outline, outlineVariant = Mocha.containerHighest,
-    error = Mocha.error,
-)
+// ---------- theme: the picked theme's tokens (Theme.kt) arranged as Material 3 tonal roles, as on the web page ----------
 
 /** Colors the Material roles do not name: good, warning, and the dimmer text tones. */
 data class Extra(val ok: Color, val warn: Color, val text2: Color, val text3: Color)
 
-val LocalExtra = androidx.compose.runtime.staticCompositionLocalOf { Extra(Mocha.ok, Mocha.warn, Mocha.text2, Mocha.text3) }
+val LocalExtra = androidx.compose.runtime.staticCompositionLocalOf { Extra(MOCHA.ok, MOCHA.warn, MOCHA.text2, MOCHA.text3) }
 
 /** Google Sans Flex (OFL), bundled: Latin only, pinned to wght 400-700. Cyrillic falls back to the system Roboto. */
 @OptIn(ExperimentalTextApi::class)
@@ -166,13 +124,17 @@ val SeimeiType = Typography(
 val TNUM: TextStyle
     @Composable get() = androidx.compose.material3.LocalTextStyle.current.copy(fontFeatureSettings = "tnum")
 
+/** Light or dark: the system's unless pinned ("light", "dark"). */
 @Composable
-fun SeimeiTheme(dynamic: Boolean, content: @Composable () -> Unit) {
+fun isDark(mode: String) = when (mode) { "dark" -> true; "light" -> false; else -> androidx.compose.foundation.isSystemInDarkTheme() }
+
+@Composable
+fun SeimeiTheme(theme: String, mode: String, accent: String?, content: @Composable () -> Unit) {
     val ctx = LocalContext.current
-    val scheme: ColorScheme = if (dynamic && Build.VERSION.SDK_INT >= 31) dynamicDarkColorScheme(ctx) else MochaScheme
-    val extra = if (scheme === MochaScheme) Extra(Mocha.ok, Mocha.warn, Mocha.text2, Mocha.text3)
-    else Extra(Mocha.ok, Mocha.warn, scheme.onSurface.copy(alpha = .85f), scheme.onSurfaceVariant)
-    androidx.compose.runtime.CompositionLocalProvider(LocalExtra provides extra) {
+    val dark = isDark(mode)
+    val t = androidx.compose.runtime.remember(theme, dark, accent) { themeTokens(ctx, theme, dark, accent) }
+    val scheme = androidx.compose.runtime.remember(t, dark) { schemeOf(t, dark) }
+    androidx.compose.runtime.CompositionLocalProvider(LocalTokens provides t, LocalExtra provides Extra(t.ok, t.warn, t.text2, t.text3)) {
         MaterialTheme(colorScheme = scheme, typography = SeimeiType, content = content)
     }
 }
@@ -248,7 +210,16 @@ class MainActivity : ComponentActivity() {
         openTab(intent)
         if (savedInstanceState == null) takeShare(intent)
         setContent {
-            SeimeiTheme(vm.dynamicColor) {
+            SeimeiTheme(vm.theme, vm.themeMode, vm.accent) {
+                // Status and navigation bar icons follow the theme's side, not only the system's.
+                val dark = isDark(vm.themeMode)
+                androidx.compose.runtime.LaunchedEffect(dark) {
+                    val clear = android.graphics.Color.TRANSPARENT
+                    enableEdgeToEdge(
+                        if (dark) androidx.activity.SystemBarStyle.dark(clear) else androidx.activity.SystemBarStyle.light(clear, clear),
+                        if (dark) androidx.activity.SystemBarStyle.dark(clear) else androidx.activity.SystemBarStyle.light(clear, clear),
+                    )
+                }
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
                     when (vm.phase) {
                         Phase.Pair -> PairScreen(vm, this)
@@ -490,6 +461,8 @@ fun Header(vm: Seimei) {
     // Idle and working go without saying in the chat (its working line shows a turn); only problems and asks show.
     val showStatus = text.isNotEmpty() && !(vm.tab == "chat" && (dot == "idle" || dot == "working"))
     var menu by remember { mutableStateOf(false) }
+    var themes by remember { mutableStateOf(false) }
+    if (themes) ThemeSheet(vm) { themes = false }
     Row(Modifier.statusBarsPadding().fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer), contentAlignment = Alignment.Center) {
             Glyph(24.dp)
@@ -531,10 +504,11 @@ fun Header(vm: Seimei) {
                     },
                 )
                 DropdownMenuItem(
-                    text = { Text("Material You colors") },
-                    trailingIcon = { Switch(vm.dynamicColor, null) },
-                    onClick = { vm.setDynamic(!vm.dynamicColor) },
-                    enabled = Build.VERSION.SDK_INT >= 31,
+                    text = { Text("Theme") },
+                    onClick = {
+                        menu = false
+                        themes = true
+                    },
                 )
             }
         }

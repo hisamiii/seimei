@@ -23,6 +23,7 @@ from .push import Push
 from .uploads import TooLarge, Uploads
 from .dispatcher import Dispatcher, quoted
 from .events import EventLog
+from .util import read_json, write_json
 from .files import MAX_MODEL_BYTES, Files
 from .guard import Guard
 from .sessions import Watcher
@@ -87,7 +88,7 @@ log = logging.getLogger("seimei.server")
 def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files, approvals: Approvals,
              tool_guard: Guard, watcher: Watcher, auth: Auth | None, origins: set[str],
              app_dir: Path | None = None, cost: Cost | None = None, push: Push | None = None,
-             uploads: Uploads | None = None, board=None, adopter=None) -> web.Application:
+             uploads: Uploads | None = None, board=None, adopter=None, theme: Path | None = None) -> web.Application:
     # Only these Host headers are served: a page using DNS rebinding cannot read the API from the browser (L4).
     hosts = {"localhost", "127.0.0.1", "::1"} | {urllib.parse.urlparse(o).hostname for o in origins}
 
@@ -292,6 +293,22 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
         if push and push.stream:
             await push.stream.drop(dev)
         return web.json_response({"ok": True})
+
+    async def theme_get(request):
+        """The Material You seed the phone app last sent from its wallpaper (#81); {} before any did."""
+        return web.json_response((theme and read_json(theme)) or {})
+
+    async def theme_set(request):
+        body = await request.json()
+        seed = str(body.get("seed", "")).lower()
+        if len(seed) != 7 or seed[0] != "#" or any(c not in "0123456789abcdef" for c in seed[1:]):
+            return web.json_response({"error": "seed is #rrggbb"}, status=400)
+        device = (auth.current(request) or {}).get("device") if auth else None
+        rec = {"seed": seed, "from": (auth.device(device) or {}).get("name") if device else "browser", "at": time.time()}
+        if theme and (read_json(theme) or {}).get("seed") != seed:
+            write_json(theme, rec)
+            events.flash({"type": "theme", **rec})
+        return web.json_response(rec)
 
     async def app_info(request):
         meta = app_dir and app_dir / "app.json"
@@ -737,6 +754,8 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     app.router.add_post("/api/sessions/{pid:[0-9]+}/archive", session_archive)
     app.router.add_post("/api/sessions/{pid:[0-9]+}/answer", session_answer)
     app.router.add_get("/api/app", app_info)
+    app.router.add_get("/api/theme", theme_get)
+    app.router.add_post("/api/theme", theme_set)
     app.router.add_get("/api/app/seimei.apk", apk)
     app.router.add_get("/api/workers", workers_all)
     app.router.add_get("/api/workers/{id}", worker_history)

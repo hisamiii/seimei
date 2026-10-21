@@ -1,8 +1,9 @@
-// The account menu: fingerprint login, the phone app and its pairing, the activity log, and logging out.
+// The account menu: fingerprint login, the phone app and its pairing, the theme, the activity log, and logging out.
 import { deviceName, register, supported } from './passkey.js';
 import { $, el, clock, dayLabel, when, post, getJSON, toLogin, snack } from './util.js';
 import { main, toBottom } from './chat.js';
 import { sheet, showSheet } from './sheet.js';
+import { openThemes } from './themepick.js';
 
 const menu = $('menu'), card = $('fp-card');
 
@@ -57,6 +58,10 @@ $('logout').addEventListener('click', () => post('api/auth/logout', {}).finally(
 $('phones').addEventListener('click', () => {
   menu.hidden = true;
   openPhones();
+});
+$('theme').addEventListener('click', () => {
+  menu.hidden = true;
+  openThemes();
 });
 $('audit').addEventListener('click', () => {
   menu.hidden = true;

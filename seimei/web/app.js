@@ -6,6 +6,7 @@ import { setUsage, renderUsage, tone } from './usage.js';
 import { setTasks, loadTasks } from './tasks.js';
 import { account } from './account.js';
 import { sheet, closeSheet } from './sheet.js';
+import { init as initTheme, phone as phoneTheme } from './theme.js';
 
 let lastId = 0;
 // The chat's events as they came (the last KEEP_CHAT), kept in this browser for the next visit.
@@ -151,6 +152,8 @@ function handle(ev) {
     setSessions(ev.list);
   } else if (ev.type === 'tasks') {
     setTasks(ev);
+  } else if (ev.type === 'theme') {
+    phoneTheme(ev);
   }
 }
 
@@ -266,4 +269,5 @@ async function start() {
   account();
 }
 
+initTheme();
 start();

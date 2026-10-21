@@ -99,19 +99,10 @@ import java.time.format.DateTimeFormatter
 
 // ---------- tones and words, as on the web page ----------
 
-data class Tone(val bg: Color, val fg: Color, val dot: Color)
-
-val TONE = mapOf(
-    "run" to Tone(Color(0xFF3D3552), Color(0xFFECDCFF), Color(0xFFCBA6F7)),
-    "ask" to Tone(Color(0xFF45393E), Color(0xFFFFDCC4), Color(0xFFFAB387)),
-    "ok" to Tone(Color(0xFF364142), Color(0xFFC8F3C3), Color(0xFFA6E3A1)),
-    "bad" to Tone(Color(0xFF45293A), Color(0xFFFFD0DC), Color(0xFFF38BA8)),
-    "idle" to Tone(Color(0xFF313244), Color(0xFFCDD6F4), Color(0xFFA6ADC8)),
-)
-
-val PEACH = Color(0xFFFAB387)
-val MAUVE = Color(0xFFCBA6F7)
-val ASK_BG = Color(0xFF2A2633)
+// The theme's tokens (Theme.kt) under the names the pages use.
+val PEACH: Color @Composable get() = LocalTokens.current.warn
+val MAUVE: Color @Composable get() = LocalTokens.current.primary
+val ASK_BG: Color @Composable get() = LocalTokens.current.tint
 
 /** "at 10:28 PM" today, "on 18 Oct at 10:28 PM" another day. */
 fun atTime(t: Double): String =
@@ -167,14 +158,15 @@ fun short(t: Double): String {
 fun whenText(t: Double): String =
     if (dayOf(t) == LocalDate.now()) clock(t) else dayOf(t).format(DateTimeFormatter.ofPattern("d MMM"))
 
-/** Catppuccin accents; a project keeps its color everywhere (the same hash as the web page). */
-private val TINTS = listOf(0xFF89B4FA, 0xFFA6E3A1, 0xFF94E2D5, 0xFFCBA6F7, 0xFFF5C2E7, 0xFFB4BEFE, 0xFFF9E2AF, 0xFF74C7EC, 0xFFEBA0AC, 0xFFFAB387).map { Color(it) }
+/** The theme's project colors; a project keeps its place in the list everywhere (the same hash as the web page). */
+@Composable
+fun tint(project: String): Color = tintOf(project, LocalTokens.current)
 
-fun tint(project: String): Color {
-    if (project.isEmpty()) return Color(0xFFA6ADC8)
+fun tintOf(project: String, t: Tokens): Color {
+    if (project.isEmpty()) return t.text3
     var h = 0L
     for (c in project) h = (h * 31 + c.code) and 0xFFFFFFFFL
-    return TINTS[(h % TINTS.size).toInt()]
+    return t.tints[(h % t.tints.size).toInt()]
 }
 
 /** One row of the list and the page head, from a shikigami or one of the user's sessions. */
@@ -259,8 +251,9 @@ fun AgentsTab(vm: Seimei) {
         }
         return
     }
+    val groups = listOf(Triple("Needs you", PEACH, ask), Triple("Working", MAUVE, work), Triple("Idle", LocalExtraText3, idle))
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp)) {
-        for ((title, color, list) in listOf(Triple("Needs you", PEACH, ask), Triple("Working", MAUVE, work), Triple("Idle", LocalExtraText3, idle))) {
+        for ((title, color, list) in groups) {
             if (list.isEmpty()) continue
             item("h-$title") { GroupTitle(title, color) }
             items(list, key = { "${it.kind}-${it.id}" }) { a ->
@@ -382,7 +375,7 @@ fun ArchiveList(vm: Seimei, now: Long) {
     }
 }
 
-val LocalExtraText3 = Color(0xFFA6ADC8)
+val LocalExtraText3: Color @Composable get() = LocalTokens.current.text3
 
 fun Seimei.open(a: Agent) = if (a.kind == "worker") openWorker(a.id) else openSession(a.id.toLong())
 
@@ -507,7 +500,7 @@ fun AgentPage(vm: Seimei, pg: Page) {
                 Column(Modifier.weight(1f)) {
                     Text(a.name, fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        val dot = when (a.state) { "work" -> MAUVE; "ask" -> PEACH; else -> Color(0xFF6C7086) }
+                        val dot = when (a.state) { "work" -> MAUVE; "ask" -> PEACH; else -> LocalTokens.current.outline }
                         Box(Modifier.size(7.dp).clip(CircleShape).background(dot))
                         Spacer(Modifier.width(6.dp))
                         if (a.project.isNotEmpty()) Text("${a.project} · ", fontSize = 13.sp, color = tint(a.project), fontWeight = FontWeight.Medium)

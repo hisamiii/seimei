@@ -14,6 +14,7 @@ import android.graphics.Bitmap
 import android.graphics.ImageDecoder
 import android.net.Uri
 import android.security.keystore.KeyPermanentlyInvalidatedException
+import android.util.Log
 import android.util.LruCache
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -114,7 +115,11 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         private set
     var authError by mutableStateOf<String?>(null)
 
-    var dynamicColor by mutableStateOf(prefs.dynamicColor)
+    var theme by mutableStateOf(prefs.theme)
+        private set
+    var themeMode by mutableStateOf(prefs.themeMode)
+        private set
+    var accent by mutableStateOf(prefs.accent)
         private set
 
     var online by mutableStateOf(false)
@@ -347,9 +352,25 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         phase = Phase.Locked
     }
 
-    fun setDynamic(on: Boolean) {
-        prefs.dynamicColor = on
-        dynamicColor = on
+    fun setTheme(name: String? = null, mode: String? = null, accent: String? = null) {
+        if (name != null) { prefs.theme = name; theme = name }
+        if (mode != null) { prefs.themeMode = mode; themeMode = mode }
+        if (accent != null) { prefs.accent = accent; this.accent = accent }
+    }
+
+    /** Hands the server this phone's wallpaper seed, so the web page's Material You matches it (#81). Only when it
+     * changed: a new wallpaper restarts the app's screen, which comes back through here. */
+    private fun sendSeed() {
+        val seed = wallpaperSeed(getApplication()) ?: return
+        if (seed == prefs.seedSent) return
+        viewModelScope.launch {
+            try {
+                api.post("api/theme", JSONObject().put("seed", seed))
+                prefs.seedSent = seed
+            } catch (e: Exception) {
+                Log.w("seimei", "could not send the wallpaper seed: $e")
+            }
+        }
     }
 
     // ---------- foreground and the stream ----------
@@ -367,6 +388,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         // Back after a while away: ask for the fingerprint again.
         if (backgroundSince > 0 && System.currentTimeMillis() - backgroundSince > LOCK_AFTER) return lock()
         connect()
+        sendSeed()
     }
 
     fun onStop() {
@@ -384,6 +406,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
 
     private fun start() {
         if (foreground) connect()
+        sendSeed()
     }
 
     private fun connect() {

@@ -731,8 +731,8 @@ fun CardHead(icon: androidx.compose.ui.graphics.vector.ImageVector, bg: Color, f
     }
 }
 
-val BAD_BG = Color(0xFF45293A)
-val OK_BG = Color(0xFF2B3B33)
+val BAD_BG: Color @Composable get() = LocalTokens.current.errorContainer
+val OK_BG: Color @Composable get() = LocalTokens.current.okContainer
 
 @Composable
 fun WorkerCard(w: Item.Worker) {

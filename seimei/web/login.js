@@ -1,4 +1,7 @@
 import { api, login, supported } from './passkey.js';
+import { init as initTheme } from './theme.js';
+
+initTheme(false);
 
 const $ = (id) => document.getElementById(id);
 

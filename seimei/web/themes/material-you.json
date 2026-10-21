@@ -1,0 +1,37 @@
+{
+ "name": "Material You",
+ "dynamic": true,
+ "seed": "#6750a4",
+ "dark": {
+  "ok": "#9cd67d",
+  "warn": "#ffb68a",
+  "tints": [
+   "#89b4fa",
+   "#a6e3a1",
+   "#94e2d5",
+   "#cba6f7",
+   "#f5c2e7",
+   "#b4befe",
+   "#f9e2af",
+   "#74c7ec",
+   "#eba0ac",
+   "#fab387"
+  ]
+ },
+ "light": {
+  "ok": "#386a20",
+  "warn": "#8b5000",
+  "tints": [
+   "#1e66f5",
+   "#40a02b",
+   "#179299",
+   "#8839ef",
+   "#ea76cb",
+   "#7287fd",
+   "#df8e1d",
+   "#209fb5",
+   "#e64553",
+   "#fe640b"
+  ]
+ }
+}

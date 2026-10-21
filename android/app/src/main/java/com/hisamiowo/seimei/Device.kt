@@ -31,9 +31,22 @@ class Prefs(ctx: Context) {
     var keyAuth: Boolean
         get() = p.getBoolean("keyAuth", true)
         set(v) = p.edit().putBoolean("keyAuth", v).apply()
-    var dynamicColor: Boolean
-        get() = p.getBoolean("dynamicColor", false)
-        set(v) = p.edit().putBoolean("dynamicColor", v).apply()
+    /** The theme (#81): one of THEMES; "Material You colors" from before themes carries over. */
+    var theme: String
+        get() = p.getString("theme", null) ?: if (p.getBoolean("dynamicColor", false)) "material-you" else "catppuccin"
+        set(v) = p.edit().putString("theme", v).apply()
+    /** Light or dark: "system", "light" or "dark". */
+    var themeMode: String
+        get() = p.getString("themeMode", "system") ?: "system"
+        set(v) = p.edit().putString("themeMode", v).apply()
+    /** Catppuccin's accent; null for its default (mauve). */
+    var accent: String?
+        get() = p.getString("accent", null)
+        set(v) = p.edit().putString("accent", v).apply()
+    /** The wallpaper seed last sent to the server, so it is sent again only when the wallpaper changes. */
+    var seedSent: String?
+        get() = p.getString("seedSent", null)
+        set(v) = p.edit().putString("seedSent", v).apply()
     var draft: String
         get() = p.getString("draft", "") ?: ""
         set(v) = p.edit().putString("draft", v).apply()

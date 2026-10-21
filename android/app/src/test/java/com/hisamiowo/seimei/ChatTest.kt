@@ -135,9 +135,9 @@ class ChatTest {
 
     @Test fun projectTintsMatchTheWebPage() {
         // The page's tint(): h = (h * 31 + code) >>> 0, then TINTS[h % 10]; yah -> 2, tmc-lab -> 8, seimei -> 6.
-        assertEquals(Color(0xFF94E2D5), tint("yah"))
-        assertEquals(Color(0xFFEBA0AC), tint("tmc-lab"))
-        assertEquals(Color(0xFFF9E2AF), tint("seimei"))
+        assertEquals(Color(0xFF94E2D5), tintOf("yah", MOCHA))
+        assertEquals(Color(0xFFEBA0AC), tintOf("tmc-lab", MOCHA))
+        assertEquals(Color(0xFFF9E2AF), tintOf("seimei", MOCHA))
     }
 
     /** Routes like the view model: trajectory events whole into one Chat, a fold line into the other. */

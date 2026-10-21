@@ -3,6 +3,7 @@ import { $, S, hooks, el, svg, clock, at as atTime, home, short, when, getJSON, 
 import { Renderer, doing as doingPhrase, elapsed } from './chat.js';
 import { sheet, showSheet, closeSheet } from './sheet.js';
 import { metricFacts } from './usage.js';
+import { current as themeNow } from './theme.js';
 
 const page = $('agents');
 const sp = $('spage');
@@ -103,13 +104,14 @@ async function refreshAll() {
 
 // ---------- one model for both kinds ----------
 
-// Catppuccin accents; a project keeps its color everywhere.
+// The theme's project colors (Catppuccin's by default); a project keeps its place in the list everywhere.
 const TINTS = ['#89b4fa', '#a6e3a1', '#94e2d5', '#cba6f7', '#f5c2e7', '#b4befe', '#f9e2af', '#74c7ec', '#eba0ac', '#fab387'];
 export function tint(project) {
-  if (!project) return '#a6adc8';
+  if (!project) return themeNow?.['text-3'] || '#a6adc8';
+  const tints = themeNow?.tints || TINTS;
   let h = 0;
   for (const c of project) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return TINTS[h % TINTS.length];
+  return tints[h % tints.length];
 }
 
 function fromWorker(w) {

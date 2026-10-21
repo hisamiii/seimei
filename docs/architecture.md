@@ -69,6 +69,15 @@ A card holds a tool call until the user answers on the phone or the web. Three s
 | `~/.local/share/seimei-app/` | the production checkout; `deploy.sh` moves it to a commit and restarts once idle |
 | `$XDG_RUNTIME_DIR/seimei/` | sockets of the connectors (Discord, browser) |
 
+## Themes
+
+A theme is one token file in `seimei/web/themes/`, built by `contrib/themes.py` from a small palette per side (dark
+and light). The page sets its tokens as CSS variables (`theme.js`); the app reads the same files as assets
+(`Theme.kt`). Adding a theme is one entry in `contrib/themes.py`. Material You has no fixed colors: the app uses
+Android's wallpaper scheme and sends its seed to `/api/theme`; the page rebuilds the same M3 scheme from that seed with
+material-color-utilities (`mcu.js`, vendored), or from a seed picked on the page when no phone has sent one. The
+server never reads its own wallpaper.
+
 ## Deploys
 
 Production never runs from the working tree. `deploy.sh [rev]` runs as its own transient systemd unit (so the

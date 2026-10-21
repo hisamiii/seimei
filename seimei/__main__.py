@@ -187,7 +187,8 @@ def main():
     dispatcher.recall = lambda: recall_state(board, pool)
     guard.tell = pool.tell
     watcher = Watcher(events, pool.own_sessions, pool.notify, pool.archive)
-    app = make_app(events, dispatcher, pool, files, approvals, guard, watcher, auth, origins, state / "app", cost, push, uploads, board, adopter)
+    app = make_app(events, dispatcher, pool, files, approvals, guard, watcher, auth, origins, state / "app", cost, push, uploads, board, adopter,
+                   theme=state / "theme.json")
     plugins.routes(app)
 
     async def deploy_note():
