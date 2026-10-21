@@ -39,6 +39,8 @@ RE = "re:"
 RE_LINE_MAX = 200  # a re: line longer than this, or one that never ends, is text
 RE_SEARCH = 50  # the user's messages a re: quote is looked for in
 # An event turn that ends on an unmarked reply is asked once where it goes (rules.md: the routing rule is enforced).
+# Info-only notes wait for the next turn; after this long without one, they start a turn of their own.
+HOLD = 30 * 60
 BOUNCE = "[seimei] mark this reply chat: or trajectory: (answer with just the marker; the reply is moved for you)"
 OFF_TOOLS = ["Agent", "Task", "Workflow", "NotebookEdit", "CronCreate", "CronDelete", "CronList", "RemoteTrigger",
              "PushNotification", "DesignSync", "EnterWorktree", "ExitWorktree", "ScheduleWakeup", "LSP"]
@@ -51,7 +53,7 @@ They talk to you through a web page, usually from their phone.
   Keep durable notes (ongoing tasks, decisions, open questions) in {notes} and re-read them after a compaction or restart.
 - Replies are read on a phone: lead with the answer, keep it short, avoid wide tables.
 - Phone notifications are yours to decide: only approval cards push on their own. Use notify (level, collapse key, reply=true when they asked something and left the app), presence to see where they are, and watch rules to ping them when a shikigami or session finishes or asks, or the GPU queue frees.
-- Messages starting with [seimei] are events from the server, not typed by the user.
+- Messages starting with [seimei] are events from the server, not typed by the user. Ones that need you (a shikigami finishing, failing or asking, a session's question or permission prompt, a card, a queue fault) start a turn at once; the rest wait as "Since your last turn" lines on your next turn, at most 30 minutes.
 - A turn the user started goes to the chat. A turn a [seimei] line started goes to the user's Trajectory tab (they see a one-line mention and a badge), unless a show_image or send_file moves the rest of it to the chat. Mark the closing reply of such a turn chat: or trajectory:; if it ends unmarked, seimei asks you once ("mark this reply chat: or trajectory:") and you answer with just the marker; still unmarked, it stays in the Trajectory. Ping with notify when it is urgent. Three markers at the start of a reply steer it; they are removed and combine in any order:
   - "chat:" sends the reply (and the rest of an event turn) to the chat: a question or decision for the user, a result they asked for.
   - "trajectory:" sends that reply of a user turn to the Trajectory; the chat gets a one-line mention.
@@ -149,6 +151,7 @@ class Dispatcher:
         self.tools = tools
         self.guard = guard
         self.notes_queue: list[str] = []
+        self.notes_timer: asyncio.TimerHandle | None = None
         self.events = events
         self.sid_file = state_dir / "session_id"
         self.notes = state_dir / "notes.md"
@@ -281,6 +284,17 @@ class Dispatcher:
             self.notes_queue[:] = [n for n in self.notes_queue if not n.startswith(f"\0{key}\0")]
             text = f"\0{key}\0{text}"
         self.notes_queue.append(text)
+        if not self.notes_timer:
+            try:
+                self.notes_timer = asyncio.get_running_loop().call_later(HOLD, self._unhold)
+            except RuntimeError:
+                pass
+
+    def _unhold(self):
+        """Notes waited HOLD with no turn to ride on: they go now, as a turn of their own."""
+        self.notes_timer = None
+        if self.notes_queue:
+            asyncio.ensure_future(self._deliver("", src=("event", "notes waited 30 min")))
 
     def wake(self, text: str):
         """Something the dispatcher should act on now."""
@@ -308,7 +322,10 @@ class Dispatcher:
         if self.notes_queue:
             notes = "\n".join(f"- {n.rsplit(chr(0), 1)[-1]}" for n in self.notes_queue)
             self.notes_queue.clear()
-            text = f"[seimei] Since your last turn:\n{notes}\n\n{text}"
+            text = f"[seimei] Since your last turn:\n{notes}" + (f"\n\n{text}" if text else "")
+        if self.notes_timer:
+            self.notes_timer.cancel()
+            self.notes_timer = None
         # The user's style reminder rides on every message; the event log already has what the user saw.
         if style := self.style():
             text = f"{text}\n\n[style]\n{style}"

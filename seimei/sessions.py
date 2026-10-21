@@ -477,7 +477,7 @@ class SessionEvents:
             if Path(f"/proc/{pid}").exists():
                 continue  # still running, only hidden (parked, or renamed out of the list)
             if rec.exists():
-                out.append((f'session "{st["name"]}" (pid {pid}) died without closing: killed or crashed{_oomd()}', True, f"end:{pid}"))
+                out.append((f'session "{st["name"]}" (pid {pid}) died without closing: killed or crashed{_oomd()}', False, f"end:{pid}"))
             else:
                 out.append((f'session "{st["name"]}" (pid {pid}) was closed', False, f"end:{pid}"))
         return out
@@ -506,7 +506,7 @@ class SessionEvents:
             elif b.get("is_error"):
                 st["fails"][name] = n = st["fails"].get(name, 0) + 1
                 if n == 3:
-                    out.append((f"{who}: {name} failed 3 times in a row, last: {text[:200]}", True, None))
+                    out.append((f"{who}: {name} failed 3 times in a row, last: {text[:200]}", False, None))
             else:
                 st["fails"].pop(name, None)
 

@@ -337,7 +337,7 @@ class Guard:
                 k = (worker, inp.get("tool_name", "?"))
                 self.fails[k] = n = self.fails.get(k, 0) + 1
                 if n == REPEATS:
-                    self._tell(worker, f"{k[1]} failed {n} times in a row, last: {' '.join(error.split())[:200]}", urgent=True)
+                    self._tell(worker, f"{k[1]} failed {n} times in a row, last: {' '.join(error.split())[:200]}")
             return {}
 
         async def done(inp, tool_use_id, ctx):

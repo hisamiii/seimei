@@ -449,8 +449,8 @@ class Pool:
 
     def tell(self, worker: str, line: str, urgent: bool = False, key: str | None = None):
         """One event line for the dispatcher about a shikigami. Lines that come close together go as one
-        message; repeats collapse. Urgent ones go now; the rest join a running dispatcher turn, or wait for
-        its next one."""
+        message; repeats collapse. Urgent ones go now (into a running turn, or as a turn of their own); the rest
+        wait for its next turn (Dispatcher.note, at most HOLD)."""
         w = self.workers.get(worker)
         self.notify(f"shikigami {w.name} ({w.id}) {line}" if w else line, urgent=urgent, key=key)
 
@@ -468,7 +468,9 @@ class Pool:
         if not batch or not self.dispatcher:
             return
         lines = [line + (f" (×{n})" if n > 1 else "") for _, (line, _, n) in batch]
-        if any(u for _, (_, u, _) in batch) or self.dispatcher.busy:
+        # Only what needs the dispatcher starts a turn (or joins the running one); info-only lines wait for its next
+        # turn even while it is busy, since a line that reaches a turn just as it ends starts a turn of its own.
+        if any(u for _, (_, u, _) in batch):
             self.dispatcher.wake("\n".join(lines) if len(lines) == 1 else "Events:\n" + "\n".join(f"- {l}" for l in lines))
         else:
             for k, (line, _, n) in batch:
