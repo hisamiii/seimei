@@ -32,19 +32,18 @@ from . import deploys, sessions
 from .aliases import Aliases
 from .archive import Archive
 from .events import EventLog
-from .util import NO_CONNECTORS, STREAM_BUFFER, queue_env, result_text, summarize, write_json
+from .util import NO_CONNECTORS, STREAM_BUFFER, result_text, summarize, write_json
 
 log = logging.getLogger("seimei.workers")
 
 PROMPT = """\
 # You are a shikigami
-You are `{name}`, a worker summoned by seimei, the user's dispatcher on their laptop (Arch, niri).
+You are `{name}`, a worker summoned by seimei, the user's dispatcher on their {about}.
 Nobody watches your terminal: work on the task on your own until it is done.
 Your final message is shown to the user on their phone as your report: start it with a one-line summary, keep it short.
 Before reporting done, run the checks that prove it (tests, build, a command, a screenshot) and list them with their result in the report. If you could not verify, say so in the first line.
 If you are blocked on a decision only the user can make, call mcp__shikigami__ask with the question and end your turn.
 Subagents are fine for searches and lookups; they run on {subagents}. No big parallel fan-outs.
-Your commands take GPU/NPU turns through claude-queue. To start or restart a desktop app, run it outside the queue with `env -u LD_PRELOAD systemd-run --user --collect <app>`: started straight from your shell, it holds the GPU turn until it quits and stalls everyone else's GPU jobs.
 Start every task with a short step list (3-8 steps, TaskCreate) and keep it current as you go (TaskUpdate: in_progress when you start a step, completed when it is done; add or delete steps when the plan changes). It shows live as your task's steps on the user's board. Skip it only for a one-step job.
 """
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
@@ -169,9 +168,10 @@ class Worker:
             model=r["model"],
             permission_mode="bypassPermissions",
             setting_sources=["user", "project", "local"],
-            system_prompt={"type": "preset", "preset": "claude_code",
-                           "append": PROMPT.format(name=r["name"], subagents=r.get("subagents") or "haiku")},
-            mcp_servers={"shikigami": self._tools()},
+            system_prompt={"type": "preset", "preset": "claude_code", "append": self.prompt()},
+            # Its own ask, and the plugin groups summon granted it, built for it (their cards name it).
+            mcp_servers={"shikigami": self._tools(), **(self.pool.plugins.servers(r["name"], r["id"], self.granted())
+                                                       if self.pool.plugins else {})},
             # Workers talk to the user through their report and ask, never to other sessions directly.
             disallowed_tools=OFF_TOOLS,
             skills=SKILLS,
@@ -181,6 +181,21 @@ class Worker:
             hooks=self._hooks(),
             **where,
         )
+
+    def granted(self) -> list[str]:
+        """The plugin groups it may use: what summon granted that is still enabled."""
+        plugins = self.pool.plugins
+        return [g for g in self.rec.get("tools") or [] if plugins and g in plugins.names]
+
+    def prompt(self) -> str:
+        r, plugins = self.rec, self.pool.plugins
+        text = PROMPT.format(name=r["name"], subagents=r.get("subagents") or "haiku", about=self.pool.about)
+        if plugins and (notes := plugins.worker_notes()):
+            text += notes + "\n"
+        if plugins and (groups := self.granted()):
+            text += (f"\nYou have seimei's {', '.join(groups)} tools (mcp__{groups[0]}__...), with seimei's rules for them:\n\n"
+                     + plugins.prompt(groups) + "\n")
+        return text
 
     def _hooks(self) -> dict:
         hooks = self.pool.guard.hooks(self.rec["name"], self.rec["id"]) if self.pool.guard else {}
@@ -206,7 +221,7 @@ class Worker:
         r = self.rec
         # No auto-memory: a shikigami reports what it learned, and seimei decides what is kept.
         # The todo tools (TaskCreate, TaskUpdate) are off by default for current models: the board mirrors them.
-        env = {**queue_env(r["name"]), **NO_CONNECTORS, "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
+        env = {**(self.pool.plugins.env(r["name"]) if self.pool.plugins else {}), **NO_CONNECTORS, "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
                "CLAUDE_CODE_SUBAGENT_MODEL": r.get("subagents") or "haiku", "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1"}
         if cap := CONTEXTS.get(r.get("context_cap") or ""):
             env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = str(cap)
@@ -228,28 +243,24 @@ class Worker:
         Claude Code holds the session (a trust prompt delays that, hence the window check)."""
         if self.rec["state"] != "laptop":
             return False
-        from . import desktop
         from .sessions import live
-        try:
-            if self.rec.get("laptop_window") is not None and desktop.window(self.rec["laptop_window"]):
-                return True
-        except Exception:
-            pass
+        if self.pool.plugins and self.pool.plugins.window_open(self.rec.get("laptop_window")):
+            return True
         return any(s["rec"].get("sessionId") == self.rec["session_id"] or s["session_id"] == self.rec["session_id"]
                    for s in live({}))
 
-    async def hand_over(self, desk) -> dict:
+    async def hand_over(self) -> dict:
         """Lend the session to the user: open it with `claude --resume` in a kitty window on the laptop. It stays a
         shikigami: once the window is closed, the next message resumes it here."""
         if self.rec["state"] == "released":
             raise RuntimeError("it is your session already")
         if self.on_laptop():
             raise RuntimeError("it is already open on the laptop")
-        w = await self._to_laptop(desk, f"shikigami {self.name}", "")
+        w = await self._to_laptop(f"shikigami {self.name}", [])
         self._set("laptop", summary="Open on the laptop.", laptop_window=w and w["id"])
         return w
 
-    async def release(self, desk) -> dict | None:
+    async def release(self) -> dict | None:
         """Give the session to the user for good: it opens like a loan, but as one of their sessions under its own
         name. No reports, no resume, no messages from seimei; adopting the session makes it this shikigami again."""
         if self.rec["state"] == "released":
@@ -258,7 +269,7 @@ class Worker:
             # Lent already: that window becomes theirs as it is.
             w = None
         else:
-            w = await self._to_laptop(desk, self.name, f" --name {shlex.quote(self.name)}")
+            w = await self._to_laptop(self.name, ["--name", self.name])
         path = sessions.transcript({"sessionId": self.rec["session_id"], "cwd": self.rec["cwd"]})
         self._set("released", summary="Handed to you as a session.", question=None,
                   laptop_window=w["id"] if w else self.rec.get("laptop_window"),
@@ -270,7 +281,7 @@ class Worker:
             board.update(t["id"], owner="you")
         return w
 
-    async def _to_laptop(self, desk, title: str, extra: str) -> dict | None:
+    async def _to_laptop(self, title: str, extra: list[str]) -> dict | None:
         """Stop it if it works, let go of its process, and resume the session in kitty on the laptop."""
         if not self.rec.get("started"):
             raise RuntimeError("it has no session yet")
@@ -290,11 +301,7 @@ class Worker:
                 self.client = None
                 self.reader.cancel()
                 await asyncio.gather(self.reader, return_exceptions=True)
-            r = self.rec
-            # claude-queue keeps it pausable by benches, like the worker was.
-            cmd = (f"kitty -d {shlex.quote(r['cwd'])} --title {shlex.quote(title)} "
-                   f"claude-queue {shlex.quote(r['name'])} --resume {r['session_id']}{extra}")
-            return await desk.spawn(cmd, own_workspace=False)
+            return await self.pool.open_terminal(self, title, extra)
 
     async def send(self, text: str, shown: str | None = None, files: list[dict] | None = None):
         """Start the session if needed and hand it a message; folds into a running turn. The log keeps what the user
@@ -476,6 +483,12 @@ class Worker:
 class Pool:
     # The task board (tasks.Board), when there is one: summon and adopt file tasks there, and those follow the workers.
     board = None
+    # The enabled plugins (plugins.Plugins): their env, the groups summon grants, and the window a session opens in.
+    plugins = None
+    # The machine, for the shikigami prompt ("their <about>"); config [host] about.
+    about = "computer"
+    # A released or lent session opens in this terminal ({cwd} and {title} filled in, quoted); config [sessions] terminal.
+    terminal = "kitty -d {cwd} --title {title}"
 
     def __init__(self, events: EventLog, state_dir: Path):
         self.events = events
@@ -605,20 +618,18 @@ class Pool:
             labels[sid] = "seimei (you)"
         return labels
 
-    def queue_names(self) -> dict[str, str]:
-        """Who each claude-queue name is: shikigami, seimei and the user's sessions (by CLAUDE_QUEUE in their env)."""
-        out = {re.sub(r"[^A-Za-z0-9_]", "_", w.name): f"shikigami {w.name}" for w in self.workers.values()
-               if w.rec["state"] != "released"}
-        out["seimei"] = "seimei (you)"
-        for s in sessions.live({}):
-            try:
-                env = Path(f"/proc/{s['pid']}/environ").read_bytes().split(b"\0")
-            except OSError:
-                continue
-            q = next((e[13:].decode() for e in env if e.startswith(b"CLAUDE_QUEUE=")), None)
-            if q and q not in out:
-                out[q] = f"session \"{s['name']}\""
-        return out
+    def resume_argv(self, w) -> list[str]:
+        """The command that resumes a shikigami's session in a terminal, as the plugins run it (claude-queue)."""
+        argv = ["claude", "--resume", w.rec["session_id"]]
+        return self.plugins.wrap(w.name, argv) if self.plugins else argv
+
+    async def open_terminal(self, w, title: str, extra: list[str]) -> dict | None:
+        cmd = (self.terminal.format(cwd=shlex.quote(w.rec["cwd"]), title=shlex.quote(title)) + " "
+               + shlex.join(self.resume_argv(w) + extra))
+        if self.plugins:
+            return await self.plugins.spawn(cmd)
+        from .plugins import spawn_detached
+        return spawn_detached(cmd)
 
     def running(self) -> int:
         return sum(w.rec["state"] in ACTIVE for w in self.workers.values())
@@ -639,7 +650,8 @@ class Pool:
             w.rec["board_task"] = t["id"]
 
     async def summon(self, name: str, task: str, cwd: str, model: str, effort: str | None = None, context: str = "400k",
-                     subagents: str = "haiku", project: str | None = None, link: str | None = None) -> Worker:
+                     subagents: str = "haiku", project: str | None = None, link: str | None = None,
+                     tools: list[str] | None = None) -> Worker:
         name = slug(name)
         path = Path(os.path.expanduser(cwd or "~")).resolve()
         if not path.is_dir():
@@ -653,12 +665,17 @@ class Pool:
                "effort": effort or None, "context_cap": context, "subagents": subagents or "haiku", "session_id": str(uuid.uuid4()), "state": "starting", "created": now, "updated": now, "summary": ""}
         if self.board and link and not self.board.find(link):
             raise ValueError(f"no task {link} on the board")
+        if tools:
+            _, unknown = self.plugins.grantable(tools) if self.plugins else ([], list(tools))
+            if unknown:
+                raise ValueError(f"no such tool group: {', '.join(unknown)} (enabled: {', '.join(self.plugins.names) if self.plugins else 'none'})")
+            rec["tools"] = list(dict.fromkeys(tools))
         w = Worker(self, rec)
         self.workers[rec["id"]] = w
         self._file(w, title_of(task, name), project, link)
         self.events.add({"type": "worker", "worker": w.id, "name": name, "event": "summoned", "text": task,
                          "cwd": str(path), "model": rec["model"], "effort": rec["effort"], "context_cap": context,
-                         "subagents": rec["subagents"]})
+                         "subagents": rec["subagents"], **({"tools": rec["tools"]} if rec.get("tools") else {})})
         await w.send(task)
         return w
 

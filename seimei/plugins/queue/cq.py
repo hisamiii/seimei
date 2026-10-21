@@ -15,6 +15,8 @@ import re
 import time
 from pathlib import Path
 
+from ...util import mins
+
 log = logging.getLogger("seimei.queue")
 
 DEVICES = "/dev/kfd:/dev/dri/renderD*:/dev/nvidia*:/dev/accel/accel*"
@@ -241,11 +243,6 @@ def top_memory(n: int = 3) -> list[tuple[int, str, int]]:
     return [(pid, comm, r) for r, pid, comm in rows[:n]]
 
 
-def mins(s: float) -> str:
-    s = int(s)
-    return f"{s}s" if s < 60 else f"{s // 60} min" if s < 3600 else f"{s // 3600} h {s % 3600 // 60} min"
-
-
 def holder_line(h: dict) -> str:
     flags = [f for f, on in (("STUCK: its command ended but it still holds the turn", h["stuck"]),
                              ("graphics app, no compute device", h["gui"])) if on]
@@ -413,12 +410,21 @@ class QueueWatcher:
             await asyncio.sleep(every)
 
 
-def make_queue_tools(approvals) -> list:
-    """Operator tools for cqd. The queue tool itself (read-only) lives in tools.py."""
+def make_queue_tools(approvals, names, who: str = "seimei", worker: str | None = None) -> list:
+    """The read-only queue view and the operator tools for cqd. names: () -> {queue name: who}."""
     from claude_agent_sdk import tool
 
     def text(t: str, error: bool = False) -> dict:
         return {"content": [{"type": "text", "text": t}], **({"is_error": True} if error else {})}
+
+    @tool("queue", "claude-queue right now: which queued command holds the GPU/NPU turn (pid, session, memory, how "
+          "long, about how long it has left, STUCK when its command ended but it still holds the turn), which device "
+          "opens wait, in which order, for what (another command, a bench, free memory) and roughly when they start, "
+          "agents frozen by a bench, idle memory hogs, and whether grants are closed after a GPU fault. Use it when a "
+          "job seems stuck on its GPU or NPU.", {})
+    async def queue(args):
+        snap = await asyncio.to_thread(snapshot, names())
+        return text(describe(snap))
 
     @tool("queue_control", "Steer claude-queue's GPU/NPU queue (cqd). action: bump (to: front, or a class: "
           "interactive, bench, batch), hold / unhold (a waiter keeps its place but does not start), admit (let a "
@@ -439,7 +445,7 @@ def make_queue_tools(approvals) -> list:
             h = next((h for h in snap["holders"] if a.get("target") in (h.get("id"), str(h["pid"]), h.get("agent"))), None)
             what = f"{h.get('agent', h['who'])} {h['command'][:80]}" if h else str(a.get("target"))
             outcome = await approvals.hold({"action": "desktop", "target": f"stop the GPU/NPU job {what}",
-                                            "detail": "SIGTERM to the whole command (its systemd scope)"}, "seimei", None)
+                                            "detail": "SIGTERM to the whole command (its systemd scope)"}, who, worker)
             if outcome != "approved":
                 return text(f"The user {outcome} it; nothing changed.", error=True)
             action = "kill"
@@ -487,4 +493,4 @@ def make_queue_tools(approvals) -> list:
             + (f", CONTAMINATED: {'; '.join(x['contaminated'])}" if x.get("contaminated") else "")
             + f": {x['key']}" for x in rows))
 
-    return [queue_control, queue_policy, queue_history]
+    return [queue, queue_control, queue_policy, queue_history]

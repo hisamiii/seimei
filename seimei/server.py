@@ -21,8 +21,6 @@ from .push import Push
 from .uploads import TooLarge, Uploads
 from .dispatcher import Dispatcher, quoted
 from .events import EventLog
-from . import queue as cq
-from .desktop import Desktop, NoDesktop
 from .files import MAX_MODEL_BYTES, Files
 from .guard import Guard
 from .sessions import Watcher
@@ -79,7 +77,7 @@ def unattach(events: list[dict], uploads) -> list[dict]:
 log = logging.getLogger("seimei.server")
 
 def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files, approvals: Approvals,
-             tool_guard: Guard, watcher: Watcher, desk: Desktop, auth: Auth | None, origins: set[str],
+             tool_guard: Guard, watcher: Watcher, auth: Auth | None, origins: set[str],
              app_dir: Path | None = None, cost: Cost | None = None, push: Push | None = None,
              uploads: Uploads | None = None, board=None, adopter=None) -> web.Application:
     @web.middleware
@@ -470,26 +468,6 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
                         key=f"tick:{t['id']}")
         return web.json_response({"ok": True, "task": t})
 
-    async def queue_view(request):
-        """claude-queue's state: cqd's snapshot, or the /proc fallback when cqd is down."""
-        snap = await asyncio.to_thread(cq.cqd, {"op": "status"})
-        if snap and "holders" in snap:
-            return web.json_response({"cqd": True, **snap})
-        fallback = await asyncio.to_thread(cq.proc_snapshot, {})
-        return web.json_response(fallback)
-
-    async def queue_action(request):
-        """The user steers the queue from the app: same actions as queue_control, no approval card."""
-        body = await request.json()
-        action = str(body.get("action", ""))
-        if action == "revoke" and body.get("kill"):
-            action = "kill"
-        r = await asyncio.to_thread(cq.cqd, {"op": "control", "action": action, "target": body.get("target"),
-                                             "to": body.get("to")})
-        if r is None:
-            raise web.HTTPServiceUnavailable(text="cqd is not running")
-        return web.json_response(r, status=400 if "error" in r else 200)
-
     async def audit(request):
         limit = max(1, min(int(request.query.get("limit", 200)), 1000))
         return web.json_response({"calls": await asyncio.to_thread(tool_guard.tail, limit)})
@@ -593,11 +571,11 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     async def worker_laptop(request):
         w = worker(request)
         try:
-            win = await w.hand_over(desk)
-        except (RuntimeError, NoDesktop) as e:
+            win = await w.hand_over()
+        except RuntimeError as e:
             return web.json_response({"error": str(e)}, status=409)
         events.add({"type": "system", "text": f"shikigami {w.name} is open on the laptop."})
-        dispatcher.note(f"the user opened shikigami {w.name} ({w.id}) on the laptop: its session now runs in a kitty "
+        dispatcher.note(f"the user opened shikigami {w.name} ({w.id}) on the laptop: its session now runs in a terminal "
                         "window there, so message it only after that window is closed.")
         return web.json_response({"ok": True, "window": win and win["id"]})
 
@@ -608,7 +586,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
             return web.json_response({"error": f"{w.name} is your session already."}, status=409)
         try:
             out = await adopter.release(w, card=False)
-        except (RuntimeError, NoDesktop) as e:
+        except RuntimeError as e:
             return web.json_response({"error": str(e)}, status=409)
         if w.rec["state"] != "released":
             return web.json_response({"error": out}, status=409)
@@ -649,10 +627,8 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     app.router.add_get("/api/cost", cost_view)
     app.router.add_get("/api/metrics", metrics_view)
     app.router.add_get("/api/audit", audit)
-    app.router.add_get("/api/queue", queue_view)
     app.router.add_get("/api/tasks", tasks_view)
     app.router.add_post("/api/tasks/{tid}/tick", task_tick)
-    app.router.add_post("/api/queue/action", queue_action)
     app.router.add_get("/api/sessions/{pid:[0-9]+}", session)
     app.router.add_post("/api/sessions/{pid:[0-9]+}/send", session_send)
     app.router.add_post("/api/sessions/{pid:[0-9]+}/archive", session_archive)

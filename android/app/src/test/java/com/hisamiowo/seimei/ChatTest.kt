@@ -269,4 +269,13 @@ class MarkdownTest {
         assertEquals("read Discord 3 times", phrase("mcp__seimei__discord_read", 3))
         assertEquals("sent 3 Discord messages", phrase("mcp__seimei__discord_send", 3))
     }
+
+    @Test fun pluginToolsPhraseLikeBefore() {
+        // #61: the built-in plugins' tools have their own servers; old events keep the old names.
+        assertEquals(phrase("mcp__seimei__discord_send", 2), phrase("mcp__discord__discord_send", 2))
+        assertEquals(phrase("mcp__seimei__browser_tabs", 1), phrase("mcp__browser__browser_tabs", 1))
+        assertEquals("used screenshot", phrase("mcp__desktop__screenshot", 1))
+        assertEquals("used x tool", phrase("mcp__mytool__x_tool", 1))
+        assertEquals("checked the shikigami", phrase("mcp__seimei__workers", 1))
+    }
 }

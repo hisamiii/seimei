@@ -1,10 +1,39 @@
 # Optional: copy to ~/.config/seimei/config.toml. These are the defaults.
 
 [server]
-port = 8417                              # the tunnel points here; --dev uses port + 1
-origin = "https://seimei.example.org"  # also the passkey domain
+port = 8417                         # --dev uses port + 1
+origin = "http://localhost:8417"    # where the app and the web reach seimei (a tunnel's https URL); also the passkey domain
 
 [dispatcher]
 model = "opus"
 cwd = "~"
-compact_window = 400000              # tokens at which its context compacts
+compact_window = 400000             # tokens at which its context compacts
+
+[host]
+about = "computer"                  # how the prompts name this machine, e.g. "laptop (an Arch box running niri)"
+
+[sessions]
+terminal = "kitty -d {cwd} --title {title}"   # opens a session for the user (a release, a loan); the command follows
+
+# Plugins: optional tool groups on top of the core. None are on by default; seimei always gets every enabled one and
+# a shikigami the ones summon grants it (tools: ["desktop"]). Each brings its tools (mcp__<name>__<tool>), its prompt
+# section and its approval cards.
+[plugins]
+enabled = []
+# Built in:
+#   desktop  the niri desktop: windows, workspaces, screenshots, input (uinput), AT-SPI, notifications
+#   discord  Discord through the Vesktop plugin in discord/
+#   browser  Waterfox (or Firefox) through the extension in browser/
+#   music    Quod Libet and the session's media players (MPRIS)
+#   queue    claude-queue / cqd: every session's commands take GPU turns through it
+
+# [plugins.queue]
+# lib = "~/.local/lib/claude-queue"   # where claude-queue's library lives
+
+# Anything else in enabled is an external MCP server, as Claude Code's mcpServers takes it (command/args/env, or
+# url/headers), plus the prompt section it brings:
+# [plugins.mytool]
+# command = "mytool-mcp"
+# args = ["--stdio"]
+# prompt = """## My tool
+# What it is for and its rules."""

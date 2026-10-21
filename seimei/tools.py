@@ -10,10 +10,10 @@ from pathlib import Path
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
 from . import metrics
-from . import queue as cq
 from . import sessions as sess
 from .events import EventLog
 from .files import MAX_BYTES, Files
+from .util import always_load
 from .workers import ACTIVE, Pool
 
 MAX_RUNNING = 5
@@ -62,28 +62,9 @@ def writers(pool: Pool, w, own: dict[str, str]) -> str | None:
 
 
 # Tools the dispatcher rarely needs: they stay behind tool search (their names show, the full schema loads on demand).
-# Every other seimei tool is loaded up front, so the everyday ones never cost a ToolSearch round trip.
-DEFERRED = {"niri_query", "discord_search", "discord_edit", "discord_delete", "discord_react", "discord_mark_read", "browser_read",
-            "browser_switch", "browser_download", "browser_downloads", "scroll", "notifications", "send_file",
-            "restore_desktop", "unlock_screen", "queue_control", "queue_policy", "queue_history",
-            "adopt"}
-
-
-def always_load(server: dict, deferred: set[str]) -> dict:
-    """Mark a server's tools, except the deferred ones, with the MCP _meta flag Claude Code reads to keep a tool in
-    the prompt instead of behind tool search. The SDK's tool() has no field for it, so the listing is wrapped."""
-    srv = server["instance"]
-    entry = srv.get_request_handler("tools/list")
-
-    async def listed(ctx, params):
-        res = await entry.handler(ctx, params)
-        for t in res.tools:
-            if t.name not in deferred:
-                t.meta = {**(t.meta or {}), "anthropic/alwaysLoad": True}
-        return res
-
-    srv.add_request_handler("tools/list", entry.params_type, listed)
-    return server
+# Every other seimei tool is loaded up front, so the everyday ones never cost a ToolSearch round trip. Plugins keep
+# their own lists.
+DEFERRED = {"send_file", "adopt"}
 
 
 # A peek's text, at most: it lands in the dispatcher's context and stays there until a compaction.
@@ -133,7 +114,7 @@ def summon_problem(args: dict) -> str:
     return ""
 
 
-def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), uploads=None):
+def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), uploads=None, groups: list[str] = ()):
     @tool("summon", "Start a shikigami: a worker Claude Code session that works on a task on its own and reports back. "
           "Every call picks name, task, cwd, model, effort and context for this task: there are no defaults. "
           "Returns at once; the report arrives later. It goes on the task board as a new task (or as the task_id you "
@@ -153,6 +134,10 @@ def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), upl
                   "task_id": {"type": "string", "description": "a board item this works on (#58 or t3); without it the "
                               "board gets a new task (with the task's #NN when it starts with one)"},
                   "project": {"type": "string", "description": "the board project for a new task; default: from cwd"},
+                  **({"tools": {"type": "array", "items": {"type": "string", "enum": list(groups)},
+                                "description": "plugin tool groups to grant it, with the same cards, guard and rules as "
+                                "yours (their prompt sections come along); default none. Grant only what the task needs."}}
+                     if groups else {}),
               },
               "required": ["name", "task", *SUMMON_PICKS]})
     async def summon(args):
@@ -163,13 +148,15 @@ def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), upl
                         "then call again with confirmed=true.", error=True)
         try:
             w = await pool.summon(args["name"], args["task"], args["cwd"], args["model"], args["effort"], args["context"],
-                                  args.get("subagent_model") or "haiku", args.get("project") or None, args.get("task_id") or None)
+                                  args.get("subagent_model") or "haiku", args.get("project") or None, args.get("task_id") or None,
+                                  list(args.get("tools") or []) or None)
         except Exception as e:
             return text(f"Could not summon: {e}", error=True)
         r = w.rec
         crowd = await asyncio.to_thread(writers, pool, w, own())
         return text(f"Summoned {w.name} ({w.id}) in {r['cwd']} on {r['model']}, effort {r['effort'] or 'default'}, "
-                    f"context {r['context_cap']}, subagents on {r['subagents']}."
+                    f"context {r['context_cap']}, subagents on {r['subagents']}"
+                    + (f", with the {', '.join(r['tools'])} tools." if r.get("tools") else ".")
                     + (f" On the board as {r['board_task']}." if r.get("board_task") else "") + (f"\n\n{crowd}" if crowd else ""))
 
     worker_events = metrics.Events(events.path)
@@ -287,15 +274,6 @@ def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), upl
 
     own = pool.own_sessions
 
-    @tool("queue", "claude-queue right now: which queued command holds the GPU/NPU turn (pid, session, memory, how "
-          "long, about how long it has left, STUCK when its command ended but it still holds the turn), which device "
-          "opens wait, in which order, for what (another command, a bench, free memory) and roughly when they start, "
-          "agents frozen by a bench, idle memory hogs, and whether grants are closed after a GPU fault. Use it when a "
-          "job seems stuck on its GPU or NPU.", {})
-    async def queue(args):
-        snap = await asyncio.to_thread(cq.snapshot, pool.queue_names())
-        return text(cq.describe(snap))
-
     @tool("sessions", "List every running Claude Code session on the laptop: your alias for it, name, status (idle, "
           "busy, waiting with what for, shell, parked), kind, folder and last activity. Includes the user's own "
           "sessions. Aliased ones show their SendMessage address, which holds through renames.", {})
@@ -378,4 +356,4 @@ def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), upl
         return text(await asyncio.to_thread(pool.dispatcher.usage.report, names))
 
     return always_load(create_sdk_mcp_server("seimei", tools=[summon, workers, peek, message, stop, show_image, send_file,
-                                                              sessions, session_peek, alias, queue, usage, *extra]), DEFERRED)
+                                                              sessions, session_peek, alias, usage, *extra]), DEFERRED)

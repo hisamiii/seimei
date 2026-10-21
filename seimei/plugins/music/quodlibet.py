@@ -72,7 +72,7 @@ def describe(cmd: str, r: dict) -> str:
     return json.dumps(r, ensure_ascii=False)
 
 
-def make_music_tools(approvals) -> list:
+def make_music_tools(approvals, who: str = "seimei", worker: str | None = None) -> list:
     @tool("music", "Quod Libet's library and player through its seimei bridge plugin. Commands and their args:\n"
           "status; search {query, limit} (Quod Libet query syntax: plain words, artist=Name, &(album=X, #(rating>0.6)), "
           "#(playcount>10)...); browse {tag: artist|album|albumartist|genre|composer|date|performer, filter, query}; "
@@ -98,7 +98,7 @@ def make_music_tools(approvals) -> list:
                     args = {"keys": keys, "tags": args.get("tags") or {}}
                 else:
                     target, detail = f"delete the playlist \"{args.get('name')}\"", "Quod Libet playlist"
-                outcome = await approvals.hold({"action": "desktop", "target": target, "detail": detail}, "seimei", None)
+                outcome = await approvals.hold({"action": "desktop", "target": target, "detail": detail}, who, worker)
                 if outcome != "approved":
                     return {"content": [{"type": "text", "text": f"The user {outcome} it; nothing changed."}], "is_error": True}
             r = await call(cmd, **args)

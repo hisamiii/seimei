@@ -37,7 +37,11 @@ const ICONS = {
   Tool: 'M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-2.4z',
 };
 
+// The built-in plugins' tools (mcp__browser__browser_tabs) read like seimei's own, as they were named before them.
+const ours = name => name.replace(/^mcp__(desktop|discord|browser|music|queue)__/, 'mcp__seimei__');
+
 export function phrase(name, n) {
+  name = ours(name);
   if (name === 'Bash') return `ran ${plural(n, 'a command', 'commands')}`;
   if (name === 'Read') return `read ${plural(n, 'a file', 'files')}`;
   if (/^(Edit|Write|MultiEdit|NotebookEdit)$/.test(name)) return `edited ${plural(n, 'a file', 'files')}`;

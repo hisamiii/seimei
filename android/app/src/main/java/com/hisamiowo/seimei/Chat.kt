@@ -320,8 +320,13 @@ fun clock(t: Double): String =
 
 fun plural(n: Int, one: String, many: String) = if (n == 1) one else "$n $many"
 
+/** The built-in plugins' tools (mcp__browser__browser_tabs) read like seimei's own, as they were named before them. */
+private val PLUGIN_TOOL = Regex("^mcp__(desktop|discord|browser|music|queue)__")
+
 /** "ran 3 commands", "read a file": what a group of tool calls did. */
-fun phrase(name: String, n: Int): String = when {
+fun phrase(tool: String, n: Int): String = phraseOf(PLUGIN_TOOL.replace(tool, "mcp__seimei__"), n)
+
+private fun phraseOf(name: String, n: Int): String = when {
     name == "Bash" -> "ran ${plural(n, "a command", "commands")}"
     name == "Read" -> "read ${plural(n, "a file", "files")}"
     name in setOf("Edit", "Write", "MultiEdit", "NotebookEdit") -> "edited ${plural(n, "a file", "files")}"
