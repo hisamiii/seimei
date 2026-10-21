@@ -547,8 +547,7 @@
       "destination": "localSettings",
       "rules": [
        {
-        "toolName": "Bash",
-        "ruleContent": null
+        "toolName": "Bash"
        }
       ],
       "behavior": "allow"

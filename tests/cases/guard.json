@@ -261,6 +261,24 @@
   {
    "tool": "Bash",
    "input": {
+    "command": "cat ~/*/id_ed25519"
+   },
+   "cwd": "/home/tester",
+   "blocked": true,
+   "why": "SSH"
+  },
+  {
+   "tool": "Glob",
+   "input": {
+    "pattern": "*/id_*"
+   },
+   "cwd": "/home/tester",
+   "blocked": true,
+   "why": "SSH"
+  },
+  {
+   "tool": "Bash",
+   "input": {
     "command": "cp -r ~/.* /tmp/dots"
    },
    "cwd": "/home/tester",

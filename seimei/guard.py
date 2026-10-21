@@ -108,7 +108,8 @@ def _secret_word(word: str, bases: list[str]) -> str | None:
         full = os.path.normpath(os.path.join(base, word))
         if any(c in full for c in "*?["):
             # A glob does something only through the files it expands to (a regex for sed or grep expands to none).
-            for hit in itertools.islice(glob.iglob(full), GLOB_LIMIT):
+            # Hidden names too: `~/*/id_ed25519` reaches ~/.ssh in a shell with dotglob.
+            for hit in itertools.islice(glob.iglob(full, include_hidden=True), GLOB_LIMIT):
                 if name := _secret_path(Path(hit)):
                     return name
         elif name := _secret_path(Path(full)):

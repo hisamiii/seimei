@@ -212,7 +212,9 @@ Python stays installed for a week as the way back (same state files).
 | 5 | ACP harness (#69) against a fake ACP agent, then dsh and Codex | ACP cases; one live run each |
 | 6 | `setup`, `update`, release signing, static builds, docs | install on a clean user account; switch the live service |
 
-**Progress (2026-10-21).** Phases 0 to 2 are done.
+**Progress (2026-10-21).** Phases 0 to 2 are done; phase 3 has started.
+- **Rule for the port.** Match seimei's behavior, not Python's: the wire protocol, the meaning of the state files and `tests/cases/` stay identical, everything else is plain Rust with std or a small crate. Where the two sides differ on a case, the right side wins; for the guard, blocking more is fine and every bypass found becomes a new case.
+- **Guard and cards.** The deny-list, the approval checks and the permission card options run in Rust over `tests/cases/` (`guard.json`, `check.json`, `permissions.json`). The port found one bypass in the Python guard (globs skipped hidden folders), now fixed and a case.
 - **Phase 2 server.** `SEIMEI_SERVER=target/debug/seimei uv run pytest -m web -k "tauth or tpush63 or tthemes"` runs the gate against it.
 - **Auth.** `tauth` is new: the login scenarios over HTTP, so both servers run them. A passkey registered on Python logs in on Rust: webauthn-rs reads py_webauthn's stored COSE keys.
 - **Push.** The rules, FCM and Web Push are Rust integration tests against local fakes (`crates/server/tests/push.rs`).
