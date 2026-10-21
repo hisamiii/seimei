@@ -1,0 +1,914 @@
+{
+ "about": "The read-only views (seimei/cost.py, metrics.py, archive.py): what one API message costs at API prices and which price row it uses, when the weekly window started (times in UTC), one shikigami's metrics, and whether the Agents list hides an item. usd compares to 1e-6.",
+ "cost": [
+  {
+   "model": "claude-fable-5-1-20260101",
+   "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 800,
+    "cache_read_input_tokens": 50000,
+    "cache_creation_input_tokens": 3000
+   },
+   "usd": 0.102,
+   "key": "claude-fable-5-1"
+  },
+  {
+   "model": "claude-mythos-5-1-20260101",
+   "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 800,
+    "cache_read_input_tokens": 50000,
+    "cache_creation_input_tokens": 3000
+   },
+   "usd": 0.102,
+   "key": "claude-mythos-5-1"
+  },
+  {
+   "model": "claude-fable-5-20260101",
+   "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 800,
+    "cache_read_input_tokens": 50000,
+    "cache_creation_input_tokens": 3000
+   },
+   "usd": 0.1395,
+   "key": "claude-fable-5"
+  },
+  {
+   "model": "claude-mythos-5-20260101",
+   "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 800,
+    "cache_read_input_tokens": 50000,
+    "cache_creation_input_tokens": 3000
+   },
+   "usd": 0.1395,
+   "key": "claude-mythos-5"
+  },
+  {
+   "model": "claude-opus-5-5-20260101",
+   "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 800,
+    "cache_read_input_tokens": 50000,
+    "cache_creation_input_tokens": 3000
+   },
+   "usd": 0.0458,
+   "key": "claude-opus-5-5"
+  },
+  {
+   "model": "claude-opus-5-20260101",
+   "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 800,
+    "cache_read_input_tokens": 50000,
+    "cache_creation_input_tokens": 3000
+   },
+   "usd": 0.06975,
+   "key": "claude-opus-5"
+  },
+  {
+   "model": "claude-opus-4-8-20260101",
+   "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 800,
+    "cache_read_input_tokens": 50000,
+    "cache_creation_input_tokens": 3000
+   },
+   "usd": 0.06975,
+   "key": "claude-opus-4-8"
+  },
+  {
+   "model": "claude-opus-4-7-20260101",
+   "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 800,
+    "cache_read_input_tokens": 50000,
+    "cache_creation_input_tokens": 3000
+   },
+   "usd": 0.06975,
+   "key": "claude-opus-4-7"
+  },
+  {
+   "model": "claude-opus-4-6-20260101",
+   "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 800,
+    "cache_read_input_tokens": 50000,
+    "cache_creation_input_tokens": 3000
+   },
+   "usd": 0.06975,
+   "key": "claude-opus-4-6"
+  },
+  {
+   "model": "claude-opus-4-5-20260101",
+   "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 800,
+    "cache_read_input_tokens": 50000,
+    "cache_creation_input_tokens": 3000
+   },
+   "usd": 0.06975,
+   "key": "claude-opus-4-5"
+  },
+  {
+   "model": "claude-opus-4-1-20260101",
+   "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 800,
+    "cache_read_input_tokens": 50000,
+    "cache_creation_input_tokens": 3000
+   },
+   "usd": 0.20925,
+   "key": "claude-opus-4-1"
+  },
+  {
+   "model": "claude-opus-4-20260101",
+   "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 800,
+    "cache_read_input_tokens": 50000,
+    "cache_creation_input_tokens": 3000
+   },
+   "usd": 0.20925,
+   "key": "claude-opus-4"
+  },
+  {
+   "model": "claude-sonnet-5-5-20260101",
+   "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 800,
+    "cache_read_input_tokens": 50000,
+    "cache_creation_input_tokens": 3000
+   },
+   "usd": 0.0229,
+   "key": "claude-sonnet-5-5"
+  },
+  {
+   "model": "claude-sonnet-5-20260101",
+   "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 800,
+    "cache_read_input_tokens": 50000,
+    "cache_creation_input_tokens": 3000
+   },
+   "usd": 0.0279,
+   "key": "claude-sonnet-5"
+  },
+  {
+   "model": "claude-sonnet-4-6-20260101",
+   "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 800,
+    "cache_read_input_tokens": 50000,
+    "cache_creation_input_tokens": 3000
+   },
+   "usd": 0.04185,
+   "key": "claude-sonnet-4-6"
+  },
+  {
+   "model": "claude-sonnet-4-5-20260101",
+   "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 800,
+    "cache_read_input_tokens": 50000,
+    "cache_creation_input_tokens": 3000
+   },
+   "usd": 0.04185,
+   "key": "claude-sonnet-4-5"
+  },
+  {
+   "model": "claude-sonnet-4-20260101",
+   "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 800,
+    "cache_read_input_tokens": 50000,
+    "cache_creation_input_tokens": 3000
+   },
+   "usd": 0.04185,
+   "key": "claude-sonnet-4"
+  },
+  {
+   "model": "claude-haiku-5-5-20260101",
+   "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 800,
+    "cache_read_input_tokens": 50000,
+    "cache_creation_input_tokens": 3000
+   },
+   "usd": 0.001395,
+   "key": "claude-haiku-5-5"
+  },
+  {
+   "model": "claude-haiku-4-5-20260101",
+   "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 800,
+    "cache_read_input_tokens": 50000,
+    "cache_creation_input_tokens": 3000
+   },
+   "usd": 0.01395,
+   "key": "claude-haiku-4-5"
+  },
+  {
+   "model": "claude-haiku-3-5-20260101",
+   "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 800,
+    "cache_read_input_tokens": 50000,
+    "cache_creation_input_tokens": 3000
+   },
+   "usd": 0.01116,
+   "key": "claude-haiku-3-5"
+  },
+  {
+   "what": "1-hour cache writes",
+   "model": "claude-opus-5-5",
+   "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 800,
+    "cache_read_input_tokens": 50000,
+    "cache_creation_input_tokens": 3000,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 1000,
+     "ephemeral_1h_input_tokens": 2000
+    }
+   },
+   "usd": 0.0518,
+   "key": "claude-opus-5-5"
+  },
+  {
+   "what": "a long Haiku 5.5 prompt",
+   "model": "claude-haiku-5-5",
+   "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 800,
+    "cache_read_input_tokens": 120000,
+    "cache_creation_input_tokens": 3000
+   },
+   "usd": 0.010475,
+   "key": "claude-haiku-5-5"
+  },
+  {
+   "what": "fast mode",
+   "model": "claude-opus-5-5",
+   "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 800,
+    "cache_read_input_tokens": 50000,
+    "cache_creation_input_tokens": 3000,
+    "speed": "fast"
+   },
+   "usd": 0.0916,
+   "key": "claude-opus-5-5"
+  },
+  {
+   "what": "fast mode where there is none",
+   "model": "claude-sonnet-5-5",
+   "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 800,
+    "cache_read_input_tokens": 50000,
+    "cache_creation_input_tokens": 3000,
+    "speed": "fast"
+   },
+   "usd": 0.0229,
+   "key": "claude-sonnet-5-5"
+  },
+  {
+   "what": "US-only inference",
+   "model": "claude-sonnet-4-6",
+   "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 800,
+    "cache_read_input_tokens": 50000,
+    "cache_creation_input_tokens": 3000,
+    "inference_geo": "us"
+   },
+   "usd": 0.046035,
+   "key": "claude-sonnet-4-6"
+  },
+  {
+   "what": "web searches",
+   "model": "claude-haiku-4-5",
+   "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 800,
+    "cache_read_input_tokens": 50000,
+    "cache_creation_input_tokens": 3000,
+    "server_tool_use": {
+     "web_search_requests": 3
+    }
+   },
+   "usd": 0.04395,
+   "key": "claude-haiku-4-5"
+  },
+  {
+   "what": "an unknown model costs nothing",
+   "model": "gpt-9",
+   "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 800,
+    "cache_read_input_tokens": 50000,
+    "cache_creation_input_tokens": 3000
+   },
+   "usd": 0.0,
+   "key": null
+  },
+  {
+   "what": "an empty record",
+   "model": "claude-opus-5-5",
+   "usage": {},
+   "usd": 0.0,
+   "key": "claude-opus-5-5"
+  }
+ ],
+ "week_start": [
+  {
+   "now": 1792616400.0,
+   "resets_at": null,
+   "start": 1792083600.0
+  },
+  {
+   "now": 1792688340.0,
+   "resets_at": null,
+   "start": 1792083600.0
+  },
+  {
+   "now": 1792688400.0,
+   "resets_at": null,
+   "start": 1792688400.0
+  },
+  {
+   "now": 1792918800.0,
+   "resets_at": null,
+   "start": 1792688400.0
+  },
+  {
+   "now": 1792616400.0,
+   "resets_at": 1792681200,
+   "start": 1792076400.0
+  },
+  {
+   "now": 1792616400.0,
+   "resets_at": 1000,
+   "start": 1792083600.0
+  }
+ ],
+ "metrics": [
+  {
+   "what": "done once, nothing after",
+   "rec": {
+    "id": "w1",
+    "name": "app-tester",
+    "model": "sonnet",
+    "effort": "high",
+    "context_cap": "400k",
+    "cwd": "/x",
+    "state": "done",
+    "created": 1800000000.0,
+    "updated": 1800000900.0,
+    "tunes": [
+     {
+      "t": 1800000100.0,
+      "by": "user",
+      "what": "effort high"
+     }
+    ]
+   },
+   "log": [
+    {
+     "type": "user",
+     "t": 1800000000.0,
+     "text": "build it"
+    }
+   ],
+   "events": [
+    {
+     "type": "worker",
+     "worker": "w1",
+     "event": "done",
+     "t": 1800000600.0
+    }
+   ],
+   "spend": {
+    "usd": 1.234567,
+    "calls": 7,
+    "input": 120000,
+    "output": 9000,
+    "cache_read": 500000,
+    "cache_write": 20000
+   },
+   "now": 1800005000.0,
+   "metrics": {
+    "id": "w1",
+    "name": "app-tester",
+    "model": "sonnet",
+    "effort": "high",
+    "context": "400k",
+    "cwd": "/x",
+    "state": "done",
+    "adopted": false,
+    "created": 1800000000.0,
+    "wall": 600.0,
+    "busy": 600.0,
+    "first_done": 1800000600.0,
+    "tokens": {
+     "input": 120000,
+     "cache_read": 500000,
+     "cache_write": 20000,
+     "output": 9000
+    },
+    "calls": 7,
+    "usd": 1.2346,
+    "asks": 0,
+    "followups": 0,
+    "followups_by": {
+     "seimei": 0,
+     "user": 0
+    },
+    "reopened": false,
+    "tunes": [
+     {
+      "t": 1800000100.0,
+      "by": "user",
+      "what": "effort high"
+     }
+    ]
+   }
+  },
+  {
+   "what": "a follow-up from the user asking for more reopens it",
+   "rec": {
+    "id": "w1",
+    "name": "app-tester",
+    "model": "sonnet",
+    "effort": "high",
+    "context_cap": "400k",
+    "cwd": "/x",
+    "state": "done",
+    "created": 1800000000.0,
+    "updated": 1800000900.0,
+    "tunes": [
+     {
+      "t": 1800000100.0,
+      "by": "user",
+      "what": "effort high"
+     }
+    ]
+   },
+   "log": [
+    {
+     "type": "user",
+     "t": 1800000000.0,
+     "text": "build it"
+    },
+    {
+     "type": "user",
+     "t": 1800000700.0,
+     "text": "also add tests"
+    }
+   ],
+   "events": [
+    {
+     "type": "worker",
+     "worker": "w1",
+     "event": "done",
+     "t": 1800000600.0
+    },
+    {
+     "type": "worker",
+     "worker": "w1",
+     "event": "replied",
+     "t": 1800000701.0
+    },
+    {
+     "type": "worker",
+     "worker": "w1",
+     "event": "done",
+     "t": 1800000900.0
+    }
+   ],
+   "spend": null,
+   "now": 1800005000.0,
+   "metrics": {
+    "id": "w1",
+    "name": "app-tester",
+    "model": "sonnet",
+    "effort": "high",
+    "context": "400k",
+    "cwd": "/x",
+    "state": "done",
+    "adopted": false,
+    "created": 1800000000.0,
+    "wall": 900.0,
+    "busy": 800.0,
+    "first_done": 1800000600.0,
+    "tokens": {
+     "input": 0,
+     "cache_read": 0,
+     "cache_write": 0,
+     "output": 0
+    },
+    "calls": 0,
+    "usd": 0.0,
+    "asks": 0,
+    "followups": 1,
+    "followups_by": {
+     "seimei": 0,
+     "user": 1
+    },
+    "reopened": true,
+    "tunes": [
+     {
+      "t": 1800000100.0,
+      "by": "user",
+      "what": "effort high"
+     }
+    ]
+   }
+  },
+  {
+   "what": "a thanks is not a reopen",
+   "rec": {
+    "id": "w1",
+    "name": "app-tester",
+    "model": "sonnet",
+    "effort": "high",
+    "context_cap": "400k",
+    "cwd": "/x",
+    "state": "done",
+    "created": 1800000000.0,
+    "updated": 1800000900.0,
+    "tunes": [
+     {
+      "t": 1800000100.0,
+      "by": "user",
+      "what": "effort high"
+     }
+    ]
+   },
+   "log": [
+    {
+     "type": "user",
+     "t": 1800000000.0,
+     "text": "build it"
+    },
+    {
+     "type": "user",
+     "t": 1800000700.0,
+     "text": "thanks!"
+    }
+   ],
+   "events": [
+    {
+     "type": "worker",
+     "worker": "w1",
+     "event": "done",
+     "t": 1800000600.0
+    },
+    {
+     "type": "worker",
+     "worker": "w1",
+     "event": "done",
+     "t": 1800000710.0
+    }
+   ],
+   "spend": null,
+   "now": 1800005000.0,
+   "metrics": {
+    "id": "w1",
+    "name": "app-tester",
+    "model": "sonnet",
+    "effort": "high",
+    "context": "400k",
+    "cwd": "/x",
+    "state": "done",
+    "adopted": false,
+    "created": 1800000000.0,
+    "wall": 710.0,
+    "busy": 610.0,
+    "first_done": 1800000600.0,
+    "tokens": {
+     "input": 0,
+     "cache_read": 0,
+     "cache_write": 0,
+     "output": 0
+    },
+    "calls": 0,
+    "usd": 0.0,
+    "asks": 0,
+    "followups": 1,
+    "followups_by": {
+     "seimei": 1,
+     "user": 0
+    },
+    "reopened": false,
+    "tunes": [
+     {
+      "t": 1800000100.0,
+      "by": "user",
+      "what": "effort high"
+     }
+    ]
+   }
+  },
+  {
+   "what": "a restart note is not a follow-up",
+   "rec": {
+    "id": "w1",
+    "name": "app-tester",
+    "model": "sonnet",
+    "effort": "high",
+    "context_cap": "400k",
+    "cwd": "/x",
+    "state": "done",
+    "created": 1800000000.0,
+    "updated": 1800000900.0,
+    "tunes": [
+     {
+      "t": 1800000100.0,
+      "by": "user",
+      "what": "effort high"
+     }
+    ]
+   },
+   "log": [
+    {
+     "type": "user",
+     "t": 1800000000.0,
+     "text": "build it"
+    },
+    {
+     "type": "user",
+     "t": 1800000700.0,
+     "text": "continue: seimei restarted"
+    }
+   ],
+   "events": [
+    {
+     "type": "worker",
+     "worker": "w1",
+     "event": "done",
+     "t": 1800000600.0
+    },
+    {
+     "type": "worker",
+     "worker": "w1",
+     "event": "done",
+     "t": 1800000800.0
+    }
+   ],
+   "spend": null,
+   "now": 1800005000.0,
+   "metrics": {
+    "id": "w1",
+    "name": "app-tester",
+    "model": "sonnet",
+    "effort": "high",
+    "context": "400k",
+    "cwd": "/x",
+    "state": "done",
+    "adopted": false,
+    "created": 1800000000.0,
+    "wall": 800.0,
+    "busy": 700.0,
+    "first_done": 1800000600.0,
+    "tokens": {
+     "input": 0,
+     "cache_read": 0,
+     "cache_write": 0,
+     "output": 0
+    },
+    "calls": 0,
+    "usd": 0.0,
+    "asks": 0,
+    "followups": 0,
+    "followups_by": {
+     "seimei": 0,
+     "user": 0
+    },
+    "reopened": false,
+    "tunes": [
+     {
+      "t": 1800000100.0,
+      "by": "user",
+      "what": "effort high"
+     }
+    ]
+   }
+  },
+  {
+   "what": "a follow-up a day later is not a reopen",
+   "rec": {
+    "id": "w1",
+    "name": "app-tester",
+    "model": "sonnet",
+    "effort": "high",
+    "context_cap": "400k",
+    "cwd": "/x",
+    "state": "done",
+    "created": 1800000000.0,
+    "updated": 1800000900.0,
+    "tunes": [
+     {
+      "t": 1800000100.0,
+      "by": "user",
+      "what": "effort high"
+     }
+    ]
+   },
+   "log": [
+    {
+     "type": "user",
+     "t": 1800000000.0,
+     "text": "build it"
+    },
+    {
+     "type": "user",
+     "t": 1800173400.0,
+     "text": "one more thing"
+    }
+   ],
+   "events": [
+    {
+     "type": "worker",
+     "worker": "w1",
+     "event": "done",
+     "t": 1800000600.0
+    },
+    {
+     "type": "worker",
+     "worker": "w1",
+     "event": "done",
+     "t": 1800173500.0
+    }
+   ],
+   "spend": null,
+   "now": 1800259200.0,
+   "metrics": {
+    "id": "w1",
+    "name": "app-tester",
+    "model": "sonnet",
+    "effort": "high",
+    "context": "400k",
+    "cwd": "/x",
+    "state": "done",
+    "adopted": false,
+    "created": 1800000000.0,
+    "wall": 173500.0,
+    "busy": 700.0,
+    "first_done": 1800000600.0,
+    "tokens": {
+     "input": 0,
+     "cache_read": 0,
+     "cache_write": 0,
+     "output": 0
+    },
+    "calls": 0,
+    "usd": 0.0,
+    "asks": 0,
+    "followups": 1,
+    "followups_by": {
+     "seimei": 1,
+     "user": 0
+    },
+    "reopened": false,
+    "tunes": [
+     {
+      "t": 1800000100.0,
+      "by": "user",
+      "what": "effort high"
+     }
+    ]
+   }
+  },
+  {
+   "what": "still running: wall and busy run to now, asks counted",
+   "rec": {
+    "id": "w1",
+    "name": "app-tester",
+    "model": "sonnet",
+    "effort": "high",
+    "context_cap": "400k",
+    "cwd": "/x",
+    "state": "running",
+    "created": 1800000000.0,
+    "updated": 1800000900.0,
+    "tunes": null
+   },
+   "log": [
+    {
+     "type": "user",
+     "t": 1800000000.0,
+     "text": "build it"
+    }
+   ],
+   "events": [
+    {
+     "type": "worker",
+     "worker": "w1",
+     "event": "asking",
+     "t": 1800000100.0
+    },
+    {
+     "type": "worker",
+     "worker": "w1",
+     "event": "replied",
+     "t": 1800000200.0
+    }
+   ],
+   "spend": null,
+   "now": 1800001000.0,
+   "metrics": {
+    "id": "w1",
+    "name": "app-tester",
+    "model": "sonnet",
+    "effort": "high",
+    "context": "400k",
+    "cwd": "/x",
+    "state": "running",
+    "adopted": false,
+    "created": 1800000000.0,
+    "wall": 1000.0,
+    "busy": 100.0,
+    "first_done": null,
+    "tokens": {
+     "input": 0,
+     "cache_read": 0,
+     "cache_write": 0,
+     "output": 0
+    },
+    "calls": 0,
+    "usd": 0.0,
+    "asks": 1,
+    "followups": 0,
+    "followups_by": {
+     "seimei": 0,
+     "user": 0
+    },
+    "reopened": false,
+    "tunes": []
+   }
+  }
+ ],
+ "archive": [
+  {
+   "mark": {},
+   "last": 1800000000.0,
+   "active": false,
+   "now": 1800003600.0,
+   "hidden": false
+  },
+  {
+   "mark": {},
+   "last": 1800000000.0,
+   "active": false,
+   "now": 1800046800.0,
+   "hidden": true
+  },
+  {
+   "mark": {},
+   "last": 1800000000.0,
+   "active": true,
+   "now": 1800046800.0,
+   "hidden": false
+  },
+  {
+   "mark": {
+    "at": 1800000010.0
+   },
+   "last": 1800000000.0,
+   "active": false,
+   "now": 1800000020.0,
+   "hidden": true
+  },
+  {
+   "mark": {
+    "at": 1800000010.0
+   },
+   "last": 1800000030.0,
+   "active": false,
+   "now": 1800000040.0,
+   "hidden": false
+  },
+  {
+   "mark": {
+    "kept": 1800046800.0
+   },
+   "last": 1800000000.0,
+   "active": false,
+   "now": 1800050400.0,
+   "hidden": false
+  },
+  {
+   "mark": {
+    "kept": 1800046800.0
+   },
+   "last": 1800000000.0,
+   "active": false,
+   "now": 1800093600.0,
+   "hidden": true
+  }
+ ]
+}

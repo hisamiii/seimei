@@ -41,7 +41,8 @@ class Events:
             out: dict[str, list[dict]] = {}
             with open(self.path, "rb") as f:
                 for line in f:
-                    if b'"type": "worker"' not in line:
+                    # Any JSON spacing: the Rust server writes this log too.
+                    if b'"worker"' not in line:
                         continue
                     try:
                         e = json.loads(line)
