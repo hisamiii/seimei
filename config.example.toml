@@ -7,6 +7,7 @@ origin = "http://localhost:8417"    # where the app and the web reach seimei (a 
 [dispatcher]
 model = "opus"
 cwd = "~"
+compact_window = 400000             # tokens at which its context compacts
 
 [host]
 about = "computer"                  # how the prompts name this machine, e.g. "laptop (an Arch box running niri)"
