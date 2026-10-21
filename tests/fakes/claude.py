@@ -379,6 +379,10 @@ async def dispatcher(self: Fake, text: str, images: int):
         return self.result("")
     elif t == "error":
         return self.result("overloaded_error", error="error_during_execution")
+    elif t == "big":
+        # One stdout line of 3 MB (a big image once ended the Python reader at its 1 MB limit).
+        self.assistant({"type": "text", "text": "x" * (3 << 20)})
+        await self.say("That was big.")
     elif text.startswith("[seimei] mark this reply"):
         await self.say("trajectory:")
     elif text.strip().split("\n\n")[-1].startswith("[seimei]"):

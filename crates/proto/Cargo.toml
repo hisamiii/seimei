@@ -1,0 +1,13 @@
+[package]
+name = "seimei-proto"
+version = "0.1.0"
+description = "A client for Claude Code's stream-json control protocol (what the Agent SDKs speak)"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+libc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
