@@ -29,6 +29,8 @@ CHALLENGE_SECONDS = 120
 # OWASP's minimum (auth audit L3): 128 MiB and a few hundred ms per check, one check at a time. Older hashes keep
 # their own parameters and are redone at the next good login.
 SCRYPT = {"n": 2**17, "r": 8, "p": 1}
+# The throttle bounds guessing, so 8 characters are enough (the user's call, 2026-10-19; tests/cases/password.json).
+MIN_PASSWORD = 8
 # Password throttle: free attempts, then a doubling lockout. Passkeys are not throttled,
 # so someone guessing the password cannot lock the owner out.
 FREE_FAILURES = 5
@@ -45,6 +47,11 @@ DEVICE_LOGIN = b"seimei device login\n"
 REAUTH_SECONDS = 10 * 60
 # Open passkey challenges and device nonces kept at most; past it the oldest go (L5).
 MAX_PENDING = 1000
+
+
+def password_problem(pw: str) -> str | None:
+    """Why a new password is refused, or None."""
+    return f"use at least {MIN_PASSWORD} characters" if len(pw) < MIN_PASSWORD else None
 
 
 def scrypt(password: str, salt: bytes, n: int, r: int, p: int) -> bytes:

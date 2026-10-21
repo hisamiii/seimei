@@ -15,7 +15,7 @@ from pathlib import Path
 from aiohttp import web
 
 from .approvals import Approvals
-from .auth import Auth
+from .auth import Auth, password_problem
 from .dispatcher import Dispatcher
 from .events import EventLog
 from .cost import Cost
@@ -37,7 +37,6 @@ from .workers import Pool
 
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "seimei/config.toml"
 STATE = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "seimei"
-MIN_PASSWORD = 12
 
 
 def account(auth: Auth, cmd: str, clear: bool, state: Path, revoke: str | None = None, keep_sessions: bool = False):
@@ -62,8 +61,8 @@ def account(auth: Auth, cmd: str, clear: bool, state: Path, revoke: str | None =
         print(f"Saved to {path} (only you can read it). seimei types it into the lock screen; it never reaches the model.")
     elif cmd == "passwd":
         pw = getpass.getpass("New seimei password: ")
-        if len(pw) < MIN_PASSWORD:
-            raise SystemExit(f"seimei: use at least {MIN_PASSWORD} characters")
+        if problem := password_problem(pw):
+            raise SystemExit(f"seimei: {problem}")
         if getpass.getpass("Again: ") != pw:
             raise SystemExit("seimei: the two entries differ")
         auth.set_password(pw)

@@ -12,7 +12,6 @@ use seimei_core::push::{Fcm, Push, WebPush};
 use seimei_core::util::{config_file, data_dir};
 use serde_json::Value;
 
-const MIN_PASSWORD: usize = 12;
 const COMMANDS: [&str; 8] =
     ["serve", "passwd", "passkeys", "logout-all", "lockdown", "pair", "devices", "screen-password"];
 
@@ -87,8 +86,8 @@ fn account(auth: &Auth, a: &Args) {
     match a.command.as_str() {
         "passwd" => {
             let pw = secret("New seimei password: ");
-            if pw.chars().count() < MIN_PASSWORD {
-                die(&format!("use at least {MIN_PASSWORD} characters"));
+            if let Some(problem) = seimei_core::auth::password_problem(&pw) {
+                die(&problem);
             }
             if secret("Again: ") != pw {
                 die("the two entries differ");

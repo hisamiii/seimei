@@ -26,6 +26,14 @@ const CHALLENGE_SECONDS: f64 = 120.0;
 /// OWASP's minimum (auth audit L3): 128 MiB and a few hundred ms per check, one check at a time. Older hashes keep
 /// their own parameters and are redone at the next good login.
 pub const SCRYPT: (u64, u64, u64) = (1 << 17, 8, 1);
+/// The throttle bounds guessing, so 8 characters are enough (the user's call, 2026-10-19; tests/cases/password.json).
+pub const MIN_PASSWORD: usize = 8;
+
+/// Why a new password is refused, or None.
+pub fn password_problem(pw: &str) -> Option<String> {
+    (pw.chars().count() < MIN_PASSWORD).then(|| format!("use at least {MIN_PASSWORD} characters"))
+}
+
 /// Password throttle: free attempts, then a doubling lockout. Passkeys are not throttled, so someone guessing the
 /// password cannot lock the owner out.
 const FREE_FAILURES: u32 = 5;
