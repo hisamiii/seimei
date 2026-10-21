@@ -89,6 +89,17 @@ def _parts(text: str) -> list[str]:
     return [c for c in text.split("/") if c not in ("", ".")]
 
 
+def _glob_reaches(full: str) -> str | None:
+    """The secret a glob reaches by the names it matches, `**` going down any number of folders."""
+    pat = re.compile(glob.translate(full, recursive=True, include_hidden=True))
+    for rel, name, _ in SECRETS:
+        root = Path(HOME) / rel
+        inside = root.rglob("*") if root.is_dir() else []
+        if any(pat.match(str(p)) for p in itertools.islice(itertools.chain([root], inside), GLOB_LIMIT)):
+            return name
+    return None
+
+
 def _secret_word(word: str, bases: list[str]) -> str | None:
     """The secret a path-like word reaches: as a real path from each base folder (globs included), or by the
     components that name a secret anywhere in it. Words with spaces are prose, not paths."""
@@ -109,6 +120,8 @@ def _secret_word(word: str, bases: list[str]) -> str | None:
         if any(c in full for c in "*?["):
             # A glob does something only through the files it expands to (a regex for sed or grep expands to none).
             # Hidden names too: `~/*/id_ed25519` reaches ~/.ssh in a shell with dotglob.
+            if name := _glob_reaches(full):
+                return name
             for hit in itertools.islice(glob.iglob(full, include_hidden=True), GLOB_LIMIT):
                 if name := _secret_path(Path(hit)):
                     return name

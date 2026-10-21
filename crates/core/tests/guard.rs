@@ -21,6 +21,12 @@ fn guard_cases() {
         std::fs::create_dir_all(home.join(f).parent().unwrap()).unwrap();
         std::fs::write(home.join(f), "test\n").unwrap();
     }
+    std::os::unix::fs::symlink(".ssh", home.join("keys")).unwrap();
+    // More names than a glob looks at on disk: a ** glob must still see the secrets past them.
+    std::fs::create_dir(home.join("big")).unwrap();
+    for i in 0..6000 {
+        std::fs::write(home.join(format!("big/{i}")), "").unwrap();
+    }
     let home = home.canonicalize().unwrap().to_string_lossy().into_owned();
     // SAFETY: set before any thread reads the environment; this binary has this one test.
     unsafe { std::env::set_var("HOME", &home) };

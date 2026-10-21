@@ -13,6 +13,11 @@ def fake_home(home):
               ".local/share/seimei/auth.json"):
         (home / f).parent.mkdir(parents=True, exist_ok=True)
         (home / f).write_text("test\n")
+    (home / "keys").symlink_to(".ssh")
+    # More names than a glob looks at on disk: a ** glob must still see the secrets past them.
+    (home / "big").mkdir()
+    for i in range(6000):
+        (home / "big" / str(i)).touch()
 
 
 @pytest.mark.parametrize("path", scripts("unit"), ids=lambda p: p.stem)

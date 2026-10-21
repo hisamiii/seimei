@@ -1042,6 +1042,74 @@
    },
    "cwd": "/home/tester/src/seimei",
    "blocked": true
+  },
+  {
+   "tool": "Bash",
+   "input": {
+    "command": "cat ~/**/auth.json"
+   },
+   "cwd": "/home/tester",
+   "blocked": true,
+   "why": "login secrets",
+   "note": "** goes down any number of folders"
+  },
+  {
+   "tool": "Glob",
+   "input": {
+    "pattern": "**/auth.json",
+    "path": "/home/tester"
+   },
+   "cwd": "/home/tester",
+   "blocked": true,
+   "why": "login secrets",
+   "note": "** goes down any number of folders"
+  },
+  {
+   "tool": "Bash",
+   "input": {
+    "command": "tar czf /tmp/k.tgz ~/.local/**/key_datas"
+   },
+   "cwd": "/home/tester",
+   "blocked": true,
+   "why": "Telegram",
+   "note": "** goes down any number of folders"
+  },
+  {
+   "tool": "Bash",
+   "input": {
+    "command": "cat ~/k*/id_ed25519"
+   },
+   "cwd": "/home/tester",
+   "blocked": true,
+   "why": "SSH",
+   "note": "a glob through a link (~/keys is a link to ~/.ssh)"
+  },
+  {
+   "tool": "Bash",
+   "input": {
+    "command": "grep -rn TODO ~/**/*.rs"
+   },
+   "cwd": "/home/tester",
+   "blocked": false,
+   "note": "** matching nothing secret"
+  },
+  {
+   "tool": "Glob",
+   "input": {
+    "pattern": "**/*.py",
+    "path": "/home/tester/src"
+   },
+   "cwd": "/home/tester",
+   "blocked": false
+  },
+  {
+   "tool": "Bash",
+   "input": {
+    "command": "sed -i 's/[a-z]*x/y/' notes.md"
+   },
+   "cwd": "/home/tester",
+   "blocked": false,
+   "note": "a regex is not a path"
   }
  ]
 }

@@ -93,18 +93,124 @@ fn parts(text: &str) -> Vec<&str> {
     text.split('/').filter(|c| !c.is_empty() && *c != ".").collect()
 }
 
-/// What a glob expands to, hidden names included. `**` counts as `*`: a recursive walk of home is too slow for a hook.
-fn glob_hits(pattern: &str) -> Result<impl Iterator<Item = PathBuf>, glob::PatternError> {
-    let mut flat = pattern.to_string();
-    while flat.contains("**") {
-        flat = flat.replace("**", "*");
+fn is_glob(s: &str) -> bool {
+    s.contains(['*', '?', '['])
+}
+
+/// Whether a name matches one glob component: `*`, `?`, `[a-z]`, `[!x]`; hidden names too. An unclosed `[` is itself.
+fn name_matches(pat: &[char], name: &[char]) -> bool {
+    match pat.first() {
+        None => name.is_empty(),
+        Some('*') => (0..=name.len()).any(|i| name_matches(&pat[1..], &name[i..])),
+        Some('?') => !name.is_empty() && name_matches(&pat[1..], &name[1..]),
+        Some('[') => {
+            let not = matches!(pat.get(1), Some('!' | '^'));
+            let from = 1 + usize::from(not);
+            // A ] right after the [ is one of the set.
+            let close = pat.get(from + 1..).and_then(|r| r.iter().position(|&x| x == ']')).map(|p| from + 1 + p);
+            let Some(end) = close else { return name.first() == Some(&'[') && name_matches(&pat[1..], &name[1..]) };
+            let Some(&c) = name.first() else { return false };
+            let set = &pat[from..end];
+            let mut hit = false;
+            let mut i = 0;
+            while i < set.len() {
+                if i + 2 < set.len() && set[i + 1] == '-' {
+                    hit |= (set[i]..=set[i + 2]).contains(&c);
+                    i += 3;
+                } else {
+                    hit |= set[i] == c;
+                    i += 1;
+                }
+            }
+            hit != not && name_matches(&pat[end + 1..], &name[1..])
+        }
+        Some(&p) => name.first() == Some(&p) && name_matches(&pat[1..], &name[1..]),
     }
-    let opts = glob::MatchOptions {
-        case_sensitive: true,
-        require_literal_separator: true,
-        require_literal_leading_dot: false,
-    };
-    Ok(glob::glob_with(&flat, opts)?.flatten().take(GLOB_LIMIT))
+}
+
+/// Whether a path matches a glob, component by component; `**` takes any number of them. With `below`, a path the
+/// glob goes on beneath counts too.
+fn path_matches(pat: &[Vec<char>], path: &[Vec<char>], below: bool) -> bool {
+    match (pat.first(), path.first()) {
+        (Some(p), _) if p[..] == ['*', '*'] => {
+            path_matches(&pat[1..], path, below) || (!path.is_empty() && path_matches(pat, &path[1..], below))
+        }
+        (None, None) => true,
+        (None, Some(_)) => false,
+        (Some(_), None) => below,
+        (Some(p), Some(n)) => name_matches(p, n) && path_matches(&pat[1..], &path[1..], below),
+    }
+}
+
+fn chars(path: &Path) -> Vec<Vec<char>> {
+    parts(&path.to_string_lossy()).iter().map(|c| c.chars().collect()).collect()
+}
+
+/// The secret a glob reaches by the names it matches: a secret it matches, or a file inside one. A secret too big to
+/// look through counts as reached.
+fn glob_reaches(pattern: &Path) -> Option<&'static str> {
+    let pat = chars(pattern);
+    for (rel, name, _) in SECRETS {
+        let secret = home().join(rel);
+        if !path_matches(&pat, &chars(&secret), true) || std::fs::symlink_metadata(&secret).is_err() {
+            continue;
+        }
+        // Links inside it are not followed; the secret itself may be one.
+        let mut todo = vec![(secret, true)];
+        let mut seen = 0;
+        while let Some((p, dir)) = todo.pop() {
+            seen += 1;
+            if seen > GLOB_LIMIT || path_matches(&pat, &chars(&p), false) {
+                return Some(name);
+            }
+            for e in std::fs::read_dir(&p).into_iter().flatten().flatten().filter(|_| dir) {
+                todo.push((e.path(), e.file_type().is_ok_and(|k| k.is_dir())));
+            }
+        }
+    }
+    None
+}
+
+/// What a glob expands to on disk, breadth first, at most GLOB_LIMIT names looked at. `**` does not go down links,
+/// but the rest of the glob is tried in a linked folder.
+fn glob_hits(pattern: &Path) -> Vec<PathBuf> {
+    let pat: Vec<String> = parts(&pattern.to_string_lossy()).iter().map(|c| c.to_string()).collect();
+    let mut todo = std::collections::VecDeque::from([(PathBuf::from("/"), 0)]);
+    let (mut hits, mut seen) = (vec![], 0);
+    while let Some((dir, i)) = todo.pop_front() {
+        let Some(c) = pat.get(i) else {
+            hits.push(dir);
+            continue;
+        };
+        if !is_glob(c) {
+            let p = dir.join(c);
+            if std::fs::symlink_metadata(&p).is_ok() {
+                todo.push_back((p, i + 1));
+            }
+            continue;
+        }
+        let comp: Vec<char> = c.chars().collect();
+        for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            seen += 1;
+            if seen > GLOB_LIMIT {
+                return hits;
+            }
+            let kind = e.file_type().ok();
+            if c == "**" {
+                if kind.is_some_and(|k| k.is_dir()) {
+                    todo.push_back((e.path(), i));
+                } else if kind.is_some_and(|k| k.is_symlink()) {
+                    todo.push_back((e.path(), i + 1));
+                }
+            } else if name_matches(&comp, &e.file_name().to_string_lossy().chars().collect::<Vec<_>>()) {
+                todo.push_back((e.path(), i + 1));
+            }
+        }
+        if c == "**" {
+            todo.push_back((dir, i + 1));
+        }
+    }
+    hits
 }
 
 /// The secret a path-like word reaches: as a real path from each base folder (globs included), or by the components
@@ -126,12 +232,10 @@ fn secret_word(word: &str, bases: &[&Path]) -> Option<&'static str> {
     }
     for b in bases {
         let full = normalize(b, &word);
-        let found = if word.contains(['*', '?', '[']) {
-            // A glob does something only through the files it expands to (a regex for sed or grep expands to none).
-            match glob_hits(&full.to_string_lossy()) {
-                Ok(mut hits) => hits.find_map(|h| secret_path(&h)),
-                Err(_) => secret_path(&full),
-            }
+        let found = if is_glob(&word) {
+            // A glob does something only through the files it expands to (a regex for sed or grep expands to none):
+            // by name into a secret, or through a link.
+            glob_reaches(&full).or_else(|| glob_hits(&full).iter().find_map(|h| secret_path(h)))
         } else {
             secret_path(&full)
         };
@@ -472,5 +576,26 @@ impl Guard {
         let tool = inp["tool_name"].as_str().unwrap_or("?").to_string();
         self.fails.lock().unwrap().remove(&(worker.unwrap_or("").to_string(), tool));
         json!({})
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn m(pat: &str, name: &str) -> bool {
+        name_matches(&pat.chars().collect::<Vec<_>>(), &name.chars().collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn globs_match_like_the_shell() {
+        assert!(m("id_*", "id_ed25519") && m(".s?h", ".ssh") && m("*", ".ssh"));
+        assert!(m("[a-c]x", "bx") && !m("[!a-c]x", "bx") && m("[]]", "]") && m("[^x]", "y"));
+        assert!(m("[", "[") && m("a[b", "a[b") && !m("[", "") && !m("[ab", "a"));
+        assert!(m("→*", "→x") && !m("?", ""));
+        let p = |s: &str| chars(Path::new(s));
+        assert!(path_matches(&p("/h/**/a.json"), &p("/h/x/y/a.json"), false));
+        assert!(path_matches(&p("/h/**"), &p("/h"), false));
+        assert!(path_matches(&p("/h/*/k"), &p("/h/.ssh"), true) && !path_matches(&p("/h/*/k"), &p("/h/.ssh"), false));
     }
 }
