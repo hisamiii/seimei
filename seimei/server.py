@@ -28,6 +28,7 @@ from .guard import Guard
 from .sessions import Watcher
 from .workers import Pool
 from .cast import Hub, Viewer
+from . import metrics
 
 WEB = (Path(__file__).parent / "web").resolve()
 CSP = ("default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; font-src 'self'; "
@@ -585,10 +586,19 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
         # The task too, trimmed: the Archived list searches it.
         return web.json_response({"workers": [{**w.info(), "task": w.rec["task"][:400]} for w in ws]})
 
+    worker_events = metrics.Events(events.path)
+
+    async def worker_metrics(ids=None) -> list[dict]:
+        return await asyncio.to_thread(metrics.collect, pool, cost, worker_events, ids) if cost else []
+
     async def worker_history(request):
         w = worker(request)
+        m = await worker_metrics([w.id])
         return web.json_response({"worker": {**w.info(), "task": w.rec["task"], "question": w.rec.get("question")},
-                                  "events": w.log.before(None, 400)})
+                                  "events": w.log.before(None, 400), "metrics": m[0] if m else None})
+
+    async def metrics_view(request):
+        return web.json_response({"workers": await worker_metrics()})
 
     async def worker_send(request):
         w = worker(request)
@@ -648,6 +658,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     app.router.add_post("/api/approvals/{aid}", decide)
     app.router.add_get("/api/usage", usage)
     app.router.add_get("/api/cost", cost_view)
+    app.router.add_get("/api/metrics", metrics_view)
     app.router.add_get("/api/audit", audit)
     app.router.add_get("/api/queue", queue_view)
     app.router.add_post("/api/queue/action", queue_action)

@@ -733,6 +733,8 @@ fun Details(vm: Seimei, pg: Page) {
                 Fact("Context", r.context()?.let { "$it% used" } ?: "")
                 if (pg.kind == "worker") Fact("Started", atTime(r.optDouble("created")).replace(Regex("^at "), "today at ").cap())
                 else Fact("Last active", atTime(r.optDouble("active")).replace(Regex("^at "), "today at ").cap())
+                // What its run took (metrics.py), as of opening the page.
+                if (pg.kind == "worker") pg.metrics?.let { m -> for ((k, v) in metricFacts(m)) Fact(k, v) }
             }
             val state = r.str("state")
             if (pg.kind == "worker" && state != "laptop" && r.optBoolean("started")) {

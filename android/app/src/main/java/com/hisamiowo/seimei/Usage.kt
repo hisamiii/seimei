@@ -21,6 +21,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -128,6 +129,7 @@ fun UsageTab(vm: Seimei) {
             }
         }
         CostSection(vm.cost)
+        MetricsSection(vm.metrics)
         Spacer(Modifier.size(8.dp))
     }
 }
@@ -183,6 +185,75 @@ fun CostSection(cost: JSONObject?) {
     }
     Text("What this laptop's Claude Code use would cost on pay-as-you-go API prices (checked ${cost.str("prices_checked")}). " +
         "Other machines on the account are not included.", fontSize = 13.sp, color = LocalExtra.current.text3)
+}
+
+fun span(sec: Double): String {
+    val m = Math.round(sec / 60).toInt()
+    return if (sec < 60) "${Math.round(sec)} s" else if (m < 60) "$m min" else "${m / 60} h ${"%02d".format(m % 60)} min"
+}
+
+/** The facts of one shikigami's run, for the Usage list and its details sheet. */
+fun metricFacts(m: JSONObject): List<Pair<String, String>> {
+    val t = m.optJSONObject("tokens") ?: JSONObject()
+    val by = m.optJSONObject("followups_by") ?: JSONObject()
+    val asks = m.optInt("asks")
+    val follow = m.optInt("followups")
+    val from = listOfNotNull(by.optInt("seimei").takeIf { it > 0 }?.let { "$it from seimei" }, by.optInt("user").takeIf { it > 0 }?.let { "$it from you" })
+    val rounds = listOfNotNull(
+        asks.takeIf { it > 0 }?.let { "$it ${if (it == 1) "ask" else "asks"}" },
+        follow.takeIf { it > 0 }?.let { "$it ${if (it == 1) "follow-up" else "follow-ups"} (${from.joinToString(", ")})" },
+        "reopened".takeIf { m.optBoolean("reopened") },
+    ).joinToString(" · ")
+    return listOf(
+        "Cost" to "${usd(m.optDouble("usd"))} at API prices${if (m.optBoolean("adopted")) ", with its time as your session" else ""}",
+        "Tokens" to "${tokens(t.optLong("input"))} in · ${tokens(t.optLong("cache_read"))} cache read · " +
+            "${tokens(t.optLong("cache_write"))} cache write · ${tokens(t.optLong("output"))} out",
+        "Time" to "${span(m.optDouble("wall"))}, busy ${span(m.optDouble("busy"))}",
+        // Asks while it worked, messages after its first done, and whether one asked for more work.
+        "Rounds" to rounds.ifEmpty { "one go" },
+    )
+}
+
+/** Each shikigami: what it was given, what it cost, how it went; tap one for its facts. */
+@Composable
+fun MetricsSection(list: List<JSONObject>?) {
+    val cs = MaterialTheme.colorScheme
+    Heading("Shikigami")
+    if (list == null) {
+        Text("Adding up…", fontSize = 13.sp, color = LocalExtra.current.text3)
+        return
+    }
+    if (list.isEmpty()) {
+        Text("No shikigami yet.", fontSize = 13.sp, color = LocalExtra.current.text3)
+        return
+    }
+    val finished = list.filter { !it.isNull("first_done") }
+    Text("${list.size} shikigami, ${usd(list.sumOf { it.optDouble("usd") })} at API prices. " +
+        "${finished.count { it.optBoolean("reopened") }} of ${finished.size} that finished got more work after.",
+        fontSize = 13.sp, color = LocalExtra.current.text3)
+    var all by remember { mutableStateOf(false) }
+    Column {
+        for ((i, m) in (if (all) list else list.take(8)).withIndex()) {
+            var open by remember(m.str("id")) { mutableStateOf(false) }
+            if (i > 0) HorizontalDivider(color = cs.surfaceContainerHigh)
+            Row(Modifier.fillMaxWidth().clickable { open = !open }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(m.str("name"), fontWeight = FontWeight.Medium, fontSize = 15.sp)
+                    Text(listOf(modelName(m.str("model")).replaceFirstChar { it.uppercase() }, m.str("effort"), m.str("context"),
+                        span(m.optDouble("wall")), m.str("state"), if (m.optBoolean("reopened")) "reopened" else "")
+                        .filter { it.isNotEmpty() }.joinToString(" · "), fontSize = 12.sp, color = LocalExtra.current.text3)
+                }
+                Text(usd(m.optDouble("usd")), fontSize = 20.sp, style = TNUM)
+                Spacer(Modifier.width(6.dp))
+                Icon(Icons.chev, null, Modifier.size(18.dp).rotate(if (open) 90f else 0f), tint = LocalExtra.current.text3)
+            }
+            if (open) Column(Modifier.padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Fact("Folder", home(m.str("cwd")), mono = true)
+                for ((k, v) in metricFacts(m).drop(1)) Fact(k, v)
+            }
+        }
+    }
+    if (list.size > 8 && !all) TextButton({ all = true }) { Text("Show all ${list.size}") }
 }
 
 /** The Usage tab's icon: the 5-hour window as a ring. */

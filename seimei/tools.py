@@ -9,6 +9,7 @@ from pathlib import Path
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
+from . import metrics
 from . import queue as cq
 from . import sessions as sess
 from .events import EventLog
@@ -123,10 +124,27 @@ def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), upl
         return text(f"Summoned {w.name} ({w.id}) in {r['cwd']} on {r['model']}, effort {r['effort'] or 'default'}, "
                     f"context {r['context_cap']}, subagents on {r['subagents']}." + (f"\n\n{crowd}" if crowd else ""))
 
+    worker_events = metrics.Events(events.path)
+
     @tool("workers", "List shikigami from the last day with their state and one-line summary. Ones the user archived "
-          "(or that ended over 12 hours ago) are left out; archived: true lists only those, from any time.", {
-              "type": "object", "properties": {"archived": {"type": "boolean"}}})
+          "(or that ended over 12 hours ago) are left out; archived: true lists only those, from any time. metrics: "
+          "true gives every shikigami's (or the named ones') task metrics instead: model / effort / context, folder, "
+          "tokens and $ at API prices, wall time, end state, asks, follow-ups after its first done, and reopened.", {
+              "type": "object", "properties": {"archived": {"type": "boolean"}, "metrics": {"type": "boolean"},
+                                               "worker": {"type": "string", "description": "with metrics: one id or name"}}})
     async def workers(args):
+        if args.get("metrics"):
+            ids = None
+            if args.get("worker"):
+                w = pool.find(str(args["worker"]))
+                if not w:
+                    return text("No such shikigami.", error=True)
+                ids = [w.id]
+            cost = pool.dispatcher.usage and pool.dispatcher.usage.cost
+            if not cost:
+                return text("No token counts here (cost reading is off).", error=True)
+            rows = await asyncio.to_thread(metrics.collect, pool, cost, worker_events, ids)
+            return text(metrics.text(rows))
         if args.get("archived"):
             old = sorted((w for w in pool.workers.values() if pool.archive.worker(w.rec)), key=lambda w: -w.rec["updated"])
             listing = [w.info() for w in old[:50]]

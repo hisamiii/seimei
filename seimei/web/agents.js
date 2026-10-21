@@ -2,6 +2,7 @@
 import { $, S, hooks, el, svg, clock, at as atTime, home, short, when, getJSON, snack, finePointer, toLogin, ICON } from './util.js';
 import { Renderer, doing as doingPhrase, elapsed } from './chat.js';
 import { sheet, showSheet, closeSheet } from './sheet.js';
+import { metricFacts } from './usage.js';
 
 const page = $('agents');
 const sp = $('spage');
@@ -694,6 +695,8 @@ function details() {
   fact('Subagents', r.subagents);
   fact('Context', r.context != null && `${r.context}% used`);
   fact(P.kind === 'worker' ? 'Started' : 'Last active', cap(atTime(P.kind === 'worker' ? r.created : r.active).replace(/^at /, 'today at ')));
+  // What its run took (see metrics.py), as of opening the page.
+  if (P.kind === 'worker' && P.metrics) for (const [k, v] of metricFacts(P.metrics)) fact(k, v);
   body.push(facts);
   const actions = el('div', 'dactions');
   if (P.kind === 'worker' && r.state !== 'laptop' && r.started !== false) actions.append(laptopButton(r));
@@ -866,6 +869,7 @@ export async function openPage(kind, id) {
   if (kind === 'worker') {
     const live = S.workers.find((x) => x.id === id);
     build(kind, id, { ...r.worker, ...live });
+    P.metrics = r.metrics;
     add(r.events);
   } else {
     build(kind, id, { ...r.session, reach: r.reach });

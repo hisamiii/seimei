@@ -73,6 +73,8 @@ class Page(val kind: String, val id: String) {
     var draft by mutableStateOf("")
     var files by mutableStateOf<List<Attachment.Doc>>(emptyList())
     var details by mutableStateOf(false)
+    /** A shikigami's run so far (metrics.py), as of opening the page. */
+    var metrics by mutableStateOf<JSONObject?>(null)
     internal val chat = Chat()
     internal var next: Long? = null
     internal var last = 0L
@@ -141,6 +143,8 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     var usage by mutableStateOf<JSONObject?>(null)
         private set
     var cost by mutableStateOf<JSONObject?>(null)
+    /** Each shikigami's run (api/metrics), newest first. */
+    var metrics by mutableStateOf<List<JSONObject>?>(null)
         private set
     /** Every shikigami, finished ones from days ago too; fetched while the Agents tab shows. */
     var allWorkers by mutableStateOf<List<JSONObject>?>(null)
@@ -611,6 +615,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 if (kind == "worker") {
                     pg.last = evs.lastOrNull()?.optLong("id") ?: 0
                     pg.row = r.getJSONObject("worker").merged(workers.firstOrNull { it.str("id") == id } ?: JSONObject())
+                    pg.metrics = r.optJSONObject("metrics")
                 } else {
                     takeSession(pg, r)
                     pg.poll = viewModelScope.launch { pollSession(pg) }
@@ -821,6 +826,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             try {
                 val r = api.get("api/cost")
                 if (r.has("all")) cost = r
+                metrics = api.get("api/metrics").optJSONArray("workers")?.objects()
             } catch (e: IOException) {
             }
         }

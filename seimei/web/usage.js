@@ -1,5 +1,5 @@
 // The Usage tab: Claude rate-limit windows, today's tokens, and the API-price equivalent; its ring is the tab's icon.
-import { $, S, hooks, el, svg, clock, getJSON, ICON } from './util.js';
+import { $, S, hooks, el, svg, clock, getJSON, home, ICON } from './util.js';
 
 const page = $('usage');
 const WINDOWS = [['five_hour', '5-hour'], ['seven_day', 'Weekly']];
@@ -53,9 +53,93 @@ export function renderUsage() {
     }
     body.push(list);
   }
-  body.push(costSection());
+  body.push(costSection(), metricsSection());
   page.replaceChildren(...body);
   loadCost();
+  loadMetrics();
+}
+
+// ---------- each shikigami: what it was given, what it cost, how it went ----------
+
+let metrics = null;
+let metricsAt = 0;
+let allShown = false;
+const mopen = new Set();
+const SHOWN = 8;
+
+async function loadMetrics() {
+  if (Date.now() - metricsAt < 15000) return;
+  metricsAt = Date.now();
+  const r = await getJSON('api/metrics');
+  if (!r?.workers) return;
+  metrics = r.workers;
+  if (S.tab === 'usage') page.querySelector('.metrics')?.replaceWith(metricsSection());
+}
+
+export const span = (sec) => {
+  const m = Math.round(sec / 60);
+  return sec < 60 ? `${Math.round(sec)} s` : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min`;
+};
+
+// The facts of one shikigami's run, for this list and its details sheet.
+export function metricFacts(m) {
+  const t = m.tokens;
+  const by = [m.followups_by.seimei && `${m.followups_by.seimei} from seimei`, m.followups_by.user && `${m.followups_by.user} from you`];
+  const rounds = [m.asks && `${m.asks} ${m.asks === 1 ? 'ask' : 'asks'}`,
+    m.followups && `${m.followups} ${m.followups === 1 ? 'follow-up' : 'follow-ups'} (${by.filter(Boolean).join(', ')})`,
+    m.reopened && 'reopened'].filter(Boolean).join(' · ');
+  return [
+    ['Cost', `${usd(m.usd)} at API prices${m.adopted ? ', with its time as your session' : ''}`],
+    ['Tokens', `${tokens(t.input)} in · ${tokens(t.cache_read)} cache read · ${tokens(t.cache_write)} cache write · ${tokens(t.output)} out`],
+    ['Time', `${span(m.wall)}, busy ${span(m.busy)}`],
+    // Asks while it worked, messages after its first done, and whether one asked for more work.
+    ['Rounds', rounds || 'one go'],
+  ];
+}
+
+function metricsSection() {
+  const box = el('div', 'metrics');
+  box.append(el('h3', 'usage-h', 'Shikigami'));
+  if (!metrics) {
+    box.append(el('p', 'usage-note', 'Adding up…'));
+    return box;
+  }
+  if (!metrics.length) {
+    box.append(el('p', 'usage-note', 'No shikigami yet.'));
+    return box;
+  }
+  const finished = metrics.filter((m) => m.first_done);
+  const total = metrics.reduce((a, m) => a + m.usd, 0);
+  box.append(el('p', 'usage-note', `${metrics.length} shikigami, ${usd(total)} at API prices. `
+    + `${finished.filter((m) => m.reopened).length} of ${finished.length} that finished got more work after.`));
+  const list = el('div', 'ulist');
+  for (const m of allShown ? metrics : metrics.slice(0, SHOWN)) {
+    const row = el('button', `crow sl${mopen.has(m.id) ? ' open' : ''}`);
+    row.type = 'button';
+    const chev = svg(ICON.chev, 18);
+    chev.classList.add('chev');
+    const how = [MODEL(m.model || ''), m.effort, m.context, span(m.wall), m.state, m.reopened ? 'reopened' : '']
+      .filter(Boolean).join(' · ');
+    row.append(el('b', null, m.name), el('span', 'amt', usd(m.usd)), chev, el('small', null, how));
+    const facts = el('dl', 'kv mfacts');
+    facts.hidden = !mopen.has(m.id);
+    for (const [k, v] of [['Folder', home(m.cwd)], ...metricFacts(m).slice(1)]) facts.append(el('dt', null, k), el('dd', null, v));
+    row.addEventListener('click', () => {
+      if (mopen.has(m.id)) mopen.delete(m.id);
+      else mopen.add(m.id);
+      row.classList.toggle('open');
+      facts.hidden = !facts.hidden;
+    });
+    list.append(row, facts);
+  }
+  box.append(list);
+  if (metrics.length > SHOWN && !allShown) {
+    const more = el('button', 'btn text sl', `Show all ${metrics.length}`);
+    more.type = 'button';
+    more.addEventListener('click', () => { allShown = true; box.replaceWith(metricsSection()); });
+    box.append(more);
+  }
+  return box;
 }
 
 // ---------- what the tokens would cost at API prices ----------
@@ -64,8 +148,8 @@ let cost = null;
 let costAt = 0;
 const open = new Set();
 // Cents only below $100: past that they are noise (QA D13).
-const usd = (n) => `$${n >= 100 ? Math.round(n).toLocaleString('en-US') : n.toFixed(2)}`;
-const MODEL = (k) => k.replace(/^claude-/, '').replace(/-(\d+)-(\d+)$/, ' $1.$2').replace(/-(\d+)$/, ' $1')
+export const usd = (n) => `$${n >= 100 ? Math.round(n).toLocaleString('en-US') : n.toFixed(2)}`;
+export const MODEL = (k) => k.replace(/^claude-/, '').replace(/-(\d+)-(\d+)$/, ' $1.$2').replace(/-(\d+)$/, ' $1')
   .replace(/^./, (c) => c.toUpperCase());
 
 async function loadCost() {
