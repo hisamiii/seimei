@@ -1,6 +1,6 @@
 # Rewriting seimei in Rust
 
-Status: design, for review. Nothing is built yet.
+Status: approved 2026-10-21 (decisions at the end). The port is #82 on the board.
 
 ## Why
 
@@ -70,9 +70,8 @@ seimei passwd | pair | devices | lockdown | ...   as today
 | config | toml, serde |
 
 **Static build.** musl with rustls is practical. The catch is webauthn-rs, which links OpenSSL. Its `vendored`
-feature builds OpenSSL into the binary under musl, at the cost of a slower clean build. The alternative is to verify
-assertions ourselves with p256 and ring: about 200 lines for the subset seimei uses (ES256 and RS256, user
-verification required, resident keys). Decide during phase 2.
+feature builds OpenSSL into the binary under musl, at the cost of a slower clean build. That is the pick: no
+hand-rolled assertion check.
 
 ### Workspace (build times in the agent loop)
 
@@ -224,16 +223,19 @@ browser (WebExtension) halves of those connectors.
 
 - **Claude Code's protocol drift** (above). The protocol is internal; we track the MIT SDK's changes.
 - **Passkey storage.** py_webauthn stores the raw COSE public key; webauthn-rs keeps its own serialized form. Either
-  convert at load (webauthn-rs-core can build a credential from COSE), or verify with our own code. Worst case:
+  convert at load (webauthn-rs-core can build a credential from COSE). Worst case:
   passkeys are added again once; phones and the password are unaffected.
 - **Plugin cards across a process boundary:** a socket round trip per card. Small, but a new failure mode (seimei
   restarting under a plugin) needs handling: the plugin answers "seimei restarted, ask again".
 - **Two implementations for a while:** every feature in that window lands in Python first. Keep the window short by
   freezing features during phases 2 and 3.
 
-## Questions for you
+## Decisions (2026-10-21)
 
-1. Static musl with vendored OpenSSL for webauthn-rs, or our own ES256/RS256 assertion check to drop OpenSSL?
-2. Plugin manifests in `~/.config/seimei/plugins/<name>/`, or listed inline in config.toml as today?
-3. Freeze features during phases 2 and 3 (the server switch), or keep shipping in Python and port twice?
-4. `seimei update` from GitHub releases signed with minisign: OK as the update channel?
+1. **Passkeys:** webauthn-rs with vendored OpenSSL in the musl build. No hand-rolled assertion check.
+2. **Plugins:** each has a manifest in `~/.config/seimei/plugins/<name>/` (built-ins ship inside the binary).
+   config.toml only enables and configures them.
+3. **Feature freeze** during phases 2 and 3: the Python server takes fixes only until the switch.
+4. **`seimei update`** downloads GitHub releases signed with minisign.
+5. **Folded in:** #65 (publish blockers: license, no default domain, scrub, updater flag, fresh repo) lands in phase 6;
+   #69 (ACP) is phase 5. The app work of #63 goes on alongside, since the app carries over.
