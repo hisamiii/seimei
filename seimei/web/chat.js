@@ -270,11 +270,14 @@ const clipWatch = new ResizeObserver((entries) => {
 const approvals = new Map();
 const outcomes = new Map();
 const LOCK = 'M7 11V8a5 5 0 0 1 10 0v3M6 11h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1z';
-const OUTCOME = { approved: 'Approved', denied: 'Denied', expired: 'No answer in 10 min, denied', restart: 'Cancelled by a seimei restart' };
+const PLAN = 'M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01';
+const PEN = 'M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4';
+const OUTCOME = { approved: 'Approved', denied: 'Denied', restart: 'Cancelled by a seimei restart', cancelled: 'Cancelled' };
 
 const SUB = { message: 'a session you started', desktop: 'a desktop action', discord: 'a Discord action' };
 
 export function approvalSub(ev) {
+  if (ev.options) return ev.sub || (ev.action === 'edit' ? home((ev.detail || '').split('\n')[0]).split('/').pop() : '');
   if (ev.action === 'edit') return home((ev.detail || '').split('\n')[0]);
   if (ev.action !== 'command') return SUB[ev.action] || '';
   const words = new Set((ev.detail || '').split(/[\s'"=]+/));
@@ -282,51 +285,137 @@ export function approvalSub(ev) {
   return s ? `session ${s.name}${s.project ? ` · ${s.project}` : ''}` : '';
 }
 
+// An edit's detail: the path, a blank line, then a diff (- and + lines) or the new file.
+function diffBody(detail) {
+  const body = el('div', 'body cmd');
+  const [path, ...rest] = (detail || '').split('\n');
+  body.append(el('span', 'path', home(path)), '\n');
+  for (const line of rest.slice(rest[0] === '' ? 1 : 0)) {
+    const cls = line.startsWith('-') ? 'del' : line.startsWith('+') ? 'add' : null;
+    body.append(cls ? el('span', cls, line) : line, '\n');
+  }
+  return body;
+}
+
+// A rule option: "Always allow <code>rule</code> in this project", marked when the rule lets it run anything.
+function choice(o) {
+  const b = el('button', 'choice sl');
+  b.type = 'button';
+  if (o.kind === 'rule' && o.rule) {
+    b.append(o.label.startsWith('Always') ? 'Always allow ' : 'Allow ', el('code', null, o.rule), ' ', el('small', null, o.where || ''));
+    if (o.broad) b.append(' ', el('small', 'warn', '· runs any code'));
+  } else if (o.where && o.label.endsWith(o.where)) {
+    b.append(o.label.slice(0, -o.where.length).trim(), ' ', el('small', null, o.where));
+  } else b.textContent = o.label;
+  return b;
+}
+
 function approvalCard(ev) {
-  const card = el('div', 'wcard approval');
+  const perm = Array.isArray(ev.options);
+  const card = el('div', `wcard approval${perm ? ' perm' : ''}${ev.action === 'plan' ? ' plan' : ''}`);
   const badge = el('span', 'badge');
-  badge.append(svg(LOCK, 18));
+  badge.append(svg(ev.action === 'plan' ? PLAN : LOCK, 18));
   const head = el('div', 'head');
   const title = el('div', 'title');
   // Cards from before messages went card-free (2026-10-19) held SendMessage text.
   const message = ev.action === 'message';
-  title.append(el('b', null, `${ev.who} wants to ${message ? `message ${ev.target}` : ev.target}`));
+  const who = ev.subagent ? `${ev.who}'s subagent` : ev.who;
+  title.append(el('b', null, `${who} wants to ${message ? `message ${ev.target}` : ev.target}`));
   // The subtitle names what it touches, not the title again (QA D8): the session a command names, the file an edit writes.
   const sub = approvalSub(ev);
   if (sub) title.append(el('span', 'sub', sub));
   head.append(badge, title);
-  const body = el('div', `body ${message || ev.action === 'discord' ? 'task' : 'cmd'}`, ev.detail);
+  let body;
+  if (perm && ev.action === 'edit') body = diffBody(ev.detail);
+  else if (perm && ev.action === 'plan') {
+    body = el('div', 'body plan');
+    body.innerHTML = md(ev.detail || '');
+  } else body = el('div', `body ${message || ev.action === 'discord' ? 'task' : 'cmd'}`, ev.detail);
+  card.append(head, body);
+
+  const opts = perm ? ev.options : [{ id: 'deny', label: 'Deny' }, { id: 'once', label: 'Approve' }];
+  const once = opts.find((o) => o.id === 'once');
+  const denyOpt = opts.find((o) => o.id === 'deny');
+  const buttons = [];
+  const answer = async (decision, option, note) => {
+    buttons.forEach((b) => (b.disabled = true));
+    try {
+      await post(`api/approvals/${ev.aid}`, { decision, ...(perm ? { option } : {}), ...(note ? { note } : {}) });
+    } catch {
+      if (!outcomes.has(ev.aid)) buttons.forEach((b) => (b.disabled = false));
+    }
+  };
+  const extra = opts.filter((o) => o.id !== 'once' && o.id !== 'deny');
+  if (extra.length) {
+    const list = el('div', 'choices');
+    for (const o of extra) {
+      const b = choice(o);
+      b.addEventListener('click', () => answer('approve', o.id));
+      buttons.push(b);
+      list.append(b);
+    }
+    card.append(list);
+  }
   const foot = el('div', 'foot');
   const left = el('span', 'left');
-  const deny = el('button', 'btn text sl', 'Deny');
-  const ok = el('button', 'btn filled sl', 'Approve');
-  for (const [b, decision] of [[deny, 'deny'], [ok, 'approve']]) {
-    b.type = 'button';
-    b.addEventListener('click', async () => {
-      deny.disabled = ok.disabled = true;
-      try {
-        await post(`api/approvals/${ev.aid}`, { decision });
-      } catch {
-        if (!outcomes.has(ev.aid)) deny.disabled = ok.disabled = false;
-      }
+  const deny = el('button', 'btn text sl', denyOpt?.label || 'Deny');
+  const ok = el('button', 'btn filled sl', once?.label || 'Approve');
+  deny.type = ok.type = 'button';
+  deny.addEventListener('click', () => answer('deny', 'deny'));
+  ok.addEventListener('click', () => answer('approve', 'once'));
+  buttons.push(deny, ok);
+  foot.append(left);
+  if (perm) {
+    // The note goes to the agent with a deny, like the terminal's "tell Claude what to do differently".
+    const pen = el('button', 'btn icon sl');
+    pen.type = 'button';
+    pen.title = 'Add a note';
+    pen.append(svg(PEN, 18));
+    buttons.push(pen);
+    pen.addEventListener('click', () => {
+      const field = el('textarea', 'note');
+      field.rows = 2;
+      field.placeholder = `Note for ${ev.who}`;
+      const cancel = el('button', 'btn text sl', 'Cancel');
+      const send = el('button', 'btn filled sl', ev.action === 'plan' ? 'Keep planning' : 'Deny with note');
+      cancel.type = send.type = 'button';
+      const noteFoot = el('div', 'foot');
+      noteFoot.append(el('span', 'left'), cancel, send);
+      buttons.push(cancel, send);
+      cancel.addEventListener('click', () => { field.remove(); noteFoot.remove(); foot.hidden = false; });
+      send.addEventListener('click', () => answer('deny', 'deny', field.value.trim()));
+      foot.hidden = true;
+      card.append(field, noteFoot);
+      field.focus();
     });
+    foot.append(pen);
   }
-  foot.append(left, deny, ok);
-  card.append(head, body, foot);
+  foot.append(deny, ok);
+  card.append(foot);
   card.expires = ev.expires;
   approvals.set(ev.aid, card);
-  if (outcomes.has(ev.aid)) settle(ev.aid, outcomes.get(ev.aid));
+  if (outcomes.has(ev.aid)) settle(outcomes.get(ev.aid));
   else tick();
   return card;
 }
 
-function settle(aid, outcome) {
-  outcomes.set(aid, outcome);
-  const card = approvals.get(aid);
+function settle(done) {
+  outcomes.set(done.aid, done);
+  const card = approvals.get(done.aid);
   if (!card) return;
+  const outcome = done.outcome;
   card.classList.add('settled', outcome);
-  card.querySelectorAll('.foot button').forEach((b) => b.remove());
-  card.querySelector('.foot .left').textContent = OUTCOME[outcome] || outcome;
+  card.querySelectorAll('.foot, .choices, textarea.note').forEach((n) => n !== card.querySelector('.foot') && n.remove());
+  const foot = card.querySelector('.foot');
+  foot.hidden = false;
+  foot.querySelectorAll('button').forEach((b) => b.remove());
+  let text = OUTCOME[outcome] || outcome;
+  if (outcome === 'expired') text = card.expires ? 'No answer in time, denied' : 'No answer, denied';
+  if (outcome === 'approved' && card.classList.contains('plan')) text = 'Went ahead';
+  if (outcome === 'approved' && done.chosen) text = done.chosen.replace(/^Always allow/, 'Always allowed').replace(/^Allow /, 'Allowed ');
+  if (outcome === 'denied' && done.by === 'chat') text = 'Denied: you wrote in the chat';
+  else if (outcome === 'denied' && done.note) text = `Denied: “${done.note}”`;
+  foot.querySelector('.left').textContent = text;
   render();
 }
 
@@ -335,8 +424,12 @@ export const waitingApprovals = () => [...approvals.entries()].filter(([aid]) =>
 function tick() {
   const now = Date.now() / 1000;
   for (const [, card] of waitingApprovals()) {
-    const left = Math.ceil((card.expires - now) / 60);
-    card.querySelector('.foot .left').textContent = left > 0 ? `Auto-denies in ${left} min` : 'Expiring';
+    const left = card.querySelector('.foot .left');
+    if (!card.expires) left.textContent = 'Waits for you';
+    else {
+      const min = Math.ceil((card.expires - now) / 60);
+      left.textContent = min > 0 ? `Auto-denies in ${min} min` : 'Expiring';
+    }
   }
 }
 setInterval(tick, 20000);
@@ -567,7 +660,7 @@ export class Renderer {
   }
 
   add(ev) {
-    if (ev.type === 'approval_done') return settle(ev.aid, ev.outcome);
+    if (ev.type === 'approval_done') return settle(ev);
     this.cur = ev.id;
     if (ev.type !== 'tool_result') this.folded = null;
     this.daily(ev);

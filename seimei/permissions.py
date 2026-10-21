@@ -44,7 +44,9 @@ def within(mode: str, ceiling: str) -> bool:
 
 def _diff(path: str, old: str, new: str) -> str:
     lines = difflib.unified_diff(old.splitlines(), new.splitlines(), lineterm="", n=2)
-    return f"{path}\n\n" + "\n".join(l for l in lines if not l.startswith(("---", "+++")))
+    # Hunk headers mean nothing on a card: the first goes, later ones become a gap.
+    out = [("…" if l.startswith("@@") else l) for l in lines if not l.startswith(("---", "+++"))]
+    return f"{path}\n\n" + "\n".join(out[1:] if out and out[0] == "…" else out)
 
 
 def describe(tool: str, inp: dict, reason: str | None) -> dict:

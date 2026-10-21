@@ -517,7 +517,7 @@ async function postJSON(path, body) {
   const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).catch(() => null);
   if (r?.status === 401) toLogin();
   const j = await r?.json().catch(() => null);
-  return r?.ok ? { ok: true } : { ok: false, error: j?.error || (r ? `The laptop said no (${r.status}).` : 'The laptop did not answer.') };
+  return r?.ok ? { ...(j && typeof j === 'object' ? j : {}), ok: true } : { ok: false, error: j?.error || (r ? `The laptop said no (${r.status}).` : 'The laptop did not answer.') };
 }
 
 function note(text, cls = 'error') {
@@ -721,13 +721,31 @@ function details() {
   const titles = el('div', 'dhead');
   titles.append(el('h2', null, r.name), el('div', 'sub', P.kind === 'worker' ? 'Shikigami' : `Session ${r.kind || ''}`.trim()));
   body.push(titles);
+  // A permission card it waits on (#64).
+  if (P.kind === 'worker' && r.card) {
+    const w = el('div', 'dwait');
+    w.append(svg(LOCK, 16), el('span', null, `Waits for your OK: ${r.card.replace(/^wants to /, '').split(':')[0]}`));
+    body.push(w);
+  }
   // Facts as a quiet key/value list; what can be done sits below as buttons (QA U12).
   const facts = el('dl', 'kv');
   const fact = (k, v, cls) => v && facts.append(el('dt', null, k), el('dd', cls, v));
+  // Model, effort and permissions of a live shikigami open the Change sheet (#64, #74).
+  const tunable = P.kind === 'worker' && !['released', 'laptop'].includes(r.state);
+  const tune = (k, v) => {
+    if (!tunable) return fact(k, v);
+    const dd = el('dd', 'tune sl');
+    dd.append(el('span', null, v || 'default'), svg(CHEV, 16));
+    dd.tabIndex = 0;
+    dd.addEventListener('click', () => changeSheet(r));
+    facts.append(el('dt', 'tune', k), dd);
+  };
   fact('Folder', home(r.cwd), 'mono');
-  fact('Model', r.model);
+  tune('Model', r.model);
   const effort = r.effort || r.effort_now;
-  fact('Effort', effort && `${effort}${r.effort || P.kind !== 'worker' ? '' : ' (default)'}`);
+  tune('Effort', r.effort_next ? `${effort || 'default'} → ${r.effort_next} at its next turn`
+    : effort && `${effort}${r.effort || P.kind !== 'worker' ? '' : ' (default)'}`);
+  if (P.kind === 'worker') tune('Permissions', MODE_LABEL[r.mode] || r.mode);
   fact('Compacts at', r.context_cap);
   fact('Subagents', r.subagents);
   fact('Context', r.context != null && `${r.context}% used`);
@@ -756,6 +774,72 @@ function details() {
   if (P.kind === 'session') body.push(el('p', 'usage-note', r.reach ? r.reach : 'Messages you send here are typed into this session\'s window on the laptop.'));
   sheet.body.replaceChildren(...body);
   showSheet('details');
+}
+
+const LOCK = 'M7 11V8a5 5 0 0 1 10 0v3M6 11h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1z';
+const CHEV = 'M9 6l6 6-6 6';
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+const MODELS = ['opus', 'sonnet', 'haiku'];
+const MODE_LABEL = { plan: 'Plan first', default: 'Ask', acceptEdits: 'Allow edits', auto: 'Auto', dontAsk: "Only what's allowed", bypassPermissions: 'Bypass' };
+const MODE_NOTE = { plan: 'It plans, you OK the plan, then it works.', default: 'What Claude Code would ask comes to you as a card.',
+  acceptEdits: 'File edits go through; commands still ask.', auto: 'Claude Code decides what is safe; the rest asks.',
+  dontAsk: 'Only what your rules allow; nothing asks.', bypassPermissions: "Nothing asks. seimei's guard still applies." };
+
+// One sheet for effort, model and permissions: only the user changes these here (seimei's tune tool does effort and model).
+function changeSheet(w) {
+  const pick = { effort: w.effort_next || w.effort || w.effort_now || 'high', model: w.model, mode: w.mode };
+  const seg = (key, values) => {
+    const row = el('div', 'seg');
+    for (const v of values) {
+      const b = el('button', `sl${pick[key] === v ? ' on' : ''}`, v);
+      b.type = 'button';
+      b.addEventListener('click', () => { pick[key] = v; row.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b)); });
+      row.append(b);
+    }
+    return row;
+  };
+  const modes = el('div', 'radios');
+  const shown = ['plan', 'default', 'acceptEdits', 'bypassPermissions'];
+  if (!shown.includes(w.mode)) shown.splice(3, 0, w.mode);
+  for (const m of shown) {
+    const b = el('button', `radio sl${pick.mode === m ? ' on' : ''}`);
+    b.type = 'button';
+    const t = el('span', 'rt');
+    t.append(el('b', null, MODE_LABEL[m] || m), el('small', null, MODE_NOTE[m] || ''));
+    b.append(el('span', 'rdot'), t);
+    b.addEventListener('click', () => { pick.mode = m; modes.querySelectorAll('.radio').forEach((x) => x.classList.toggle('on', x === b)); });
+    modes.append(b);
+  }
+  const err = el('p', 'snote error');
+  err.hidden = true;
+  const cancel = el('button', 'btn text sl', 'Cancel');
+  const apply = el('button', 'btn filled sl', 'Apply');
+  cancel.type = apply.type = 'button';
+  cancel.addEventListener('click', () => details());
+  apply.addEventListener('click', async () => {
+    const body = {};
+    if (pick.effort !== (w.effort_next || w.effort || w.effort_now)) body.effort = pick.effort;
+    if (pick.model !== w.model) body.model = pick.model;
+    if (pick.mode !== w.mode) body.mode = pick.mode;
+    if (!Object.keys(body).length) return details();
+    apply.disabled = true;
+    const r = await postJSON(`api/workers/${encodeURIComponent(w.id)}/tune`, body);
+    apply.disabled = false;
+    if (!r.ok) {
+      err.textContent = r.error || 'Could not change it.';
+      err.hidden = false;
+      return;
+    }
+    P.row = { ...P.row, ...r };
+    details();
+  });
+  const btns = el('div', 'dbtns');
+  btns.append(cancel, apply);
+  sheet.body.replaceChildren(el('h2', 'change-h', `Change ${w.name}`),
+    el('p', 'lab', 'Effort'), seg('effort', EFFORTS), el('p', 'lab', 'Model'), seg('model', MODELS),
+    el('p', 'hint', 'Takes effect at its next turn, without restarting the task. A new effort keeps the cache; a new model rebuilds it once.'),
+    el('p', 'lab', 'Permissions'), modes, err, btns);
+  showSheet('change');
 }
 
 function stopButton(w) {

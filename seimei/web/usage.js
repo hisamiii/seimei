@@ -94,6 +94,8 @@ export function metricFacts(m) {
     ['Time', `${span(m.wall)}, busy ${span(m.busy)}`],
     // Asks while it worked, messages after its first done, and whether one asked for more work.
     ['Rounds', rounds || 'one go'],
+    // Effort, model or permissions changed on the way (#74), oldest first.
+    ...(m.tunes?.length ? [['Changes', m.tunes.map((x) => `${x.what} at ${new Date(x.t * 1000).toTimeString().slice(0, 5)}`).join(' · ')]] : []),
   ];
 }
 
