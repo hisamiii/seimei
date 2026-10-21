@@ -26,15 +26,24 @@ sealed interface Item {
         /** An "asks" card that something later settled: "Answered" or "Closed". */
         val settled: String? = null,
     ) : Item
+    /** A card: Approve/Deny from the guard and plugins, or (with options) a permission prompt of Claude Code's (#64).
+     * expires is 0 for a shikigami's permission card, which waits. done is the approval_done event once settled. */
     data class Approval(
         override val key: String, val aid: String, val who: String, val action: String, val target: String,
         val detail: String, val expires: Double, val outcome: String?,
+        val options: List<Opt> = emptyList(), val sub: String = "", val subagent: Boolean = false, val done: Done? = null,
     ) : Item
     /** w and h: the picture's size from the laptop (0 when unknown), so its space is kept before it loads. */
     data class Shown(override val key: String, val file: String, val caption: String, val w: Int = 0, val h: Int = 0) : Item
     /** A file seimei handed over to download. */
     data class Sent(override val key: String, val file: FileRef, val caption: String, val t: Double = 0.0) : Item
 }
+
+/** One choice on a permission card: kind once, rule, dir, mode or deny; a rule option carries its rule and where. */
+data class Opt(val id: String, val label: String, val kind: String, val rule: String, val where: String, val broad: Boolean)
+
+/** How a card was settled: what was picked (a rule), the note sent with a deny, "chat" when a message settled it. */
+data class Done(val outcome: String, val chosen: String, val note: String, val by: String)
 
 /** What the next message answers: an event id, the composer's quote and the lane the event shows in. */
 data class ReplyTo(val id: Long, val text: String, val lane: String)
@@ -111,7 +120,7 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
     private val tools = HashMap<String, Int>()
     private val notes = HashMap<String, Int>()
     private val approvals = HashMap<String, Int>()
-    private val outcomes = HashMap<String, String>()
+    private val outcomes = HashMap<String, Done>()
     private var seq = 0
 
     val waiting get() = approvals.keys.count { it !in outcomes }
@@ -194,8 +203,9 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
         val key = keyOf(ev)
         if (type == "approval_done") {
             val aid = ev.str("aid")
-            outcomes[aid] = ev.str("outcome")
-            approvals[aid]?.let { i -> items[i] = (items[i] as Item.Approval).copy(outcome = outcomes[aid]) }
+            val done = Done(ev.str("outcome"), ev.str("chosen"), ev.str("note"), ev.str("by"))
+            outcomes[aid] = done
+            approvals[aid]?.let { i -> items[i] = (items[i] as Item.Approval).copy(outcome = done.outcome, done = done) }
             return
         }
         if (type != "tool_result") fold = -1
@@ -291,7 +301,11 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
             "approval" -> {
                 val aid = ev.str("aid")
                 approvals[aid] = put(Item.Approval(key, aid, ev.str("who"), ev.str("action"), ev.str("target"),
-                    ev.str("detail"), ev.optDouble("expires", 0.0), outcomes[aid]))
+                    ev.str("detail"), ev.optDouble("expires", 0.0).let { if (it.isNaN()) 0.0 else it }, outcomes[aid]?.outcome,
+                    ev.optJSONArray("options")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) }.map { o ->
+                        Opt(o.str("id"), o.str("label"), o.str("kind"), o.str("rule"), o.str("where"), o.optBoolean("broad")) } }
+                        ?: emptyList(),
+                    ev.str("sub"), ev.optBoolean("subagent"), outcomes[aid]))
             }
             "rate_limit" -> put(Item.Note(key, limitText(ev), if (ev.str("status") == "rejected") "error" else "warn"))
         }

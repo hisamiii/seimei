@@ -766,18 +766,79 @@ fun WorkerCard(w: Item.Worker) {
     }
 }
 
-val OUTCOME = mapOf("approved" to "Approved", "denied" to "Denied", "expired" to "No answer in 10 min, denied",
-    "restart" to "Cancelled by a seimei restart")
+val OUTCOME = mapOf("approved" to "Approved", "denied" to "Denied", "expired" to "No answer in time, denied",
+    "restart" to "Cancelled by a seimei restart", "cancelled" to "Cancelled")
+
+/** What a settled card says: the rule it allowed, the note sent with a deny, or that a chat message settled it. */
+fun settledText(a: Item.Approval): String {
+    val d = a.done
+    val o = a.outcome ?: return ""
+    return when {
+        o == "expired" && a.expires == 0.0 -> "No answer, denied"
+        o == "approved" && d != null && d.chosen.isNotEmpty() -> d.chosen.replace(Regex("^Always allow"), "Always allowed").replace(Regex("^Allow "), "Allowed ")
+        o == "approved" && a.action == "plan" -> "Went ahead"
+        o == "denied" && d?.by == "chat" -> "Denied: you wrote in the chat"
+        o == "denied" && !d?.note.isNullOrEmpty() -> "Denied: “${d!!.note}”"
+        else -> OUTCOME[o] ?: o
+    }
+}
+
+/** A rule option: "Always allow `rule` in this project", marked when the rule lets it run anything. */
+@Composable
+fun optionText(o: Opt): androidx.compose.ui.text.AnnotatedString {
+    val ex = LocalExtra.current
+    val code = androidx.compose.ui.text.SpanStyle(fontFamily = FontFamily.Monospace, background = MaterialTheme.colorScheme.surfaceContainerHighest)
+    val small = androidx.compose.ui.text.SpanStyle(color = ex.text3, fontSize = 12.sp)
+    return androidx.compose.ui.text.buildAnnotatedString {
+        if (o.kind == "rule" && o.rule.isNotEmpty()) {
+            append(if (o.label.startsWith("Always")) "Always allow " else "Allow ")
+            pushStyle(code); append(o.rule); pop()
+            if (o.where.isNotEmpty()) { append(" "); pushStyle(small); append(o.where); pop() }
+            if (o.broad) { append(" "); pushStyle(small.copy(color = MaterialTheme.colorScheme.error)); append("· runs any code"); pop() }
+        } else if (o.where.isNotEmpty() && o.label.endsWith(o.where)) {
+            append(o.label.dropLast(o.where.length).trim()); append(" ")
+            pushStyle(small); append(o.where); pop()
+        } else append(o.label)
+    }
+}
+
+/** An edit's detail: the path, a blank line, then a diff (- and + lines) or the new file. */
+@Composable
+fun diffText(detail: String): androidx.compose.ui.text.AnnotatedString {
+    val ex = LocalExtra.current
+    val err = MaterialTheme.colorScheme.error
+    val lines = detail.split('\n')
+    val rest = lines.drop(1).let { if (it.firstOrNull() == "") it.drop(1) else it }
+    return androidx.compose.ui.text.buildAnnotatedString {
+        pushStyle(androidx.compose.ui.text.SpanStyle(color = ex.text3)); append(home(lines[0])); pop()
+        for (l in rest) {
+            append("\n")
+            when {
+                l.startsWith("-") -> { pushStyle(androidx.compose.ui.text.SpanStyle(color = err, background = BAD_BG)); append(l); pop() }
+                l.startsWith("+") -> { pushStyle(androidx.compose.ui.text.SpanStyle(color = ex.ok, background = OK_BG)); append(l); pop() }
+                else -> append(l)
+            }
+        }
+    }
+}
+
+val PEN = icon("M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4")
+val PLAN = icon("M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01")
 
 @Composable
 fun ApprovalCard(a: Item.Approval, vm: Seimei) {
     val cs = MaterialTheme.colorScheme
     var sent by remember(a.aid) { mutableStateOf(false) }
+    var noting by remember(a.aid) { mutableStateOf(false) }
+    var note by remember(a.aid) { mutableStateOf("") }
     val message = a.action == "message"
+    // A permission card (#64) carries Claude Code's choices; a guard card is Approve/Deny.
+    val perm = a.options.isNotEmpty()
     // The subtitle names what it touches, not the title again: the session a command names, the file an edit writes.
-    val sub = when (a.action) {
-        "edit" -> home(a.detail.substringBefore('\n'))
-        "command" -> a.detail.split(Regex("[\\s'\"=]+")).toSet().let { words ->
+    val sub = when {
+        perm -> a.sub.ifEmpty { if (a.action == "edit") home(a.detail.substringBefore('\n')).substringAfterLast('/') else "" }
+        a.action == "edit" -> home(a.detail.substringBefore('\n'))
+        a.action == "command" -> a.detail.split(Regex("[\\s'\"=]+")).toSet().let { words ->
             vm.sessions.firstOrNull { it.str("name").isNotEmpty() && it.str("name") in words }
                 ?.let { s -> "session ${s.str("name")}" + s.str("project").let { if (it.isEmpty()) "" else " · $it" } }
         }
@@ -788,33 +849,76 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
         "approved" -> OK_BG to LocalExtra.current.ok
         else -> BAD_BG to cs.error
     }
+    fun answer(approve: Boolean, option: String?, note: String? = null) {
+        sent = true
+        vm.decide(a.aid, approve, option, note) { sent = false }
+    }
+    val who = if (a.subagent) "${a.who}'s subagent" else a.who
     Card(highlight = a.outcome == null) {
-        CardHead(Icons.lock, bg, fg, "${a.who} wants to ${if (message) "message ${a.target}" else a.target}", sub)
-        Text(
-            a.detail, fontSize = 13.sp, lineHeight = 19.sp,
-            fontFamily = if (message || a.action == "discord") null else FontFamily.Monospace,
-            color = if (a.outcome == null) cs.onSurface else LocalExtra.current.text2,
-            maxLines = if (a.outcome == null) Int.MAX_VALUE else 3, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.fillMaxWidth().heightIn(max = if (a.outcome == null) 160.dp else 80.dp)
-                .then(if (message) Modifier else Modifier.clip(RoundedCornerShape(10.dp)).background(cs.surface).padding(horizontal = 10.dp, vertical = 8.dp))
-                .verticalScroll(rememberScrollState()),
-        )
+        CardHead(if (a.action == "plan") PLAN else Icons.lock, bg, fg, "$who wants to ${if (message) "message ${a.target}" else a.target}", sub)
+        val box = Modifier.fillMaxWidth().heightIn(max = if (a.outcome == null) 220.dp else 80.dp)
+        if (perm && a.action == "plan") {
+            Box(box.verticalScroll(rememberScrollState())) { Md(a.detail, 14, if (a.outcome == null) cs.onSurface else LocalExtra.current.text2) }
+        } else {
+            val mono = !(message || a.action == "discord")
+            val text = if (perm && a.action == "edit") diffText(a.detail) else androidx.compose.ui.text.AnnotatedString(a.detail)
+            Text(
+                text, fontSize = 13.sp, lineHeight = 19.sp,
+                fontFamily = if (mono) FontFamily.Monospace else null,
+                color = if (a.outcome == null) cs.onSurface else LocalExtra.current.text2,
+                maxLines = if (a.outcome == null) Int.MAX_VALUE else 3, overflow = TextOverflow.Ellipsis,
+                modifier = box
+                    .then(if (message) Modifier else Modifier.clip(RoundedCornerShape(10.dp)).background(cs.surface).padding(horizontal = 10.dp, vertical = 8.dp))
+                    .verticalScroll(rememberScrollState()),
+            )
+        }
+        val once = a.options.firstOrNull { it.id == "once" }
+        val deny = a.options.firstOrNull { it.id == "deny" }
+        val extra = a.options.filter { it.id != "once" && it.id != "deny" }
+        if (a.outcome == null && extra.isNotEmpty() && !noting) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (o in extra) {
+                    Text(optionText(o), fontSize = 14.sp, lineHeight = 20.sp,
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(cs.surfaceContainerHigh)
+                            .clickable(enabled = !sent) { answer(true, o.id) }.padding(horizontal = 12.dp, vertical = 10.dp))
+                }
+            }
+        }
+        if (a.outcome == null && noting) {
+            // The note goes to the agent with a deny, like the terminal's "tell Claude what to do differently".
+            val focus = remember { FocusRequester() }
+            LaunchedEffect(Unit) { focus.requestFocus() }
+            TextField(note, { note = it }, Modifier.fillMaxWidth().focusRequester(focus), placeholder = { Text("Note for ${a.who}") }, minLines = 2, maxLines = 5,
+                shape = RoundedCornerShape(12.dp),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = cs.surfaceContainerHigh, unfocusedContainerColor = cs.surfaceContainerHigh,
+                    focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
+                ))
+        }
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (a.outcome != null) {
-                Text(OUTCOME[a.outcome] ?: a.outcome, fontSize = 13.sp,
+                Text(settledText(a), fontSize = 13.sp,
                     color = if (a.outcome == "approved") LocalExtra.current.ok else cs.error, modifier = Modifier.weight(1f).padding(vertical = 10.dp))
-            } else {
-                val left by produceState(minutesLeft(a.expires), a.expires) {
-                    while (true) {
-                        delay(20_000)
-                        value = minutesLeft(a.expires)
-                    }
-                }
-                Text(if (left > 0) "Auto-denies in $left min" else "Expiring", fontSize = 13.sp, color = LocalExtra.current.text3,
-                    modifier = Modifier.weight(1f))
-                TextButton({ sent = true; vm.decide(a.aid, false) { sent = false } }, enabled = !sent) { Text("Deny") }
+            } else if (noting) {
+                Spacer(Modifier.weight(1f))
+                TextButton({ noting = false }, enabled = !sent) { Text("Cancel") }
                 Spacer(Modifier.width(4.dp))
-                Button({ sent = true; vm.decide(a.aid, true) { sent = false } }, enabled = !sent) { Text("Approve") }
+                Button({ answer(false, "deny", note.trim()) }, enabled = !sent) { Text(if (a.action == "plan") "Keep planning" else "Deny with note") }
+            } else {
+                if (a.expires > 0) {
+                    val left by produceState(minutesLeft(a.expires), a.expires) {
+                        while (true) {
+                            delay(20_000)
+                            value = minutesLeft(a.expires)
+                        }
+                    }
+                    Text(if (left > 0) "Auto-denies in $left min" else "Expiring", fontSize = 13.sp, color = LocalExtra.current.text3,
+                        modifier = Modifier.weight(1f))
+                } else Text("Waits for you", fontSize = 13.sp, color = LocalExtra.current.text3, modifier = Modifier.weight(1f))
+                if (perm) IconButton({ noting = true }, enabled = !sent) { Icon(PEN, "Add a note", Modifier.size(20.dp)) }
+                TextButton({ answer(false, if (perm) "deny" else null) }, enabled = !sent) { Text(deny?.label ?: "Deny") }
+                Spacer(Modifier.width(4.dp))
+                Button({ answer(true, if (perm) "once" else null) }, enabled = !sent) { Text(once?.label ?: "Approve") }
             }
         }
     }

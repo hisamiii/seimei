@@ -59,6 +59,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.Button
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
@@ -720,6 +721,92 @@ fun Fact(key: String, value: String, mono: Boolean = false) {
     }
 }
 
+/** A tappable fact: model, effort and permissions of a live shikigami open the Change sheet. */
+@Composable
+fun TuneFact(key: String, value: String, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable(onClick = onClick).background(cs.surfaceContainerHigh)
+        .padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(key, fontSize = 14.sp, lineHeight = 20.sp, color = LocalExtra.current.text3, modifier = Modifier.width(104.dp))
+        Text(value.ifEmpty { "default" }, fontSize = 14.sp, lineHeight = 20.sp, modifier = Modifier.weight(1f))
+        Icon(Icons.chev, null, Modifier.size(16.dp), tint = LocalExtra.current.text3)
+    }
+}
+
+val EFFORTS = listOf("low", "medium", "high", "xhigh", "max")
+val MODELS = listOf("opus", "sonnet", "haiku")
+val MODE_LABEL = mapOf("plan" to "Plan first", "default" to "Ask", "acceptEdits" to "Allow edits", "auto" to "Auto",
+    "dontAsk" to "Only what's allowed", "bypassPermissions" to "Bypass")
+val MODE_NOTE = mapOf("plan" to "It plans, you OK the plan, then it works.", "default" to "What Claude Code would ask comes to you as a card.",
+    "acceptEdits" to "File edits go through; commands still ask.", "auto" to "Claude Code decides what is safe; the rest asks.",
+    "dontAsk" to "Only what your rules allow; nothing asks.", "bypassPermissions" to "Nothing asks. seimei's guard still applies.")
+
+@Composable
+fun Pills(values: List<String>, on: String, pick: (String) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(cs.surfaceContainerHigh).padding(3.dp)) {
+        for (v in values) Text(v, fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            color = if (v == on) cs.onSecondaryContainer else LocalExtra.current.text2,
+            fontWeight = if (v == on) FontWeight.Medium else null,
+            modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(if (v == on) cs.secondaryContainer else Color.Transparent)
+                .clickable { pick(v) }.padding(vertical = 9.dp))
+    }
+}
+
+/** One sheet for effort, model and permissions: only the user changes these here (seimei's tune tool does effort and model). */
+@Composable
+fun ChangeSheet(vm: Seimei, pg: Page, done: () -> Unit) {
+    val r = pg.row
+    val cs = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
+    val effortNow = r.str("effort_next").ifEmpty { r.str("effort") }.ifEmpty { r.str("effort_now") }
+    var effort by remember { mutableStateOf(effortNow.ifEmpty { "high" }) }
+    var model by remember { mutableStateOf(r.str("model")) }
+    var mode by remember { mutableStateOf(r.str("mode")) }
+    var sending by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    Text("Change ${r.str("name")}", fontSize = 22.sp, lineHeight = 26.sp)
+    Text("Effort", fontSize = 13.sp, color = LocalExtra.current.text3)
+    Pills(EFFORTS, effort) { effort = it }
+    Text("Model", fontSize = 13.sp, color = LocalExtra.current.text3)
+    Pills(MODELS, model) { model = it }
+    Text("Takes effect at its next turn, without restarting the task. A new effort keeps the cache; a new model rebuilds it once.",
+        fontSize = 13.sp, lineHeight = 18.sp, color = LocalExtra.current.text3)
+    Text("Permissions", fontSize = 13.sp, color = LocalExtra.current.text3)
+    val shown = listOf("plan", "default", "acceptEdits", "bypassPermissions").let { if (r.str("mode") in it) it else it.take(3) + r.str("mode") + it.last() }
+    Column {
+        for (m in shown) Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { mode = m }.padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(20.dp).border(2.dp, if (m == mode) cs.primary else LocalExtra.current.text3, CircleShape), contentAlignment = Alignment.Center) {
+                if (m == mode) Box(Modifier.size(10.dp).clip(CircleShape).background(cs.primary))
+            }
+            Spacer(Modifier.width(14.dp))
+            Column {
+                Text(MODE_LABEL[m] ?: m, fontSize = 15.sp)
+                Text(MODE_NOTE[m].orEmpty(), fontSize = 13.sp, color = LocalExtra.current.text3)
+            }
+        }
+    }
+    error?.let { Text(it, fontSize = 13.sp, color = cs.error) }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        TextButton(done) { Text("Cancel") }
+        Spacer(Modifier.width(8.dp))
+        Button({
+            val body = JSONObject()
+            if (effort != effortNow) body.put("effort", effort)
+            if (model != r.str("model")) body.put("model", model)
+            if (mode != r.str("mode")) body.put("mode", mode)
+            if (body.length() == 0) return@Button done()
+            sending = true
+            scope.launch {
+                error = vm.workerTune(pg, body)
+                sending = false
+                if (error == null) done()
+            }
+        }, enabled = !sending) { Text("Apply") }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun Details(vm: Seimei, pg: Page) {
@@ -729,17 +816,37 @@ fun Details(vm: Seimei, pg: Page) {
     LaunchedEffect(pg) { vm.loadMetrics(pg) }
     ModalBottomSheet({ pg.details = false }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = cs.surfaceContainer) {
-        Column(Modifier.padding(start = 20.dp, end = 20.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        var changing by remember { mutableStateOf(false) }
+        Column(Modifier.padding(start = 20.dp, end = 20.dp, bottom = 24.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (changing) return@Column ChangeSheet(vm, pg) { changing = false }
             Column {
                 Text(r.str("name"), fontSize = 22.sp, lineHeight = 26.sp)
                 Text(if (pg.kind == "worker") "Shikigami" else "Session ${r.str("kind")}".trim(), fontSize = 13.sp, color = LocalExtra.current.text3)
             }
+            // A permission card it waits on (#64).
+            if (pg.kind == "worker" && r.str("card").isNotEmpty()) Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(cs.primaryContainer).padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.lock, null, Modifier.size(16.dp), tint = cs.onPrimaryContainer)
+                Spacer(Modifier.width(8.dp))
+                Text("Waits for your OK: ${r.str("card").removePrefix("wants to ").substringBefore(':')}", fontSize = 14.sp, color = cs.onPrimaryContainer)
+            }
             // Facts as a quiet key/value list; what can be done sits below as full-width tonal buttons.
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Fact("Folder", home(r.str("cwd")), mono = true)
-                Fact("Model", r.str("model"))
                 val effort = r.str("effort").ifEmpty { r.str("effort_now") }
-                Fact("Effort", if (effort.isEmpty()) "" else effort + if (pg.kind == "worker" && r.str("effort").isEmpty()) " (default)" else "")
+                val effortText = if (r.str("effort_next").isNotEmpty()) "${effort.ifEmpty { "default" }} → ${r.str("effort_next")} at its next turn"
+                    else if (effort.isEmpty()) "" else effort + if (pg.kind == "worker" && r.str("effort").isEmpty()) " (default)" else ""
+                // Model, effort and permissions of a live shikigami open the Change sheet (#64, #74).
+                if (pg.kind == "worker" && r.str("state") !in listOf("released", "laptop")) {
+                    TuneFact("Model", r.str("model")) { changing = true }
+                    TuneFact("Effort", effortText) { changing = true }
+                    TuneFact("Permissions", MODE_LABEL[r.str("mode")] ?: r.str("mode")) { changing = true }
+                } else {
+                    Fact("Model", r.str("model"))
+                    Fact("Effort", effortText)
+                }
                 Fact("Compacts at", r.str("context_cap"))
                 Fact("Subagents", r.str("subagents"))
                 Fact("Context", r.context()?.let { "$it% used" } ?: "")

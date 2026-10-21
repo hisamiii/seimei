@@ -285,6 +285,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 val sig = DeviceKey.sign(ready, nonce)
                 val r = api.post("api/devices/login", JSONObject().put("device", device).put("nonce", nonce).put("signature", sig))
                 api.token = r.getString("token")
+                Push.live = api
                 phase = Phase.Ready
                 start()
                 registerPush()
@@ -315,6 +316,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         DeviceKey.delete()
         prefs.device = null
         api.token = null
+        Push.live = null
         phase = Phase.Pair
         authError = why
         forgetConversations()
@@ -340,6 +342,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         stream?.cancel()
         api.closeStream()
         api.token = null
+        Push.live = null
         online = false
         phase = Phase.Locked
     }
@@ -355,6 +358,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         foreground = true
         visible = true
         Push.visible = true
+        Push.lockAt = Long.MAX_VALUE
         // Anything pushed while away is on screen now.
         Push.clear(getApplication<Application>())
         installAllowed = Updater.canInstall(getApplication())
@@ -370,6 +374,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         visible = false
         Push.visible = false
         backgroundSince = System.currentTimeMillis()
+        Push.lockAt = backgroundSince + LOCK_AFTER
         saveChat(now = true)
         stream?.cancel()
         stream = null
@@ -981,6 +986,17 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     }
 
     /** Opens the shikigami in a terminal on the laptop; null when it worked, else why not. */
+    /** The Change sheet (#64, #74): a new effort, model or permission mode for a shikigami; null when it took. */
+    suspend fun workerTune(pg: Page, body: JSONObject): String? = try {
+        pg.row = pg.row.merged(api.post("api/workers/${pg.id}/tune", body))
+        loadMetrics(pg)
+        null
+    } catch (e: HttpError) {
+        e.body.trim().take(200).ifEmpty { "no answer" }
+    } catch (e: IOException) {
+        "no answer"
+    }
+
     suspend fun workerLaptop(id: String): String? = try {
         api.post("api/workers/$id/laptop")
         null
@@ -1081,10 +1097,12 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun decide(aid: String, approve: Boolean, onFail: () -> Unit) {
+    /** Answers a card; a permission card (#64) also names its option, and a deny can carry a note for the agent. */
+    fun decide(aid: String, approve: Boolean, option: String? = null, note: String? = null, onFail: () -> Unit) {
         viewModelScope.launch {
             try {
-                api.post("api/approvals/$aid", JSONObject().put("decision", if (approve) "approve" else "deny"))
+                api.post("api/approvals/$aid", JSONObject().put("decision", if (approve) "approve" else "deny")
+                    .apply { option?.let { put("option", it) }; if (!note.isNullOrEmpty()) put("note", note) })
             } catch (e: IOException) {
                 onFail()
             }

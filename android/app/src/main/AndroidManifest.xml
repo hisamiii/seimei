@@ -38,5 +38,6 @@
             </intent-filter>
         </activity>
         <receiver android:name=".InstallResult" android:exported="false" />
+        <receiver android:name=".Decide" android:exported="false" />
     </application>
 </manifest>
