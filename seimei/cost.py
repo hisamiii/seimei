@@ -90,9 +90,12 @@ class Cost:
     def __init__(self, root: Path = PROJECTS):
         self.root = root
         self.offsets: dict[Path, tuple[int, int]] = {}
-        # message id -> (time, model, usage); the line with the most output wins, since streamed
-        # messages are written once per content block.
-        self.messages: dict[str, tuple[float, str, dict]] = {}
+        # message id -> (time, model, usage, session id); the line with the most output wins, since streamed
+        # messages are written once per content block. A subagent's calls count for its parent session.
+        self.messages: dict[str, tuple[float, str, dict, str]] = {}
+        # session id -> its title (from /rename or the peer name) and folder, for sessions no longer running.
+        self.titles: dict[str, str] = {}
+        self.folders: dict[str, str] = {}
         self.lock = threading.Lock()
         self.scanned = 0.0
 
@@ -116,15 +119,20 @@ class Cost:
                 # Only whole lines; a line still being written is read next time.
                 end = data.rfind(b"\n") + 1
                 for line in data[:end].splitlines():
-                    if b'"usage"' in line:
-                        self._line(line)
+                    if b'"usage"' in line or b'"customTitle"' in line or b'"agentName"' in line:
+                        self._line(line, f.stem)
                 self.offsets[f] = (st.st_ino, off + end)
             self.scanned = time.time()
 
-    def _line(self, line: bytes):
+    def _line(self, line: bytes, stem: str = ""):
         try:
             d = json.loads(line)
         except ValueError:
+            return
+        sid = d.get("sessionId") or stem
+        if d.get("type") in ("custom-title", "agent-name"):
+            if title := d.get("customTitle") or d.get("agentName"):
+                self.titles[sid] = title
             return
         m = d.get("message")
         if not isinstance(m, dict):
@@ -139,7 +147,27 @@ class Cost:
             t = datetime.fromisoformat(d.get("timestamp", "").replace("Z", "+00:00")).timestamp()
         except ValueError:
             t = old[0] if old else 0.0
-        self.messages[mid] = (t, model, u)
+        self.messages[mid] = (t, model, u, sid)
+        if d.get("cwd"):
+            self.folders.setdefault(sid, d["cwd"])
+
+    def sessions(self, start: float, end: float = float("inf")) -> dict[str, dict]:
+        """Per session id: USD, API calls, the four token kinds, and the summed context of its calls."""
+        out: dict[str, dict] = {}
+        with self.lock:
+            msgs = list(self.messages.values())
+        for t, model, u, sid in msgs:
+            if not start <= t < end:
+                continue
+            s = out.setdefault(sid, {"usd": 0.0, "calls": 0, "context": 0, **{f: 0 for f in FIELDS}})
+            s["usd"] += cost(model, u)[0]
+            s["calls"] += 1
+            s["input"] += u.get("input_tokens") or 0
+            s["output"] += u.get("output_tokens") or 0
+            s["cache_read"] += u.get("cache_read_input_tokens") or 0
+            s["cache_write"] += u.get("cache_creation_input_tokens") or 0
+            s["context"] += sum(u.get(k) or 0 for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
+        return out
 
     def summary(self, resets_at: float | None = None, now: datetime | None = None) -> dict:
         now = now or datetime.now()
@@ -149,7 +177,7 @@ class Cost:
         out = {k: {"usd": 0.0, "messages": 0, "models": {}} for k in periods}
         with self.lock:
             msgs = list(self.messages.values())
-        for t, model, u in msgs:
+        for t, model, u, _ in msgs:
             usd, key = cost(model, u)
             for name, start in periods.items():
                 if t < start:

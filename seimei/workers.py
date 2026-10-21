@@ -28,6 +28,7 @@ from claude_agent_sdk import (
 )
 
 from . import sessions
+from .aliases import Aliases
 from .archive import Archive
 from .events import EventLog
 from .util import NO_CONNECTORS, STREAM_BUFFER, queue_env, result_text, summarize, write_json
@@ -398,6 +399,7 @@ class Pool:
         recs = json.loads(self.path.read_text()) if self.path.exists() else []
         self.workers: dict[str, Worker] = {r["id"]: Worker(self, r) for r in recs}
         self.archive = Archive(state_dir / "archive.json")
+        self.aliases = Aliases(state_dir / "aliases.json")
         self._hidden: set[str] = set()
 
     def startup(self) -> list[str]:

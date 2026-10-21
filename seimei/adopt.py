@@ -85,7 +85,12 @@ class Adopter:
     async def request(self, key: str, when: str = "idle", name: str = "", model: str = "", effort: str = "",
                       context: str = "", close_window: bool = False) -> str:
         """The tool: asks the user, then adopts now or at the next idle. Returns what to tell the dispatcher."""
-        s = find(await asyncio.to_thread(self.rows), key)
+        rows = await asyncio.to_thread(self.rows)
+        s = find(rows, key)
+        if not s and getattr(self.pool, "aliases", None):
+            live = await asyncio.to_thread(sessions.live, self.pool.own_sessions())
+            hit = self.pool.aliases.resolve(key, live)
+            s = hit and next((r for r in rows if r["pid"] == hit["pid"]), None)
         if not s:
             return f"No session of the user's is named {key!r}."
         if s["kind"] != "interactive":

@@ -63,17 +63,25 @@ def make_desktop_tools(desk: Desktop, files: Files, events: EventLog, layout=Non
 
     @tool("screenshot", "See the screen. Without a window: the whole screen as JPEG; click and scroll take pixel "
           "coordinates from this image. With a window id: that window alone at full resolution, even on another "
-          "workspace, for reading (not for click coordinates). show=true also puts the image in the chat.", {
+          "workspace, for reading (not for click coordinates). region [x, y, w, h] (pixels of the whole-screen image) "
+          "or target (bar: the status bar; top or bottom: half the screen): that part at full resolution, under "
+          "800 KB, for reading small text. show=true also puts the image in the chat.", {
               "type": "object",
               "properties": {"window": {"type": "integer"}, "show": {"type": "boolean", "default": False},
+                             "region": {"type": "array", "items": {"type": "number"}},
+                             "target": {"type": "string", "enum": ["bar", "top", "bottom"]},
                              "caption": {"type": "string"}}})
     async def screenshot(args):
         try:
-            data, mime = await desk.screenshot(args.get("window"))
+            if args.get("region") or args.get("target"):
+                data, mime, geo = await desk.region(args.get("region"), args.get("target"))
+                note = f"Region {geo} (logical pixels) at full resolution; not for click coordinates."
+            else:
+                data, mime = await desk.screenshot(args.get("window"))
+                note = "Whole screen; click coordinates are pixels of this image." if args.get("window") is None else \
+                    f"Window {args['window']}."
         except Exception as e:
             return failed(e)
-        note = "Whole screen; click coordinates are pixels of this image." if args.get("window") is None else \
-            f"Window {args['window']}."
         if args.get("show"):
             name, _ = files.save(data)
             events.add({"type": "image", "file": name, "caption": str(args.get("caption") or "")[:300]})
@@ -95,6 +103,16 @@ def make_desktop_tools(desk: Desktop, files: Files, events: EventLog, layout=Non
         except Exception as e:
             return failed(e)
         return text(out or "Done.")
+
+    @tool("niri_query", "Read-only niri state as JSON (niri msg --json <what>): outputs, workspaces, windows, "
+          "focused-window, focused-output, layers, keyboard-layouts or version. For details the desktop tool leaves out.", {
+              "type": "object", "properties": {"what": {"type": "string", "enum": list(desktop.QUERIES)}}, "required": ["what"]})
+    async def niri_query(args):
+        try:
+            out = await asyncio.to_thread(desktop.query, str(args.get("what")))
+        except Exception as e:
+            return failed(e)
+        return text(out if len(out) <= 30_000 else out[:30_000] + " … (cut at 30000 characters)")
 
     @tool("open_app", "Start an app or command in the desktop session. It runs outside seimei, so it survives seimei "
           "restarts. Its window goes to the \"seimei\" workspace unless workspace is \"current\", and counts as "
@@ -279,5 +297,5 @@ def make_desktop_tools(desk: Desktop, files: Files, events: EventLog, layout=Non
             return text(f"The user {outcome} the restore." if outcome != "expired" else "No answer in 10 minutes; not restored.")
         return text("\n".join(await layout.restore(plan)))
 
-    return [overview, screenshot, niri, open_app, type_text, press_keys, click, scroll, ui_tree, ui_action, media,
+    return [overview, screenshot, niri, niri_query, open_app, type_text, press_keys, click, scroll, ui_tree, ui_action, media,
             notifications, unlock_screen, restore_desktop]

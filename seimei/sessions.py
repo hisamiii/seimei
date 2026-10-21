@@ -95,9 +95,12 @@ def live(own: dict[str, str]) -> list[dict]:
     return out
 
 
-def find(key: str, own: dict[str, str]) -> dict | None:
+def find(key: str, own: dict[str, str], aliases=None) -> dict | None:
+    """By alias, exact name, pid, session id prefix, then a unique part of the name."""
     key = key.strip()
     sessions = live(own)
+    if aliases and (s := aliases.resolve(key, sessions)):
+        return s
     for test in (lambda s: s["name"] == key, lambda s: str(s["pid"]) == key, lambda s: s["session_id"].startswith(key),
                  lambda s: key.lower() in s["name"].lower()):
         hits = [s for s in sessions if test(s)]

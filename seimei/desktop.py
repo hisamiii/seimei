@@ -140,6 +140,37 @@ def _output(name: str) -> dict:
     return ipc("Outputs")[name]["logical"]
 
 
+# A region shot stays under this, so it fits a tool result and the model's image budget.
+REGION_MAX = 800_000
+# Read-only niri queries the dispatcher may make (niri msg --json <what>).
+QUERIES = ("outputs", "workspaces", "windows", "focused-window", "focused-output", "layers", "keyboard-layouts", "version")
+
+
+def query(what: str) -> str:
+    if what not in QUERIES:
+        raise ValueError(f"what is one of {', '.join(QUERIES)}")
+    r = subprocess.run(["niri", "msg", "--json", what], env=env(), capture_output=True, text=True, timeout=10)
+    if r.returncode:
+        raise RuntimeError(r.stderr.strip() or f"niri msg {what} failed")
+    return json.dumps(json.loads(r.stdout), separators=(",", ":"))
+
+
+def _bar_height() -> int:
+    """The running waybar's height plus its vertical margins, in logical pixels, from its own config."""
+    for p in Path("/proc").iterdir():
+        try:
+            argv = (p / "cmdline").read_bytes().split(b"\0")
+        except OSError:
+            continue
+        if argv and argv[0].endswith(b"waybar") and b"-c" in argv:
+            text = Path(argv[argv.index(b"-c") + 1].decode()).read_text()
+            h = re.search(r'"height"\s*:\s*(\d+)', text)
+            m = re.search(r'"margin"\s*:\s*"(\d+)(?:\s+\d+)?(?:\s+(\d+))?', text)
+            top = int(m.group(1)) if m else 0
+            return int(h.group(1)) + top + (int(m.group(2)) if m and m.group(2) else top)
+    raise RuntimeError("waybar is not running")
+
+
 def _screen_scale() -> float:
     outs = [o["logical"] for o in ipc("Outputs").values() if o.get("logical")]
     edge = max(max(o["x"] + o["width"] for o in outs), max(o["y"] + o["height"] for o in outs))
@@ -286,6 +317,41 @@ class Desktop:
         if not await asyncio.to_thread(window, window_id):
             raise ValueError(f"no window {window_id}")
         return await asyncio.to_thread(self._window_shot, window_id), "image/png"
+
+    async def region(self, box: list[float] | None = None, target: str | None = None) -> tuple[bytes, str, str]:
+        """Part of the screen at full resolution: box is x, y, w, h in pixels of the whole-screen screenshot (like
+        click), or a named target. Returns the image, its type and the logical geometry taken."""
+        outs = [o["logical"] for o in (await asyncio.to_thread(ipc, "Outputs")).values() if o.get("logical")]
+        o = outs[0]
+        if target:
+            bar = await asyncio.to_thread(_bar_height) if target == "bar" else 0
+            half = o["height"] // 2
+            x, y, w, h = {"bar": (0, 0, o["width"], bar), "top": (0, 0, o["width"], half),
+                          "bottom": (0, half, o["width"], o["height"] - half)}.get(target) or (None,) * 4
+            if x is None:
+                raise ValueError("target is bar, top or bottom")
+        else:
+            if not box or len(box) != 4 or box[2] <= 0 or box[3] <= 0:
+                raise ValueError("region is [x, y, w, h] with a positive width and height")
+            scale = await asyncio.to_thread(_screen_scale)
+            x, y, w, h = (round(v / scale) for v in box)
+        x, y = max(0, x), max(0, y)
+        w, h = min(w, o["x"] + o["width"] - x), min(h, o["y"] + o["height"] - y)
+        if w <= 0 or h <= 0:
+            raise ValueError("the region is off the screen")
+        geo = f"{x},{y} {w}x{h}"
+        full = o.get("scale") or 1
+        # PNG while it fits, then JPEG at falling quality, then smaller.
+        for kind, q, s in (("png", 0, full), ("jpeg", 90, full), ("jpeg", 75, full), ("jpeg", 75, full * .7), ("jpeg", 70, full * .5)):
+            args = ["grim", "-g", geo, "-s", f"{s:.3f}", "-t", kind] + (["-q", str(q)] if kind == "jpeg" else []) + ["-"]
+            proc = await asyncio.create_subprocess_exec(*args, env=await asyncio.to_thread(env), stdout=subprocess.PIPE,
+                                                        stderr=subprocess.PIPE)
+            out, err = await proc.communicate()
+            if proc.returncode:
+                raise RuntimeError(err.decode().strip() or "grim failed")
+            if len(out) <= REGION_MAX:
+                return out, f"image/{kind}", geo
+        return out, "image/jpeg", geo
 
     async def frame(self, scale: float = 0.5, quality: int = 60) -> bytes:
         return await self._grim(scale, quality)

@@ -1,7 +1,9 @@
-"""Account usage: the plan's rolling windows as Claude Code reports them, and today's tokens per seimei session."""
+"""Account usage: the plan's rolling windows as Claude Code reports them, today's tokens per seimei session, and
+(with cost.py) what each session spent at API prices and what 1% of the 5-hour window costs, now and before."""
 
+import json
 import time
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from .events import EventLog
@@ -9,18 +11,38 @@ from .util import read_json, write_json
 
 NAMES = {"five_hour": "5-hour", "seven_day": "Weekly"}
 WARN_AT = (0.8, 0.95)
+FIVE = 5 * 3600
+TOP = 10
 
 
 class Usage:
-    def __init__(self, events: EventLog, state_dir: Path):
+    def __init__(self, events: EventLog, state_dir: Path, cost=None, ratelog: Path | None = None):
         self.events = events
+        self.cost = cost
         self.path = state_dir / "usage.json"
         self.data = read_json(self.path) or {}
         self.data.setdefault("windows", {})
         self.data.setdefault("warned", {})
+        # 5-hour windows by their reset time: the highest share used seen in each.
+        if "history" not in self.data:
+            self.data["history"] = self._seed(ratelog)
         # Claude Code reports running totals per session, kept across resumes; the last ones give each turn's share.
         self.data.setdefault("seen", {})
         self._roll()
+
+    @staticmethod
+    def _seed(ratelog: Path | None) -> dict:
+        """Earlier windows from the dispatcher's status-line log, when there is one."""
+        h: dict[str, float] = {}
+        try:
+            for line in ratelog.read_text().splitlines() if ratelog else ():
+                w = (json.loads(line).get("rl") or {}).get("five_hour") or {}
+                if w.get("resets_at") and w.get("used_percentage") is not None:
+                    k = str(int(w["resets_at"]))
+                    h[k] = max(h.get(k, 0), w["used_percentage"] / 100)
+        except (OSError, ValueError, AttributeError):
+            pass
+        return h
 
     def _roll(self):
         today = date.today().isoformat()
@@ -50,6 +72,11 @@ class Usage:
             if used is None:
                 continue
             self.data["windows"][key] = {"utilization": used, "resets_at": resets}
+            if key == "five_hour" and resets:
+                h = self.data["history"]
+                h[str(int(resets))] = max(h.get(str(int(resets)), 0), used)
+                for old in sorted(h, key=int)[:-60]:
+                    del h[old]
             self._warn(key, used, resets)
         self.data["status"] = raw.get("status")
         self.data["updated"] = time.time()
@@ -94,7 +121,7 @@ class Usage:
             s[k] += v
         self._changed()
 
-    def report(self) -> str:
+    def report(self, names: dict[str, str] | None = None) -> str:
         """Plain text for the dispatcher's usage tool."""
         snap = self.snapshot()
         lines = []
@@ -112,4 +139,52 @@ class Usage:
             for name, s in sorted(sessions.items(), key=lambda kv: -kv[1]["output"]):
                 total_in = s["input"] + s["cache_read"] + s["cache_write"]
                 lines.append(f"- {name}: {s['output']:,} / {total_in:,} over {s['turns']} turn{'s' if s['turns'] != 1 else ''}")
+        if self.cost:
+            lines += self.spend(names or {})
         return "\n".join(lines)
+
+    def spend(self, names: dict[str, str]) -> list[str]:
+        """What each session spent this window and today, and the price of 1% of the 5-hour window."""
+        c, now = self.cost, time.time()
+        if now - c.scanned > 10:
+            c.scan()
+        hm = lambda t: time.strftime("%H:%M", time.localtime(t))
+        lines = ["", "At API prices (this laptop only, each API call counted once):"]
+        five = self.data["windows"].get("five_hour") or {}
+        start = five["resets_at"] - FIVE if five.get("resets_at") and five["resets_at"] > now else None
+        windows = []
+        if start:
+            windows.append(("This window", start, now, five.get("utilization") or 0))
+        for k in sorted(self.data["history"], key=int, reverse=True):
+            end = int(k)
+            if end <= now and len(windows) < 7:
+                windows.append((f"{hm(end - FIVE)}-{hm(end)}", end - FIVE, end, self.data["history"][k]))
+        for label, a, b, used in windows:
+            usd = sum(s["usd"] for s in c.sessions(a, b).values())
+            per = f", ${usd / (used * 100):.2f} per 1%" if used >= 0.02 else ""
+            lines.append(f"- {label}: ${usd:.2f} for {round(used * 100)}% of the 5-hour window{per}")
+        day = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        for label, a in ((f"Per session since this window began ({hm(start)})", start), ("Per session today", day)):
+            if a is None:
+                continue
+            rows = sorted(c.sessions(a).items(), key=lambda kv: -kv[1]["usd"])
+            if not rows:
+                continue
+            lines.append(f"{label}: $ / calls / output, cache read, cache write, input / average context per call")
+            for sid, s in rows[:TOP]:
+                lines.append(f"- {self._name(sid, names)}: ${s['usd']:.2f} / {s['calls']} / {_k(s['output'])}, "
+                             f"{_k(s['cache_read'])}, {_k(s['cache_write'])}, {_k(s['input'])} / {_k(s['context'] / s['calls'])}")
+            if rest := rows[TOP:]:
+                lines.append(f"- {len(rest)} more: ${sum(s['usd'] for _, s in rest):.2f}")
+        return lines
+
+    def _name(self, sid: str, names: dict[str, str]) -> str:
+        if sid in names:
+            return names[sid]
+        title = self.cost.titles.get(sid)
+        folder = Path(self.cost.folders.get(sid, "")).name
+        return f"{title} ({sid[:8]})" if title else f"{folder or '?'} ({sid[:8]})"
+
+
+def _k(n: float) -> str:
+    return f"{n / 1e6:.1f}M" if n >= 1e6 else f"{n / 1e3:.0f}k" if n >= 1e3 else str(round(n))

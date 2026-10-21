@@ -145,7 +145,8 @@ def main():
     discord = discord_link.Discord(discord_link.socket_path(args.dev))
     approvals = Approvals(events)
     guard = Guard(events, approvals, state)
-    usage = Usage(events, state)
+    cost = Cost()
+    usage = Usage(events, state, cost, STATE / "ratelog/rates.jsonl")
     desk = Desktop(events, lambda t: dispatcher.note(t), state / UNLOCK)
     layout = Layout(desk, approvals, events, state)
     push = Push(events, auth, Fcm(FIREBASE / "service-account.json"), state)
@@ -158,7 +159,7 @@ def main():
     pool.dispatcher, pool.guard = dispatcher, guard
     guard.tell = pool.tell
     watcher = Watcher(events, pool.own_sessions, pool.notify, pool.archive)
-    app = make_app(events, dispatcher, pool, files, approvals, guard, watcher, desk, auth, origins, state / "app", Cost(), push, uploads)
+    app = make_app(events, dispatcher, pool, files, approvals, guard, watcher, desk, auth, origins, state / "app", cost, push, uploads)
 
     async def start(app):
         approvals.startup()

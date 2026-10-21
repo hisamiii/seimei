@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -61,7 +62,7 @@ def writers(pool: Pool, w, own: dict[str, str]) -> str | None:
 
 # Tools the dispatcher rarely needs: they stay behind tool search (their names show, the full schema loads on demand).
 # Every other seimei tool is loaded up front, so the everyday ones never cost a ToolSearch round trip.
-DEFERRED = {"discord_search", "discord_edit", "discord_delete", "discord_react", "discord_mark_read", "browser_read",
+DEFERRED = {"niri_query", "discord_search", "discord_edit", "discord_delete", "discord_react", "discord_mark_read", "browser_read",
             "browser_switch", "browser_download", "browser_downloads", "scroll", "notifications", "send_file",
             "restore_desktop", "unlock_screen", "queue_control", "queue_policy", "queue_history",
             "adopt"}
@@ -82,6 +83,11 @@ def always_load(server: dict, deferred: set[str]) -> dict:
 
     srv.add_request_handler("tools/list", entry.params_type, listed)
     return server
+
+
+def address(s: dict) -> str:
+    """Where SendMessage reaches a session, whatever its name."""
+    return "uds:" + (s["rec"].get("messagingSocketPath") or f"/run/user/{os.getuid()}/cc-socks/{s['pid']}.sock")
 
 
 def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), uploads=None):
@@ -222,16 +228,46 @@ def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), upl
         snap = await asyncio.to_thread(cq.snapshot, pool.queue_names())
         return text(cq.describe(snap))
 
-    @tool("sessions", "List every running Claude Code session on the laptop: name, status (idle, busy, waiting with "
-          "what for, shell, parked), kind, folder and last activity. Includes the user's own sessions.", {})
+    @tool("sessions", "List every running Claude Code session on the laptop: your alias for it, name, status (idle, "
+          "busy, waiting with what for, shell, parked), kind, folder and last activity. Includes the user's own "
+          "sessions. Aliased ones show their SendMessage address, which holds through renames.", {})
     async def sessions(args):
         rows = sess.live(own())
         if not rows:
             return text("No running sessions.")
         home = str(Path.home())
+
+        def head(s):
+            a = pool.aliases.of(s)
+            return (f"{a} = \"{s['name']}\" [pid {s['pid']}, to {address(s)}]" if a else f"{s['name']} [pid {s['pid']}]")
         return text("\n".join(
-            f"{s['name']} [pid {s['pid']}]: {s['status']} since {sess.ago(s['since'])}, last activity {sess.ago(s['active'])}, "
+            f"{head(s)}: {s['status']} since {sess.ago(s['since'])}, last activity {sess.ago(s['active'])}, "
             f"{s['kind']}, in {s['cwd'].replace(home, '~', 1)}" for s in rows))
+
+    @tool("alias", "Your own name for a session (like dev or asr) that holds when it is renamed: sessions, "
+          "session_peek and adopt take it, and sessions shows its SendMessage address. session: its current name, "
+          "pid or alias; leave alias empty to remove it. Without arguments: the list.", {
+              "type": "object", "properties": {"alias": {"type": "string"}, "session": {"type": "string"}}})
+    async def alias(args):
+        name, key = str(args.get("alias") or "").strip(), str(args.get("session") or "").strip()
+        rows = sess.live(own())
+        if not key and not name:
+            if not pool.aliases.map:
+                return text("No aliases yet.")
+            return text("\n".join(f"{a} = " + (f"\"{s['name']}\" [pid {s['pid']}, to {address(s)}]" if (s := pool.aliases.resolve(a, rows))
+                                               else "(not running)") for a in list(pool.aliases.map)))
+        if not key:
+            return text(f"Removed {name}." if pool.aliases.remove(name) else f"No alias {name}.")
+        s = sess.find(key, own(), pool.aliases)
+        if not s:
+            return text(f"No single running session matches {key!r}.", error=True)
+        if not name:
+            a = pool.aliases.of(s)
+            return text(f"Removed {a}." if a and pool.aliases.remove(a) else f"{s['name']} has no alias.")
+        if not re.fullmatch(r"[\w.-]{1,32}", name):
+            return text("An alias is up to 32 letters, digits, dots, dashes or underscores.", error=True)
+        pool.aliases.set(name, s)
+        return text(f"{name} = \"{s['name']}\" [pid {s['pid']}], SendMessage to {address(s)}.")
 
     @tool("session_peek", "Read a running session: its last user messages and assistant texts, an open "
           "AskUserQuestion with its options (SendMessage does not reach a session sitting in one), and tool calls "
@@ -240,7 +276,7 @@ def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), upl
               "properties": {"session": {"type": "string"}, "count": {"type": "integer", "default": 3}},
               "required": ["session"]})
     async def session_peek(args):
-        s = sess.find(str(args["session"]), own())
+        s = sess.find(str(args["session"]), own(), pool.aliases)
         if not s:
             names = ", ".join(x["name"] for x in sess.live(own()))
             return text(f"No single running session matches. Running: {names}", error=True)
@@ -249,7 +285,7 @@ def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), upl
             return text(f"{s['name']} has no transcript yet.")
         p = sess.peek(path, max(1, min(int(args.get("count", 3)), 20)))
         lines = [f"{s['name']} [pid {s['pid']}, {s['kind']}]: {s['status']} since {sess.ago(s['since'])}, "
-                 f"last activity {sess.ago(s['active'])}, in {s['cwd']}"]
+                 f"last activity {sess.ago(s['active'])}, in {s['cwd']}; SendMessage to {address(s)}"]
         for q in p["questions"]:
             lines.append(f"\nOPEN AskUserQuestion (asked {q['asked'][:19]}Z), waiting for an answer in the terminal:")
             for item in q["questions"]:
@@ -264,10 +300,14 @@ def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), upl
             lines += [f"[{who} {t[11:19]}] {x}" for t, who, x in merged]
         return text("\n".join(lines))
 
-    @tool("usage", "The account's plan usage: the 5-hour and weekly windows (share used, reset time) and today's "
-          "tokens per seimei session.", {})
+    @tool("usage", "The account's plan usage: the 5-hour and weekly windows (share used, reset time), today's "
+          "tokens per seimei session, and at API prices: what this and earlier 5-hour windows cost and the price of "
+          "1% of the window in each, and per session (yours, shikigami, the user's) this window and today: $, calls, "
+          "output / cache read / cache write / input tokens and average context per call.", {})
     async def usage(args):
-        return text(pool.dispatcher.usage.report())
+        names = {s["session_id"]: s["name"] for s in await asyncio.to_thread(sess.live, {})}
+        names.update(own())
+        return text(await asyncio.to_thread(pool.dispatcher.usage.report, names))
 
     return always_load(create_sdk_mcp_server("seimei", tools=[summon, workers, peek, message, stop, show_image, send_file,
-                                                              sessions, session_peek, queue, usage, *extra]), DEFERRED)
+                                                              sessions, session_peek, alias, queue, usage, *extra]), DEFERRED)
