@@ -20,7 +20,7 @@ from .dispatcher import Dispatcher
 from .events import EventLog
 from .cost import Cost
 from .uploads import Uploads
-from . import deploys
+from . import deploys, permissions
 from .plugins import Host, Plugins
 from .push import FIREBASE, Fcm, Push, Stream, WebPush, make_push_tools
 from .watches import Watches, make_watch_tools
@@ -161,6 +161,8 @@ def main():
     pool.plugins = Dispatcher.plugins = plugins
     pool.about = Dispatcher.about = host.get("about") or "computer"
     pool.terminal = cfg.get("sessions", {}).get("terminal") or pool.terminal
+    pool.mode = permissions.configured(cfg.get("approvals", {}), "shikigami")
+    Dispatcher.mode = permissions.configured(cfg.get("approvals", {}), "dispatcher")
     push = Push(events, auth, Fcm(FIREBASE / "service-account.json"), state, WebPush(state / "push-vapid.pem", origin), Stream())
     push.watches = Watches(state / "watches.json", push, lambda line: pool.notify(line), plugins)
     dispatcher = Dispatcher(disp, events, state, make_tools(pool, files, events, make_adopt_tools(adopter) + make_push_tools(push)

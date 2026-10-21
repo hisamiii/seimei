@@ -23,7 +23,7 @@ from claude_agent_sdk import (
     get_session_info,
 )
 
-from . import recall
+from . import permissions, recall
 from .events import EventLog
 from .util import NO_CONNECTORS, STREAM_BUFFER, result_text, summarize
 
@@ -171,6 +171,8 @@ class Dispatcher:
     plugins = None
     # The machine, as the prompt names it; config [host] about.
     about = "computer"
+    # Its permission mode; config [approvals] dispatcher.
+    mode = "default"
 
     def __init__(self, cfg: dict, events: EventLog, state_dir: Path, tools=None, guard=None, usage=None):
         self.cfg = cfg
@@ -264,7 +266,13 @@ class Dispatcher:
             cwd=cwd,
             max_buffer_size=STREAM_BUFFER,
             model=self.cfg.get("model", "opus"),
-            permission_mode="bypassPermissions",
+            permission_mode=self.mode,
+            # Whatever Claude Code would ask in a terminal becomes a card, which a chat message also settles.
+            **({"can_use_tool": permissions.callback(self.guard.approvals, "seimei", None, lambda: self.mode)}
+               if self.guard else {}),
+            # seimei's tools and its plugins carry their own cards; external MCP servers ask like the rest.
+            allowed_tools=["mcp__seimei", *(f"mcp__{n}" for n in (self.plugins.names if self.plugins else [])
+                                            if self.plugins.own(n))],
             include_partial_messages=True,
             setting_sources=["user", "project", "local"],
             system_prompt={"type": "preset", "preset": "claude_code", "append": self.prompt()},

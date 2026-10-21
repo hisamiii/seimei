@@ -163,6 +163,11 @@ class Plugins:
     def get(self, name: str) -> Plugin | None:
         return next((p for p in self.list if p.name == name), None)
 
+    def own(self, name: str) -> bool:
+        """A plugin seimei ships (its risky tools carry their own cards), not an external MCP server."""
+        p = self.get(name)
+        return bool(p) and not isinstance(p, External)
+
     def grantable(self, groups) -> tuple[list[str], list[str]]:
         """The asked-for groups split into (enabled, unknown)."""
         groups = [str(g) for g in groups or []]

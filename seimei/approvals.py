@@ -108,6 +108,8 @@ class Approvals:
     def __init__(self, events: EventLog):
         self.events = events
         self.waiting: dict[str, asyncio.Future] = {}
+        # Open permission cards: id -> the shikigami's id, or None for seimei's own.
+        self.open: dict[str, str | None] = {}
 
     def startup(self):
         """Cards left open by a restart: their tool calls died with the old sessions."""
@@ -118,25 +120,53 @@ class Approvals:
             elif ev["type"] == "approval" and ev["aid"] not in done:
                 self.events.add({"type": "approval_done", "aid": ev["aid"], "outcome": "restart"})
 
-    def decide(self, aid: str, approve: bool) -> bool:
+    def decide(self, aid: str, approve: bool, option: str | None = None, note: str | None = None) -> bool:
         fut = self.waiting.get(aid)
         if not fut or fut.done():
             return False
-        fut.set_result(approve)
+        fut.set_result((approve, option, note))
         return True
 
+    def chat(self):
+        """The user wrote in the chat while seimei's own permission card was open: that settles it as denied (seimei
+        cannot read the message until its tool call ends). Like typing during a prompt in the terminal."""
+        for aid, who in list(self.open.items()):
+            if who is None:
+                self.decide(aid, False, "chat")
+
     async def hold(self, what: dict, who: str, worker: str | None) -> str:
-        """Show the card and wait for the user: approved, denied or expired."""
+        """Show an Approve/Deny card and wait for the user: approved, denied or expired."""
+        return (await self.card(what, who, worker, WAIT))[0]
+
+    async def card(self, what: dict, who: str, worker: str | None, wait: float | None = WAIT,
+                   remind: float | None = None) -> tuple[str, str | None, str | None]:
+        """Show a card and wait for the user: (outcome, the option they picked, their note). Without a wait it waits
+        until answered (or its session ends), with one reminder push after remind seconds."""
         aid = uuid.uuid4().hex[:8]
         fut = asyncio.get_running_loop().create_future()
         self.waiting[aid] = fut
+        # Permission cards (with options) of seimei itself settle on a chat message.
+        if "options" in what:
+            self.open[aid] = worker
         self.events.add({"type": "approval", "aid": aid, "who": who, "worker": worker,
-                         **{k: v[:DETAIL if k == "detail" else 2000] for k, v in what.items()}, "expires": time.time() + WAIT})
+                         **{k: v[:DETAIL if k == "detail" else 2000] if isinstance(v, str) else v for k, v in what.items()},
+                         "expires": time.time() + wait if wait else None})
+        outcome, option, note = "cancelled", None, None
         try:
-            outcome = "approved" if await asyncio.wait_for(fut, WAIT) else "denied"
+            if remind:
+                try:
+                    await asyncio.wait_for(asyncio.shield(fut), remind)
+                except asyncio.TimeoutError:
+                    self.events.flash({"type": "approval_remind", "aid": aid})
+            approve, option, note = await (asyncio.wait_for(fut, wait) if wait else fut)
+            outcome = "approved" if approve else "denied"
         except asyncio.TimeoutError:
             outcome = "expired"
         finally:
             self.waiting.pop(aid, None)
-        self.events.add({"type": "approval_done", "aid": aid, "outcome": outcome})
-        return outcome
+            self.open.pop(aid, None)
+            label = next((o["label"] for o in what.get("options") or [] if o["id"] == option), None)
+            self.events.add({"type": "approval_done", "aid": aid, "outcome": outcome,
+                             **({"chosen": label} if label and outcome == "approved" and option != "once" else {}),
+                             **({"note": note[:2000]} if note else {}), **({"by": "chat"} if option == "chat" else {})})
+        return outcome, option, note

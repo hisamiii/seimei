@@ -382,6 +382,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
             reply = None
         if reply and not quoted(reply)[0]:
             reply = None
+        approvals.chat()
         await dispatcher.send(text, saved, infos, cid, reply)
         return web.json_response({"ok": True})
 
@@ -536,7 +537,10 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
         body = await request.json()
         if body.get("decision") not in ("approve", "deny"):
             raise web.HTTPBadRequest()
-        if not approvals.decide(request.match_info["aid"], body["decision"] == "approve"):
+        # A permission card's choice (its option id) and the note that goes to the agent with a deny.
+        option = str(body["option"])[:40] if body.get("option") else None
+        note = str(body.get("note") or "").strip()[:2000] or None
+        if not approvals.decide(request.match_info["aid"], body["decision"] == "approve", option, note):
             raise web.HTTPConflict(text="already answered or expired")
         return web.json_response({"ok": True})
 
@@ -609,6 +613,14 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
 
     async def worker_stop(request):
         await worker(request).stop()
+        return web.json_response({"ok": True})
+
+    async def worker_mode(request):
+        """The user sets a shikigami's permission mode (agents cannot: this needs the user's login)."""
+        try:
+            await worker(request).set_mode(str((await request.json()).get("mode", "")))
+        except ValueError as e:
+            raise web.HTTPBadRequest(text=str(e))
         return web.json_response({"ok": True})
 
     async def worker_archive(request):
@@ -691,6 +703,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     app.router.add_post("/api/workers/{id}/send", worker_send)
     app.router.add_post("/api/workers/{id}/stop", worker_stop)
     app.router.add_post("/api/workers/{id}/archive", worker_archive)
+    app.router.add_post("/api/workers/{id}/mode", worker_mode)
     app.router.add_post("/api/workers/{id}/laptop", worker_laptop)
     app.router.add_post("/api/workers/{id}/release", worker_release)
     app.router.add_post("/api/sessions/{pid:[0-9]+}/adopt", session_adopt)

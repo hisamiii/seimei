@@ -28,7 +28,7 @@ from claude_agent_sdk import (
     tool,
 )
 
-from . import deploys, sessions
+from . import deploys, permissions, sessions
 from .aliases import Aliases
 from .archive import Archive
 from .events import EventLog
@@ -126,7 +126,8 @@ class Worker:
     def info(self) -> dict:
         r = self.rec
         return {**{k: r.get(k) for k in ("id", "name", "state", "cwd", "model", "effort", "context_cap", "subagents", "created",
-                                         "updated", "summary", "question", "doing")},
+                                         "updated", "summary", "question", "doing", "card")},
+                "mode": self.mode,
                 "started": bool(r.get("started")), "archived": self.pool.archive.worker(r)}
 
     def brief(self) -> dict:
@@ -166,7 +167,12 @@ class Worker:
             cwd=r["cwd"],
             max_buffer_size=STREAM_BUFFER,
             model=r["model"],
-            permission_mode="bypassPermissions",
+            permission_mode=self.mode,
+            # Whatever Claude Code would ask in a terminal becomes a card (never asked in bypass).
+            **({"can_use_tool": permissions.callback(self.pool.guard.approvals, r["name"], self, lambda: self.pool.mode,
+                                                     self._mode_chosen)} if self.pool.guard else {}),
+            # Its own tools and seimei's plugins carry their own cards; external MCP servers ask like the rest.
+            allowed_tools=["mcp__shikigami", *(f"mcp__{g}" for g in self.granted() if self.pool.plugins.own(g))],
             setting_sources=["user", "project", "local"],
             system_prompt={"type": "preset", "preset": "claude_code", "append": self.prompt()},
             # Its own ask, and the plugin groups summon granted it, built for it (their cards name it).
@@ -181,6 +187,34 @@ class Worker:
             hooks=self._hooks(),
             **where,
         )
+
+    @property
+    def mode(self) -> str:
+        """Its permission mode: what summon or the user set, else the configured one."""
+        return self.rec.get("mode") or self.pool.mode
+
+    def _mode_chosen(self, mode: str):
+        """The user picked a mode on one of its cards (Allow edits for this session, Go ahead on a plan)."""
+        self.rec["mode"] = mode
+        self.pool.changed()
+
+    async def set_mode(self, mode: str):
+        """The user changed its mode on the Agents page; a running session switches at once."""
+        if mode not in permissions.MODES:
+            raise ValueError(f"mode is one of {', '.join(permissions.MODES)}")
+        if self.client:
+            await self.client.set_permission_mode(mode)
+        self._mode_chosen(mode)
+
+    def waiting_card(self, text: str | None):
+        """A permission card of its is open (what it wants) or settled (None): the Agents page and its board task
+        show that it waits on the user, and seimei hears it."""
+        self.rec["card"] = text
+        self.pool.changed()
+        if self.pool.board:
+            self.pool.board.follow(self.id, "asking" if text else self.rec["state"])
+        if text:
+            self.pool.tell(self.id, f"waits on a permission card: {text}", key=f"perm:{self.id}")
 
     def granted(self) -> list[str]:
         """The plugin groups it may use: what summon granted that is still enabled."""
@@ -489,6 +523,8 @@ class Pool:
     about = "computer"
     # A released or lent session opens in this terminal ({cwd} and {title} filled in, quoted); config [sessions] terminal.
     terminal = "kitty -d {cwd} --title {title}"
+    # The shikigami permission mode from config ([approvals] shikigami): their default and ceiling.
+    mode = "default"
 
     def __init__(self, events: EventLog, state_dir: Path):
         self.events = events
@@ -651,8 +687,11 @@ class Pool:
 
     async def summon(self, name: str, task: str, cwd: str, model: str, effort: str | None = None, context: str = "400k",
                      subagents: str = "haiku", project: str | None = None, link: str | None = None,
-                     tools: list[str] | None = None) -> Worker:
+                     tools: list[str] | None = None, mode: str | None = None) -> Worker:
         name = slug(name)
+        if mode and not permissions.within(mode, self.mode):
+            raise ValueError(f"mode {mode} lets through more than the shikigami mode set in config ({self.mode}); "
+                             "only the user can raise it, on the Agents page")
         path = Path(os.path.expanduser(cwd or "~")).resolve()
         if not path.is_dir():
             raise ValueError(f"no such folder: {path}")
@@ -663,6 +702,8 @@ class Pool:
         now = time.time()
         rec = {"id": uuid.uuid4().hex[:8], "name": name, "task": task, "cwd": str(path), "model": model or "opus",
                "effort": effort or None, "context_cap": context, "subagents": subagents or "haiku", "session_id": str(uuid.uuid4()), "state": "starting", "created": now, "updated": now, "summary": ""}
+        if mode:
+            rec["mode"] = mode
         if self.board and link and not self.board.find(link):
             raise ValueError(f"no task {link} on the board")
         if tools:

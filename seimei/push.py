@@ -412,6 +412,10 @@ class Push:
         elif kind == "approval_done":
             if self.approvals.pop(ev.get("aid"), None) is not None:
                 self._approvals(alert=False)
+        elif kind == "approval_remind":
+            # A shikigami's card has waited REMIND: one more alert for it.
+            if ev.get("aid") in self.approvals:
+                self._approvals(alert=True)
         if self.watches:
             self.watches.handle(ev)
 

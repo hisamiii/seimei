@@ -9,7 +9,7 @@ from pathlib import Path
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
-from . import metrics
+from . import metrics, permissions
 from . import sessions as sess
 from .events import EventLog
 from .files import MAX_BYTES, Files
@@ -134,6 +134,8 @@ def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), upl
                   "task_id": {"type": "string", "description": "a board item this works on (#58 or t3); without it the "
                               "board gets a new task (with the task's #NN when it starts with one)"},
                   "project": {"type": "string", "description": "the board project for a new task; default: from cwd"},
+                  "mode": {"type": "string", "enum": list(permissions.MODES), "description": "its permission mode; "
+                           "default: the one set in config. Only the same or stricter (plan first, or only what's allowed)."},
                   **({"tools": {"type": "array", "items": {"type": "string", "enum": list(groups)},
                                 "description": "plugin tool groups to grant it, with the same cards, guard and rules as "
                                 "yours (their prompt sections come along); default none. Grant only what the task needs."}}
@@ -149,12 +151,12 @@ def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), upl
         try:
             w = await pool.summon(args["name"], args["task"], args["cwd"], args["model"], args["effort"], args["context"],
                                   args.get("subagent_model") or "haiku", args.get("project") or None, args.get("task_id") or None,
-                                  list(args.get("tools") or []) or None)
+                                  list(args.get("tools") or []) or None, args.get("mode") or None)
         except Exception as e:
             return text(f"Could not summon: {e}", error=True)
         r = w.rec
         crowd = await asyncio.to_thread(writers, pool, w, own())
-        return text(f"Summoned {w.name} ({w.id}) in {r['cwd']} on {r['model']}, effort {r['effort'] or 'default'}, "
+        return text(f"Summoned {w.name} ({w.id}) in {r['cwd']} on {r['model']}, effort {r['effort'] or 'default'}, mode {w.mode}, "
                     f"context {r['context_cap']}, subagents on {r['subagents']}"
                     + (f", with the {', '.join(r['tools'])} tools." if r.get("tools") else ".")
                     + (f" On the board as {r['board_task']}." if r.get("board_task") else "") + (f"\n\n{crowd}" if crowd else ""))
