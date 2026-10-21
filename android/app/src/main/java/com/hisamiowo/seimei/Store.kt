@@ -9,7 +9,7 @@ import org.json.JSONObject
 /**
  * Conversations kept on the phone, so the chat and every agent page show at once (after a cold start too) and only
  * fetch what is new. Each is a file of its raw events (the last [keep]) and where to go on from: the chat and each
- * page are drawn from these again, as from the laptop. App-private and never backed up; unpairing clears it.
+ * page are drawn from these again, as from the server. App-private and never backed up; unpairing clears it.
  */
 class Store(dir: File) {
     private val root = File(dir, "conversations")
@@ -48,11 +48,11 @@ class Store(dir: File) {
 
     companion object {
         const val CHAT = "chat"
-        /** The task board, whole, as the laptop last sent it. */
+        /** The task board, whole, as the server last sent it. */
         const val TASKS = "tasks"
-        /** Events the chat keeps; older ones load from the laptop when scrolled to, as before. */
+        /** Events the chat keeps; older ones load from the server when scrolled to, as before. */
         const val CHAT_KEEP = 300
-        /** Events a page keeps: what the laptop sends for a page at most. */
+        /** Events a page keeps: what the server sends for a page at most. */
         const val PAGE_KEEP = 400
         /** Agent pages kept, the most recently opened ones. */
         const val PAGES = 40

@@ -1,6 +1,6 @@
 # Architecture
 
-seimei is one Python process (aiohttp) on the laptop. It keeps one permanent Claude Code session, the dispatcher,
+seimei is one Python process (aiohttp) on the server. It keeps one permanent Claude Code session, the dispatcher,
 and runs worker sessions, the shikigami, next to it. The web page and the Android app talk to it over HTTP. It
 listens on 127.0.0.1 only; a tunnel (Cloudflare Tunnel here, `tailscale serve` works too) brings it to the phone.
 
@@ -33,7 +33,7 @@ phone app / web page ──https──> tunnel ──> 127.0.0.1:8417  seimei
   effort. Their tools (`mcp__shikigami__*`) let them ask the user and report. When one finishes, fails or asks, the
   dispatcher hears it at its next turn (questions and failures wake it at once). After a restart, running shikigami
   are resumed with a "continue" (capped at 3 per hour). A shikigami can be handed to the user as a terminal session
-  ("On laptop", "Give to me") and taken back ("Hand to seimei").
+  ("Open on server", "Give to me") and taken back ("Hand to seimei").
 - **The user's own sessions** are read from Claude Code's registry (`~/.claude/sessions/*.json`) and transcripts. The
   page lists them; messages are typed into their kitty window. Stopping, resuming or deleting one takes a card.
 
@@ -42,9 +42,9 @@ phone app / web page ──https──> tunnel ──> 127.0.0.1:8417  seimei
 Everything the page shows is an event in `events.jsonl` (state dir), with dense ids. Clients read the history, then
 follow `/api/stream` (SSE) from the last id they saw, so a reconnect replays what it missed. Transient events
 (`events.flash`) are sent but never stored. The server sends a data ping every 15 seconds; a client that hears
-nothing for 40 seconds shows "away" (a suspended laptop never closes the socket).
+nothing for 40 seconds shows "away" (a suspended server never closes the socket).
 
-Push goes to phones only while they are away (the laptop holds pushes while the app is open): FCM for builds with a
+Push goes to phones only while they are away (the server holds pushes while the app is open): FCM for builds with a
 Firebase config, Web Push (RFC 8291) through a UnifiedPush distributor, or seimei's own background stream when the
 phone has neither.
 

@@ -76,7 +76,7 @@ private val ORDER = mapOf("asks" to 0, "running" to 1, "review" to 2, "open" to 
 data class Section(val name: String, val color: String?, val paused: Boolean, val label: String, val live: List<Task>, val done: List<Task>)
 
 /** The board's projects in the order they show: what asks first, then running work, paused last, otherwise as the
- * laptop keeps them. */
+ * server keeps them. */
 fun sections(board: JSONObject): List<Section> {
     val tasks = board.optJSONArray("tasks").objects()
     // Each owner's next item: their first open task in queue order.

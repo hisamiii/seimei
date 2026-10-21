@@ -183,7 +183,7 @@ fun CostSection(cost: JSONObject?) {
             }
         }
     }
-    Text("What this laptop's Claude Code use would cost on pay-as-you-go API prices (checked ${cost.str("prices_checked")}). " +
+    Text("What this server's Claude Code use would cost on pay-as-you-go API prices (checked ${cost.str("prices_checked")}). " +
         "Other machines on the account are not included.", fontSize = 13.sp, color = LocalExtra.current.text3)
 }
 

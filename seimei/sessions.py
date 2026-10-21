@@ -1,4 +1,4 @@
-"""Every Claude Code session on the laptop, read from Claude Code's own session registry and transcripts."""
+"""Every Claude Code session on the server, read from Claude Code's own session registry and transcripts."""
 
 import asyncio
 import calendar
@@ -381,14 +381,14 @@ def timeline(path: Path, start: int | None = None, events: int = 400) -> dict:
 
 
 # What Claude Code writes in waitingFor, as a sentence (QA U7).
-WAITING = {"dialog open": "A dialog is open on the laptop", "input needed": "Needs your input on the laptop",
+WAITING = {"dialog open": "A dialog is open on the server", "input needed": "Needs your input on the server",
            "sandbox request": "A sandboxed command wants network access", "goal proposal": "Proposed a session goal"}
 
 
 def waiting_text(w: str | None) -> str:
     if not w:
-        return "Waiting on the laptop"
-    return WAITING.get(w) or f"Waiting on the laptop: {w}"
+        return "Waiting on the server"
+    return WAITING.get(w) or f"Waiting on the server: {w}"
 
 def listing(own: dict[str, str]) -> list[dict]:
     """The user's running sessions for the page: seimei's and parked terminals left out."""
@@ -458,7 +458,7 @@ class SessionEvents:
                 q = (ask.get("questions") or [{}])[0]
                 opts = " | ".join(o.get("label", "") for o in q.get("options") or [])
                 out.append((f"{who} asks: {q.get('question', '')}" + (f" Options: {opts}." if opts else "")
-                            + ("" if ask.get("answerable", True) else " (several questions or multi-select: laptop only)"),
+                            + ("" if ask.get("answerable", True) else " (several questions or multi-select: in its terminal only)"),
                             True, f"ask:{pid}"))
             st["ask"] = tid
             perm = None
@@ -467,7 +467,7 @@ class SessionEvents:
                 perm = d.get("tool_id") or r.get("waiting_for") or "?"
                 if perm != st["perm"]:
                     what = f"{d.get('tool', '')} {d.get('what', '')}".strip() or _prompt_on_screen(pid) or r.get("waiting_for") or "something"
-                    out.append((f"{who} waits on the laptop for a permission prompt: {what[:200]}", True, f"perm:{pid}"))
+                    out.append((f"{who} waits on the server for a permission prompt: {what[:200]}", True, f"perm:{pid}"))
             st["perm"] = perm
             if was == "busy" and r["status"] == "idle":
                 out.append((f"{who} finished a turn" + (f": {r['line'][:200]}" if r.get("line") else ""), False, f"finished:{pid}"))

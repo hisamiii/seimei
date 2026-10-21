@@ -61,12 +61,12 @@ def test_forged_phone_and_passkey_are_dropped(auth):
 def test_cli_changes_are_reported_not_refused(auth):
     write_behind(auth.path, lambda d: d["pairing"].append({"hash": "h", "exp": time.time() + 60}))
     auth.load()
-    assert auth.alarms == ["A pairing code was made on the laptop"]
+    assert auth.alarms == ["A pairing code was made on the server"]
     assert auth.data["pairing"]
     other = A.Auth(auth.path.parent, "http://localhost:8418")
     other.set_password("another long password")
     auth.load()
-    assert auth.alarms[-1] == "seimei's password was changed on the laptop"
+    assert auth.alarms[-1] == "seimei's password was changed on the server"
 
 
 def test_removals_are_quiet(auth):

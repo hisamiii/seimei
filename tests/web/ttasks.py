@@ -33,11 +33,11 @@ async def main():
         await seimei.locator(".fold3").click()
         await pg.locator(".pj.held .ph").first.click(); await pg.wait_for_timeout(300)
         check("a paused project opens on a tap", await pg.locator(".pj.held .ln").count() == 1)
-        # The user's own item: tick, it reaches the laptop and folds into done; untick brings it back.
+        # The user's own item: tick, it reaches the server and folds into done; untick brings it back.
         await seimei.locator("button.g.tick").first.click(); await pg.wait_for_timeout(1200)
         api = await (await ctx.request.get(U + "/api/tasks")).json()
         t1 = next(t for t in api["tasks"] if t["id"] == "t1")
-        check("ticking marks it done on the laptop", t1["state"] == "done" and t1["done_at"], t1)
+        check("ticking marks it done on the server", t1["state"] == "done" and t1["done_at"], t1)
         check("and it folds into done", (await seimei.locator(".fold3").inner_text()).strip() == "6 done")
         await seimei.locator(".fold3").click(); await pg.wait_for_timeout(300)
         await seimei.locator(".ln.s-done", has_text="Back up the signing key").locator("button.g").click(); await pg.wait_for_timeout(1200)
@@ -48,7 +48,7 @@ async def main():
         # Live: a change from elsewhere (another phone ticking) shows without a reload.
         await ctx.request.post(U + "/api/tasks/t2/tick", data='{"done": true}', headers=O)
         await pg.wait_for_timeout(1200)
-        check("a change on the laptop shows live", (await seimei.locator(".fold3").inner_text()).strip() in ("6 done", "hide done")
+        check("a change on the server shows live", (await seimei.locator(".fold3").inner_text()).strip() in ("6 done", "hide done")
               and await seimei.locator(".ln.s-done", has_text="M4 step 0 tests").count() == 1)
         # Tap a task with a shikigami: its page opens (QA has no such shikigami, so the page is asked for).
         asked = []

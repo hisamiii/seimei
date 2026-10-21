@@ -333,7 +333,7 @@ fun PairScreen(vm: Seimei, activity: Activity) {
         Text("Pair this phone", style = MaterialTheme.typography.headlineSmall)
         Spacer(Modifier.height(8.dp))
         Text(
-            "On the laptop's seimei page, open the menu, then Phone app, then Pair a phone. Type the code it shows.",
+            "On seimei's web page, open the menu, then Phone app, then Pair a phone. Type the code it shows.",
             color = LocalExtra.current.text3, textAlign = TextAlign.Center, fontSize = 14.sp,
         )
         Spacer(Modifier.height(28.dp))

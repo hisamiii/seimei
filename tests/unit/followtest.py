@@ -129,7 +129,7 @@ async def main():
     wl = await pool.summon("handed", "x", str(proj), "opus", "high", "400k")
     board.update(board.current(wl.id)["id"], state="done")
     wl._set("laptop")
-    check("one on the laptop needs no task", "handed" not in (board.drift(ws()) or ""), board.drift(ws()))
+    check("one on the server needs no task", "handed" not in (board.drift(ws()) or ""), board.drift(ws()))
     check("no line when they agree", board.drift(ws()) is None, board.drift(ws()))
 
     disp = D.Dispatcher({}, events, d)

@@ -41,7 +41,7 @@ MIN_PASSWORD = 12
 
 
 def account(auth: Auth, cmd: str, clear: bool, state: Path, revoke: str | None = None, keep_sessions: bool = False):
-    """Recovery lives on the laptop: these never go through the web page."""
+    """Recovery lives on the server: these never go through the web page."""
     if cmd == "screen-password":
         # The desktop plugin's unlock_screen types it; the command stays here, where recovery lives.
         from .plugins.desktop.desktop import UNLOCK

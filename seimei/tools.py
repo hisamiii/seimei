@@ -295,7 +295,7 @@ def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), upl
 
     own = pool.own_sessions
 
-    @tool("sessions", "List every running Claude Code session on the laptop: your alias for it, name, status (idle, "
+    @tool("sessions", "List every running Claude Code session on the server: your alias for it, name, status (idle, "
           "busy, waiting with what for, shell, parked), kind, folder and last activity. Includes the user's own "
           "sessions. Aliased ones show their SendMessage address, which holds through renames.", {})
     async def sessions(args):

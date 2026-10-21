@@ -198,6 +198,6 @@ function costSection() {
     list.append(row, models);
   }
   box.append(list, el('p', 'usage-note',
-    `What this laptop's Claude Code use would cost on pay-as-you-go API prices (checked ${cost.prices_checked}). Other machines on the account are not included.`));
+    `What this server's Claude Code use would cost on pay-as-you-go API prices (checked ${cost.prices_checked}). Other machines on the account are not included.`));
   return box;
 }

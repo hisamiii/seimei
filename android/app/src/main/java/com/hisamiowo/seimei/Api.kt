@@ -25,7 +25,7 @@ import org.json.JSONObject
 
 class HttpError(val code: Int, val body: String) : IOException("HTTP $code: ${body.take(200)}")
 
-/** The laptop's HTTP API. After login every call carries the bearer token. */
+/** The server's HTTP API. After login every call carries the bearer token. */
 class Api(server: String) {
     val base = server.trimEnd('/') + "/"
 
@@ -76,7 +76,7 @@ class Api(server: String) {
         })
     }
 
-    /** Streams a file up to the laptop; [open] is read once, never held in memory whole. */
+    /** Streams a file up to the server; [open] is read once, never held in memory whole. */
     suspend fun upload(name: String, open: () -> InputStream): JSONObject {
         val body = object : RequestBody() {
             override fun contentType() = OCTET
@@ -96,7 +96,7 @@ class Api(server: String) {
         return JSONObject(await(req) { it.string() })
     }
 
-    /** Streams a laptop file into [out], telling [progress] the bytes so far. */
+    /** Streams a server file into [out], telling [progress] the bytes so far. */
     suspend fun download(path: String, out: OutputStream, progress: (Long) -> Unit = {}) = await(request(path).build()) { body ->
         val src = body.source()
         val buf = okio.Buffer()
@@ -117,7 +117,7 @@ class Api(server: String) {
 
     /**
      * Closes the event stream's connection now. Cancelling its coroutine alone waits for the blocked read to
-     * return, which takes until the laptop next writes; meanwhile the laptop would think the app is on screen.
+     * return, which takes until the server next writes; meanwhile the server would think the app is on screen.
      */
     fun closeStream() {
         current?.cancel()

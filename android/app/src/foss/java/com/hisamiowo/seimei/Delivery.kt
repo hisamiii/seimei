@@ -28,7 +28,7 @@ object Delivery {
     const val available = true
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    /** The logged-in API, so an endpoint the push app changes later reaches the laptop at once. */
+    /** The logged-in API, so an endpoint the push app changes later reaches the server at once. */
     @Volatile
     private var api: Api? = null
 
@@ -82,7 +82,7 @@ object Delivery {
             try {
                 send(api, endpoint)
             } catch (e: IOException) {
-                Log.w("seimei", "could not hand the laptop the push endpoint: $e")
+                Log.w("seimei", "could not hand the server the push endpoint: $e")
             }
         }
     }
@@ -100,7 +100,7 @@ object Delivery {
 /** The push app's side: endpoints and messages (decrypted by the connector with this phone's Web Push keys). */
 class UpService : PushService() {
     override fun onNewEndpoint(endpoint: PushEndpoint, instance: String) {
-        // Without keys the laptop would have to send in the clear; it refuses that, so this endpoint is no use.
+        // Without keys the server would have to send in the clear; it refuses that, so this endpoint is no use.
         val keys = endpoint.pubKeySet ?: run {
             Log.w("seimei", "the push app gave an endpoint without keys")
             return

@@ -1,4 +1,4 @@
-"""Login: a password set on the laptop, passkeys (fingerprint) added after the first login, cookie sessions,
+"""Login: a password set on the server, passkeys (fingerprint) added after the first login, cookie sessions,
 and paired phones running the seimei app, which sign a challenge with a key kept in the phone's keystore."""
 
 import asyncio
@@ -114,12 +114,12 @@ class Auth:
             d["passkeys"] = [x for x in d["passkeys"] if x["id"] not in forged.get("passkeys", ())]
             self.save()
             what = ", ".join(f"{len(v)} {k[:-1] if len(v) == 1 else k}" for k, v in forged.items())
-            self._alarm("Login data was forged", f"Something on the laptop wrote {what} into auth.json without logging in. "
+            self._alarm("Login data was forged", f"Something on the server wrote {what} into auth.json without logging in. "
                         "seimei refused them. If it was not you, run `seimei lockdown` and check what your agents ran.")
         if now["pairing"] - known["pairing"]:
-            self._alarm("A pairing code was made on the laptop", "If you did not run `seimei pair`, run `seimei lockdown`.")
+            self._alarm("A pairing code was made on the server", "If you did not run `seimei pair`, run `seimei lockdown`.")
         if now["password"] != known["password"]:
-            self._alarm("seimei's password was changed on the laptop", "If you did not run `seimei passwd`, run `seimei lockdown`.")
+            self._alarm("seimei's password was changed on the server", "If you did not run `seimei passwd`, run `seimei lockdown`.")
         self.known = {**now, **{k: now[k] - v for k, v in forged.items()}}
 
     def _alarm(self, title: str, text: str):

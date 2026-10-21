@@ -1,4 +1,4 @@
-"""What this laptop's Claude Code use would cost at pay-as-you-go API prices.
+"""What this server's Claude Code use would cost at pay-as-you-go API prices.
 
 Reads every transcript in ~/.claude/projects (seimei, shikigami and the user's own sessions), counts each
 API message once by its id (resumed sessions repeat messages), and prices it with the table below.
@@ -213,4 +213,4 @@ class Cost:
                 m["usd"] = round(m["usd"], 2)
             p["unpriced"] = sorted(k for k in p["models"] if k not in PRICES)
         return {"type": "cost", **out, "day_start": day, "week_start": week, "prices_checked": PRICES_CHECKED,
-                "scanned": self.scanned, "note": "Claude Code on this laptop only; other machines on the account are not included."}
+                "scanned": self.scanned, "note": "Claude Code on this server only; other machines on the account are not included."}

@@ -33,7 +33,7 @@ sealed interface Item {
         val detail: String, val expires: Double, val outcome: String?,
         val options: List<Opt> = emptyList(), val sub: String = "", val subagent: Boolean = false, val done: Done? = null,
     ) : Item
-    /** w and h: the picture's size from the laptop (0 when unknown), so its space is kept before it loads. */
+    /** w and h: the picture's size from the server (0 when unknown), so its space is kept before it loads. */
     data class Shown(override val key: String, val file: String, val caption: String, val w: Int = 0, val h: Int = 0) : Item
     /** A file seimei handed over to download. */
     data class Sent(override val key: String, val file: FileRef, val caption: String, val t: Double = 0.0) : Item
@@ -79,12 +79,12 @@ class Asks : HashMap<String, Pair<Chat, Int>>()
 
 private val ENDED = mapOf("done" to "finished", "failed" to "failed", "stopped" to "was stopped", "interrupted" to "was interrupted")
 
-/** A file stored on the laptop (uploads.py), downloaded only when tapped. */
+/** A file stored on the server (uploads.py), downloaded only when tapped. */
 data class FileRef(val id: String, val name: String, val size: Long, val kind: String)
 
 fun JSONObject.fileRef(id: String = str("id")) = FileRef(id, str("name"), optLong("size"), str("kind"))
 
-/** The laptop deletes files after this long (uploads.py KEEP_DAYS); older chips show as expired. */
+/** The server deletes files after this long (uploads.py KEEP_DAYS); older chips show as expired. */
 const val KEEP_SECONDS = 30 * 86400.0
 
 fun expired(t: Double, now: Double = System.currentTimeMillis() / 1000.0) = t > 0 && now - t > KEEP_SECONDS

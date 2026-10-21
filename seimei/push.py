@@ -366,7 +366,7 @@ class Push:
         log.info("push %s%s to %d phone(s)", data.get("kind"), " cancel" if data.get("cancel") else "", len(phones))
         data = {k: str(v) for k, v in data.items()}
         for dev, rec in phones:
-            # The last few pushes, for tests and a look from the laptop.
+            # The last few pushes, for tests and a look from the server.
             self.sent = [*self.sent[-49:], (dev, data)]
             if not self.can_send(rec):
                 continue

@@ -128,7 +128,7 @@ fun stateText(w: JSONObject): String {
         "failed" -> "Failed $at"
         "stopped" -> "Stopped $at"
         "interrupted" -> "Interrupted $at"
-        "laptop" -> "Open on the laptop since $since"
+        "laptop" -> "Open on the server since $since"
         "released" -> "Your session since $since"
         else -> w.str("state")
     }
@@ -213,7 +213,7 @@ fun fromSession(s: JSONObject, seen: JSONObject): Agent {
         "session", s.optLong("pid").toString(), s.str("name"), s.str("project"), s.context(), state, s.optDouble("since", 0.0),
         when {
             q -> s.str("ask").ifEmpty { "Asks a question" }
-            asking -> s.str("waiting_text").ifEmpty { "Waiting on the laptop" }
+            asking -> s.str("waiting_text").ifEmpty { "Waiting on the server" }
             state == "work" -> sessionLine(s.optJSONObject("doing"))
             else -> s.str("line").ifEmpty { "Idle" }
         },
@@ -255,7 +255,7 @@ fun AgentsTab(vm: Seimei) {
         Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
             Text("Nothing running", fontWeight = FontWeight.Medium, fontSize = 16.sp)
             Spacer(Modifier.size(6.dp))
-            Text("Your Claude sessions on the laptop and the shikigami seimei summons show up here.", color = LocalExtra.current.text3, fontSize = 14.sp)
+            Text("Your Claude sessions on the server and the shikigami seimei summons show up here.", color = LocalExtra.current.text3, fontSize = 14.sp)
         }
         return
     }
@@ -489,8 +489,8 @@ fun blocked(pg: Page): String? {
     if (pg.kind == "worker") return null
     pg.reach?.let { return it }
     val ask = pg.ask
-    if (ask != null && !ask.optBoolean("answerable")) return "Answer on the laptop."
-    if (pg.row.str("status") == "waiting" && ask == null) return "${pg.row.str("waiting_text").ifEmpty { "Waiting on the laptop" }}. Answer it there."
+    if (ask != null && !ask.optBoolean("answerable")) return "Answer on the server."
+    if (pg.row.str("status") == "waiting" && ask == null) return "${pg.row.str("waiting_text").ifEmpty { "Waiting on the server" }}. Answer it there."
     return null
 }
 
@@ -526,7 +526,7 @@ fun AgentPage(vm: Seimei, pg: Page) {
                 val canHand = if (pg.kind == "worker") pg.row.optBoolean("started", true) && pg.row.str("state") !in setOf("released", "starting")
                     else pg.row.str("kind") in setOf("interactive", "background")
                 if (canHand) FilledTonalButton({ vm.handoff(pg) }, Modifier.heightIn(min = 36.dp).padding(end = 4.dp)
-                    .semantics { contentDescription = if (pg.kind == "worker") "Give ${a.name} to me: it goes on as my own session on the laptop"
+                    .semantics { contentDescription = if (pg.kind == "worker") "Give ${a.name} to me: it goes on as my own session on the server"
                         else "Hand ${a.name} to seimei as a shikigami" },
                     contentPadding = PaddingValues(horizontal = 12.dp)) {
                     Text(if (pg.kind == "worker") "Give to me" else "Hand to seimei", fontSize = 13.sp, maxLines = 1)
@@ -620,7 +620,7 @@ fun QuestionCard(vm: Seimei, pg: Page, ask: JSONObject) {
             }
             val many = (ask.optJSONArray("questions")?.length() ?: 0) > 1
             Text(
-                if (!ask.optBoolean("answerable")) "Answer ${if (many) "these" else "this one"} on the laptop: ${if (many) "several questions at once" else "pick any"} works there only."
+                if (!ask.optBoolean("answerable")) "Answer ${if (many) "these" else "this one"} on the server: ${if (many) "several questions at once" else "pick any"} works there only."
                 else "Something else? Answer in your own words below.",
                 fontSize = 12.5.sp, color = LocalExtra.current.text3, modifier = Modifier.padding(horizontal = 4.dp),
             )
@@ -852,7 +852,7 @@ fun Details(vm: Seimei, pg: Page) {
                 Fact("Context", r.context()?.let { "$it% used" } ?: "")
                 if (pg.kind == "worker") Fact("Started", atTime(r.optDouble("created")).replace(Regex("^at "), "today at ").cap())
                 else Fact("Last active", atTime(r.optDouble("active")).replace(Regex("^at "), "today at ").cap())
-                // What its run took (metrics.py), once the laptop has priced it.
+                // What its run took (metrics.py), once the server has priced it.
                 if (pg.kind == "worker") pg.metrics?.let { m -> for ((k, v) in metricFacts(m)) Fact(k, v) }
             }
             val state = r.str("state")
@@ -875,7 +875,7 @@ fun Details(vm: Seimei, pg: Page) {
                 }, Modifier.fillMaxWidth().heightIn(min = 48.dp), enabled = !sending) {
                     Icon(Icons.laptop, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text(if (armed) "Stop it and open on laptop" else "On laptop")
+                    Text(if (armed) "Stop it and open on server" else "Open on server")
                 }
                 error?.let { Text("Could not open it: $it", fontSize = 13.sp, color = cs.error) }
             }
@@ -900,7 +900,7 @@ fun Details(vm: Seimei, pg: Page) {
                 Text(if (agent.archived) "Unarchive" else "Archive")
             }
             if (pg.kind == "worker" && r.str("task").isNotEmpty()) TaskRow(r.str("task"))
-            if (pg.kind == "session") Text(pg.reach ?: "Messages you send here are typed into this session's window on the laptop.",
+            if (pg.kind == "session") Text(pg.reach ?: "Messages you send here are typed into this session's window on the server.",
                 fontSize = 13.sp, color = LocalExtra.current.text3)
         }
     }

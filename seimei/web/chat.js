@@ -459,10 +459,10 @@ const fileIcon = (kind) => FILE_ICON[kind] || FILE_ICON.doc;
 export const size = (n) => (n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 const KIND_LABEL = { pdf: 'PDF', archive: 'Archive', audio: 'Audio', video: 'Video', image: 'Image', code: 'Code', text: 'Text', file: 'File' };
 
-// The laptop deletes files after 30 days (uploads.py KEEP_DAYS); older chips show as expired.
+// The server deletes files after 30 days (uploads.py KEEP_DAYS); older chips show as expired.
 const KEEP = 30 * 86400;
 
-// A file as a download chip; the laptop always serves it as an attachment, never rendered.
+// A file as a download chip; the server always serves it as an attachment, never rendered.
 export function fileChip(f, t) {
   const expired = t && Date.now() / 1000 - t > KEEP;
   const a = el(expired ? 'div' : 'a', `fchip${expired ? ' expired' : ' sl'}`);
@@ -952,7 +952,7 @@ $('composer').addEventListener('submit', async (e) => {
   const sending = attachments.splice(0);
   if ((!text && !sending.length) || !S.online) {
     attachments.push(...sending);
-    if (!S.online) snack('Not connected to the laptop yet. Your message stays here.');
+    if (!S.online) snack('Not connected to the server yet. Your message stays here.');
     return;
   }
   input.value = '';
@@ -979,7 +979,7 @@ function quoteOff() {
 }
 $('quote-x').addEventListener('click', quoteOff);
 
-// The message shows at once, dimmed, until the laptop echoes it back (QA U1); a failed one offers a retry.
+// The message shows at once, dimmed, until the server echoes it back (QA U1); a failed one offers a retry.
 const pending = new Map();
 
 function pendingBubble(cid, text, sending, reply) {
@@ -1077,7 +1077,7 @@ async function prepare(file) {
 const MAX_FILE = 50 << 20;
 const PICTURE = /^image\/(jpeg|png|webp|gif)$/;
 
-// Any other file goes up to the laptop right away; the message then names it by id.
+// Any other file goes up to the server right away; the message then names it by id.
 function uploadFile(f) {
   const a = { kind: 'file', name: f.name || 'file', size: f.size, id: null };
   a.upload = fetch(`api/upload?name=${encodeURIComponent(a.name)}`, {

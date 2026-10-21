@@ -1,4 +1,4 @@
-"""#53 on the web: the chat and agent pages kept in localStorage, drawn before the laptop answers, then only what is
+"""#53 on the web: the chat and agent pages kept in localStorage, drawn before the server answers, then only what is
 new fetched (history?limit=0, ?after=, ?from=) and merged without doubles; the login page clears them."""
 import asyncio, json, re, sys; sys.path.insert(0, __import__('os').path.dirname(__file__))
 from h import *
@@ -24,7 +24,7 @@ async def main():
         k = await keys()
         check("worker and session pages kept", f"seimei.keep.worker-{wid}" in k and any(x.startswith("seimei.keep.session-") for x in k), k)
 
-        # The laptop answers slowly: the kept copies draw first, and only what is new is asked for.
+        # The server answers slowly: the kept copies draw first, and only what is new is asked for.
         asked = []
         async def slow(route):
             asked.append(route.request.url.replace(U, ""))
@@ -32,13 +32,13 @@ async def main():
         await pg.route(re.compile(r".*/api/(history|workers/[^/]+(\?.*)?$|sessions/\d+(\?.*)?$)"), slow)
         await pg.goto(U + "/"); await pg.wait_for_timeout(1000)
         n = await pg.locator("#thread .msg, #thread .bubble, #thread > *").count()
-        check("a reload draws the kept chat before the laptop answers", n > 3, n)
+        check("a reload draws the kept chat before the server answers", n > 3, n)
         await pg.wait_for_timeout(3000)
         check("and asks only history?limit=0", any(a.startswith("/api/history?limit=0") for a in asked) and not any("limit=200" in a for a in asked), asked)
         await pg.goto(U + "/#agents"); await pg.wait_for_timeout(1500)
         asked.clear()
         await pg.locator("button.agent", has_text="app-tester").first.click(); await pg.wait_for_timeout(800)
-        check("the kept worker page draws before the laptop answers", "3 bugs fixed" in await pg.locator(".sthread").inner_text())
+        check("the kept worker page draws before the server answers", "3 bugs fixed" in await pg.locator(".sthread").inner_text())
         await pg.wait_for_timeout(3500)
         check("it asks only for events after its last", any(re.match(rf"/api/workers/{wid}\?after=\d+$", a) for a in asked), asked)
         await pg.unroute(re.compile(r".*/api/(history|workers/[^/]+(\?.*)?$|sessions/\d+(\?.*)?$)"))

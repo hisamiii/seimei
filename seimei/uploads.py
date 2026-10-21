@@ -80,7 +80,7 @@ class Uploads:
         return self.info(fid)
 
     def add(self, src: Path, name: str | None = None) -> dict:
-        """A copy of a laptop file for the user to download."""
+        """A copy of a server file for the user to download."""
         if not src.is_file():
             raise ValueError("not a file")
         if src.stat().st_size > MAX_BYTES:

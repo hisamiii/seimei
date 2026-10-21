@@ -38,7 +38,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 
-/** A newer signed APK on the laptop (app.json from publish.sh). */
+/** A newer signed APK on the server (app.json from publish.sh). */
 data class Release(val version: String, val code: Int, val size: Long)
 
 /** Where an update stands; the sheet shows it. */
@@ -90,7 +90,7 @@ object Updater {
             }
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
-            state = Updating.Failed(if (e is HttpError) "The laptop has no app to give (${e.code})." else "Could not download the update.")
+            state = Updating.Failed(if (e is HttpError) "The server has no app to give (${e.code})." else "Could not download the update.")
         } finally {
             if (state !is Updating.Confirming) apk.delete()
         }

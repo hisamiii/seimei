@@ -11,7 +11,7 @@ defaults.
 | | `cwd` | `~` | its working folder |
 | | `compact_window` | 400000 | tokens at which its context compacts |
 | `[host]` | `about` | `computer` | how prompts name the machine |
-| `[sessions]` | `terminal` | `kitty -d {cwd} --title {title}` | how a session opens for the user (release, "On laptop") |
+| `[sessions]` | `terminal` | `kitty -d {cwd} --title {title}` | how a session opens for the user (release, "Open on server") |
 | `[approvals]` | `dispatcher` | `default` | permission mode, by Claude Code's names |
 | | `shikigami` | `default` | permission mode and ceiling for shikigami |
 | `[plugins]` | `enabled` | `[]` | see [plugins.md](plugins.md) |

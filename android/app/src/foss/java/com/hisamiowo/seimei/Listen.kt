@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit
 
 /**
  * The background connection, for phones without a push app: a foreground service holding one websocket to the
- * laptop, which sends it what it would push. Android requires the lasting notification that says so.
+ * server, which sends it what it would push. Android requires the lasting notification that says so.
  */
 class Listen : Service() {
     companion object {
@@ -36,7 +36,7 @@ class Listen : Service() {
         }
     }
 
-    // Pings every 30 s find a dead link (a network switch, a sleeping laptop); no read timeout between messages.
+    // Pings every 30 s find a dead link (a network switch, a sleeping server); no read timeout between messages.
     private val client = OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(0, TimeUnit.SECONDS)
         .pingInterval(30, TimeUnit.SECONDS).build()
     private val main = Handler(Looper.getMainLooper())
@@ -96,7 +96,7 @@ class Listen : Service() {
                 Push.show(this@Listen, json.keys().asSequence().associateWith { json.getString(it) })
             }
 
-            // The laptop closed it (unpaired, or a restart): close back at once, then reconnect, which tells which.
+            // The server closed it (unpaired, or a restart): close back at once, then reconnect, which tells which.
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                 webSocket.close(1000, null)
                 lost(webSocket, null)

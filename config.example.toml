@@ -10,7 +10,7 @@ cwd = "~"
 compact_window = 400000             # tokens at which its context compacts
 
 [host]
-about = "computer"                  # how the prompts name this machine, e.g. "laptop (an Arch box running niri)"
+about = "computer"                  # how the prompts name this machine, e.g. "desktop (an Arch box running niri)"
 
 [sessions]
 terminal = "kitty -d {cwd} --title {title}"   # opens a session for the user (a release, a loan); the command follows

@@ -121,10 +121,10 @@ class ChatTest {
         assertEquals("Running make · 4m", r.line)
         val asking = JSONObject().put("pid", 8).put("name", "q").put("status", "waiting").put("question", true).put("ask", "Keep 4?")
         assertEquals("ask" to "Keep 4?", fromSession(asking, seen).let { it.state to it.line })
-        // The laptop words the wait (sessions.py waiting_text); without it the row says only where it waits.
+        // The server words the wait (sessions.py waiting_text); without it the row says only where it waits.
         val prompt = JSONObject().put("pid", 9).put("name", "p").put("status", "waiting").put("waiting_text", "Waiting for your OK to run Bash")
         assertEquals("Waiting for your OK to run Bash", fromSession(prompt, seen).line)
-        assertEquals("Waiting on the laptop", fromSession(JSONObject().put("pid", 11).put("status", "waiting"), seen).line)
+        assertEquals("Waiting on the server", fromSession(JSONObject().put("pid", 11).put("status", "waiting"), seen).line)
         val idle = JSONObject().put("pid", 10).put("name", "i").put("status", "idle").put("line", "Done.").put("context", 41)
         assertEquals(41, fromSession(idle, seen).context)
         assertNull(fromSession(prompt, seen).context)

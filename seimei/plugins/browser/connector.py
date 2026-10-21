@@ -66,7 +66,7 @@ def make_browser_tools(browser: Browser, approvals: Approvals, who: str = "seime
         except (NotConnected, RuntimeError, ValueError) as e:
             return _text(str(e), error=True)
 
-    @tool("browser_tabs", "List the tabs open in Waterfox on the laptop, by window: id, title, URL, and whether "
+    @tool("browser_tabs", "List the tabs open in Waterfox on the server, by window: id, title, URL, and whether "
           "active, pinned, playing sound or asleep. Private windows are not visible.", {})
     async def tabs(args):
         async def go():
@@ -110,7 +110,7 @@ def make_browser_tools(browser: Browser, approvals: Approvals, who: str = "seime
             return _text(head + (f"[Selected: {sel}]\n" if sel and off == 0 else "") + part)
         return await guarded(go)
 
-    @tool("browser_open", "Open an http(s) link in a new Waterfox tab on the laptop. background: true keeps the "
+    @tool("browser_open", "Open an http(s) link in a new Waterfox tab on the server. background: true keeps the "
           "current tab in front.", {
               "type": "object",
               "properties": {"url": {"type": "string"}, "background": {"type": "boolean"}},

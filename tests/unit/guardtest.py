@@ -14,7 +14,7 @@ cases = [
  ("Bash", {"command": "tar czf /tmp/t.tgz ~/.local/share/TelegramDesktop/tdata"}, True),
  ("Bash", {"command": "cat ~/.local/share/seimei/auth.json"}, True),
  ("Bash", {"command": "cat ~/.claude/.credentials.json"}, True),
- ("Bash", {"command": "ssh laptop uptime"}, False),
+ ("Bash", {"command": "ssh buildhost uptime"}, False),
  ("Bash", {"command": "git push origin main"}, False),
  ("Bash", {"command": "grep -rn ssh ~/src/seimei/README.md"}, False),
  ("Read", {"file_path": "/home/tester/.ssh/config"}, True),

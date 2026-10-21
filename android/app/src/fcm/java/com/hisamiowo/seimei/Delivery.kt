@@ -31,20 +31,20 @@ object Delivery {
         }
     }
 
-    /** After each login: hands the laptop this phone's token, which then may push to it. */
+    /** After each login: hands the server this phone's token, which then may push to it. */
     suspend fun register(ctx: Context, api: Api, prefs: Prefs) {
         val token = token() ?: prefs.pushToken ?: return
         prefs.pushToken = token
         api.post("api/devices/push", JSONObject().put("token", token))
     }
 
-    /** The phone was unpaired: nothing to undo, the laptop forgot the token. */
+    /** The phone was unpaired: nothing to undo, the server forgot the token. */
     fun forget(ctx: Context, prefs: Prefs) {}
 }
 
 class Notify : FirebaseMessagingService() {
     override fun onNewToken(token: String) {
-        // Sent to the laptop at the next login; the token alone opens nothing.
+        // Sent to the server at the next login; the token alone opens nothing.
         Prefs(this).pushToken = token
     }
 

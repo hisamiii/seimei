@@ -305,7 +305,7 @@ class Desktop:
 
     def _drive(self):
         if time.time() < self.halted_until:
-            raise RuntimeError("the user pressed the stop key on the laptop; ask them before driving the desktop again")
+            raise RuntimeError("the user pressed the stop key at the desktop; ask them before driving the desktop again")
         self.driving_until = time.time() + 20
         # For the bar's "seimei is driving" indicator.
         try:
@@ -322,7 +322,7 @@ class Desktop:
     def _target(self, window_id: int) -> dict:
         """Focus the window and check it really has focus, so input never lands somewhere else."""
         if time.time() < self.halted_until:
-            raise RuntimeError("the user pressed the stop key on the laptop; ask them before driving the desktop again")
+            raise RuntimeError("the user pressed the stop key at the desktop; ask them before driving the desktop again")
         if locked():
             raise RuntimeError("the screen is locked; unlock it first")
         if not window(window_id):
@@ -353,10 +353,10 @@ class Desktop:
         if not locked():
             return "The screen is not locked."
         if time.time() < self.halted_until:
-            raise RuntimeError("the user pressed the stop key on the laptop; ask them first")
+            raise RuntimeError("the user pressed the stop key at the desktop; ask them first")
         if not self.secret or not self.secret.exists():
             raise RuntimeError("no screen password saved; the user sets one with `uv run python -m seimei "
-                               "screen-password` in a terminal on the laptop")
+                               "screen-password` in a terminal on the server")
         self._drive()
         back = self._us_layout()
         try:

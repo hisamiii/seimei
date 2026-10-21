@@ -13,7 +13,7 @@
 - **New passkeys and phones:**
   - Adding one needs a browser login from the last 10 minutes, and a phone session cannot add either.
   - Each addition sends an urgent push naming the device.
-- **Recovery:** `seimei lockdown` on the laptop ends every session, removes every passkey and unpairs every phone;
+- **Recovery:** `seimei lockdown` on the server ends every session, removes every passkey and unpairs every phone;
   `seimei passwd` ends every session too.
 
 ## What the agents can do
@@ -34,7 +34,7 @@ The dispatcher and every shikigami run as the user, with Bash, in the permission
 **The login tripwire.** `auth.json` sits in the agents' reach (same user), so an agent could write a session into it.
 seimei remembers every session, phone and passkey it made, and refuses any that appears in the file without having
 come through a login, pair or passkey route. It drops the entry and sends an urgent push. A new pairing code or
-password written on the laptop is reported rather than refused, since `seimei pair` and `seimei passwd` make them.
+password written on the server is reported rather than refused, since `seimei pair` and `seimei passwd` make them.
 It does not stop an agent that writes the file and then restarts seimei: startup trusts the file. The restart is
 the trace.
 

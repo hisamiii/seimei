@@ -33,5 +33,5 @@ $('pwform').addEventListener('submit', async (e) => {
   $('pwbtn').disabled = false;
   if (r.ok) return location.reload();
   $('pw').select();
-  say(r.data.wait ? `Too many tries. Wait ${r.data.wait} s.` : r.status === 401 ? 'Wrong password.' : 'Could not reach the laptop.');
+  say(r.data.wait ? `Too many tries. Wait ${r.data.wait} s.` : r.status === 401 ? 'Wrong password.' : 'Could not reach the server.');
 });

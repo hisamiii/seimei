@@ -1,4 +1,4 @@
-"""Noticing that the laptop slept: CLOCK_MONOTONIC stops during suspend, CLOCK_BOOTTIME does not."""
+"""Noticing that the server slept: CLOCK_MONOTONIC stops during suspend, CLOCK_BOOTTIME does not."""
 
 import asyncio
 import logging
@@ -38,8 +38,8 @@ class WakeWatch:
     async def woke(self, slept: float):
         now = time.time()
         when = f"{time.strftime('%H:%M', time.localtime(now - slept))} to {time.strftime('%H:%M', time.localtime(now))}"
-        self.events.add({"type": "system", "text": f"Laptop slept for {span(slept)} ({when})."})
-        lines = [f"The laptop was asleep for {span(slept)} ({when}). Network calls in flight then may have failed or stalled."]
+        self.events.add({"type": "system", "text": f"The server slept for {span(slept)} ({when})."})
+        lines = [f"The server was asleep for {span(slept)} ({when}). Network calls in flight then may have failed or stalled."]
         busy = [w for w in self.pool.workers.values() if w.rec["state"] in ("running", "asking")]
         if busy:
             lines.append("Shikigami that were mid-task: " + ", ".join(f"{w.name} ({w.rec['state']})" for w in busy)

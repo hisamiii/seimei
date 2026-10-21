@@ -112,7 +112,7 @@ def _env(pid) -> dict[str, str]:
 
 
 def _gpu_mem(pid, fd: str) -> int:
-    """Resident GTT + VRAM of one DRM fd: on this UMA laptop GPU memory is system RAM that RSS does not show."""
+    """Resident GTT + VRAM of one DRM fd: on this UMA machine GPU memory is system RAM that RSS does not show."""
     total = 0
     for m in re.finditer(r"^drm-resident-(gtt|vram):\s+(\d+)\s*(\w+)?", _read(f"/proc/{pid}/fdinfo/{fd}"), re.M):
         total += int(m.group(2)) * UNIT.get(m.group(3) or "B", 1)

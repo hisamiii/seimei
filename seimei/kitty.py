@@ -53,13 +53,13 @@ def reachable(pid: int) -> str | None:
         window(pid)
     except Unreachable as e:
         return str(e)
-    return None if _password() else "Remote control is not set up on the laptop."
+    return None if _password() else "Remote control is not set up on the server."
 
 
 async def _rc(w: dict, cmd: str, *args: str, data: str | None = None) -> str:
     pw = _password()
     if not pw:
-        raise Unreachable("Remote control is not set up on the laptop.")
+        raise Unreachable("Remote control is not set up on the server.")
     env = {**os.environ, "KITTY_PUBLIC_KEY": w["key"], "KITTY_RC_PASSWORD": pw}
     # Options before the positional keys, or kitty would read --match as keys and type into the active window.
     argv = ["kitten", "@", "--to", w["to"], "--password-env", "KITTY_RC_PASSWORD", cmd, "--match", f"id:{w['id']}",
@@ -123,7 +123,7 @@ def survey(text: str) -> bool:
 
 
 def draft(ansi_text: str) -> str:
-    """What the user already typed at the session's prompt on the laptop (faint placeholders aside)."""
+    """What the user already typed at the session's prompt on the server (faint placeholders aside)."""
     rows = _rows(ansi_text)
     plain = [_plain(r) for r in rows]
     at = max((i for i, r in enumerate(plain) if re.match(r"^\s*❯", r) and i and RULE.match(plain[i - 1])), default=None)
@@ -147,11 +147,11 @@ async def type_message(pid: int, text: str):
         await asyncio.sleep(0.5)
         now = await _rc(w, "get-text", "--ansi")
         if survey(now):
-            raise Unreachable("The session shows a rating prompt on the laptop; dismiss it there first.")
+            raise Unreachable("The session shows a rating prompt on the server; dismiss it there first.")
     if dialog(now):
-        raise Unreachable("The session shows a prompt on the laptop right now; answer that first.")
+        raise Unreachable("The session shows a prompt on the server right now; answer that first.")
     if draft(now):
-        raise Unreachable("There is unsent text at the session's prompt on the laptop; send or clear it there first.")
+        raise Unreachable("There is unsent text at the session's prompt on the server; send or clear it there first.")
     await _type(w, text)
 
 
@@ -242,7 +242,7 @@ def screen_sync(pid: int) -> str:
     w = window(pid)
     pw = _password()
     if not pw:
-        raise Unreachable("Remote control is not set up on the laptop.")
+        raise Unreachable("Remote control is not set up on the server.")
     env = {**os.environ, "KITTY_PUBLIC_KEY": w["key"], "KITTY_RC_PASSWORD": pw}
     try:
         r = subprocess.run(["kitten", "@", "--to", w["to"], "--password-env", "KITTY_RC_PASSWORD", "get-text",

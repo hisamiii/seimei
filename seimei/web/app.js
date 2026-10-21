@@ -1,4 +1,4 @@
-// The page: the stream from the laptop, the three tabs, and the header and navigation bar around them.
+// The page: the stream from the server, the three tabs, and the header and navigation bar around them.
 import { $, S, hooks, clock, finePointer, viewing, closeView, keep } from './util.js';
 import { render, onDelta, clearLive, addEvent, loadHistory, autosize, waitingApprovals, toBottom, showLane } from './chat.js';
 import { setWorkers, setSessions, sheetEvent, agentCounts, showAgents, pageOpen, closePage, archOpen, closeArch } from './agents.js';
@@ -163,7 +163,7 @@ const SILENT = 40000;
 const GRACE = 8000;
 let quietUntil = 0;
 
-// A phone pauses a background tab and its stream drops; that is not the laptop sleeping.
+// A phone pauses a background tab and its stream drops; that is not the server sleeping.
 // Losses while hidden or during a quiet reconnect only count once that reconnect fails.
 function lost() {
   if (S.online && !document.hidden && Date.now() > quietUntil) S.awaySince = Date.now();
@@ -201,7 +201,7 @@ function connect() {
   };
 }
 
-// The server pings every 15 s. A suspended laptop never closes the connection, so silence is the signal.
+// The server pings every 15 s. A suspended server never closes the connection, so silence is the signal.
 function watchdog() {
   if (document.hidden) return;
   if (Date.now() - lastSeen > SILENT) {
@@ -211,7 +211,7 @@ function watchdog() {
 }
 setInterval(watchdog, 5000);
 
-// Back in front: reconnect quietly, and show the away card only if the laptop does not answer.
+// Back in front: reconnect quietly, and show the away card only if the server does not answer.
 function resume() {
   if (S.online && Date.now() - lastSeen < SILENT) return;
   const since = Date.now();
@@ -231,7 +231,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) resu
 window.addEventListener('pageshow', (e) => { if (e.persisted) resume(); });
 
 async function start() {
-  // The chat as last seen draws at once; the laptop then sends only what came since (the stream replays it).
+  // The chat as last seen draws at once; the server then sends only what came since (the stream replays it).
   const copy = keep.read('chat');
   const kept = copy && Date.now() - (copy.at || 0) < KEPT_FOR ? copy.events : null;
   if (kept?.length) {
@@ -245,7 +245,7 @@ async function start() {
   if (res?.status === 401) return location.reload();
   const r = res?.ok ? await res.json() : null;
   if (r && kept?.length && (r.last < lastId || r.last - lastId > REPLAY_MAX)) {
-    // Too far behind (or another laptop's log): start from the laptop's copy.
+    // Too far behind (or another server's log): start from the server's copy.
     keep.drop('chat');
     return location.reload();
   }

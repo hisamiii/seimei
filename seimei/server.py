@@ -92,7 +92,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     hosts = {"localhost", "127.0.0.1", "::1"} | {urllib.parse.urlparse(o).hostname for o in origins}
 
     def alarm(title: str, text: str):
-        """Urgent: a phone paired, a passkey added, login data forged on the laptop."""
+        """Urgent: a phone paired, a passkey added, login data forged on the server."""
         events.add({"type": "system", "level": "error", "text": f"{title}. {text}"})
         if push:
             push.ping(title, text, level="urgent")
@@ -190,7 +190,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
             auth.register_verify(body["credential"], name)
         except Exception as e:
             return web.json_response({"ok": False, "error": str(e)[:200]}, status=400)
-        alarm("A passkey was added", f"{name or 'Unnamed'}. If it was not you, run `seimei lockdown` on the laptop.")
+        alarm("A passkey was added", f"{name or 'Unnamed'}. If it was not you, run `seimei lockdown` on the server.")
         return web.json_response({"ok": True})
 
     async def me(request):
@@ -211,7 +211,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
         except Exception as e:
             await asyncio.sleep(1)
             return web.json_response({"error": str(e)[:200]}, status=401)
-        alarm("A phone was paired", f"{auth.device(device)['name']}. If it was not you, run `seimei lockdown` on the laptop.")
+        alarm("A phone was paired", f"{auth.device(device)['name']}. If it was not you, run `seimei lockdown` on the server.")
         return web.json_response({"device": device})
 
     async def device_challenge(request):
@@ -520,7 +520,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
         if not ask or ask["tool_id"] != body.get("tool_id"):
             return web.json_response({"error": "That question was already answered."}, status=409)
         if not ask["answerable"]:
-            return web.json_response({"error": "Answer this one on the laptop."}, status=409)
+            return web.json_response({"error": "Answer this one on the server."}, status=409)
         q = ask["questions"][0]
         options = [o.get("label", "") for o in q.get("options", []) if isinstance(o, dict)]
         try:
@@ -676,8 +676,8 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
             win = await w.hand_over()
         except RuntimeError as e:
             return web.json_response({"error": str(e)}, status=409)
-        events.add({"type": "system", "text": f"shikigami {w.name} is open on the laptop."})
-        dispatcher.note(f"the user opened shikigami {w.name} ({w.id}) on the laptop: its session now runs in a terminal "
+        events.add({"type": "system", "text": f"shikigami {w.name} is open on the server."})
+        dispatcher.note(f"the user opened shikigami {w.name} ({w.id}) on the server: its session now runs in a terminal "
                         "window there, so message it only after that window is closed.")
         return web.json_response({"ok": True, "window": win and win["id"]})
 

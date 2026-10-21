@@ -15,7 +15,7 @@ function stateText(w) {
   return {
     starting: 'Starting', running: `Working since ${since}`, asking: 'Waiting for your answer', done: `Finished ${at}`,
     failed: `Failed ${at}`, stopped: `Stopped ${at}`, interrupted: `Interrupted ${at}`,
-    laptop: `Open on the laptop since ${since}`, released: `Your session since ${since}`,
+    laptop: `Open on the server since ${since}`, released: `Your session since ${since}`,
   }[w.state] || w.state;
 }
 
@@ -126,7 +126,7 @@ function fromSession(s) {
   const state = asking ? 'ask' : s.status === 'busy' ? 'work' : 'idle';
   return {
     kind: 'session', id: s.pid, name: s.name, project: s.project, context: s.context, state, since: s.since,
-    line: s.question ? (s.ask || 'Asks a question') : asking ? (s.waiting_text || 'Waiting on the laptop')
+    line: s.question ? (s.ask || 'Asks a question') : asking ? (s.waiting_text || 'Waiting on the server')
       : state === 'work' ? sessionLine(s.doing) : (s.line || 'Idle'),
     fresh: state === 'idle' && s.active > (seen[s.session_id] || 0) + 1,
     archived: !!s.archived, find: [s.name, s.project, s.line],
@@ -242,7 +242,7 @@ export async function setArchived(x, on, undo = true) {
   if (!r.ok) return snack(r.error);
   // An archived conversation is not kept in this browser.
   if (on && !(P && P.kind === x.kind && String(P.id) === String(x.id))) keep.drop(`${x.kind}-${x.id}`);
-  // The laptop's update follows; show it now.
+  // The server's update follows; show it now.
   if (x.kind === 'worker') for (const w of [...S.workers, ...(all || [])]) { if (w.id === x.id) w.archived = on; }
   else for (const s of S.sessions) { if (s.pid === x.id) s.archived = on; }
   if (P && P.kind === x.kind && P.id === x.id) {
@@ -353,7 +353,7 @@ export function renderAgents() {
   if (arch) parts.push(archRow(arch));
   if (!parts.length) {
     const empty = el('div', 'empty');
-    empty.append(el('b', null, 'Nothing running'), el('span', null, 'Your Claude sessions on the laptop and the shikigami seimei summons show up here.'));
+    empty.append(el('b', null, 'Nothing running'), el('span', null, 'Your Claude sessions on the server and the shikigami seimei summons show up here.'));
     parts.push(empty);
   }
   const top = page.scrollTop;
@@ -423,7 +423,7 @@ function head() {
   P.hand.hidden = !can;
   P.hand.textContent = P.kind === 'worker' ? 'Give to me' : 'Hand to seimei';
   P.hand.setAttribute('aria-label', P.kind === 'worker'
-    ? `Give ${x.name} to me: it goes on as my own session on the laptop` : `Hand ${x.name} to seimei as a shikigami`);
+    ? `Give ${x.name} to me: it goes on as my own session on the server` : `Hand ${x.name} to seimei as a shikigami`);
   P.banner.hidden = !P.row.archived;
   if (P.row.archived) {
     const un = el('button', 'sl', 'Unarchive');
@@ -446,12 +446,12 @@ async function handoff() {
   if (P) P.hand.disabled = false;
   if (!r.ok) return snack(r.error);
   if (kind === 'worker') {
-    snack(`${row.name} is your session now, open on the laptop.`);
+    snack(`${row.name} is your session now, open on the server.`);
     history.back();
   } else snack('Approve the card in Chat to hand it over.');
 }
 
-// The question card at the end of the timeline: options to tap when the laptop can be reached.
+// The question card at the end of the timeline: options to tap when the server can be reached.
 function question(ask) {
   const key = ask ? ask.tool_id || ask.text : null;
   if (key === P.askKey) return;
@@ -480,7 +480,7 @@ function question(ask) {
       P.qbox.append(b);
     });
     const many = (ask.questions?.length || 0) > 1;
-    P.qbox.append(el('p', 'qnote', !ask.answerable ? `Answer ${many ? 'these' : 'this one'} on the laptop: ${many ? 'several questions at once' : 'pick any'} works there only.`
+    P.qbox.append(el('p', 'qnote', !ask.answerable ? `Answer ${many ? 'these' : 'this one'} on the server: ${many ? 'several questions at once' : 'pick any'} works there only.`
       : 'Something else? Answer in your own words below.'));
   } else {
     P.qbox.append(el('p', 'qnote', 'Answer below.'));
@@ -501,7 +501,7 @@ async function answer(body, btn) {
   }
   note(null);
   poll(true);
-  // The keys may not land on the laptop: if the same question is still open after 10 s, it can be answered again (QA U10).
+  // The keys may not land on the server: if the same question is still open after 10 s, it can be answered again (QA U10).
   btn?.append(el('span', 'sent', 'Sent'));
   const key = P.askKey;
   setTimeout(() => {
@@ -517,7 +517,7 @@ async function postJSON(path, body) {
   const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).catch(() => null);
   if (r?.status === 401) toLogin();
   const j = await r?.json().catch(() => null);
-  return r?.ok ? { ...(j && typeof j === 'object' ? j : {}), ok: true } : { ok: false, error: j?.error || (r ? `The laptop said no (${r.status}).` : 'The laptop did not answer.') };
+  return r?.ok ? { ...(j && typeof j === 'object' ? j : {}), ok: true } : { ok: false, error: j?.error || (r ? `The server said no (${r.status}).` : 'The server did not answer.') };
 }
 
 function note(text, cls = 'error') {
@@ -531,8 +531,8 @@ function blocked() {
   if (P.kind === 'worker') return null;
   const s = P.row;
   if (s.reach) return s.reach;
-  if (P.ask && !P.ask.answerable) return 'Answer on the laptop.';
-  if (s.status === 'waiting' && !s.question) return `${s.waiting_text || 'Waiting on the laptop'}. Answer it there.`;
+  if (P.ask && !P.ask.answerable) return 'Answer on the server.';
+  if (s.status === 'waiting' && !s.question) return `${s.waiting_text || 'Waiting on the server'}. Answer it there.`;
   return null;
 }
 
@@ -551,7 +551,7 @@ function composerState() {
   sendState();
 }
 
-// ---------- attachments: everything uploads to the laptop at once, and the message names the files ----------
+// ---------- attachments: everything uploads to the server at once, and the message names the files ----------
 
 const MAX_FILE = 50 << 20;
 
@@ -750,7 +750,7 @@ function details() {
   fact('Subagents', r.subagents);
   fact('Context', r.context != null && `${r.context}% used`);
   fact(P.kind === 'worker' ? 'Started' : 'Last active', cap(atTime(P.kind === 'worker' ? r.created : r.active).replace(/^at /, 'today at ')));
-  // What its run took (see metrics.py): fetched when the sheet opens, since pricing it takes the laptop a moment.
+  // What its run took (see metrics.py): fetched when the sheet opens, since pricing it takes the server a moment.
   if (P.kind === 'worker') {
     const id = P.id;
     getJSON(`api/workers/${encodeURIComponent(id)}/metrics`).then((m) => {
@@ -771,7 +771,7 @@ function details() {
   }
   if (actions.childElementCount) body.push(actions);
   if (P.kind === 'worker' && r.task) body.push(taskRow(r.task));
-  if (P.kind === 'session') body.push(el('p', 'usage-note', r.reach ? r.reach : 'Messages you send here are typed into this session\'s window on the laptop.'));
+  if (P.kind === 'session') body.push(el('p', 'usage-note', r.reach ? r.reach : 'Messages you send here are typed into this session\'s window on the server.'));
   sheet.body.replaceChildren(...body);
   showSheet('details');
 }
@@ -858,7 +858,7 @@ function stopButton(w) {
 function laptopButton(w) {
   const b = el('button', 'dbtn sl');
   b.type = 'button';
-  const label = el('span', null, 'On laptop');
+  const label = el('span', null, 'Open on server');
   b.append(svg(ICON.laptop, 16), label);
   let armed = false;
   b.addEventListener('click', async () => {
@@ -866,7 +866,7 @@ function laptopButton(w) {
     // A running worker gets stopped first, so ask for a second tap.
     if (ACTIVE.has(cur.state) && !armed) {
       armed = true;
-      label.textContent = 'Stop it and open on laptop';
+      label.textContent = 'Stop it and open on server';
       return;
     }
     b.disabled = true;
@@ -876,8 +876,8 @@ function laptopButton(w) {
     if (r.ok) {
       b.hidden = true;
     } else {
-      label.textContent = 'On laptop';
-      sheet.body.append(el('p', 'snote error', `Could not open ${w.name} on the laptop: ${r.error}`));
+      label.textContent = 'Open on server';
+      sheet.body.append(el('p', 'snote error', `Could not open ${w.name} on the server: ${r.error}`));
     }
   });
   return b;
@@ -995,7 +995,7 @@ function build(kind, id, row) {
 
 export async function openPage(kind, id) {
   const reopen = P && P.kind === kind && P.id === id;
-  // The page as last seen draws at once; the laptop then sends only what came since.
+  // The page as last seen draws at once; the server then sends only what came since.
   const kept = keep.read(`${kind}-${id}`);
   const live = kind === 'worker' ? S.workers.find((x) => x.id === id) : null;
   if (kept?.events) {
@@ -1015,8 +1015,8 @@ export async function openPage(kind, id) {
     if (r) r.reset = true;
   }
   if (kept && P !== p) return;
-  if (!r) return kept ? snack('Offline: this is the last copy.') : snack('Could not reach the laptop.');
-  // Drawn anew when there was no copy, or the laptop says the copy is too old to extend.
+  if (!r) return kept ? snack('Offline: this is the last copy.') : snack('Could not reach the server.');
+  // Drawn anew when there was no copy, or the server says the copy is too old to extend.
   if (!kept || r.reset) build(kind, id, kind === 'worker' ? { ...r.worker, ...live } : { ...r.session, reach: r.reach });
   else P.row = kind === 'worker' ? { ...P.row, ...r.worker, ...live } : { ...P.row, ...r.session, reach: r.reach };
   if (kind === 'worker') add(r.events);

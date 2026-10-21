@@ -75,7 +75,7 @@ export function when(t) {
   return d.toDateString() === new Date().toDateString() ? clock(t) : d.toLocaleDateString([], { day: 'numeric', month: 'short' });
 }
 
-// A session that ended (expired, logged out elsewhere, revoked on the laptop) sends the page back to login.
+// A session that ended (expired, logged out elsewhere, revoked on the server) sends the page back to login.
 export const toLogin = () => location.reload();
 
 // ---------- conversations kept in this browser ----------

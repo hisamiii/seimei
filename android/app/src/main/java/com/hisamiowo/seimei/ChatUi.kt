@@ -395,7 +395,7 @@ fun Away(vm: Seimei) {
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceContainer).padding(16.dp),
     ) {
-        Text("The laptop is not answering", fontWeight = FontWeight.SemiBold)
+        Text("The server is not answering", fontWeight = FontWeight.SemiBold)
         Text("Since ${clock(vm.awaySince!! / 1000.0)}. It may be asleep or offline; seimei keeps trying.",
             fontSize = 14.sp, color = LocalExtra.current.text2)
     }
@@ -437,7 +437,7 @@ fun UserMsg(m: Item.Msg, vm: Seimei, onPicture: (String) -> Unit) {
     }
 }
 
-/** A sent message the laptop has not echoed yet: dimmed, or outlined with a retry when it failed. */
+/** A sent message the server has not echoed yet: dimmed, or outlined with a retry when it failed. */
 @Composable
 fun PendingMsg(p: Pending, vm: Seimei) {
     val cs = MaterialTheme.colorScheme
@@ -482,7 +482,7 @@ fun kindIcon(kind: String) = when (kind) {
     else -> Icons.doc
 }
 
-/** A laptop file: first tap saves it to Downloads, then a tap opens it. */
+/** A server file: first tap saves it to Downloads, then a tap opens it. */
 @Composable
 fun FileChip(vm: Seimei, f: FileRef, modifier: Modifier = Modifier, onUser: Boolean = false, expired: Boolean = false) {
     val cs = MaterialTheme.colorScheme
@@ -490,7 +490,7 @@ fun FileChip(vm: Seimei, f: FileRef, modifier: Modifier = Modifier, onUser: Bool
     val sub = if (onUser) cs.onPrimaryContainer.copy(alpha = .75f) else LocalExtra.current.text3
     val saving = f.id in vm.saving
     val saved = f.id in vm.savedIds
-    // A copy already in Downloads still opens after the laptop deleted its file.
+    // A copy already in Downloads still opens after the server deleted its file.
     val gone = expired && !saved
     Row(
         modifier.clip(RoundedCornerShape(16.dp))

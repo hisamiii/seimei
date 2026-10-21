@@ -37,11 +37,11 @@ class Prefs(ctx: Context) {
     var draft: String
         get() = p.getString("draft", "") ?: ""
         set(v) = p.edit().putString("draft", v).apply()
-    /** The Firebase token, kept for the next login to hand to the laptop. */
+    /** The Firebase token, kept for the next login to hand to the server. */
     var pushToken: String?
         get() = p.getString("pushToken", null)
         set(v) = p.edit().putString("pushToken", v).apply()
-    /** The push app's endpoint and keys (UnifiedPush), as JSON for the laptop; null before it gave one. */
+    /** The push app's endpoint and keys (UnifiedPush), as JSON for the server; null before it gave one. */
     var upEndpoint: String?
         get() = p.getString("upEndpoint", null)
         set(v) = p.edit().putString("upEndpoint", v).apply()
@@ -60,7 +60,7 @@ class Prefs(ctx: Context) {
     var askedNotifications: Boolean
         get() = p.getBoolean("askedNotifications", false)
         set(v) = p.edit().putBoolean("askedNotifications", v).apply()
-    /** laptop file id -> the copy saved in Downloads, so a second tap opens it. */
+    /** server file id -> the copy saved in Downloads, so a second tap opens it. */
     var saved: String
         get() = p.getString("saved", "{}") ?: "{}"
         set(v) = p.edit().putString("saved", v).apply()

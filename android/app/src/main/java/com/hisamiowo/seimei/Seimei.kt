@@ -47,7 +47,7 @@ data class Shared(val text: String, val uris: List<Uri>)
 sealed interface Attachment {
     class Photo(val data: String, val preview: ImageBitmap) : Attachment
 
-    /** Any other file: it goes up to the laptop as soon as it is picked, and the message names it by id. */
+    /** Any other file: it goes up to the server as soon as it is picked, and the message names it by id. */
     class Doc(val name: String, val preview: ImageBitmap? = null) : Attachment {
         var id by mutableStateOf<String?>(null)
         var uploading by mutableStateOf(true)
@@ -55,7 +55,7 @@ sealed interface Attachment {
     }
 }
 
-/** A message shown before the laptop echoes it back (QA U1); a failed one waits for a retry tap. */
+/** A message shown before the server echoes it back (QA U1); a failed one waits for a retry tap. */
 class Pending(val cid: String, val text: String, val sending: List<Attachment>, val reply: ReplyTo? = null) {
     var failed by mutableStateOf(false)
 }
@@ -84,7 +84,7 @@ class Page(val kind: String, val id: String) {
     internal var poll: Job? = null
     internal var save: Job? = null
 
-    /** Adds what is new in [evs], or starts over with them ([reset]: the laptop sent a fresh copy). */
+    /** Adds what is new in [evs], or starts over with them ([reset]: the server sent a fresh copy). */
     fun take(evs: List<JSONObject>, reset: Boolean) {
         val fresh = if (reset) evs else Store.fresh(raw, evs)
         if (reset) chat = Chat()
@@ -132,7 +132,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         private set
     /** Which of the two the chat tab shows: "c" (chat) or "t" (trajectory). */
     var lane by mutableStateOf("c")
-    /** The task board (tasks.py): {"tasks": [...], "projects": [...]}, the kept copy until the laptop sends it. */
+    /** The task board (tasks.py): {"tasks": [...], "projects": [...]}, the kept copy until the server sends it. */
     var board by mutableStateOf<JSONObject?>(null)
     /** Board sections opened or shut by hand (project name -> open); the rest follow their default. */
     var boardOpen by mutableStateOf(try { JSONObject(prefs.boardOpen) } catch (e: JSONException) { JSONObject() })
@@ -244,7 +244,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 unlock(activity)
             } catch (e: HttpError) {
                 DeviceKey.delete()
-                authError = if (e.code == 401) "That code is wrong or has expired. Make a new one on the laptop." else "The laptop said: ${e.message}"
+                authError = if (e.code == 401) "That code is wrong or has expired. Make a new one on the server." else "The server said: ${e.message}"
             } catch (e: IOException) {
                 DeviceKey.delete()
                 authError = "Could not reach $server."
@@ -264,7 +264,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 val nonce = try {
                     api.post("api/devices/challenge", JSONObject().put("device", device)).getString("nonce")
                 } catch (e: HttpError) {
-                    if (e.code == 401) return@launch unpaired("This phone was unpaired on the laptop. Pair it again with a new code.")
+                    if (e.code == 401) return@launch unpaired("This phone was unpaired on the server. Pair it again with a new code.")
                     throw e
                 }
                 val signer = try {
@@ -294,14 +294,14 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             } catch (e: HttpError) {
                 authError = "Login failed (${e.code})."
             } catch (e: IOException) {
-                authError = "Could not reach the laptop. Is it on?"
+                authError = "Could not reach the server. Is it on?"
             } finally {
                 authBusy = false
             }
         }
     }
 
-    /** Tells the laptop how to reach this phone (Firebase, a push app, or the background connection). */
+    /** Tells the server how to reach this phone (Firebase, a push app, or the background connection). */
     private fun registerPush() {
         viewModelScope.launch {
             try {
@@ -322,7 +322,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         forgetConversations()
     }
 
-    /** No copies of conversations stay on a phone that is not paired (or pairs with another laptop). */
+    /** No copies of conversations stay on a phone that is not paired (or pairs with another server). */
     private fun forgetConversations() {
         restored = true
         chatSave?.cancel()
@@ -392,7 +392,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         awaySince = null
         online = false
         stream = viewModelScope.launch {
-            // Quiet reconnect: only call the laptop away if it does not answer within the grace period.
+            // Quiet reconnect: only call the server away if it does not answer within the grace period.
             val grace = launch {
                 delay(GRACE)
                 if (!online && awaySince == null) awaySince = began
@@ -671,7 +671,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         presence()
     }
 
-    /** Tells the laptop which view is on screen: a finished turn notifies everywhere but on the chat. */
+    /** Tells the server which view is on screen: a finished turn notifies everywhere but on the chat. */
     private fun presence() {
         val view = if (page != null) "page" else tab
         Push.onChat = view == "chat"
@@ -787,15 +787,15 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 }
                 savePage(pg)
             } catch (e: HttpError) {
-                if (shown == null) snack = "Could not reach the laptop."
-                else if (e.code == 404) shown.note = "The laptop no longer has this; it shows the last copy."
+                if (shown == null) snack = "Could not reach the server."
+                else if (e.code == 404) shown.note = "The server no longer has this; it shows the last copy."
             } catch (e: IOException) {
-                snack = if (shown == null) "Could not reach the laptop." else "Offline: this is the last copy."
+                snack = if (shown == null) "Could not reach the server." else "Offline: this is the last copy."
             }
         }
     }
 
-    /** A shikigami's run so far, for its details: priced on the laptop when asked, not with every page load. */
+    /** A shikigami's run so far, for its details: priced on the server when asked, not with every page load. */
     fun loadMetrics(pg: Page) {
         if (pg.kind != "worker") return
         viewModelScope.launch {
@@ -857,7 +857,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
 
     private fun errorOf(e: IOException): String = (e as? HttpError)?.let {
         try { JSONObject(it.body).str("error") } catch (x: JSONException) { "" }
-    }.orEmpty().ifEmpty { if (e is HttpError) "The laptop said no (${e.code})." else "The laptop did not answer." }
+    }.orEmpty().ifEmpty { if (e is HttpError) "The server said no (${e.code})." else "The server did not answer." }
 
     /** Sends the page's draft and files: to a shikigami, as the answer to an open question, or typed into a session. */
     fun pageSend() {
@@ -902,7 +902,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Photos and files for the page: each uploads to the laptop at once, and the message names it by path. */
+    /** Photos and files for the page: each uploads to the server at once, and the message names it by path. */
     fun pageAttach(uris: List<Uri>) {
         val pg = page ?: return
         val cr = getApplication<Application>().contentResolver
@@ -955,7 +955,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     /** Hides a finished shikigami or an idle session from the list, or brings it back; nothing is stopped. */
     fun setArchived(a: Agent, on: Boolean, offerUndo: Boolean = true) {
         val path = if (a.kind == "worker") "api/workers/${a.id}/archive" else "api/sessions/${a.id}/archive"
-        // Shown at once; the laptop's listing follows.
+        // Shown at once; the server's listing follows.
         fun flag(list: List<JSONObject>, key: String) = list.map { if (it.optString(key) == a.id) it.merged(JSONObject().put("archived", on)) else it }
         if (a.kind == "worker") {
             workers = flag(workers, "id")
@@ -971,7 +971,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             try {
                 api.post(path, JSONObject().put("archived", on))
             } catch (e: IOException) {
-                snack = "Could not reach the laptop."
+                snack = "Could not reach the server."
             }
         }
     }
@@ -985,7 +985,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Opens the shikigami in a terminal on the laptop; null when it worked, else why not. */
+    /** Opens the shikigami in a terminal on the server; null when it worked, else why not. */
     /** The Change sheet (#64, #74): a new effort, model or permission mode for a shikigami; null when it took. */
     suspend fun workerTune(pg: Page, body: JSONObject): String? = try {
         pg.row = pg.row.merged(api.post("api/workers/${pg.id}/tune", body))
@@ -1015,7 +1015,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 api.post(if (worker) "api/workers/${pg.id}/release" else "api/sessions/${pg.id}/adopt")
                 if (worker) {
                     closePage()
-                    snack = "${pg.row.str("name")} is your session now, open on the laptop."
+                    snack = "${pg.row.str("name")} is your session now, open on the server."
                 } else snack = "Approve the card in Chat to hand it over."
             } catch (e: HttpError) {
                 snack = try { JSONObject(e.body).optString("error") } catch (x: JSONException) { "" }.ifEmpty { errorOf(e) }
@@ -1053,7 +1053,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         val sending = attachments
         if (text.isEmpty() && sending.isEmpty()) return
         if (!online) {
-            snack = "Not connected to the laptop yet. Your message stays here."
+            snack = "Not connected to the server yet. Your message stays here."
             return
         }
         edit("")
@@ -1192,7 +1192,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
 
     // ---------- app updates ----------
 
-    /** A newer release on the laptop, or null. */
+    /** A newer release on the server, or null. */
     var release by mutableStateOf<Release?>(null)
         private set
     var checking by mutableStateOf(false)
@@ -1226,9 +1226,9 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { Updater.install(getApplication(), api, r) }
     }
 
-    // ---------- files from the laptop ----------
+    // ---------- files from the server ----------
 
-    /** laptop file id -> its copy in Downloads. */
+    /** server file id -> its copy in Downloads. */
     private val saved = try { JSONObject(prefs.saved) } catch (e: JSONException) { JSONObject() }
     var saving by mutableStateOf(setOf<String>())
         private set
@@ -1265,7 +1265,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 uri?.let { withContext(Dispatchers.IO + NonCancellable) { cr.delete(it, null, null) } }
                 if (e !is kotlinx.coroutines.CancellationException) {
-                    chat.local(if ((e as? HttpError)?.code == 404) "${f.name} has expired on the laptop." else "Could not download ${f.name}.")
+                    chat.local(if ((e as? HttpError)?.code == 404) "${f.name} has expired on the server." else "Could not download ${f.name}.")
                     publish()
                 }
             } finally {
@@ -1322,7 +1322,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         return Attachment.Photo(Base64.getEncoder().encodeToString(bytes), bmp.asImageBitmap())
     }
 
-    /** A picture from the laptop, fetched with the login token: the chat-sized thumbnail (kept in a small cache),
+    /** A picture from the server, fetched with the login token: the chat-sized thumbnail (kept in a small cache),
      *  or the original for the full-screen view (not cached: it can be big). */
     suspend fun image(name: String, full: Boolean = false): ImageBitmap? {
         if (!full) images.get(name)?.let { return it }

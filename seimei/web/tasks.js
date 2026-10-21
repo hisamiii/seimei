@@ -140,7 +140,7 @@ async function tick(t) {
   try {
     await post(`api/tasks/${encodeURIComponent(t.id.replace(/^#/, ''))}/tick`, { done });
   } catch {
-    snack('Could not reach the laptop.');
+    snack('Could not reach the server.');
     loadTasks();
   }
 }

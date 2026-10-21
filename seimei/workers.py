@@ -349,7 +349,7 @@ class Worker:
         return create_sdk_mcp_server("shikigami", tools=[ask, board])
 
     def on_laptop(self) -> bool:
-        """The session is open on the laptop (after On laptop): its kitty window is still there, or a running
+        """The session is open on the server (after Open on server): its kitty window is still there, or a running
         Claude Code holds the session (a trust prompt delays that, hence the window check)."""
         if self.rec["state"] != "laptop":
             return False
@@ -360,14 +360,14 @@ class Worker:
                    for s in live({}))
 
     async def hand_over(self) -> dict:
-        """Lend the session to the user: open it with `claude --resume` in a kitty window on the laptop. It stays a
+        """Lend the session to the user: open it with `claude --resume` in a kitty window on the server. It stays a
         shikigami: once the window is closed, the next message resumes it here."""
         if self.rec["state"] == "released":
             raise RuntimeError("it is your session already")
         if self.on_laptop():
-            raise RuntimeError("it is already open on the laptop")
+            raise RuntimeError("it is already open on the server")
         w = await self._to_laptop(f"shikigami {self.name}", [])
-        self._set("laptop", summary="Open on the laptop.", laptop_window=w and w["id"])
+        self._set("laptop", summary="Open on the server.", laptop_window=w and w["id"])
         return w
 
     async def release(self) -> dict | None:
@@ -385,14 +385,14 @@ class Worker:
                   laptop_window=w["id"] if w else self.rec.get("laptop_window"),
                   released={"at": time.time(), "path": str(path) if path else None,
                             "offset": path.stat().st_size if path else 0})
-        self._add({"type": "system", "text": "Handed to you: it goes on as your session on the laptop."})
+        self._add({"type": "system", "text": "Handed to you: it goes on as your session on the server."})
         board = self.pool.board
         if board and (t := board.current(self.id)):
             board.update(t["id"], owner="you")
         return w
 
     async def _to_laptop(self, title: str, extra: list[str]) -> dict | None:
-        """Stop it if it works, let go of its process, and resume the session in kitty on the laptop."""
+        """Stop it if it works, let go of its process, and resume the session in kitty on the server."""
         if not self.rec.get("started"):
             raise RuntimeError("it has no session yet")
         if self.rec["state"] in ACTIVE:
@@ -420,7 +420,7 @@ class Worker:
             raise RuntimeError(f"{self.name} is the user's own session now; it becomes a shikigami again only when "
                                "adopted (the user taps Hand to seimei, or you adopt it with their OK)")
         if await asyncio.to_thread(self.on_laptop):
-            raise RuntimeError(f"{self.name} is open on the laptop; message it there, or close that window first")
+            raise RuntimeError(f"{self.name} is open on the server; message it there, or close that window first")
         async with self.lock:
             if self.idle_timer:
                 self.idle_timer.cancel()
@@ -840,14 +840,14 @@ class Pool:
         gone = r.get("released") or {}
         path = sessions.transcript({"sessionId": session_id, "cwd": r["cwd"]})
         if path:
-            # What the user and the session did on the laptop, so the page reads on without a gap.
+            # What the user and the session did on the server, so the page reads on without a gap.
             start = gone.get("offset", 0) if gone.get("path") == str(path) else 0
             try:
                 tl = await asyncio.to_thread(sessions.timeline, path, start)
             except OSError:
                 tl = {"events": []}
             if tl["events"]:
-                w._add({"type": "system", "text": f"In your session \"{origin}\" on the laptop:"})
+                w._add({"type": "system", "text": f"In your session \"{origin}\" on the server:"})
                 for ev in tl["events"]:
                     w._add({k: v for k, v in ev.items() if k not in ("id", "t")})
         r.update(session_id=session_id, model=model or r["model"], effort=effort or r.get("effort"),

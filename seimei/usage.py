@@ -149,7 +149,7 @@ class Usage:
         if now - c.scanned > 10:
             c.scan()
         hm = lambda t: time.strftime("%H:%M", time.localtime(t))
-        lines = ["", "At API prices (this laptop only, each API call counted once):"]
+        lines = ["", "At API prices (this server only, each API call counted once):"]
         five = self.data["windows"].get("five_hour") or {}
         start = five["resets_at"] - FIVE if five.get("resets_at") and five["resets_at"] > now else None
         windows = []

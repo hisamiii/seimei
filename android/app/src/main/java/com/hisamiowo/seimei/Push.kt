@@ -42,7 +42,7 @@ object Push {
         "listen" to "Shown while seimei keeps its own connection open, on phones without a push app.",
     )
 
-    /** Whether the app is on screen; the laptop holds pushes then, and this catches any that slip through. */
+    /** Whether the app is on screen; the server holds pushes then, and this catches any that slip through. */
     @Volatile
     var visible = false
 
@@ -76,15 +76,15 @@ object Push {
 
     fun cancel(ctx: Context, tag: String) = ctx.getSystemService(NotificationManager::class.java).cancel(tag, 0)
 
-    /** Turns one of the laptop's data messages into a notification: one per kind, replaced by later ones, withdrawn on
+    /** Turns one of the server's data messages into a notification: one per kind, replaced by later ones, withdrawn on
      * cancel. Every way of delivery ends here. */
     fun show(ctx: Context, d: Map<String, String>) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
-        // A kind from a newer laptop than this app knows still shows, on the Pings channel.
+        // A kind from a newer server than this app knows still shows, on the Pings channel.
         val kind = (d["kind"] ?: return).let { if (nm.getNotificationChannel(it) != null && it != "listen") it else "ping" }
         val tag = d["tag"] ?: kind
         if (d["cancel"] == "1") return nm.cancel(tag, 0)
-        // On screen the laptop holds pushes; "reply ready" still shows when the chat itself is not in front, a test always.
+        // On screen the server holds pushes; "reply ready" still shows when the chat itself is not in front, a test always.
         if (visible && d["test"] != "1" && (tag != "reply" || onChat)) return
         val open = PendingIntent.getActivity(
             ctx, tag.hashCode(),
