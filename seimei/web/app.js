@@ -12,7 +12,10 @@ let raw = [];
 const KEEP_CHAT = 300;
 // A kept chat further behind than this is fetched anew instead of replayed through the stream.
 const REPLAY_MAX = 1000;
-const saveChat = () => keep.later('chat', () => ({ events: raw.slice(-KEEP_CHAT) }));
+// An older copy is not drawn at all: a night brings about a thousand events, and drawing a copy only to reload the
+// page would flash.
+const KEPT_FOR = 4 * 3600e3;
+const saveChat = () => keep.later('chat', () => ({ events: raw.slice(-KEEP_CHAT), at: Date.now() }));
 
 // ---------- tabs ----------
 
@@ -224,7 +227,8 @@ window.addEventListener('pageshow', (e) => { if (e.persisted) resume(); });
 
 async function start() {
   // The chat as last seen draws at once; the laptop then sends only what came since (the stream replays it).
-  const kept = keep.read('chat')?.events;
+  const copy = keep.read('chat');
+  const kept = copy && Date.now() - (copy.at || 0) < KEPT_FOR ? copy.events : null;
   if (kept?.length) {
     raw = kept;
     loadHistory({ events: kept });
