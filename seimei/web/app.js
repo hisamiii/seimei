@@ -1,5 +1,5 @@
 // The page: the stream from the laptop, the three tabs, and the header and navigation bar around them.
-import { $, S, hooks, clock, finePointer, viewing, closeView } from './util.js';
+import { $, S, hooks, clock, finePointer, viewing, closeView, keep } from './util.js';
 import { render, onDelta, clearLive, addEvent, loadHistory, autosize, waitingApprovals, toBottom, showLane } from './chat.js';
 import { setWorkers, setSessions, sheetEvent, agentCounts, showAgents, pageOpen, closePage, archOpen, closeArch } from './agents.js';
 import { setUsage, renderUsage, tone } from './usage.js';
@@ -7,6 +7,12 @@ import { account } from './account.js';
 import { sheet, closeSheet } from './sheet.js';
 
 let lastId = 0;
+// The chat's events as they came (the last KEEP_CHAT), kept in this browser for the next visit.
+let raw = [];
+const KEEP_CHAT = 300;
+// A kept chat further behind than this is fetched anew instead of replayed through the stream.
+const REPLAY_MAX = 1000;
+const saveChat = () => keep.later('chat', () => ({ events: raw.slice(-KEEP_CHAT) }));
 
 // ---------- tabs ----------
 
@@ -119,6 +125,9 @@ function handle(ev) {
     if (ev.id <= lastId) return;
     lastId = ev.id;
     addEvent(ev);
+    raw.push(ev);
+    if (raw.length > 2 * KEEP_CHAT) raw = raw.slice(-KEEP_CHAT);
+    saveChat();
     // The chat dot is for the conversation; the trajectory keeps its own count.
     if (S.tab !== 'chat' && ev.lane !== 't' && /^(assistant|approval|worker|image)$/.test(ev.type)) S.unread = true;
     render();
@@ -214,17 +223,35 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) resu
 window.addEventListener('pageshow', (e) => { if (e.persisted) resume(); });
 
 async function start() {
-  const res = await fetch('api/history?limit=200').catch(() => null);
+  // The chat as last seen draws at once; the laptop then sends only what came since (the stream replays it).
+  const kept = keep.read('chat')?.events;
+  if (kept?.length) {
+    raw = kept;
+    loadHistory({ events: kept });
+    lastId = kept.at(-1).id;
+    show(location.hash.slice(1) || 'chat');
+    render();
+  }
+  const res = await fetch(kept?.length ? 'api/history?limit=0' : 'api/history?limit=200').catch(() => null);
   if (res?.status === 401) return location.reload();
   const r = res?.ok ? await res.json() : null;
+  if (r && kept?.length && (r.last < lastId || r.last - lastId > REPLAY_MAX)) {
+    // Too far behind (or another laptop's log): start from the laptop's copy.
+    keep.drop('chat');
+    return location.reload();
+  }
   if (r) {
-    loadHistory(r);
-    lastId = r.last;
+    if (!kept?.length) {
+      loadHistory(r);
+      lastId = r.last;
+      raw = r.events;
+      saveChat();
+    }
     S.session = r.state;
     setWorkers({ list: r.workers, total: r.workers.length });
   }
   autosize();
-  show(location.hash.slice(1) || 'chat');
+  if (!kept?.length) show(location.hash.slice(1) || 'chat');
   render();
   connect();
   account();

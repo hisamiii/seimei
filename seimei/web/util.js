@@ -78,6 +78,44 @@ export function when(t) {
 // A session that ended (expired, logged out elsewhere, revoked on the laptop) sends the page back to login.
 export const toLogin = () => location.reload();
 
+// ---------- conversations kept in this browser ----------
+// The chat and the agent pages last seen, so the next visit draws them at once and fetches only what is new. The
+// login page clears them (logging out, or a session that ended, leads there).
+const KEEP = 'seimei.keep.';
+const PAGES = 20;
+const saves = {};
+export const keep = {
+  read(key) {
+    try { return JSON.parse(localStorage.getItem(KEEP + key)); } catch { return null; }
+  },
+  // Written a moment after the last change; a full storage drops the oldest pages first.
+  later(key, data) {
+    clearTimeout(saves[key]);
+    saves[key] = setTimeout(() => keep.write(key, data()), 1200);
+  },
+  write(key, data) {
+    const index = keep.read('index') || {};
+    index[key] = Date.now();
+    const pages = Object.keys(index).filter((k) => k !== 'chat').sort((a, b) => index[b] - index[a]);
+    for (const k of pages.slice(PAGES)) keep.drop(k, index);
+    for (;;) {
+      try {
+        localStorage.setItem(KEEP + key, JSON.stringify(data));
+        localStorage.setItem(KEEP + 'index', JSON.stringify(index));
+        return;
+      } catch {
+        const old = Object.keys(index).filter((k) => k !== key && k !== 'chat').sort((a, b) => index[a] - index[b])[0];
+        if (!old) return;
+        keep.drop(old, index);
+      }
+    }
+  },
+  drop(key, index = null) {
+    try { localStorage.removeItem(KEEP + key); } catch {}
+    if (index) delete index[key];
+  },
+};
+
 export async function post(path, body) {
   const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (r.status === 401) toLogin();

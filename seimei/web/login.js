@@ -1,6 +1,11 @@
 import { api, login, supported } from './passkey.js';
 
 const $ = (id) => document.getElementById(id);
+
+// Logged out: no conversations stay in this browser (util.js keeps them while logged in).
+try {
+  for (const k of Object.keys(localStorage)) if (k.startsWith('seimei.keep.')) localStorage.removeItem(k);
+} catch {}
 const err = $('err');
 const say = (text) => { err.textContent = text; };
 

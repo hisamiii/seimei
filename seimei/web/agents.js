@@ -1,5 +1,5 @@
 // Shikigami and the user's own Claude sessions: the Agents list, and the full-screen page of one of them.
-import { $, S, hooks, el, svg, clock, at as atTime, home, short, when, getJSON, snack, finePointer, toLogin, ICON } from './util.js';
+import { $, S, hooks, el, svg, clock, at as atTime, home, short, when, getJSON, snack, finePointer, toLogin, ICON, keep } from './util.js';
 import { Renderer, doing as doingPhrase, elapsed } from './chat.js';
 import { sheet, showSheet, closeSheet } from './sheet.js';
 import { metricFacts } from './usage.js';
@@ -240,6 +240,8 @@ export async function setArchived(x, on, undo = true) {
   const path = x.kind === 'worker' ? `api/workers/${encodeURIComponent(x.id)}/archive` : `api/sessions/${x.id}/archive`;
   const r = await postJSON(path, { archived: on });
   if (!r.ok) return snack(r.error);
+  // An archived conversation is not kept in this browser.
+  if (on && !(P && P.kind === x.kind && String(P.id) === String(x.id))) keep.drop(`${x.kind}-${x.id}`);
   // The laptop's update follows; show it now.
   if (x.kind === 'worker') for (const w of [...S.workers, ...(all || [])]) { if (w.id === x.id) w.archived = on; }
   else for (const s of S.sessions) { if (s.pid === x.id) s.archived = on; }
@@ -637,9 +639,21 @@ function stick(force = false) {
   if (P && (force || P.pinned)) P.main.scrollTop = P.main.scrollHeight;
 }
 
+// Draws what is new (an event with an id already drawn is skipped) and keeps the page's last KEEP_PAGE events.
+const KEEP_PAGE = 400;
 function add(events) {
-  for (const ev of events) P.renderer.add(ev);
-  if (events.length) P.empty?.remove();
+  const fresh = events.filter((ev) => ev.id == null || !P.ids.has(String(ev.id)));
+  for (const ev of fresh) {
+    if (ev.id != null) P.ids.add(String(ev.id));
+    if (typeof ev.id === 'number') P.last = Math.max(P.last, ev.id);
+    P.renderer.add(ev);
+  }
+  if (fresh.length) {
+    P.empty?.remove();
+    P.raw = P.raw.concat(fresh).slice(-KEEP_PAGE);
+    const p = P;
+    keep.later(`${p.kind}-${p.id}`, () => ({ events: p.raw, last: p.last, next: p.next, row: p.row }));
+  }
 }
 
 let pollTimer = 0;
@@ -651,8 +665,9 @@ async function poll(soon = false) {
   const r = await getJSON(`api/sessions/${p.id}${p.next != null ? `?from=${p.next}` : ''}`);
   if (P !== p) return;
   if (r) {
-    if (p.next != null && r.next < p.next) {
-      // The transcript was replaced (compacted or continued): draw it again.
+    if ((p.next != null && r.next < p.next) || r.reset) {
+      // The transcript was replaced (compacted or continued), or ran far ahead: draw it again.
+      keep.drop(`session-${p.id}`);
       return openPage('session', p.id);
     }
     p.next = r.next;
@@ -843,7 +858,7 @@ function build(kind, id, row) {
   sp.replaceChildren(bar, banner, main, foot);
 
   P = { kind, id, row, title, sub, ring: r, banner, main, thread, empty, qbox, note: noteEl, tray: trayEl, input, attach, send, stop,
-    files: [], next: null, ask: null, askKey: undefined, pinned: true, renderer: new Renderer(thread) };
+    files: [], next: null, ask: null, askKey: undefined, pinned: true, renderer: new Renderer(thread), ids: new Set(), raw: [], last: 0 };
 
   main.addEventListener('scroll', () => { if (P) P.pinned = nearBottom(); }, { passive: true });
   new ResizeObserver(() => stick()).observe(thread);
@@ -868,23 +883,50 @@ function build(kind, id, row) {
 }
 
 export async function openPage(kind, id) {
-  const r = kind === 'worker' ? await getJSON(`api/workers/${encodeURIComponent(id)}`) : await getJSON(`api/sessions/${id}`);
-  if (!r) return snack('Could not reach the laptop.');
   const reopen = P && P.kind === kind && P.id === id;
-  if (kind === 'worker') {
-    const live = S.workers.find((x) => x.id === id);
-    build(kind, id, { ...r.worker, ...live });
-    add(r.events);
-  } else {
-    build(kind, id, { ...r.session, reach: r.reach });
+  // The page as last seen draws at once; the laptop then sends only what came since.
+  const kept = keep.read(`${kind}-${id}`);
+  const live = kind === 'worker' ? S.workers.find((x) => x.id === id) : null;
+  if (kept?.events) {
+    build(kind, id, { ...kept.row, ...live });
+    P.next = kept.next ?? null;
+    add(kept.events);
+    shown(reopen);
+  }
+  const p = P;
+  const path = kind === 'worker'
+    ? `api/workers/${encodeURIComponent(id)}${kept ? `?after=${kept.last || 0}` : ''}`
+    : `api/sessions/${id}${kept?.next != null ? `?from=${kept.next}` : ''}`;
+  let r = await getJSON(path);
+  // A pid the system gave to another session since: that one is new here.
+  if (r && kind === 'session' && kept?.next != null && kept.row?.session_id && r.session.session_id !== kept.row.session_id) {
+    r = await getJSON(`api/sessions/${id}`);
+    if (r) r.reset = true;
+  }
+  if (kept && P !== p) return;
+  if (!r) return kept ? snack('Offline: this is the last copy.') : snack('Could not reach the laptop.');
+  // Drawn anew when there was no copy, or the laptop says the copy is too old to extend.
+  if (!kept || r.reset) build(kind, id, kind === 'worker' ? { ...r.worker, ...live } : { ...r.session, reach: r.reach });
+  else P.row = kind === 'worker' ? { ...P.row, ...r.worker, ...live } : { ...P.row, ...r.session, reach: r.reach };
+  if (kind === 'worker') add(r.events);
+  else {
     P.next = r.next;
     add(r.events);
     P.renderer.live(r.doing && { ...r.doing, output: r.live?.output });
     question(r.ask);
     if (r.session.session_id) markSeen(r.session);
     changed();
+    clearTimeout(pollTimer);
     pollTimer = setTimeout(poll, 2000);
   }
+  if (!kept || r.reset) shown(reopen);
+  else {
+    head();
+    stick();
+  }
+}
+
+function shown(reopen) {
   head();
   sp.hidden = false;
   document.body.classList.add('spage-open');
