@@ -11,6 +11,7 @@ import logging
 import os
 import re
 import signal
+import subprocess
 import time
 from pathlib import Path
 
@@ -20,6 +21,9 @@ log = logging.getLogger("seimei.adopt")
 SHELLS = {"bash", "zsh", "fish", "sh", "dash"}
 # Claude Code runs each Bash call inside a shell that sources its snapshot; the call's own command sits below it.
 WRAPPER = re.compile(r"^\S*\b(ba|z|fi|da)?sh -c .*shell-snapshots/")
+# What a Claude Code session started from seimei must not inherit from it.
+CLEAN_ENV = ("CLAUDE_CODE_CHILD_SESSION", "CLAUDECODE", "CLAUDE_PID", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_MESSAGING_SOCKET",
+             "CLAUDE_CODE_BRIDGE_SESSION_ID", "CLAUDE_JOB_DIR", "CLAUDE_CODE_SESSION_ATTENDED", "LD_PRELOAD")
 WAIT_IDLE = 12 * 3600
 SETTLE = 60
 # Claude Code's status "shell": its turn is over but a background shell still runs. Claude Code shows that as working,
@@ -85,6 +89,21 @@ async def end_left(kids: dict[int, str]):
             await asyncio.sleep(0.5)
 
 
+def background(s: dict) -> bool:
+    """A background session of Claude Code's daemon: `claude stop <its job id>` ends it and keeps its conversation."""
+    return bool(s.get("job"))
+
+
+def stop_job(job_id: str) -> str:
+    """`claude stop`: the daemon ends the session cleanly. Returns "" or what went wrong."""
+    env = {k: v for k, v in os.environ.items() if k not in CLEAN_ENV}
+    try:
+        p = subprocess.run(["claude", "stop", job_id], capture_output=True, text=True, timeout=60, env=env, cwd="/")
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return str(e)
+    return "" if p.returncode == 0 else (p.stderr or p.stdout).strip()[:300] or f"exit {p.returncode}"
+
+
 def descendants(pid: int) -> dict[int, str]:
     """Every process below pid, with its command line."""
     out, todo = {}, [pid]
@@ -112,7 +131,8 @@ def alive(pid: int) -> bool:
 def find(rows: list[dict], key: str) -> dict | None:
     key = key.strip()
     return (next((s for s in rows if s["name"] == key), None) or next((s for s in rows if s["name"].lower() == key.lower()), None)
-            or next((s for s in rows if str(s["pid"]) == key), None))
+            or next((s for s in rows if str(s["pid"]) == key), None)
+            or next((s for s in rows if s.get("job") and s["job"] == key), None))
 
 
 def default_context(tokens: int) -> str:
@@ -165,20 +185,22 @@ class Adopter:
             s = hit and next((r for r in rows if r["pid"] == hit["pid"]), None)
         if not s:
             return f"No session of the user's is named {key!r}."
-        if s["kind"] != "interactive":
-            return f"{s['name']} is a {s['kind']} session; only interactive ones can be adopted."
+        if s["kind"] != "interactive" and not background(s):
+            return f"{s['name']} is a {s['kind']} session; only interactive and background ones can be adopted."
         pending = s["pid"] in self.waiting
         if pending and when != "now":
             return f"{s['name']} is already waiting to be adopted at its next idle; when=now adopts it now instead."
         bg = await asyncio.to_thread(jobs, s["pid"])
         moment = "now, interrupting it if it works" if when == "now" else "when it next goes idle"
+        ends = (f"its background job ({s['job']}) is stopped with claude stop, which keeps the conversation,"
+                if background(s) else f"its Claude Code (pid {s['pid']}) ends")
         outcome = await self.approvals.hold({
             "action": "command", "target": f"adopt your session \"{s['name']}\" as a shikigami" + (" now" if pending else ""),
-            "detail": f"{moment.capitalize()}: its Claude Code (pid {s['pid']}) ends and the conversation goes on in the "
+            "detail": f"{moment.capitalize()}: {ends} and the conversation goes on in the "
                       f"background as a shikigami. "
                       + (f"Background jobs that end with it: {'; '.join(j[:120] for j in bg[:5])}. " if bg
                          else "Background processes it started end with it. ")
-                      + f"The window is {'closed' if close_window else 'kept'}."}, "seimei", None)
+                      + ("" if background(s) else f"The window is {'closed' if close_window else 'kept'}.")}, "seimei", None)
         if outcome != "approved":
             return f"The user {outcome} it; nothing changed" + (" (it still waits for its idle)." if pending else ".")
         args = dict(name=name, model=model, effort=effort, context=context, close_window=close_window)
@@ -188,7 +210,7 @@ class Adopter:
         if when == "now" or self._idle(s):
             return await self.adopt(s, interrupt=when == "now", **args)
         until = time.time() + WAIT_IDLE
-        s = {k: v for k, v in s.items() if k != "rec"} | {"proc_start": s.get("rec", {}).get("procStart")}
+        s = {k: v for k, v in s.items() if k not in ("rec", "ask_detail", "doing")}
         self._save(self._pending() | {s["pid"]: {"s": s, "args": args, "until": until}})
         self.waiting[s["pid"]] = asyncio.get_running_loop().create_task(self._at_idle(s, args, until))
         return f"Approved. {s['name']} is busy; it gets adopted when it next goes idle, and you hear when it does."
@@ -241,14 +263,18 @@ class Adopter:
     async def adopt(self, s: dict, interrupt: bool, name: str = "", model: str = "", effort: str = "", context: str = "",
                     close_window: bool = False) -> str:
         pid = s["pid"]
+        bg = background(s)
         try:
-            win = kitty.window(pid)
+            win = None if bg else kitty.window(pid)
         except kitty.Unreachable:
             win = None
-        shell = _ppid(pid)
+        shell = 0 if bg else _ppid(pid)
         shell = shell if _comm(shell) in SHELLS else 0
         interrupted = False
-        if interrupt and not self._idle(s):
+        if bg:
+            # No window to press Esc in: `claude stop` ends a turn in flight too.
+            interrupted = interrupt and not self._idle(s)
+        elif interrupt and not self._idle(s):
             # Esc stops the turn (or closes an open prompt) like the user at the keyboard; without the window, SIGINT.
             if win and kitty.reachable(pid) is None:
                 await kitty._rc(win, "send-key", "escape")
@@ -266,20 +292,30 @@ class Adopter:
         except OSError:
             b = {}
         kids = descendants(pid)
-        os.kill(pid, signal.SIGTERM)
-        for _ in range(30):
-            if not alive(pid):
-                break
-            await asyncio.sleep(0.5)
+        if bg:
+            if err := await asyncio.to_thread(stop_job, s["job"]):
+                raise RuntimeError(f"claude stop {s['job']} failed: {err}")
+            for _ in range(60):
+                if not alive(pid):
+                    break
+                await asyncio.sleep(0.5)
+            else:
+                raise RuntimeError(f"claude stop {s['job']} returned but pid {pid} still runs; nothing adopted")
         else:
-            os.kill(pid, signal.SIGKILL)
-            await asyncio.sleep(1)
+            os.kill(pid, signal.SIGTERM)
+            for _ in range(30):
+                if not alive(pid):
+                    break
+                await asyncio.sleep(0.5)
+            else:
+                os.kill(pid, signal.SIGKILL)
+                await asyncio.sleep(1)
         # What the old process left running (a language server, a job that outlived it) ends too, as the card said.
         await end_left(kids)
         # A background job shows once: its wrapper gives the command, the processes below it repeat it.
         died = list(dict.fromkeys(job(c) for p, c in kids.items() if not alive(p) and c and not LSP.search(c)
                                   and (not WRAPPER.match(c) or job(c) != c)))
-        window = "kept"
+        window = "none (a background session)" if bg else "kept"
         if close_window and shell and win:
             # The shell the session ran in is at its prompt now: exit closes the window.
             try:
@@ -293,7 +329,8 @@ class Adopter:
         elif close_window:
             window = "closed with the session" if not shell else "kept (not reachable)"
         tokens = b.get("tokens") or 0
-        first = (f"seimei adopted you: you were the user's own session \"{s['name']}\" in a terminal on the laptop, and "
+        where = "in the background under Claude Code's daemon" if bg else "in a terminal on the laptop"
+        first = (f"seimei adopted you: you were the user's own session \"{s['name']}\" {where}, and "
                  f"now you go on in the background as a shikigami. "
                  + ("You were interrupted mid-turn: check what was in flight before you go on. " if interrupted else "")
                  + ("Background processes that ended with the old session: " + "; ".join(d[:150] for d in died[:10]) + ". "
@@ -311,13 +348,13 @@ class Adopter:
 def make_adopt_tools(adopter: Adopter) -> list:
     from claude_agent_sdk import tool
 
-    @tool("adopt", "Adopt one of the user's interactive sessions as a shikigami: its Claude Code ends and the same "
-          "conversation goes on in the background, reporting like any shikigami. when: idle (default, at its next "
-          "idle) or now (interrupts it with Esc first). Optional name (default: the session's), model, effort and "
+    @tool("adopt", "Adopt one of the user's interactive or background sessions as a shikigami: its Claude Code ends "
+          "(a background one through claude stop) and the same conversation goes on as a shikigami, reporting like any "
+          "other. when: idle (default, at its next idle) or now (interrupts it first). Optional name (default: the session's), model, effort and "
           "context (default: the session's model and effort, the smallest of 256k/400k/1m above what it holds). "
           "close_window closes its terminal afterwards. The user approves first; you hear what ended with it.", {
               "type": "object",
-              "properties": {"session": {"type": "string", "description": "the session's name or pid"},
+              "properties": {"session": {"type": "string", "description": "the session's name, pid, or background job id"},
                              "when": {"type": "string", "enum": ["idle", "now"], "default": "idle"},
                              "name": {"type": "string"}, "model": {"type": "string"},
                              "effort": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max"]},

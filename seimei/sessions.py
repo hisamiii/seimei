@@ -411,6 +411,8 @@ def listing(own: dict[str, str]) -> list[dict]:
                     "line": b.get("line", ""), "context": b.get("context"), "doing": b.get("doing"),
                     "model": (b.get("model") or "").removeprefix("claude-") or None, "effort": b.get("effort"),
                     "ask_detail": ask,
+                    # A background session's daemon job (claude stop/attach take it), and the process start (pid reuse).
+                    "job": rec.get("jobId") if rec.get("kind") == "bg" else None, "proc_start": rec.get("procStart"),
                     "reach": kitty.reachable(s["pid"])})
     return out
 
