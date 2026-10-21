@@ -441,6 +441,8 @@ function foldLabel(ev) {
   if (ev.type === 'worker') return `${ev.name} ${ENDED[ev.event] || ev.event}`;
   if (ev.type === 'system') return ev.text.replace(/\.$/, '');
   if (ev.type === 'rate_limit') return limitText(ev);
+  // A reply of the user's turn that seimei marked trajectory:.
+  if (ev.type === 'assistant' && ev.re) return 'a reply to you';
   return '';
 }
 

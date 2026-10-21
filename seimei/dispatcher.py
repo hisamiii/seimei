@@ -31,8 +31,9 @@ log = logging.getLogger("seimei")
 # Built-in tools the dispatcher has no use for. It keeps SendMessage/ListAgents, Monitor, ToolSearch and auto-memory.
 # style.md is appended to every message the dispatcher gets, for the model only; past this it is cut.
 STYLE_MAX = 500
-# A reply in an event turn that starts with this goes to the chat, not the trajectory.
-CHAT = "chat:"
+# A reply that starts with one of these goes to that lane, whatever started the turn: chat: moves the rest of an
+# event turn to the chat, trajectory: moves that one reply of the user's turn to the trajectory.
+MARKERS = ("chat:", "trajectory:")
 OFF_TOOLS = ["Agent", "Task", "Workflow", "NotebookEdit", "CronCreate", "CronDelete", "CronList", "RemoteTrigger",
              "PushNotification", "DesignSync", "EnterWorktree", "ExitWorktree", "ScheduleWakeup", "LSP"]
 
@@ -45,7 +46,7 @@ They talk to you through a web page, usually from their phone.
 - Replies are read on a phone: lead with the answer, keep it short, avoid wide tables.
 - Phone notifications are yours to decide: only approval cards push on their own. Use notify (level, collapse key, reply=true when they asked something and left the app), presence to see where they are, and watch rules to ping them when a shikigami or session finishes or asks, or the GPU queue frees.
 - Messages starting with [seimei] are events from the server, not typed by the user.
-- What you write in a turn a [seimei] line started shows in the user's Trajectory tab, not the chat; they see a one-line mention and a badge. A show_image or send_file in such a turn moves the rest of it to the chat. So does starting a reply with "chat:" (it is removed): use it when the user needs to see it (a question or decision for them, a result they asked for). Routine event handling stays unmarked. Ping with notify when it is urgent.
+- What you write in a turn a [seimei] line started shows in the user's Trajectory tab, not the chat; they see a one-line mention and a badge. A show_image or send_file in such a turn moves the rest of it to the chat. So does starting a reply with "chat:" (it is removed): use it when the user needs to see it (a question or decision for them, a result they asked for). Routine event handling stays unmarked. The mirror: in a turn the user started, a reply starting with "trajectory:" goes to the Trajectory instead (the chat gets a one-line mention). Unmarked, user turns go to the chat. Ping with notify when it is urgent.
 
 ## Shikigami
 Delegate real work (coding, research, anything longer than a few tool calls) to shikigami: worker sessions you start with mcp__seimei__summon.
@@ -95,6 +96,10 @@ Read what the request needs; don't page through history. There is no access to t
 """
 
 
+def marked(text: str) -> str | None:
+    return next((m for m in MARKERS if text.startswith(m)), None)
+
+
 def why(text: str) -> str:
     """The trajectory's label for a turn events started: "shikigami app-tester (ab12) finished: ..." lines become
     "app-tester finished"."""
@@ -123,7 +128,8 @@ class Dispatcher:
         self.busy = False
         self.stopping = False
         self.pending: list[str] = []
-        self.head: str | None = None  # the start of a streaming reply, held until it shows whether it says chat:
+        self.head: str | None = None  # the start of a streaming reply, held until it shows whether it is marked
+        self.block_lane: str | None = None  # "t" while a reply marked trajectory: streams
         # What was sent since the last model step: ("user", event id) or ("event", why); see _step.
         self.inputs: list[tuple[str, object]] = []
         self.write_lock = asyncio.Lock()
@@ -301,21 +307,25 @@ class Dispatcher:
                 self._set(busy=True)
                 self._step()
             elif kind == "content_block_start" and ev["content_block"].get("type") == "text":
-                self.head = ""
+                self.head, self.block_lane = "", None
             elif kind == "content_block_delta" and ev["delta"].get("type") == "text_delta":
                 text = ev["delta"]["text"]
                 if self.head is not None:
-                    # Hold the start of a reply until it shows whether it is marked chat:.
+                    # Hold the start of a reply until it shows whether it is marked.
                     self.head += text
                     lead = self.head.lstrip()
-                    if len(lead) < len(CHAT) and CHAT.startswith(lead):
+                    if any(len(lead) < len(m) and m.startswith(lead) for m in MARKERS):
                         return
                     text, self.head = self.head, None
-                    if lead.startswith(CHAT):
-                        self.events.to_chat()
-                        text = lead[len(CHAT):].lstrip()
+                    if m := marked(lead):
+                        text = lead[len(m):].lstrip()
+                        if m == "chat:":
+                            self.events.to_chat()
+                        elif self.events.turn.get("lane") != "t":
+                            self.block_lane = "t"
                 if text:
-                    self.events.flash({"type": "delta", "text": text, "lane": self.events.turn.get("lane", "c")})
+                    lane = self.block_lane or self.events.turn.get("lane", "c")
+                    self.events.flash({"type": "delta", "text": text, "lane": lane})
             elif kind == "content_block_start" and ev["content_block"].get("type") == "thinking":
                 self.events.flash({"type": "thinking"})
         elif isinstance(msg, AssistantMessage):
@@ -323,11 +333,16 @@ class Dispatcher:
                 return
             for b in msg.content:
                 if isinstance(b, TextBlock) and (text := b.text.strip()):
-                    if text.startswith(CHAT):
-                        self.events.to_chat()
-                        text = text[len(CHAT):].strip()
+                    where = {}
+                    if m := marked(text):
+                        text = text[len(m):].strip()
+                        if m == "chat:":
+                            self.events.to_chat()
+                        else:
+                            where = self._to_trajectory()
+                    self.block_lane = None
                     if text:
-                        self.events.add({"type": "assistant", "text": text})
+                        self.events.add({"type": "assistant", "text": text, **where})
                 elif isinstance(b, ToolUseBlock):
                     self.events.add({"type": "tool", "tool_id": b.id, "name": b.name, "summary": summarize(b.input)})
         elif isinstance(msg, UserMessage):
@@ -365,6 +380,14 @@ class Dispatcher:
             self.events.turn = {"lane": "c", "re": users[-1]}
         elif not self.events.turn:
             self.events.turn = {"lane": "t", "turn": self.events.last_id + 1, "why": took[0][1] if took else ""}
+
+    def _to_trajectory(self) -> dict:
+        """Where a reply marked trajectory: goes in the user's turn: its own trajectory turn, answering their message
+        (the clients quote it). In an event turn it is there already."""
+        turn = self.events.turn
+        if turn.get("lane") == "t":
+            return {}
+        return {"lane": "t", "turn": self.events.last_id + 1, "why": "your message", **({"re": turn["re"]} if turn.get("re") else {})}
 
     def rate_limit(self, msg: RateLimitEvent):
         """Limits are shared by the dispatcher and every worker: one account."""

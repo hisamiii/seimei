@@ -157,6 +157,8 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
             "worker" -> "${ev.str("name")} ${ENDED[ev.str("event")] ?: ev.str("event")}"
             "system" -> ev.str("text").removeSuffix(".")
             "rate_limit" -> limitText(ev)
+            // A reply of the user's turn that seimei marked trajectory:.
+            "assistant" -> if (ev.optLong("re") > 0) "a reply to you" else ""
             else -> ""
         }
         val list = if (type == "worker") reports else notesSeen
@@ -194,7 +196,7 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
             from = fromId
             activity = -1
             val why = ev.str("why")
-            put(Item.Trig("f$key", if (why.isEmpty()) "on its own" else "after $why"))
+            put(Item.Trig("from$key", if (why.isEmpty()) "on its own" else "after $why"))
         } else if (lane == "c" && fromId == 0L) from = 0
         // The summoned card already says it.
         if (type == "tool" && ev.str("name") == "mcp__seimei__summon") return
