@@ -22,6 +22,7 @@ use crate::transcripts::{project_of, transcript};
 use crate::uploads::Uploads;
 use crate::usage::Usage;
 use crate::util::{chars, now, py_repr, truthy};
+use crate::watches::{DEFAULT_HOURS, NewRule, TRIGGERS, Watches, mins};
 use crate::workers::{ACTIVE, CONTEXTS, EFFORTS, MODELS, Pool, Summon, Worker};
 
 static SERVER: LazyLock<Value> =
@@ -50,6 +51,7 @@ pub struct Tools {
     pub pool: Arc<Pool>,
     pub worker_events: Arc<WorkerEvents>,
     pub adopter: Arc<Adopter>,
+    pub watches: Arc<Watches>,
 }
 
 pub fn text(t: &str, error: bool) -> Value {
@@ -486,11 +488,69 @@ impl Tools {
                 text(&lines.join("\n"), false)
             }
             "alias" => self.alias(a),
+            "watch" => self.watch(a),
             "session_peek" => self.session_peek(a),
             _ if SERVER["tools"].as_array().into_iter().flatten().any(|t| t["name"] == name) => {
                 text(&format!("{name} is not in the Rust server yet."), true)
             }
             _ => text(&format!("Tool '{name}' not found"), true),
+        }
+    }
+
+    /// Watch rules: add, list, remove.
+    fn watch(&self, a: &Value) -> Value {
+        match a["action"].as_str() {
+            Some("list") => text(&self.watches.listing(), false),
+            Some("remove") => {
+                let id = arg(a, "id");
+                let said = if self.watches.remove(&id) { format!("Removed {id}.") } else { "No such rule.".into() };
+                text(&said, false)
+            }
+            Some("add") => {
+                let or =
+                    |k: &str, d: &str| Some(arg(a, k)).filter(|v| truthy(&a[k]) && !v.is_empty()).unwrap_or(d.into());
+                let hours = match &a["hours"] {
+                    Value::Number(n) => n.as_f64().unwrap_or(0.0),
+                    Value::String(h) if !h.trim().is_empty() => match h.trim().parse::<f64>() {
+                        Ok(h) => h,
+                        Err(_) => {
+                            let e = format!("could not convert string to float: {}", py_repr(h));
+                            return text(&format!("Could not add: {e}"), true);
+                        }
+                    },
+                    _ => DEFAULT_HOURS,
+                };
+                let rule = NewRule {
+                    trigger: arg(a, "trigger"),
+                    target: or("target", "*"),
+                    title: or("title", ""),
+                    body: or("body", ""),
+                    level: or("level", "normal"),
+                    key: if truthy(&a["key"]) { a["key"].clone() } else { Value::Null },
+                    reply: truthy(&a["reply"]),
+                    hours,
+                    repeat: truthy(&a["repeat"]),
+                };
+                // An unknown trigger is the first thing to hear about, then a missing title.
+                if rule.title.is_empty() && TRIGGERS.iter().any(|(t, _)| *t == rule.trigger) {
+                    return text("A rule needs a title for its ping.", true);
+                }
+                let r = match self.watches.add(rule) {
+                    Ok(r) => r,
+                    Err(e) => return text(&format!("Could not add: {e}"), true),
+                };
+                let id = r["id"].as_str().unwrap_or("");
+                text(
+                    &format!(
+                        "Added {id}: {} {}, expires in {}.",
+                        r["trigger"].as_str().unwrap_or(""),
+                        r["target"].as_str().unwrap_or(""),
+                        mins(r["expires"].as_f64().unwrap_or(0.0) - now())
+                    ),
+                    false,
+                )
+            }
+            _ => text("action is add, list or remove.", true),
         }
     }
 

@@ -255,6 +255,9 @@ fn main() {
         tokio::spawn(app.dispatcher.clone().run());
         tokio::spawn(app.pool.clone().sweep());
         tokio::spawn(app.watcher.clone().run());
+        tokio::spawn(app.watches.clone().run(events.clone()));
+        let wake = seimei_core::wake::WakeWatch::new(events.clone(), app.pool.clone());
+        tokio::spawn(wake.run(std::time::Duration::from_secs(10)));
         // `systemctl --user kill -s USR1 seimei` from a key binding: end the turn.
         let (ev, d) = (events.clone(), app.dispatcher.clone());
         tokio::spawn(async move {

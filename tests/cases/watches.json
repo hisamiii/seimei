@@ -1,0 +1,1169 @@
+{
+ "about": "Watch rules (seimei/watches.py, crates/core/src/watches.rs); generated from Python. The file starts with the rule in \"start\"; rule ids are W<n> in the order added.",
+ "start": [
+  {
+   "id": "wold1",
+   "trigger": "session_idle",
+   "target": "gone",
+   "title": "t",
+   "body": "",
+   "level": "normal",
+   "key": null,
+   "reply": false,
+   "repeat": false,
+   "created": 1,
+   "expires": 2
+  }
+ ],
+ "steps": [
+  {
+   "tick": true,
+   "told": [
+    "watch wold1 (session_idle gone) expired without firing"
+   ],
+   "rules": []
+  },
+  {
+   "add": {
+    "trigger": "shikigami_done",
+    "target": "runner",
+    "title": "{name} done",
+    "body": "{detail}",
+    "level": "normal",
+    "key": "k1",
+    "reply": false,
+    "hours": 24,
+    "repeat": false
+   },
+   "added": true,
+   "told": [],
+   "rules": [
+    {
+     "id": "W0",
+     "trigger": "shikigami_done",
+     "target": "runner",
+     "title": "{name} done",
+     "body": "{detail}",
+     "level": "normal",
+     "key": "k1",
+     "reply": false,
+     "repeat": false
+    }
+   ]
+  },
+  {
+   "add": {
+    "trigger": "shikigami_ends",
+    "target": "*",
+    "title": "{name} ended",
+    "body": "{detail}",
+    "level": "urgent",
+    "key": null,
+    "reply": false,
+    "hours": 24,
+    "repeat": true
+   },
+   "added": true,
+   "told": [],
+   "rules": [
+    {
+     "id": "W0",
+     "trigger": "shikigami_done",
+     "target": "runner",
+     "title": "{name} done",
+     "body": "{detail}",
+     "level": "normal",
+     "key": "k1",
+     "reply": false,
+     "repeat": false
+    },
+    {
+     "id": "W1",
+     "trigger": "shikigami_ends",
+     "target": "*",
+     "title": "{name} ended",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    }
+   ]
+  },
+  {
+   "add": {
+    "trigger": "shikigami_asks",
+    "target": " Runner ",
+    "title": "{name} asks",
+    "body": "{detail}",
+    "level": "normal",
+    "key": null,
+    "reply": true,
+    "hours": 24,
+    "repeat": false
+   },
+   "added": true,
+   "told": [],
+   "rules": [
+    {
+     "id": "W0",
+     "trigger": "shikigami_done",
+     "target": "runner",
+     "title": "{name} done",
+     "body": "{detail}",
+     "level": "normal",
+     "key": "k1",
+     "reply": false,
+     "repeat": false
+    },
+    {
+     "id": "W1",
+     "trigger": "shikigami_ends",
+     "target": "*",
+     "title": "{name} ended",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    },
+    {
+     "id": "W2",
+     "trigger": "shikigami_asks",
+     "target": "Runner",
+     "title": "{name} asks",
+     "body": "{detail}",
+     "level": "normal",
+     "key": null,
+     "reply": true,
+     "repeat": false
+    }
+   ]
+  },
+  {
+   "add": {
+    "trigger": "session_asks",
+    "target": "*",
+    "title": "{name} asks",
+    "body": "{detail}",
+    "level": "urgent",
+    "key": null,
+    "reply": false,
+    "hours": 500,
+    "repeat": true
+   },
+   "added": true,
+   "told": [],
+   "rules": [
+    {
+     "id": "W0",
+     "trigger": "shikigami_done",
+     "target": "runner",
+     "title": "{name} done",
+     "body": "{detail}",
+     "level": "normal",
+     "key": "k1",
+     "reply": false,
+     "repeat": false
+    },
+    {
+     "id": "W1",
+     "trigger": "shikigami_ends",
+     "target": "*",
+     "title": "{name} ended",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    },
+    {
+     "id": "W2",
+     "trigger": "shikigami_asks",
+     "target": "Runner",
+     "title": "{name} asks",
+     "body": "{detail}",
+     "level": "normal",
+     "key": null,
+     "reply": true,
+     "repeat": false
+    },
+    {
+     "id": "W3",
+     "trigger": "session_asks",
+     "target": "*",
+     "title": "{name} asks",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    }
+   ]
+  },
+  {
+   "add": {
+    "trigger": "session_idle",
+    "target": "Kv-Gate",
+    "title": "{name} is idle",
+    "body": "",
+    "level": "normal",
+    "key": null,
+    "reply": false,
+    "hours": 0,
+    "repeat": false
+   },
+   "added": true,
+   "told": [],
+   "rules": [
+    {
+     "id": "W0",
+     "trigger": "shikigami_done",
+     "target": "runner",
+     "title": "{name} done",
+     "body": "{detail}",
+     "level": "normal",
+     "key": "k1",
+     "reply": false,
+     "repeat": false
+    },
+    {
+     "id": "W1",
+     "trigger": "shikigami_ends",
+     "target": "*",
+     "title": "{name} ended",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    },
+    {
+     "id": "W2",
+     "trigger": "shikigami_asks",
+     "target": "Runner",
+     "title": "{name} asks",
+     "body": "{detail}",
+     "level": "normal",
+     "key": null,
+     "reply": true,
+     "repeat": false
+    },
+    {
+     "id": "W3",
+     "trigger": "session_asks",
+     "target": "*",
+     "title": "{name} asks",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    },
+    {
+     "id": "W4",
+     "trigger": "session_idle",
+     "target": "Kv-Gate",
+     "title": "{name} is idle",
+     "body": "",
+     "level": "normal",
+     "key": null,
+     "reply": false,
+     "repeat": false
+    }
+   ]
+  },
+  {
+   "add": {
+    "trigger": "queue_free",
+    "target": "*",
+    "title": "free",
+    "body": "",
+    "level": "normal",
+    "key": null,
+    "reply": false,
+    "hours": 24,
+    "repeat": false
+   },
+   "error": "unknown trigger 'queue_free'; one of shikigami_done, shikigami_failed, shikigami_asks, shikigami_ends, session_asks, session_idle",
+   "told": [],
+   "rules": [
+    {
+     "id": "W0",
+     "trigger": "shikigami_done",
+     "target": "runner",
+     "title": "{name} done",
+     "body": "{detail}",
+     "level": "normal",
+     "key": "k1",
+     "reply": false,
+     "repeat": false
+    },
+    {
+     "id": "W1",
+     "trigger": "shikigami_ends",
+     "target": "*",
+     "title": "{name} ended",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    },
+    {
+     "id": "W2",
+     "trigger": "shikigami_asks",
+     "target": "Runner",
+     "title": "{name} asks",
+     "body": "{detail}",
+     "level": "normal",
+     "key": null,
+     "reply": true,
+     "repeat": false
+    },
+    {
+     "id": "W3",
+     "trigger": "session_asks",
+     "target": "*",
+     "title": "{name} asks",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    },
+    {
+     "id": "W4",
+     "trigger": "session_idle",
+     "target": "Kv-Gate",
+     "title": "{name} is idle",
+     "body": "",
+     "level": "normal",
+     "key": null,
+     "reply": false,
+     "repeat": false
+    }
+   ]
+  },
+  {
+   "add": {
+    "trigger": "nope",
+    "target": "*",
+    "title": "x",
+    "body": "",
+    "level": "normal",
+    "key": null,
+    "reply": false,
+    "hours": 24,
+    "repeat": false
+   },
+   "error": "unknown trigger 'nope'; one of shikigami_done, shikigami_failed, shikigami_asks, shikigami_ends, session_asks, session_idle",
+   "told": [],
+   "rules": [
+    {
+     "id": "W0",
+     "trigger": "shikigami_done",
+     "target": "runner",
+     "title": "{name} done",
+     "body": "{detail}",
+     "level": "normal",
+     "key": "k1",
+     "reply": false,
+     "repeat": false
+    },
+    {
+     "id": "W1",
+     "trigger": "shikigami_ends",
+     "target": "*",
+     "title": "{name} ended",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    },
+    {
+     "id": "W2",
+     "trigger": "shikigami_asks",
+     "target": "Runner",
+     "title": "{name} asks",
+     "body": "{detail}",
+     "level": "normal",
+     "key": null,
+     "reply": true,
+     "repeat": false
+    },
+    {
+     "id": "W3",
+     "trigger": "session_asks",
+     "target": "*",
+     "title": "{name} asks",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    },
+    {
+     "id": "W4",
+     "trigger": "session_idle",
+     "target": "Kv-Gate",
+     "title": "{name} is idle",
+     "body": "",
+     "level": "normal",
+     "key": null,
+     "reply": false,
+     "repeat": false
+    }
+   ]
+  },
+  {
+   "listing": true,
+   "text": "W0: shikigami_done runner -> normal ping \"{name} done\" (key k1), expires in 23 h 59 min\nW1: shikigami_ends * -> urgent ping \"{name} ended\", repeats, expires in 23 h 59 min\nW2: shikigami_asks Runner -> normal ping \"{name} asks\", reply, expires in 23 h 59 min\nW3: session_asks * -> urgent ping \"{name} asks\", repeats, expires in 167 h 59 min\nW4: session_idle Kv-Gate -> normal ping \"{name} is idle\", expires in 23 h 59 min",
+   "told": [],
+   "rules": [
+    {
+     "id": "W0",
+     "trigger": "shikigami_done",
+     "target": "runner",
+     "title": "{name} done",
+     "body": "{detail}",
+     "level": "normal",
+     "key": "k1",
+     "reply": false,
+     "repeat": false
+    },
+    {
+     "id": "W1",
+     "trigger": "shikigami_ends",
+     "target": "*",
+     "title": "{name} ended",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    },
+    {
+     "id": "W2",
+     "trigger": "shikigami_asks",
+     "target": "Runner",
+     "title": "{name} asks",
+     "body": "{detail}",
+     "level": "normal",
+     "key": null,
+     "reply": true,
+     "repeat": false
+    },
+    {
+     "id": "W3",
+     "trigger": "session_asks",
+     "target": "*",
+     "title": "{name} asks",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    },
+    {
+     "id": "W4",
+     "trigger": "session_idle",
+     "target": "Kv-Gate",
+     "title": "{name} is idle",
+     "body": "",
+     "level": "normal",
+     "key": null,
+     "reply": false,
+     "repeat": false
+    }
+   ]
+  },
+  {
+   "event": {
+    "type": "workers",
+    "list": [
+     {
+      "id": "a1",
+      "name": "runner",
+      "state": "running",
+      "summary": "",
+      "question": null
+     },
+     {
+      "id": "a2",
+      "name": "other",
+      "state": "done",
+      "summary": "old",
+      "question": null
+     }
+    ]
+   },
+   "told": [],
+   "rules": [
+    {
+     "id": "W0",
+     "trigger": "shikigami_done",
+     "target": "runner",
+     "title": "{name} done",
+     "body": "{detail}",
+     "level": "normal",
+     "key": "k1",
+     "reply": false,
+     "repeat": false
+    },
+    {
+     "id": "W1",
+     "trigger": "shikigami_ends",
+     "target": "*",
+     "title": "{name} ended",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    },
+    {
+     "id": "W2",
+     "trigger": "shikigami_asks",
+     "target": "Runner",
+     "title": "{name} asks",
+     "body": "{detail}",
+     "level": "normal",
+     "key": null,
+     "reply": true,
+     "repeat": false
+    },
+    {
+     "id": "W3",
+     "trigger": "session_asks",
+     "target": "*",
+     "title": "{name} asks",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    },
+    {
+     "id": "W4",
+     "trigger": "session_idle",
+     "target": "Kv-Gate",
+     "title": "{name} is idle",
+     "body": "",
+     "level": "normal",
+     "key": null,
+     "reply": false,
+     "repeat": false
+    }
+   ]
+  },
+  {
+   "event": {
+    "type": "workers",
+    "list": [
+     {
+      "id": "a1",
+      "name": "runner",
+      "state": "asking",
+      "summary": "",
+      "question": "Which one?"
+     },
+     {
+      "id": "a2",
+      "name": "other",
+      "state": "done",
+      "summary": "old",
+      "question": null
+     }
+    ]
+   },
+   "told": [
+    "watch W2 fired (shikigami_asks runner): pinged the user \"runner asks\" to 0 phone(s); the rule is done"
+   ],
+   "rules": [
+    {
+     "id": "W0",
+     "trigger": "shikigami_done",
+     "target": "runner",
+     "title": "{name} done",
+     "body": "{detail}",
+     "level": "normal",
+     "key": "k1",
+     "reply": false,
+     "repeat": false
+    },
+    {
+     "id": "W1",
+     "trigger": "shikigami_ends",
+     "target": "*",
+     "title": "{name} ended",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    },
+    {
+     "id": "W3",
+     "trigger": "session_asks",
+     "target": "*",
+     "title": "{name} asks",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    },
+    {
+     "id": "W4",
+     "trigger": "session_idle",
+     "target": "Kv-Gate",
+     "title": "{name} is idle",
+     "body": "",
+     "level": "normal",
+     "key": null,
+     "reply": false,
+     "repeat": false
+    }
+   ]
+  },
+  {
+   "event": {
+    "type": "workers",
+    "list": [
+     {
+      "id": "a1",
+      "name": "runner",
+      "state": "running",
+      "summary": "",
+      "question": null
+     },
+     {
+      "id": "a2",
+      "name": "other",
+      "state": "done",
+      "summary": "old",
+      "question": null
+     }
+    ]
+   },
+   "told": [],
+   "rules": [
+    {
+     "id": "W0",
+     "trigger": "shikigami_done",
+     "target": "runner",
+     "title": "{name} done",
+     "body": "{detail}",
+     "level": "normal",
+     "key": "k1",
+     "reply": false,
+     "repeat": false
+    },
+    {
+     "id": "W1",
+     "trigger": "shikigami_ends",
+     "target": "*",
+     "title": "{name} ended",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    },
+    {
+     "id": "W3",
+     "trigger": "session_asks",
+     "target": "*",
+     "title": "{name} asks",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    },
+    {
+     "id": "W4",
+     "trigger": "session_idle",
+     "target": "Kv-Gate",
+     "title": "{name} is idle",
+     "body": "",
+     "level": "normal",
+     "key": null,
+     "reply": false,
+     "repeat": false
+    }
+   ]
+  },
+  {
+   "event": {
+    "type": "workers",
+    "list": [
+     {
+      "id": "a1",
+      "name": "runner",
+      "state": "done",
+      "summary": "Shipped it xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "question": null
+     },
+     {
+      "id": "a2",
+      "name": "other",
+      "state": "stopped",
+      "summary": "",
+      "question": null
+     }
+    ]
+   },
+   "told": [
+    "watch W0 fired (shikigami_done runner): pinged the user \"runner done\" to 0 phone(s); the rule is done",
+    "watch W1 fired (shikigami_ends runner): pinged the user \"runner ended\" to 0 phone(s)",
+    "watch W1 fired (shikigami_ends other): pinged the user \"other ended\" to 0 phone(s)"
+   ],
+   "rules": [
+    {
+     "id": "W1",
+     "trigger": "shikigami_ends",
+     "target": "*",
+     "title": "{name} ended",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    },
+    {
+     "id": "W3",
+     "trigger": "session_asks",
+     "target": "*",
+     "title": "{name} asks",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    },
+    {
+     "id": "W4",
+     "trigger": "session_idle",
+     "target": "Kv-Gate",
+     "title": "{name} is idle",
+     "body": "",
+     "level": "normal",
+     "key": null,
+     "reply": false,
+     "repeat": false
+    }
+   ]
+  },
+  {
+   "event": {
+    "type": "workers",
+    "list": [
+     {
+      "id": "a1",
+      "name": "runner",
+      "state": "failed",
+      "summary": "",
+      "question": null
+     },
+     {
+      "id": "a3",
+      "name": "new",
+      "state": "interrupted",
+      "summary": "",
+      "question": null
+     }
+    ]
+   },
+   "told": [
+    "watch W1 fired (shikigami_ends runner): pinged the user \"runner ended\" to 0 phone(s)"
+   ],
+   "rules": [
+    {
+     "id": "W1",
+     "trigger": "shikigami_ends",
+     "target": "*",
+     "title": "{name} ended",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    },
+    {
+     "id": "W3",
+     "trigger": "session_asks",
+     "target": "*",
+     "title": "{name} asks",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    },
+    {
+     "id": "W4",
+     "trigger": "session_idle",
+     "target": "Kv-Gate",
+     "title": "{name} is idle",
+     "body": "",
+     "level": "normal",
+     "key": null,
+     "reply": false,
+     "repeat": false
+    }
+   ]
+  },
+  {
+   "event": {
+    "type": "sessions",
+    "list": [
+     {
+      "session_id": "s1",
+      "pid": 11,
+      "name": "kv-gate",
+      "status": "busy",
+      "question": false,
+      "waiting_text": "Waiting on the server"
+     }
+    ]
+   },
+   "told": [],
+   "rules": [
+    {
+     "id": "W1",
+     "trigger": "shikigami_ends",
+     "target": "*",
+     "title": "{name} ended",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    },
+    {
+     "id": "W3",
+     "trigger": "session_asks",
+     "target": "*",
+     "title": "{name} asks",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    },
+    {
+     "id": "W4",
+     "trigger": "session_idle",
+     "target": "Kv-Gate",
+     "title": "{name} is idle",
+     "body": "",
+     "level": "normal",
+     "key": null,
+     "reply": false,
+     "repeat": false
+    }
+   ]
+  },
+  {
+   "event": {
+    "type": "sessions",
+    "list": [
+     {
+      "session_id": "s1",
+      "pid": 11,
+      "name": "kv-gate",
+      "status": "waiting",
+      "question": false,
+      "waiting_text": "Needs your input on the server"
+     },
+     {
+      "session_id": "",
+      "pid": 12,
+      "name": "nosid",
+      "status": "idle",
+      "question": false,
+      "waiting_text": "Waiting on the server"
+     }
+    ]
+   },
+   "told": [
+    "watch W3 fired (session_asks kv-gate): pinged the user \"kv-gate asks\" to 0 phone(s)"
+   ],
+   "rules": [
+    {
+     "id": "W1",
+     "trigger": "shikigami_ends",
+     "target": "*",
+     "title": "{name} ended",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    },
+    {
+     "id": "W3",
+     "trigger": "session_asks",
+     "target": "*",
+     "title": "{name} asks",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    },
+    {
+     "id": "W4",
+     "trigger": "session_idle",
+     "target": "Kv-Gate",
+     "title": "{name} is idle",
+     "body": "",
+     "level": "normal",
+     "key": null,
+     "reply": false,
+     "repeat": false
+    }
+   ]
+  },
+  {
+   "event": {
+    "type": "sessions",
+    "list": [
+     {
+      "session_id": "s1",
+      "pid": 11,
+      "name": "kv-gate",
+      "status": "waiting",
+      "question": false,
+      "waiting_text": "x"
+     },
+     {
+      "session_id": "",
+      "pid": 12,
+      "name": "nosid",
+      "status": "waiting",
+      "question": true,
+      "waiting_text": ""
+     }
+    ]
+   },
+   "told": [
+    "watch W3 fired (session_asks nosid): pinged the user \"nosid asks\" to 0 phone(s)"
+   ],
+   "rules": [
+    {
+     "id": "W1",
+     "trigger": "shikigami_ends",
+     "target": "*",
+     "title": "{name} ended",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    },
+    {
+     "id": "W3",
+     "trigger": "session_asks",
+     "target": "*",
+     "title": "{name} asks",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    },
+    {
+     "id": "W4",
+     "trigger": "session_idle",
+     "target": "Kv-Gate",
+     "title": "{name} is idle",
+     "body": "",
+     "level": "normal",
+     "key": null,
+     "reply": false,
+     "repeat": false
+    }
+   ]
+  },
+  {
+   "event": {
+    "type": "sessions",
+    "list": [
+     {
+      "session_id": "s1",
+      "pid": 11,
+      "name": "kv-gate",
+      "status": "busy",
+      "question": "first line\nsecond",
+      "waiting_text": ""
+     }
+    ]
+   },
+   "told": [],
+   "rules": [
+    {
+     "id": "W1",
+     "trigger": "shikigami_ends",
+     "target": "*",
+     "title": "{name} ended",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    },
+    {
+     "id": "W3",
+     "trigger": "session_asks",
+     "target": "*",
+     "title": "{name} asks",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    },
+    {
+     "id": "W4",
+     "trigger": "session_idle",
+     "target": "Kv-Gate",
+     "title": "{name} is idle",
+     "body": "",
+     "level": "normal",
+     "key": null,
+     "reply": false,
+     "repeat": false
+    }
+   ]
+  },
+  {
+   "event": {
+    "type": "sessions",
+    "list": [
+     {
+      "session_id": "s1",
+      "pid": 11,
+      "name": "kv-gate",
+      "status": "idle",
+      "question": false,
+      "waiting_text": ""
+     }
+    ]
+   },
+   "told": [
+    "watch W4 fired (session_idle kv-gate): pinged the user \"kv-gate is idle\" to 0 phone(s); the rule is done"
+   ],
+   "rules": [
+    {
+     "id": "W1",
+     "trigger": "shikigami_ends",
+     "target": "*",
+     "title": "{name} ended",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    },
+    {
+     "id": "W3",
+     "trigger": "session_asks",
+     "target": "*",
+     "title": "{name} asks",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    }
+   ]
+  },
+  {
+   "listing": true,
+   "text": "W1: shikigami_ends * -> urgent ping \"{name} ended\", repeats, expires in 23 h 59 min\nW3: session_asks * -> urgent ping \"{name} asks\", repeats, expires in 167 h 59 min",
+   "told": [],
+   "rules": [
+    {
+     "id": "W1",
+     "trigger": "shikigami_ends",
+     "target": "*",
+     "title": "{name} ended",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    },
+    {
+     "id": "W3",
+     "trigger": "session_asks",
+     "target": "*",
+     "title": "{name} asks",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    }
+   ]
+  },
+  {
+   "remove": "W1",
+   "removed": true,
+   "told": [],
+   "rules": [
+    {
+     "id": "W3",
+     "trigger": "session_asks",
+     "target": "*",
+     "title": "{name} asks",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    }
+   ]
+  },
+  {
+   "remove": "W99",
+   "removed": false,
+   "told": [],
+   "rules": [
+    {
+     "id": "W3",
+     "trigger": "session_asks",
+     "target": "*",
+     "title": "{name} asks",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    }
+   ]
+  },
+  {
+   "listing": true,
+   "text": "W3: session_asks * -> urgent ping \"{name} asks\", repeats, expires in 167 h 59 min",
+   "told": [],
+   "rules": [
+    {
+     "id": "W3",
+     "trigger": "session_asks",
+     "target": "*",
+     "title": "{name} asks",
+     "body": "{detail}",
+     "level": "urgent",
+     "key": null,
+     "reply": false,
+     "repeat": true
+    }
+   ]
+  }
+ ]
+}

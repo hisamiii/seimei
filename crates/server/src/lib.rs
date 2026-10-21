@@ -35,6 +35,7 @@ use seimei_core::transcripts::brief;
 use seimei_core::uploads::Uploads;
 use seimei_core::usage::Usage;
 use seimei_core::util::{now, read_json, truthy, write_json};
+use seimei_core::watches::Watches;
 use seimei_core::workers::{self, Pool};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
@@ -82,6 +83,8 @@ pub struct App {
     pub watcher: Arc<Watcher>,
     /// Hand to seimei, Give to me.
     pub adopter: Arc<Adopter>,
+    /// The dispatcher's watch rules.
+    pub watches: Arc<Watches>,
     usage: Arc<Usage>,
     cost: Arc<Cost>,
     worker_events: Arc<WorkerEvents>,
@@ -141,8 +144,12 @@ impl App {
         let _ = guard.tell.set(Box::new(move |w, line, urgent, key| p.tell(w, line, urgent, key)));
         let worker_events = Arc::new(WorkerEvents::new(&state.join("events.jsonl")));
         let adopter = Adopter::new(pool.clone(), approvals.clone(), state);
+        let p = pool.clone();
+        let tell = Box::new(move |line: &str| p.notify(line, false, None));
+        let watches = Arc::new(Watches::new(&state.join("watches.json"), push.clone(), tell));
         let tools = Arc::new(Tools {
             adopter: adopter.clone(),
+            watches: watches.clone(),
             pool: pool.clone(),
             worker_events: worker_events.clone(),
             events: events.clone(),
@@ -175,6 +182,7 @@ impl App {
             pool,
             watcher,
             adopter,
+            watches,
             usage,
             cost,
             worker_events,

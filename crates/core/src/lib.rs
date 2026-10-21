@@ -25,4 +25,6 @@ pub mod transcripts;
 pub mod uploads;
 pub mod usage;
 pub mod util;
+pub mod wake;
+pub mod watches;
 pub mod workers;
