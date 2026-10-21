@@ -36,6 +36,24 @@ sealed interface Item {
     data class Sent(override val key: String, val file: FileRef, val caption: String, val t: Double = 0.0) : Item
 }
 
+/** What the next message answers: an event id, the composer's quote and the lane the event shows in. */
+data class ReplyTo(val id: Long, val text: String, val lane: String)
+
+private val CARD_VERB = mapOf("done" to "finished", "failed" to "failed", "asking" to "asks")
+
+/** A row the user can reply to (seimei's messages, report, question and approval cards), as the reply; else null. */
+fun Item.quote(lane: String): ReplyTo? {
+    val id = key.removePrefix("e").toLongOrNull() ?: return null
+    return when (this) {
+        is Item.Msg -> if (role == "assistant") ReplyTo(id, text, lane) else null
+        is Item.Worker -> CARD_VERB[event]?.let { verb ->
+            ReplyTo(id, "$name $verb: ${(text.lineSequence().firstOrNull { it.isNotBlank() } ?: "").replace(Regex("^[#>*\\-\\s]+"), "").trim()}", lane)
+        }
+        is Item.Approval -> ReplyTo(id, "$who wants to $target", lane)
+        else -> null
+    }
+}
+
 /** A chip quoting another message; a tap goes to it (lane "c": the chat, "t": the trajectory). */
 data class Anchor(val text: String, val goto: String, val lane: String)
 
@@ -226,7 +244,8 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
             if (id > 0) said[id] = ev.str("text")
             val re = ev.optLong("re")
             val anchor = when {
-                type == "user" && ev.str("quote").isNotEmpty() -> Anchor(anchorText(ev.str("quote")), "e${ev.optLong("quote_id")}", "t")
+                type == "user" && ev.str("quote").isNotEmpty() ->
+                    Anchor(anchorText(ev.str("quote")), "e${ev.optLong("quote_id")}", ev.str("quote_lane").ifEmpty { "t" })
                 // A reply far from what it answers says which message that was.
                 // re_pin: seimei named the message (re:), so the chip shows even right after it.
                 type == "assistant" && re > 0 && (ev.optBoolean("re_pin") || re != lastUser || between)

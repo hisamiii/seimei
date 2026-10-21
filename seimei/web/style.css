@@ -143,6 +143,15 @@ body:not([data-tab="chat"]) .ltabs { display: none; }
   display: block; margin-top: 8px; min-height: 32px; padding: 0 14px; border: 1px solid var(--outline); border-radius: 16px;
   background: none; color: var(--primary); font: 500 13px var(--sans);
 }
+.replyable { position: relative; -webkit-touch-callout: none; }
+.rbtn {
+  position: absolute; top: 6px; right: 6px; display: grid; place-items: center; width: 32px; height: 32px; padding: 0;
+  border: 1px solid var(--outline); border-radius: 16px; background: var(--surface); color: var(--text-2);
+  opacity: 0; transition: opacity .12s;
+}
+.msg.assistant > .rbtn { top: -6px; right: 0; }
+.replyable:hover > .rbtn, .rbtn:focus-visible { opacity: 1; }
+@media (hover: none) { .rbtn { display: none; } }
 .traj-empty { align-self: center; max-width: 34ch; margin: 48px 0; text-align: center; color: var(--text-3); font-size: 14px; }
 .re {
   display: flex; align-items: center; gap: 6px; width: fit-content; max-width: 100%; margin: 0 0 6px; padding: 4px 10px 4px 8px;

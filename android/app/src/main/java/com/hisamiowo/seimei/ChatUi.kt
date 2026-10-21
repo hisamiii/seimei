@@ -1,5 +1,14 @@
 package com.hisamiowo.seimei
 
+import androidx.compose.animation.core.animate
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.ui.graphics.Brush
@@ -182,7 +191,9 @@ fun ChatTab(vm: Seimei) {
         if (!traj) items(vm.pending.asReversed(), key = { "p" + it.cid }) { PendingMsg(it, vm) }
         items(rows, key = { it.key }, contentType = { it::class }) { row ->
             Box(if (row.key == flashing) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp)) else Modifier) {
-                Row(row, vm) { zoom = it }
+                val quote = row.quote(if (traj) "t" else "c")
+                if (quote != null) SwipeReply({ vm.replyIn(quote) }) { Row(row, vm) { zoom = it } }
+                else Row(row, vm) { zoom = it }
             }
         }
         if (vm.hasOlder) item(key = "older") {
@@ -260,6 +271,30 @@ fun AnchorChip(a: Anchor, vm: Seimei, onUser: Boolean = false) {
         Icon(Icons.reply, null, Modifier.size(14.dp), tint = fg.copy(alpha = .8f))
         Spacer(Modifier.width(6.dp))
         Text(a.text, fontSize = 12.5.sp, color = fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** Swipe right to reply: the row follows the finger, the reply icon shows behind it, and past the mark it replies. */
+@Composable
+fun SwipeReply(onReply: () -> Unit, content: @Composable () -> Unit) {
+    var dx by remember { mutableFloatStateOf(0f) }
+    val mark = with(LocalDensity.current) { 64.dp.toPx() }
+    val haptic = LocalHapticFeedback.current
+    Box(Modifier.fillMaxWidth().draggable(
+        rememberDraggableState { d ->
+            val was = dx
+            dx = (dx + d).coerceIn(0f, mark * 1.3f)
+            if (was < mark && dx >= mark) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        },
+        Orientation.Horizontal,
+        onDragStopped = {
+            if (dx >= mark) onReply()
+            animate(dx, 0f) { v, _ -> dx = v }
+        },
+    )) {
+        Icon(Icons.reply, "Reply", Modifier.align(Alignment.CenterStart).padding(start = 4.dp).size(22.dp)
+            .alpha((dx / mark).coerceIn(0f, 1f)), tint = MaterialTheme.colorScheme.primary)
+        Box(Modifier.offset { IntOffset(dx.roundToInt(), 0) }) { content() }
     }
 }
 
@@ -411,7 +446,7 @@ fun PendingMsg(p: Pending, vm: Seimei) {
                 .padding(horizontal = 16.dp, vertical = 11.dp),
             horizontalAlignment = Alignment.End,
         ) {
-            p.reply?.let { AnchorChip(Anchor(anchorText(it.second), "e${it.first}", "t"), vm, onUser = true) }
+            p.reply?.let { AnchorChip(Anchor(anchorText(it.text), "e${it.id}", it.lane), vm, onUser = true) }
             val photos = p.sending.filterIsInstance<Attachment.Photo>()
             if (photos.isNotEmpty()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -488,7 +523,7 @@ fun AssistantMsg(m: Item.Msg, vm: Seimei) {
         m.anchor?.let { AnchorChip(it, vm) }
         Md(m.text)
         if (time) Text(clock(m.t), fontSize = 12.sp, color = LocalExtra.current.text3, modifier = Modifier.padding(top = 4.dp))
-        if (m.reply > 0) androidx.compose.material3.OutlinedButton({ vm.replyIn(m.reply) }, Modifier.padding(top = 8.dp).heightIn(min = 32.dp),
+        if (m.reply > 0) androidx.compose.material3.OutlinedButton({ vm.replyIn(ReplyTo(m.reply, m.text, "t")) }, Modifier.padding(top = 8.dp).heightIn(min = 32.dp),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp)) { Text("Reply in chat", fontSize = 13.sp) }
     }
 }

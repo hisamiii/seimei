@@ -56,7 +56,7 @@ sealed interface Attachment {
 }
 
 /** A message shown before the laptop echoes it back (QA U1); a failed one waits for a retry tap. */
-class Pending(val cid: String, val text: String, val sending: List<Attachment>, val reply: Pair<Long, String>? = null) {
+class Pending(val cid: String, val text: String, val sending: List<Attachment>, val reply: ReplyTo? = null) {
     var failed by mutableStateOf(false)
 }
 
@@ -140,8 +140,8 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     /** Trajectory events the user has not seen yet. */
     var unseen by mutableStateOf(0)
         private set
-    /** The message of seimei's that the next send answers ("Reply in chat"): its event id and text. */
-    var replyTo by mutableStateOf<Pair<Long, String>?>(null)
+    /** The message of seimei's or the card that the next send answers (a swipe, or "Reply in chat"). */
+    var replyTo by mutableStateOf<ReplyTo?>(null)
         private set
     /** A row to scroll to and flash, by key, in the lane on screen. */
     var goto by mutableStateOf<String?>(null)
@@ -554,9 +554,9 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         if (lane == "t" && tab == "chat" && foreground && page == null) markSeen() else unseen++
     }
 
-    /** "Reply in chat" on a message of seimei's in the trajectory: the next send answers it. */
-    fun replyIn(id: Long) {
-        replyTo = id to (trailChat.said[id] ?: "")
+    /** A swipe on a message of seimei's or a card, or "Reply in chat" in the trajectory: the next send answers it. */
+    fun replyIn(r: ReplyTo) {
+        replyTo = r
         showLane("c")
     }
 
@@ -1063,7 +1063,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 val imgs = JSONArray()
                 p.sending.filterIsInstance<Attachment.Photo>().forEach { imgs.put(JSONObject().put("data", it.data)) }
                 api.post("api/send", JSONObject().put("text", p.text).put("cid", p.cid).put("images", imgs)
-                    .put("files", JSONArray(docs.map { it.id })).apply { p.reply?.let { put("reply", it.first) } })
+                    .put("files", JSONArray(docs.map { it.id })).apply { p.reply?.let { put("reply", it.id) } })
             } catch (e: IOException) {
                 if (p in pending) p.failed = true
             }

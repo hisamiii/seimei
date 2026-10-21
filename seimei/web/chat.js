@@ -393,7 +393,7 @@ export function message(ev) {
   const node = el('div', `msg ${ev.type}`);
   if (ev.type === 'assistant') node.innerHTML = md(ev.text);
   else {
-    if (ev.quote) node.append(anchor(ev.quote, ev.quote_id, 't'));
+    if (ev.quote) node.append(anchor(ev.quote, ev.quote_id, ev.quote_lane || 't'));
     if (ev.images?.length) {
       const pics = el('div', `pics n${Math.min(ev.images.length, 3)}${ev.text ? '' : ' only'}`);
       ev.images.forEach((n, i) => pics.append(pic(n, ev.sizes?.[i])));
@@ -446,6 +446,26 @@ function foldLabel(ev) {
   if (ev.type === 'assistant' && ev.re) return 'a reply to you';
   return '';
 }
+
+// What the user can answer: seimei's messages and the report, question and approval cards. Each gets a reply button
+// on hover; a long press replies on touch. Event id -> the composer's quote and the lane it shows in.
+const quotable = new Map();
+const VERB = { done: 'finished', failed: 'failed', asking: 'asks' };
+
+function replyable(node, ev, text) {
+  quotable.set(ev.id, { text, lane: ev.lane === 't' ? 't' : 'c' });
+  node.classList.add('replyable');
+  node.dataset.rid = ev.id;
+  const b = el('button', 'rbtn sl');
+  b.type = 'button';
+  b.title = 'Reply';
+  b.setAttribute('aria-label', 'Reply');
+  b.dataset.reply = ev.id;
+  b.append(svg(REPLY, 16));
+  node.append(b);
+}
+
+const firstLine = (t) => ((t || '').split('\n').find((x) => x.trim()) || '').replace(/^[#>*\-\s]+/, '').trim();
 
 // A chip quoting the message this one answers; a tap goes to it (lane c: the chat, t: the trajectory).
 function anchor(text, id, lane) {
@@ -587,6 +607,7 @@ export class Renderer {
         node.prepend(anchor(said.get(ev.re) || ev.re_text, ev.re, 'c'));
         this.between = false;
       }
+      if (ev.type === 'assistant') replyable(node, ev, ev.text || '');
       if (this.lane === 't' && ev.type === 'assistant') {
         const b = el('button', 'reply-btn sl', 'Reply in chat');
         b.type = 'button';
@@ -607,10 +628,11 @@ export class Renderer {
       }
       const card = this.put(workerCard(ev));
       if (ev.event === 'asking') this.asks.set(ev.worker, card);
+      if (VERB[ev.event]) replyable(card, ev, `${ev.name} ${VERB[ev.event]}: ${firstLine(ev.text)}`);
     }
     else if (ev.type === 'image') this.put(shown(ev));
     else if (ev.type === 'file') this.put(sentFile(ev));
-    else if (ev.type === 'approval') this.put(approvalCard(ev));
+    else if (ev.type === 'approval') replyable(this.put(approvalCard(ev)), ev, `${ev.who} wants to ${ev.target}`);
     else if (ev.type === 'rate_limit') this.put(el('div', `note ${ev.status === 'rejected' ? 'error' : 'warn'}`, limitText(ev)));
   }
 }
@@ -845,10 +867,10 @@ $('composer').addEventListener('submit', async (e) => {
   deliver(text, sending, reply);
 });
 
-// "Reply in chat" on a message of seimei's in the trajectory: the next message answers it.
+// Reply (hover button, long press, or "Reply in chat" in the trajectory): the next message answers that message or card.
 let replyTo = null;
 function replyIn(id) {
-  replyTo = { id, text: said.get(id) || '' };
+  replyTo = { id, ...(quotable.get(id) || { text: said.get(id) || '', lane: 't' }) };
   $('quote-text').textContent = `Replying to: ${replyTo.text.replace(/\s+/g, ' ').trim()}`;
   $('quote').hidden = false;
   showLane('c');
@@ -865,7 +887,7 @@ const pending = new Map();
 
 function pendingBubble(cid, text, sending, reply) {
   const node = el('div', 'msg user pending');
-  if (reply) node.append(anchor(reply.text, reply.id, 't'));
+  if (reply) node.append(anchor(reply.text, reply.id, reply.lane || 't'));
   const imgs = sending.filter((a) => a.kind === 'image');
   if (imgs.length) {
     const pics = el('div', `pics n${Math.min(imgs.length, 3)}${text ? '' : ' only'}`);
@@ -1040,9 +1062,10 @@ $('composer').addEventListener('drop', (e) => {
 // Tap a message to see when it was sent; tap a shikigami card to open it; tap a picture to zoom; tap a fold line or
 // an anchor to go to what it names.
 function onTap(e) {
+  if (press?.fired) return;
   const goto = e.target.closest('[data-goto]');
   if (goto) return showLane(goto.dataset.lane, +goto.dataset.goto);
-  const reply = e.target.closest('.reply-btn');
+  const reply = e.target.closest('.reply-btn, .rbtn');
   if (reply) return replyIn(+reply.dataset.reply);
   if (e.target.matches('img.pic')) {
     const n = e.target.dataset.name;
@@ -1058,3 +1081,35 @@ function onTap(e) {
 }
 thread.addEventListener('click', onTap);
 traj.addEventListener('click', onTap);
+
+// A long press on something answerable replies to it (touch only; a mouse has the hover button).
+const PRESS = 450;
+let press = null;
+function pressStart(e) {
+  const node = e.target.closest('.replyable');
+  if (e.pointerType !== 'touch' || !node || e.target.closest('a, button, input, textarea')) return;
+  const p = { x: e.clientX, y: e.clientY, fired: false };
+  p.timer = setTimeout(() => {
+    p.fired = true;
+    navigator.vibrate?.(12);
+    replyIn(+node.dataset.rid);
+  }, PRESS);
+  press = p;
+}
+function pressMove(e) {
+  if (press && !press.fired && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 10) pressEnd();
+}
+function pressEnd() {
+  if (!press) return;
+  clearTimeout(press.timer);
+  // A fired press swallows the click that may follow it, and no later tap.
+  if (press.fired) setTimeout(() => { press = null; }, 400);
+  else press = null;
+}
+for (const box of [thread, traj]) {
+  box.addEventListener('pointerdown', pressStart);
+  box.addEventListener('pointermove', pressMove);
+  box.addEventListener('pointerup', pressEnd);
+  box.addEventListener('pointercancel', pressEnd);
+  box.addEventListener('contextmenu', (e) => { if (press?.fired) e.preventDefault(); });
+}

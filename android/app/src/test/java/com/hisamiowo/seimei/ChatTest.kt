@@ -202,6 +202,29 @@ class ChatTest {
         assertEquals("Sweep the prefill tiles and report the best" to 10, searchLine(a, "prefill"))
         assertEquals(a.line to -1, searchLine(a, ""))
     }
+
+    @Test fun repliesQuoteMessagesAndCards() {
+        val c = Chat(utc)
+        c.add(ev("user", kv = arrayOf("text" to "go")))
+        c.add(ev("assistant", kv = arrayOf("text" to "On it.")))
+        c.add(ev("worker", kv = arrayOf("event" to "asking", "name" to "npu-dma", "worker" to "ab12", "text" to "\nWhich branch?\nmore")))
+        c.add(ev("worker", kv = arrayOf("event" to "summoned", "name" to "x", "worker" to "cd34", "text" to "task")))
+        c.add(ev("approval", kv = arrayOf("aid" to "a1", "who" to "seimei", "action" to "command", "target" to "delete a session",
+            "detail" to "x", "expires" to 0.0)))
+        val quotes = c.items.mapNotNull { it.quote("c") }
+        assertEquals(listOf("On it.", "npu-dma asks: Which branch?", "seimei wants to delete a session"), quotes.map { it.text })
+        assertEquals(listOf(2L, 3L, 5L), quotes.map { it.id })
+        assertNull(c.items.filterIsInstance<Item.Msg>().first { it.role == "user" }.quote("c"))
+    }
+
+    @Test fun userAnchorGoesToTheQuotedLane() {
+        val c = Chat(utc)
+        c.add(ev("user", kv = arrayOf("text" to "yes", "quote" to "npu-dma finished: done", "quote_id" to 7, "quote_lane" to "c")))
+        c.add(ev("user", kv = arrayOf("text" to "old", "quote" to "earlier", "quote_id" to 3)))
+        val a = c.items.filterIsInstance<Item.Msg>().map { it.anchor!! }
+        assertEquals(listOf("c", "t"), a.map { it.lane })
+        assertEquals("e7", a[0].goto)
+    }
 }
 
 class MarkdownTest {

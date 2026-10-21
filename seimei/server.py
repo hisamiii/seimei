@@ -19,7 +19,7 @@ from .auth import Auth
 from .cost import Cost
 from .push import Push
 from .uploads import TooLarge, Uploads
-from .dispatcher import Dispatcher
+from .dispatcher import Dispatcher, quoted
 from .events import EventLog
 from . import queue as cq
 from .desktop import Desktop, NoDesktop
@@ -328,12 +328,12 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
                 raise web.HTTPBadRequest(text=str(e)[:200])
             saved.append((name, kind, base64.b64encode(data).decode()))
         cid = str(body.get("cid") or "")[:40] or None
-        # "Reply in chat" from the trajectory: the message of seimei's that this one answers.
+        # A reply: the message of seimei's or the card (a report, a question, an approval) this one answers.
         try:
             reply = events.events[int(body["reply"]) - 1] if body.get("reply") else None
         except (ValueError, TypeError, IndexError):
             reply = None
-        if reply and reply.get("type") != "assistant":
+        if reply and not quoted(reply)[0]:
             reply = None
         await dispatcher.send(text, saved, infos, cid, reply)
         return web.json_response({"ok": True})
