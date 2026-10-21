@@ -1,9 +1,32 @@
-// The Screen tab: the laptop screen or one window, about once a second, and the windows by workspace.
+// The Screen tab: the laptop screen as live video (stills once a second where the browser cannot decode it), one
+// window about every 4 s, and the windows by workspace.
 import { $, S, el, svg, getJSON, toLogin, view, viewLive, ICON } from './util.js';
+import { LiveStream, liveSupported } from './live.js';
 
 const page = $('screen');
 const APP_TONES = ['#cba6f7', '#89b4fa', '#a6e3a1', '#f9e2af', '#fab387', '#f5c2e7', '#94e2d5', '#b4befe'];
-const screen = { mode: 'screen', window: null, paused: false, timer: null, url: null, state: null, gen: 0, listTimer: 0 };
+const screen = { mode: 'screen', window: null, paused: false, timer: null, url: null, state: null, gen: 0, listTimer: 0,
+  liveOk: liveSupported(), output: '' };
+// One canvas for the whole page life: the list re-renders every few seconds, the decoder keeps drawing into it.
+const canvas = el('canvas');
+canvas.id = 'screen-video';
+canvas.setAttribute('aria-label', 'The laptop screen, live');
+canvas.addEventListener('click', () => fullScreen());
+const live = new LiveStream(canvas, (text, kind) => {
+  if (kind === 'unsupported') {
+    screen.liveOk = false;
+    renderScreen();
+    pollScreen();
+    return;
+  }
+  showScreenMsg(kind === 'live' ? (screen.state?.locked ? 'Screen locked' : '') : text);
+});
+const useLive = () => screen.mode === 'screen' && screen.liveOk;
+
+function fullScreen() {
+  if (useLive()) document.getElementById('screen-frame')?.requestFullscreen?.().catch(() => {});
+  else if (screen.url) view(screen.url, { live: 'screen' });
+}
 
 function appTone(app) {
   let h = 0;
@@ -38,35 +61,45 @@ function outputLabel(o) {
 function renderScreen() {
   const st = screen.state;
   const frame = el('div', 'screen-frame');
+  frame.id = 'screen-frame';
   const img = el('img');
   img.alt = 'The laptop screen';
   img.id = 'screen-img';
   if (screen.url) img.src = screen.url;
-  img.addEventListener('click', () => screen.url && view(screen.url, { live: 'screen' }));
-  const live = el('span', `live-chip ${screen.paused ? 'off' : ''}`);
-  live.append(el('i'), screen.paused ? 'Paused' : 'Live');
+  img.addEventListener('click', () => fullScreen());
+  const liveChip = el('span', `live-chip ${screen.paused ? 'off' : ''}`);
+  liveChip.append(el('i'), screen.paused ? 'Paused' : 'Live');
   const msg = el('div', 'screen-msg', '');
   msg.id = 'screen-msg';
-  frame.append(img, live, msg);
+  frame.append(useLive() ? canvas : img, liveChip, msg);
 
   const ctl = el('div', 'screen-ctl');
   const target = screenTarget();
-  const out = st?.outputs?.[0];
+  const outs = st?.outputs || [];
+  const out = outs.find((o) => o.name === screen.output) || outs[0];
   const [title, sub] = screen.mode === 'screen' ? (out ? outputLabel(out) : ['', '']) : [target ? target.title : 'No window', target?.app || ''];
-  const label = el('span', 'screen-label');
-  label.append(el('b', null, title), el('small', null, sub));
+  const label = el(outs.length > 1 && screen.mode === 'screen' ? 'button' : 'span', 'screen-label');
+  label.append(el('b', null, title), el('small', null, outs.length > 1 && screen.mode === 'screen' ? `${sub} · tap for the next screen` : sub));
+  if (label.tagName === 'BUTTON') {
+    label.type = 'button';
+    label.addEventListener('click', () => {
+      screen.output = outs[(outs.indexOf(out) + 1) % outs.length].name;
+      renderScreen();
+      pollScreen();
+    });
+  }
   const pause = el('button', 'btn tonal sl', screen.paused ? 'Resume' : 'Pause');
   pause.type = 'button';
   pause.addEventListener('click', () => {
     screen.paused = !screen.paused;
     renderScreen();
-    if (!screen.paused) pollScreen();
+    pollScreen();
   });
   const full = el('button', 'icon-btn tonal sl');
   full.type = 'button';
   full.setAttribute('aria-label', 'Full screen');
   full.append(svg(ICON.full, 18));
-  full.addEventListener('click', () => screen.url && view(screen.url, { live: 'screen' }));
+  full.addEventListener('click', () => fullScreen());
   ctl.append(label, pause, full);
 
   const seg = el('div', 'seg');
@@ -132,7 +165,9 @@ async function refreshDesktop() {
 
 async function pollScreen() {
   clearTimeout(screen.timer);
-  if (S.tab !== 'screen' || screen.paused || document.hidden) return;
+  if (S.tab !== 'screen' || screen.paused || document.hidden) return live.stop();
+  if (useLive()) return live.start(screen.output);
+  live.stop();
   const gen = screen.gen;
   const target = screenTarget();
   // Each frame is ~180 KB: on a metered connection one every 3 s instead of every second (QA U13).
@@ -178,8 +213,9 @@ export async function showScreen() {
 }
 
 export function hideScreen() {
+  live.stop();
   clearTimeout(screen.timer);
   clearInterval(screen.listTimer);
 }
 
-document.addEventListener('visibilitychange', () => { if (!document.hidden && S.tab === 'screen') pollScreen(); });
+document.addEventListener('visibilitychange', () => { if (S.tab === 'screen') pollScreen(); });

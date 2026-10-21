@@ -22,6 +22,7 @@ from .desktop import UNLOCK, Desktop
 from .layout import Layout
 from .desktop_tools import make_desktop_tools
 from .music import make_music_tools
+from .cast import Hub
 from .cost import Cost
 from .uploads import Uploads
 from . import discord as discord_link
@@ -146,6 +147,7 @@ def main():
     approvals = Approvals(events)
     guard = Guard(events, approvals, state)
     cost = Cost()
+    cast = Hub()
     usage = Usage(events, state, cost, STATE / "ratelog/rates.jsonl")
     desk = Desktop(events, lambda t: dispatcher.note(t), state / UNLOCK)
     layout = Layout(desk, approvals, events, state)
@@ -159,9 +161,10 @@ def main():
     pool.dispatcher, pool.guard = dispatcher, guard
     guard.tell = pool.tell
     watcher = Watcher(events, pool.own_sessions, pool.notify, pool.archive)
-    app = make_app(events, dispatcher, pool, files, approvals, guard, watcher, desk, auth, origins, state / "app", cost, push, uploads)
+    app = make_app(events, dispatcher, pool, files, approvals, guard, watcher, desk, auth, origins, state / "app", cost, push, uploads, cast)
 
     async def start(app):
+        await cast.cleanup()
         approvals.startup()
         events.close_open_tools()
         pool.startup()
@@ -189,6 +192,7 @@ def main():
         asyncio.get_running_loop().add_signal_handler(signal.SIGUSR1, stop_key)
 
     async def shutdown(app):
+        await cast.close()
         # A reply cut off mid-stream would vanish without a word (QA U3).
         if dispatcher.busy:
             events.add({"type": "system", "level": "warn", "text": "seimei restarted mid-reply; that turn was cut off."})

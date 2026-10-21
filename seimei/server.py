@@ -27,6 +27,7 @@ from .files import MAX_MODEL_BYTES, Files
 from .guard import Guard
 from .sessions import Watcher
 from .workers import Pool
+from .cast import Hub, Viewer
 
 WEB = (Path(__file__).parent / "web").resolve()
 CSP = ("default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; font-src 'self'; "
@@ -77,7 +78,7 @@ def unattach(events: list[dict], uploads) -> list[dict]:
 def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files, approvals: Approvals,
              tool_guard: Guard, watcher: Watcher, desk: Desktop, auth: Auth | None, origins: set[str],
              app_dir: Path | None = None, cost: Cost | None = None, push: Push | None = None,
-             uploads: Uploads | None = None) -> web.Application:
+             uploads: Uploads | None = None, cast: Hub | None = None) -> web.Application:
     @web.middleware
     async def guard(request: web.Request, handler):
         # Never trust the peer address: cloudflared connects from localhost too.
@@ -474,6 +475,42 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
                 hit = frames[key] = (time.monotonic(), data, mime)
         return web.Response(body=hit[1], content_type=hit[2], headers={"Cache-Control": "no-store"})
 
+    streams: set[web.WebSocketResponse] = set()
+
+    async def screen_stream(request):
+        """The display stream (cast.py). A cookie rides along on a cross-site WebSocket too, so only the page's own
+        Origin or the app's bearer token may open it."""
+        if not (auth and auth.bearer(request)) and request.headers.get("Origin") not in origins:
+            return web.Response(status=403, text="forbidden")
+        if not cast:
+            raise web.HTTPNotFound()
+        output = request.query.get("output", "")
+        if not cast.test:
+            try:
+                names = sorted((await asyncio.to_thread(dt.ipc, "Outputs")).keys(), key=lambda n: not n.startswith("eDP"))
+            except NoDesktop:
+                return web.json_response({"down": True}, status=503)
+            if not names or (output and output not in names):
+                raise web.HTTPNotFound(text="no such output")
+            output = output or names[0]
+        ws = web.WebSocketResponse(heartbeat=10, compress=False)
+        await ws.prepare(request)
+        streams.add(ws)
+        v = Viewer(ws.send_bytes, ws.send_json)
+        caster = cast.join(output or "test", v)
+        try:
+            async for msg in ws:
+                if msg.type == web.WSMsgType.TEXT and msg.data == "key":
+                    caster.ask_key()
+        finally:
+            streams.discard(ws)
+            caster.leave(v)
+        return ws
+
+    async def close_streams(app):
+        for ws in list(streams):
+            await ws.close(code=1001, message=b"seimei restarts")
+
     async def desktop_state(request):
         try:
             state = await asyncio.to_thread(desk.state)
@@ -615,6 +652,8 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     app.router.add_get("/api/queue", queue_view)
     app.router.add_post("/api/queue/action", queue_action)
     app.router.add_get("/api/screen", screen)
+    app.router.add_get("/api/stream/screen", screen_stream)
+    app.on_shutdown.append(close_streams)
     app.router.add_get("/api/desktop", desktop_state)
     app.router.add_get("/api/sessions/{pid:[0-9]+}", session)
     app.router.add_post("/api/sessions/{pid:[0-9]+}/send", session_send)
