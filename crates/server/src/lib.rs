@@ -17,13 +17,17 @@ use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
+use seimei_core::approvals::Approvals;
 use seimei_core::auth::Auth;
 use seimei_core::cost::Cost;
+use seimei_core::dispatcher::{self, Dispatcher};
 use seimei_core::events::{Event, EventLog};
-use seimei_core::files::Files;
+use seimei_core::files::{Files, MAX_MODEL_BYTES};
+use seimei_core::guard::Guard;
 use seimei_core::metrics::{self, WorkerEvents};
 use seimei_core::push::{self as push_mod, Push};
 use seimei_core::tasks::{self, Board};
+use seimei_core::tools::Tools;
 use seimei_core::uploads::Uploads;
 use seimei_core::usage::Usage;
 use seimei_core::util::{now, read_json, write_json};
@@ -63,18 +67,21 @@ pub struct App {
     pages: HashMap<&'static str, String>,
     pub app_dir: PathBuf,
     pub theme: PathBuf,
-    pub board: Mutex<Board>,
+    pub board: Arc<Mutex<Board>>,
+    pub dispatcher: Arc<Dispatcher>,
+    pub approvals: Arc<Approvals>,
     pub files: Arc<Files>,
     pub uploads: Arc<Uploads>,
     pub push: Arc<Push>,
     pub pool: Pool,
-    usage: Usage,
+    usage: Arc<Usage>,
     cost: Arc<Cost>,
     worker_events: WorkerEvents,
     audit: PathBuf,
 }
 
 impl App {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         events: Arc<EventLog>,
         auth: Option<Arc<Auth>>,
@@ -83,6 +90,7 @@ impl App {
         state: &Path,
         push: Arc<Push>,
         pool: Pool,
+        disp: dispatcher::Config,
     ) -> App {
         // Only these Host headers are served: a page using DNS rebinding cannot read the API from the browser (L4).
         let mut hosts: HashSet<String> = ["localhost", "127.0.0.1", "::1"].map(String::from).into();
@@ -93,7 +101,24 @@ impl App {
             let page = assets.remove(name).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
             pages.insert(name, page.replace("\"static/", &format!("\"static/{version}/")));
         }
-        let board = Mutex::new(Board::open(&state.join("tasks.json"), Some(events.clone())));
+        let board = Arc::new(Mutex::new(Board::open(&state.join("tasks.json"), Some(events.clone()))));
+        let files = Arc::new(Files::new(state));
+        let uploads = Arc::new(Uploads::new(state));
+        let usage = Arc::new(Usage::new(state, Some(events.clone())));
+        let cost = Arc::new(Cost::new(&seimei_core::transcripts::claude_dir()));
+        let approvals = Arc::new(Approvals::new(events.clone()));
+        let guard = Arc::new(Guard::new(events.clone(), approvals.clone(), state));
+        let tools = Arc::new(Tools {
+            events: events.clone(),
+            files: files.clone(),
+            uploads: uploads.clone(),
+            board: board.clone(),
+            usage: usage.clone(),
+            cost: cost.clone(),
+            push: push.clone(),
+        });
+        let dispatcher =
+            Dispatcher::new(disp, events.clone(), state, usage.clone(), approvals.clone(), guard.clone(), tools);
         App {
             events,
             auth,
@@ -104,12 +129,14 @@ impl App {
             app_dir: state.join("app"),
             theme: state.join("theme.json"),
             board,
-            files: Arc::new(Files::new(state)),
-            uploads: Arc::new(Uploads::new(state)),
+            dispatcher,
+            approvals,
+            files,
+            uploads,
             push,
             pool,
-            usage: Usage::new(state),
-            cost: Arc::new(Cost::new(&seimei_core::transcripts::claude_dir())),
+            usage,
+            cost,
             worker_events: WorkerEvents::new(&state.join("events.jsonl")),
             audit: state.join("audit.jsonl"),
         }
@@ -144,7 +171,7 @@ impl App {
 
     /// The dispatcher's state until it is ported (phase 3): never connected, never busy.
     fn state(&self) -> Value {
-        json!({"type": "state", "connected": false, "busy": false})
+        self.dispatcher.state()
     }
 
     fn workers(&self) -> Value {
@@ -247,6 +274,9 @@ pub fn router(app: Arc<App>) -> Router {
             .route("/api/devices/{id}/revoke", post(revoke))
             .route("/api/devices/push", get(push_info).post(push_token))
             .route("/api/devices/push/test", post(push_test))
+            .route("/api/send", post(send))
+            .route("/api/interrupt", post(interrupt))
+            .route("/api/approvals/{aid}", post(decide))
             .route("/api/usage", get(usage))
             .route("/api/cost", get(cost_view))
             .route("/api/metrics", get(metrics_view))
@@ -612,7 +642,12 @@ async fn task_tick(State(app): Shared, UrlPath(tid): UrlPath<String>, bytes: Byt
     };
     let done = b["done"].as_bool().unwrap_or(false);
     match app.board.lock().unwrap().tick(&tid, done) {
-        Ok(t) => ok(json!({"ok": true, "task": t})),
+        Ok(t) => {
+            let did = if done { "ticked off" } else { "reopened" };
+            let line = format!("the user {did} their task {} {} ({}) on the board", t.id, t.title, t.project);
+            app.dispatcher.note(&line, Some(&format!("tick:{}", t.id)));
+            ok(json!({"ok": true, "task": t}))
+        }
         Err(tasks::Error::NotFound(_)) => text(StatusCode::NOT_FOUND, "no such task"),
         Err(e) => json_status(StatusCode::FORBIDDEN, json!({"error": e.to_string()})),
     }
@@ -1018,4 +1053,84 @@ async fn worker_history(
     row["question"] = w.rec["question"].clone();
     let events: Vec<&Value> = events.iter().map(|e| &**e).collect();
     ok(json!({"worker": row, "events": events, "reset": reset}))
+}
+
+/// Photos and attached files per message.
+const MAX_IMAGES: usize = 6;
+const MAX_FILES: usize = 10;
+
+async fn send(State(app): Shared, bytes: Bytes) -> Response {
+    let b = match body(&bytes) {
+        Ok(b) => b,
+        Err(r) => return r,
+    };
+    let said = s(&b, "text").trim().to_string();
+    let list = |k: &str| match &b[k] {
+        Value::Null => Some(vec![]),
+        Value::Array(a) => Some(a.clone()),
+        _ => None,
+    };
+    let (Some(images), Some(attached)) = (list("images"), list("files")) else {
+        return text(StatusCode::BAD_REQUEST, &format!("text, up to {MAX_IMAGES} images or up to {MAX_FILES} files"));
+    };
+    if (said.is_empty() && images.is_empty() && attached.is_empty())
+        || images.len() > MAX_IMAGES
+        || attached.len() > MAX_FILES
+    {
+        return text(StatusCode::BAD_REQUEST, &format!("text, up to {MAX_IMAGES} images or up to {MAX_FILES} files"));
+    }
+    let id = |v: &Value| v.as_str().map_or_else(|| v.to_string(), String::from);
+    let infos: Option<Vec<Value>> = attached.iter().map(|f| app.uploads.info(&id(f))).collect();
+    let Some(infos) = infos else { return text(StatusCode::BAD_REQUEST, "unknown file") };
+    let (mut names, mut saved) = (vec![], vec![]);
+    for img in &images {
+        let data = img["data"].as_str().and_then(seimei_core::util::b64_decode);
+        let Some(data) = data else { return text(StatusCode::BAD_REQUEST, "an image is not base64") };
+        if data.len() > MAX_MODEL_BYTES {
+            return text(StatusCode::BAD_REQUEST, "an image is larger than 5 MB");
+        }
+        match app.files.save(&data) {
+            Ok((name, kind)) => {
+                names.push(name);
+                saved.push((kind.to_string(), seimei_core::util::b64(&data)));
+            }
+            Err(e) => return text(StatusCode::BAD_REQUEST, &seimei_core::util::chars(&e, 200)),
+        }
+    }
+    let cid = Some(seimei_core::util::chars(&s(&b, "cid"), 40)).filter(|c| !c.is_empty());
+    // A reply: the message of seimei's or the card (a report, a question, an approval) this one answers.
+    let reply = match &b["reply"] {
+        Value::Number(n) => n.as_i64(),
+        Value::String(t) => t.trim().parse().ok(),
+        _ => None,
+    }
+    .and_then(|n| app.events.get(n))
+    .filter(|ev| !dispatcher::quoted(ev).0.is_empty());
+    app.approvals.chat();
+    app.dispatcher.send(&said, &names, saved, &infos, cid.as_deref(), reply.as_deref());
+    ok(json!({"ok": true}))
+}
+
+async fn interrupt(State(app): Shared) -> Response {
+    app.dispatcher.interrupt();
+    ok(json!({"ok": true}))
+}
+
+/// The user's tap on a card: approve or deny, with a permission card's option and a note for the agent.
+async fn decide(State(app): Shared, UrlPath(aid): UrlPath<String>, bytes: Bytes) -> Response {
+    let b = match body(&bytes) {
+        Ok(b) => b,
+        Err(r) => return r,
+    };
+    let approve = match b["decision"].as_str() {
+        Some("approve") => true,
+        Some("deny") => false,
+        _ => return text(StatusCode::BAD_REQUEST, "400: Bad Request"),
+    };
+    let option = Some(seimei_core::util::chars(&s(&b, "option"), 40)).filter(|o| !o.is_empty() && b["option"] != false);
+    let note = Some(seimei_core::util::chars(s(&b, "note").trim(), 2000)).filter(|n| !n.is_empty());
+    if !app.approvals.decide(&aid, approve, option, note) {
+        return text(StatusCode::CONFLICT, "already answered or expired");
+    }
+    ok(json!({"ok": true}))
 }

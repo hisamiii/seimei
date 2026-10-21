@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use seimei_core::auth::Auth;
+use seimei_core::dispatcher;
 use seimei_core::events::EventLog;
 use seimei_core::permissions::configured;
 use seimei_core::push::{Fcm, Push, WebPush};
@@ -24,11 +25,19 @@ struct Args {
     keep_sessions: bool,
     clear: bool,
     revoke: Option<String>,
+    model: Option<String>,
 }
 
 fn args() -> Args {
-    let mut a =
-        Args { command: "serve".into(), dev: false, no_login: false, keep_sessions: false, clear: false, revoke: None };
+    let mut a = Args {
+        command: "serve".into(),
+        dev: false,
+        no_login: false,
+        keep_sessions: false,
+        clear: false,
+        revoke: None,
+        model: None,
+    };
     let mut it = std::env::args().skip(1);
     while let Some(x) = it.next() {
         match x.as_str() {
@@ -38,9 +47,7 @@ fn args() -> Args {
             "--keep-sessions" => a.keep_sessions = true,
             "--clear" => a.clear = true,
             "--revoke" => a.revoke = it.next(),
-            "--model" => {
-                it.next();
-            }
+            "--model" => a.model = it.next(),
             c if COMMANDS.contains(&c) => a.command = c.into(),
             other => die(&format!("unknown argument {other}; usage: seimei [{}] [--dev]", COMMANDS.join("|"))),
         }
@@ -212,11 +219,30 @@ fn main() {
     let approvals = cfg.get("approvals").and_then(|s| s.as_table()).cloned().unwrap_or_default();
     let pool =
         Pool::new(&state, &configured(&approvals, "shikigami")).unwrap_or_else(|e| die(&format!("workers: {e}")));
-    let app = Arc::new(seimei_server::App::new(events.clone(), auth, origins, &web, &state, push.clone(), pool));
+    let mut disp = cfg.get("dispatcher").and_then(|s| s.as_table()).cloned().unwrap_or_default();
+    if let Some(m) = &a.model {
+        disp.insert("model".into(), toml::Value::String(m.clone()));
+    }
+    let about = cfg.get("host").and_then(|h| h.get("about")).and_then(|v| v.as_str()).unwrap_or("computer");
+    let disp = dispatcher::Config::new(&disp, &configured(&approvals, "dispatcher"), about, a.dev);
+    let app = Arc::new(seimei_server::App::new(events.clone(), auth, origins, &web, &state, push.clone(), pool, disp));
+    wire(&app);
 
     let rt = tokio::runtime::Runtime::new().expect("a runtime");
     rt.block_on(async move {
+        app.approvals.startup();
         events.close_open_tools("Interrupted by a seimei restart.");
+        tokio::spawn(app.dispatcher.clone().run());
+        // `systemctl --user kill -s USR1 seimei` from a key binding: end the turn.
+        let (ev, d) = (events.clone(), app.dispatcher.clone());
+        tokio::spawn(async move {
+            let mut usr1 = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined1()).unwrap();
+            while usr1.recv().await.is_some() {
+                d.interrupt();
+                ev.add(serde_json::json!({"type": "system", "level": "warn", "text": "Stopped with the stop key."}));
+                d.note("The user pressed the stop key: your turn was interrupted.", None);
+            }
+        });
         tokio::spawn(push.run());
         tokio::spawn(app.uploads.clone().run());
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
@@ -224,11 +250,17 @@ fn main() {
             .unwrap_or_else(|e| die(&format!("port {port}: {e}")));
         let stop = {
             let events = events.clone();
+            let dispatcher = app.dispatcher.clone();
             async move {
                 let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap();
                 tokio::select! {
                     _ = term.recv() => {},
                     _ = tokio::signal::ctrl_c() => {},
+                }
+                // A reply cut off mid-stream would vanish without a word (QA U3).
+                if dispatcher.busy() {
+                    let text = "seimei restarted mid-reply; that turn was cut off.";
+                    events.add(serde_json::json!({"type": "system", "level": "warn", "text": text}));
                 }
                 // End every open stream, so clients notice at once and the shutdown is not held up by them.
                 events.close();
@@ -240,4 +272,38 @@ fn main() {
         };
         axum::serve(listener, seimei_server::router(app)).with_graceful_shutdown(stop).await.unwrap();
     });
+}
+
+/// What the dispatcher reads from the rest at the start of a turn: where the task board and the shikigami disagree,
+/// and after a compaction the open board items and the shikigami at work.
+fn wire(app: &Arc<seimei_server::App>) {
+    let a = app.clone();
+    let _ = app.dispatcher.drift.set(Box::new(move || {
+        let board = a.board.lock().unwrap();
+        // Archived shikigami are out of the picture, unless a task still points at one.
+        let workers: Vec<(String, String, String)> = (a.pool.workers.iter())
+            .filter(|w| !a.pool.archive.worker(&w.rec) || board.current(w.id()).is_some())
+            .map(|w| {
+                let s = |k: &str| w.rec[k].as_str().unwrap_or("").to_string();
+                (w.id().to_string(), s("name"), s("state"))
+            })
+            .collect();
+        board.drift(&workers, seimei_core::util::now())
+    }));
+    let a = app.clone();
+    let _ = app.dispatcher.recall.set(Box::new(move || {
+        let live: Vec<String> = (a.pool.workers.iter())
+            .filter(|w| matches!(w.rec["state"].as_str(), Some("running" | "asking" | "laptop")))
+            .map(|w| {
+                let s = |k: &str| w.rec[k].as_str().unwrap_or("").to_string();
+                let task = s("board_task");
+                let task = if task.is_empty() { String::new() } else { format!(", task {task}") };
+                let first =
+                    s("task").trim().lines().next().map(|l| seimei_core::util::chars(l, 200)).unwrap_or_default();
+                format!("- {} ({}) {} in {}{task}: {first}", s("name"), w.id(), s("state"), s("cwd"))
+            })
+            .collect();
+        let live = if live.is_empty() { "(none)".to_string() } else { live.join("\n") };
+        Some(format!("## Open board items\n{}\n\n## Shikigami at work\n{live}", a.board.lock().unwrap().text(false)))
+    }));
 }

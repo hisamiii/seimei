@@ -93,6 +93,15 @@ pub fn b64url_decode(s: &str) -> Option<Vec<u8>> {
     URL_SAFE_NO_PAD.decode(s.trim_end_matches('=')).ok()
 }
 
+/// Standard base64 with padding, strict: what the page sends photos in.
+pub fn b64_decode(s: &str) -> Option<Vec<u8>> {
+    base64::engine::general_purpose::STANDARD.decode(s).ok()
+}
+
+pub fn b64(data: &[u8]) -> String {
+    base64::engine::general_purpose::STANDARD.encode(data)
+}
+
 pub fn hex(data: &[u8]) -> String {
     data.iter().map(|b| format!("{b:02x}")).collect()
 }

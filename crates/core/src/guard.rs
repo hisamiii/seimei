@@ -1,12 +1,15 @@
 //! The deny-list in front of every tool call of the dispatcher and the shikigami: what a prompt injection would reach
 //! for. tests/cases/guard.json holds this and seimei/guard.py to the same decisions.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 
 use regex::Regex;
-use serde_json::Value;
+use serde_json::{Value, json};
 
+use crate::approvals::{Approvals, check};
+use crate::events::EventLog;
 use crate::paths::{expand, home, normalize, realpath};
 use crate::shell::{commands, unwrap, words};
 
@@ -323,4 +326,151 @@ pub fn audit_tail(path: &Path, limit: usize) -> Vec<Value> {
         }
     }
     out
+}
+
+/// How long the PreToolUse hook may take: it can wait on an approval card.
+pub const HOOK_TIMEOUT: f64 = 600.0 + 300.0;
+/// The audit log is rotated by renaming past this size, never trimmed.
+const AUDIT_ROTATE: u64 = 64 << 20;
+/// A shikigami tool failing this many times in a row is worth the dispatcher's attention.
+const REPEATS: u32 = 3;
+
+/// What a shikigami's calls ran into, for the dispatcher: (worker id, line, urgent, key).
+pub type Tell = Box<dyn Fn(&str, &str, bool, Option<&str>) + Send + Sync>;
+
+/// A short what-it-was for an event line: the command, the path, or the input.
+pub fn excerpt(tool: &str, inp: &Value, n: usize) -> String {
+    let text = ["command", "file_path", "notebook_path", "url"]
+        .iter()
+        .find_map(|k| inp[k].as_str().filter(|s| !s.is_empty()))
+        .map_or_else(|| brief(inp), String::from);
+    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let short = if text.chars().count() <= n { text } else { format!("{}…", crate::util::chars(&text, n - 1)) };
+    format!("{tool} {short}")
+}
+
+fn brief(inp: &Value) -> String {
+    let text = inp.to_string();
+    if text.chars().count() <= 1500 { text } else { format!("{}…", crate::util::chars(&text, 1500)) }
+}
+
+/// The checks in front of every tool call of seimei and the shikigami, and the audit log of them.
+pub struct Guard {
+    events: Arc<EventLog>,
+    approvals: Arc<Approvals>,
+    path: PathBuf,
+    pub tell: OnceLock<Tell>,
+    fails: Mutex<HashMap<(String, String), u32>>,
+}
+
+fn decision(allow: bool, reason: &str) -> Value {
+    json!({"hookSpecificOutput": {"hookEventName": "PreToolUse",
+        "permissionDecision": if allow { "allow" } else { "deny" }, "permissionDecisionReason": reason}})
+}
+
+impl Guard {
+    pub fn new(events: Arc<EventLog>, approvals: Arc<Approvals>, state: &Path) -> Guard {
+        Guard { events, approvals, path: state.join("audit.jsonl"), tell: OnceLock::new(), fails: Mutex::default() }
+    }
+
+    pub fn audit_path(&self) -> &Path {
+        &self.path
+    }
+
+    fn tell(&self, worker: Option<&str>, line: &str, urgent: bool, key: Option<&str>) {
+        if let (Some(w), Some(tell)) = (worker, self.tell.get()) {
+            tell(w, line, urgent, key);
+        }
+    }
+
+    /// Append one line (created 600).
+    fn audit(&self, mut rec: Value) {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        if std::fs::metadata(&self.path).is_ok_and(|m| m.len() > AUDIT_ROTATE) {
+            let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+            let _ = std::fs::rename(&self.path, self.path.with_file_name(format!("audit-{stamp}.jsonl")));
+        }
+        rec["t"] = json!((crate::util::now() * 1000.0).round() / 1000.0);
+        let file = std::fs::OpenOptions::new().create(true).append(true).mode(0o600).open(&self.path);
+        if let Ok(mut f) = file {
+            let _ = f.write_all(format!("{rec}\n").as_bytes());
+        }
+    }
+
+    /// The PreToolUse hook: blocked, held for a card, or let through. who: "seimei" or the shikigami's name.
+    pub async fn pre(&self, who: &str, worker: Option<&str>, inp: &Value, tool_use_id: Option<&str>) -> Value {
+        let tool = inp["tool_name"].as_str().unwrap_or("");
+        let args = if inp["tool_input"].is_object() { inp["tool_input"].clone() } else { json!({}) };
+        let home = home().display().to_string();
+        let cwd = inp["cwd"].as_str().filter(|c| !c.is_empty()).unwrap_or(&home);
+        let mut rec = json!({"event": "call", "who": who, "worker": worker, "session": inp["session_id"],
+            "agent": inp["agent_id"], "id": tool_use_id, "tool": tool, "input": brief(&args)});
+        if let Some(why) = blocked(tool, &args, cwd) {
+            rec["decision"] = json!("blocked");
+            rec["why"] = json!(why);
+            self.audit(rec);
+            self.events.add(json!({"type": "system", "level": "error", "text": format!("Blocked {who}: {why}.")}));
+            self.tell(worker, &format!("the guard blocked {why}: {}", excerpt(tool, &args, 120)), false, None);
+            return decision(
+                false,
+                &format!(
+                    "seimei's guard blocks {why}. This rule protects against prompt injection and has no override; \
+                     if the user really wants it, they do it themselves."
+                ),
+            );
+        }
+        if let Some(what) = check(tool, &args) {
+            let card = format!("{}: {}", what["action"].as_str().unwrap_or(""), what["target"].as_str().unwrap_or(""));
+            let key = format!("approval:{}", tool_use_id.unwrap_or(""));
+            self.tell(worker, &format!("waits on an approval card ({card})"), false, Some(&key));
+            let outcome = self.approvals.hold(what, who, worker).await;
+            rec["decision"] = json!(outcome);
+            self.audit(rec);
+            self.tell(worker, &format!("approval card ({card}) {outcome}"), false, Some(&key));
+            return match outcome {
+                "approved" => decision(true, "The user approved this on their phone."),
+                "denied" => decision(false, "The user denied this on their phone."),
+                _ => decision(
+                    false,
+                    "The user did not answer within 10 minutes, so it was denied. Ask them in chat before trying again.",
+                ),
+            };
+        }
+        rec["decision"] = json!("allowed");
+        self.audit(rec);
+        json!({})
+    }
+
+    /// PostToolUseFailure: the outcome goes into the audit log; repeated failures reach the dispatcher.
+    pub fn failed(&self, worker: Option<&str>, inp: &Value, tool_use_id: Option<&str>) -> Value {
+        let error = match &inp["error"] {
+            Value::String(s) => s.clone(),
+            Value::Null => String::new(),
+            v => v.to_string(),
+        };
+        let error = crate::util::chars(&error, 300);
+        self.audit(json!({"event": "failed", "id": tool_use_id, "error": error}));
+        if let Some(w) = worker {
+            let tool = inp["tool_name"].as_str().unwrap_or("?").to_string();
+            let n = {
+                let mut fails = self.fails.lock().unwrap();
+                let n = fails.entry((w.to_string(), tool.clone())).or_default();
+                *n += 1;
+                *n
+            };
+            if n == REPEATS {
+                let last = crate::util::chars(&error.split_whitespace().collect::<Vec<_>>().join(" "), 200);
+                self.tell(worker, &format!("{tool} failed {n} times in a row, last: {last}"), false, None);
+            }
+        }
+        json!({})
+    }
+
+    /// PostToolUse (shikigami only): a success ends a run of failures.
+    pub fn done(&self, worker: Option<&str>, inp: &Value) -> Value {
+        let tool = inp["tool_name"].as_str().unwrap_or("?").to_string();
+        self.fails.lock().unwrap().remove(&(worker.unwrap_or("").to_string(), tool));
+        json!({})
+    }
 }

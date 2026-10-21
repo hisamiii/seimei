@@ -1,0 +1,619 @@
+{
+ "about": "seimei's own MCP server as Claude Code sees it (no plugins): the initialize result and tools/list. The descriptions are prompt text. tests/unit/toolcases.py holds the Python server to this; the Rust server serves this file.",
+ "initialize": {
+  "capabilities": {
+   "tools": {
+    "listChanged": false
+   }
+  },
+  "protocolVersion": "2025-06-18",
+  "serverInfo": {
+   "name": "seimei",
+   "version": "1.0.0"
+  }
+ },
+ "tools": [
+  {
+   "_meta": {
+    "anthropic/alwaysLoad": true
+   },
+   "description": "Start a shikigami: a worker Claude Code session that works on a task on its own and reports back. Every call picks name, task, cwd, model, effort and context for this task: there are no defaults. Returns at once; the report arrives later. It goes on the task board as a new task (or as the task_id you name), whose state then follows it.",
+   "inputSchema": {
+    "properties": {
+     "name": {
+      "type": "string",
+      "description": "short lowercase name, like npu-dma or readme-fix"
+     },
+     "task": {
+      "type": "string",
+      "description": "the full instructions; the worker sees nothing else"
+     },
+     "cwd": {
+      "type": "string",
+      "description": "the project folder the task is about; ~ only when the task is about home"
+     },
+     "model": {
+      "type": "string",
+      "enum": [
+       "opus",
+       "sonnet",
+       "haiku"
+      ],
+      "description": "opus for real work, sonnet for routine jobs, haiku for quick lookups"
+     },
+     "effort": {
+      "type": "string",
+      "enum": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ],
+      "description": "reasoning effort, picked per task: low (or the haiku model) for lookups; medium for mockups, CSS and config; high for research, kernels and risky or delicate work; xhigh or max only for escalations or tasks seimei judges very important, never for long iterative work"
+     },
+     "context": {
+      "type": "string",
+      "enum": [
+       "256k",
+       "400k",
+       "1m"
+      ],
+      "description": "where it compacts: 256k or 400k for most tasks; 1m only when the task really needs it"
+     },
+     "subagent_model": {
+      "type": "string",
+      "enum": [
+       "haiku",
+       "sonnet",
+       "opus"
+      ],
+      "default": "haiku",
+      "description": "model for the shikigami's own subagents; haiku unless a rare case needs more"
+     },
+     "confirmed": {
+      "type": "boolean",
+      "description": "set only after the user OKed more than 5 running workers"
+     },
+     "task_id": {
+      "type": "string",
+      "description": "a board item this works on (#58 or t3); without it the board gets a new task (with the task's #NN when it starts with one)"
+     },
+     "project": {
+      "type": "string",
+      "description": "the board project for a new task; default: from cwd"
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "default",
+       "acceptEdits",
+       "plan",
+       "auto",
+       "dontAsk",
+       "bypassPermissions"
+      ],
+      "description": "its permission mode; default: the one set in config. Only the same or stricter (plan first, or only what's allowed)."
+     }
+    },
+    "required": [
+     "name",
+     "task",
+     "cwd",
+     "model",
+     "effort",
+     "context"
+    ],
+    "type": "object"
+   },
+   "name": "summon"
+  },
+  {
+   "_meta": {
+    "anthropic/alwaysLoad": true
+   },
+   "description": "List shikigami from the last day with their state and one-line summary. Ones the user archived (or that ended over 12 hours ago) are left out; archived: true lists only those, from any time. metrics: true gives every shikigami's (or the named ones') task metrics instead: model / effort / context, folder, tokens and $ at API prices, wall time, end state, asks, follow-ups after its first done, and reopened.",
+   "inputSchema": {
+    "properties": {
+     "archived": {
+      "type": "boolean"
+     },
+     "metrics": {
+      "type": "boolean"
+     },
+     "worker": {
+      "type": "string",
+      "description": "with metrics: one id or name"
+     }
+    },
+    "type": "object"
+   },
+   "name": "workers"
+  },
+  {
+   "_meta": {
+    "anthropic/alwaysLoad": true
+   },
+   "description": "Read a shikigami's recent messages and tool calls.",
+   "inputSchema": {
+    "properties": {
+     "worker": {
+      "type": "string",
+      "description": "id or name"
+     },
+     "count": {
+      "type": "integer",
+      "default": 30
+     }
+    },
+    "required": [
+     "worker"
+    ],
+    "type": "object"
+   },
+   "name": "peek"
+  },
+  {
+   "_meta": {
+    "anthropic/alwaysLoad": true
+   },
+   "description": "Send a shikigami a message: an answer to its question, new instructions, or 'continue'. It folds into a running turn or wakes a finished worker with its full context.",
+   "inputSchema": {
+    "properties": {
+     "worker": {
+      "type": "string",
+      "description": "id or name"
+     },
+     "text": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "worker",
+     "text"
+    ],
+    "type": "object"
+   },
+   "name": "message"
+  },
+  {
+   "_meta": {
+    "anthropic/alwaysLoad": true
+   },
+   "description": "Stop a running shikigami. Its session is kept; a later message resumes it.",
+   "inputSchema": {
+    "properties": {
+     "worker": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "worker"
+    ],
+    "type": "object"
+   },
+   "name": "stop"
+  },
+  {
+   "_meta": {
+    "anthropic/alwaysLoad": true
+   },
+   "description": "Change a shikigami's effort and/or model without restarting its task: the model from its next request, the effort from its next turn (a running turn finishes first). A new effort keeps the prompt cache; a new model rebuilds it once. Its permission mode is the user's to change, not yours.",
+   "inputSchema": {
+    "properties": {
+     "worker": {
+      "type": "string",
+      "description": "its id or name"
+     },
+     "effort": {
+      "type": "string",
+      "enum": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     },
+     "model": {
+      "type": "string",
+      "enum": [
+       "opus",
+       "sonnet",
+       "haiku"
+      ]
+     }
+    },
+    "required": [
+     "worker"
+    ],
+    "type": "object"
+   },
+   "name": "tune"
+  },
+  {
+   "_meta": {
+    "anthropic/alwaysLoad": true
+   },
+   "description": "Show the user an image inline in the chat: a screenshot, render or chart saved as PNG, JPEG, WebP or GIF (not SVG).",
+   "inputSchema": {
+    "properties": {
+     "path": {
+      "type": "string",
+      "description": "absolute path of the image file"
+     },
+     "caption": {
+      "type": "string",
+      "description": "optional one-line caption"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "type": "object"
+   },
+   "name": "show_image"
+  },
+  {
+   "description": "Hand the user a file to download on their phone or page: any type (PDF, archive, log, audio...), up to 50 MB. It shows in the chat as a download chip. For pictures to look at, use show_image.",
+   "inputSchema": {
+    "properties": {
+     "path": {
+      "type": "string",
+      "description": "absolute path of the file"
+     },
+     "caption": {
+      "type": "string",
+      "description": "optional one-line caption"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "type": "object"
+   },
+   "name": "send_file"
+  },
+  {
+   "_meta": {
+    "anthropic/alwaysLoad": true
+   },
+   "description": "List every running Claude Code session on the server: your alias for it, name, status (idle, busy, waiting with what for, shell, parked), kind, folder and last activity. Includes the user's own sessions. Aliased ones show their SendMessage address, which holds through renames.",
+   "inputSchema": {
+    "properties": {},
+    "required": [],
+    "type": "object"
+   },
+   "name": "sessions"
+  },
+  {
+   "_meta": {
+    "anthropic/alwaysLoad": true
+   },
+   "description": "Read a running session: its last user messages and assistant texts, an open AskUserQuestion with its options (SendMessage does not reach a session sitting in one), and tool calls still running. Session by name, pid or session id.",
+   "inputSchema": {
+    "properties": {
+     "session": {
+      "type": "string"
+     },
+     "count": {
+      "type": "integer",
+      "default": 3
+     }
+    },
+    "required": [
+     "session"
+    ],
+    "type": "object"
+   },
+   "name": "session_peek"
+  },
+  {
+   "_meta": {
+    "anthropic/alwaysLoad": true
+   },
+   "description": "Your own name for a session (like dev or asr) that holds when it is renamed: sessions, session_peek and adopt take it, and sessions shows its SendMessage address. session: its current name, pid or alias; leave alias empty to remove it. Without arguments: the list.",
+   "inputSchema": {
+    "properties": {
+     "alias": {
+      "type": "string"
+     },
+     "session": {
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "name": "alias"
+  },
+  {
+   "_meta": {
+    "anthropic/alwaysLoad": true
+   },
+   "description": "The account's plan usage: the 5-hour and weekly windows (share used, reset time), today's tokens per seimei session, and at API prices: what this and earlier 5-hour windows cost and the price of 1% of the window in each, and per session (yours, shikigami, the user's) this window and today: $, calls, output / cache read / cache write / input tokens and average context per call.",
+   "inputSchema": {
+    "properties": {},
+    "required": [],
+    "type": "object"
+   },
+   "name": "usage"
+  },
+  {
+   "description": "Adopt one of the user's interactive or background sessions as a shikigami: its Claude Code ends (a background one through claude stop) and the same conversation goes on as a shikigami, reporting like any other. when: idle (default, at its next idle) or now (interrupts it first). Optional name (default: the session's), model, effort and context (default: the session's model and effort, the smallest of 256k/400k/1m above what it holds). close_window closes its terminal afterwards. It goes on the task board like a summoned one: a new task (project from its folder unless given) or the task_id you name. The user approves first; you hear what ended with it.",
+   "inputSchema": {
+    "properties": {
+     "session": {
+      "type": "string",
+      "description": "the session's name, pid, or background job id"
+     },
+     "when": {
+      "type": "string",
+      "enum": [
+       "idle",
+       "now"
+      ],
+      "default": "idle"
+     },
+     "name": {
+      "type": "string"
+     },
+     "model": {
+      "type": "string"
+     },
+     "effort": {
+      "type": "string",
+      "enum": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     },
+     "context": {
+      "type": "string",
+      "enum": [
+       "256k",
+       "400k",
+       "1m"
+      ]
+     },
+     "close_window": {
+      "type": "boolean",
+      "default": false
+     },
+     "task_id": {
+      "type": "string",
+      "description": "a board item it works on (#58 or t3)"
+     },
+     "project": {
+      "type": "string",
+      "description": "the board project for a new task"
+     }
+    },
+    "required": [
+     "session"
+    ],
+    "type": "object"
+   },
+   "name": "adopt"
+  },
+  {
+   "_meta": {
+    "anthropic/alwaysLoad": true
+   },
+   "description": "Give a shikigami to the user for good: it stops (if it works) and goes on as one of their own sessions, same conversation, in a terminal window on the server under its name. It no longer reports, you cannot message it, and it is not resumed; its board task becomes the user's. The user approves first. Adopting that session later (adopt, or their Hand to seimei tap) makes it the same shikigami again, with its history. For a short look on the server that stays yours, the user has Open on server instead.",
+   "inputSchema": {
+    "properties": {
+     "worker": {
+      "type": "string",
+      "description": "the shikigami's id or name"
+     }
+    },
+    "required": [
+     "worker"
+    ],
+    "type": "object"
+   },
+   "name": "release"
+  },
+  {
+   "_meta": {
+    "anthropic/alwaysLoad": true
+   },
+   "description": "Push a notification to the user's phone. Nothing else pushes on its own except approval cards: use it when the user asked to hear about something (an APK is up, a run finished), when a shikigami or session needs them soon, or with reply=true when they asked you something and left the app (the tap opens the chat at your latest message; it skips a phone already showing the chat). level: silent (no sound), normal (default), urgent (sound, high priority; rare emergencies only). key: pings with the same key update one notification instead of stacking (e.g. 'build', 'render-7'). Pings without a key while the user is away show together. Check presence first when unsure.",
+   "inputSchema": {
+    "properties": {
+     "title": {
+      "type": "string",
+      "description": "short: what happened"
+     },
+     "body": {
+      "type": "string",
+      "description": "one or two sentences"
+     },
+     "level": {
+      "type": "string",
+      "enum": [
+       "silent",
+       "normal",
+       "urgent"
+      ],
+      "default": "normal"
+     },
+     "key": {
+      "type": "string",
+      "description": "collapse key for one topic"
+     },
+     "reply": {
+      "type": "boolean",
+      "description": "reply ready: the tap opens the chat at your message"
+     }
+    },
+    "required": [
+     "title"
+    ],
+    "type": "object"
+   },
+   "name": "notify"
+  },
+  {
+   "_meta": {
+    "anthropic/alwaysLoad": true
+   },
+   "description": "Where the user is in the app on each phone: open or not, which view (chat, agents, usage, page = an agent's page), and when they last left.",
+   "inputSchema": {
+    "properties": {},
+    "required": [],
+    "type": "object"
+   },
+   "name": "presence"
+  },
+  {
+   "_meta": {
+    "anthropic/alwaysLoad": true
+   },
+   "description": "Watch rules: ping the user when something happens, without you waiting for it. action add (trigger, target, title, body, level, key, reply, hours, repeat), list, or remove (id). Triggers: shikigami_done: a shikigami (target: its name, or * for any) finishes its task; shikigami_failed: a shikigami fails; shikigami_asks: a shikigami asks a question; shikigami_ends: a shikigami ends in any way: done, failed, stopped, interrupted; session_asks: one of the user's sessions (target: its name, or *) asks a question or waits on a prompt; session_idle: a session finishes its turn (busy -> idle). {name} and {detail} in title/body are filled in. A rule fires once unless repeat, expires after hours (default 24, max 168), and you hear when it fires or expires.",
+   "inputSchema": {
+    "properties": {
+     "action": {
+      "type": "string",
+      "enum": [
+       "add",
+       "list",
+       "remove"
+      ]
+     },
+     "trigger": {
+      "type": "string",
+      "enum": [
+       "shikigami_done",
+       "shikigami_failed",
+       "shikigami_asks",
+       "shikigami_ends",
+       "session_asks",
+       "session_idle"
+      ]
+     },
+     "target": {
+      "type": "string",
+      "description": "shikigami or session name, * for any"
+     },
+     "title": {
+      "type": "string"
+     },
+     "body": {
+      "type": "string"
+     },
+     "level": {
+      "type": "string",
+      "enum": [
+       "silent",
+       "normal",
+       "urgent"
+      ],
+      "default": "normal"
+     },
+     "key": {
+      "type": "string",
+      "description": "collapse key"
+     },
+     "reply": {
+      "type": "boolean",
+      "description": "the tap opens the chat at your latest message"
+     },
+     "hours": {
+      "type": "number",
+      "default": 24
+     },
+     "repeat": {
+      "type": "boolean",
+      "default": false
+     },
+     "id": {
+      "type": "string",
+      "description": "for remove"
+     }
+    },
+    "required": [
+     "action"
+    ],
+    "type": "object"
+   },
+   "name": "watch"
+  },
+  {
+   "_meta": {
+    "anthropic/alwaysLoad": true
+   },
+   "description": "The user's task board (the Tasks tab next to Chat | Trajectory), yours to keep current. summon and adopt file a task for each new shikigami by themselves (or link the one you name), and a linked task follows its shikigami: running while it works, asks while it waits on a question, review once it reports (finished or failed), paused when stopped or interrupted. A shikigami moves along its own queue itself: it starts an item (running; its previous one goes back to open unless shipped) and ships it (review, and it stays there). You mark it done after checking the report; the shikigami's own todo list shows live as the task's steps. The user's own to-dos are owner 'you' (they tick those off themselves). Each owner's items form a queue: the first open one shows as next. action: list | add | update | done | remove | order | project. add: title, project, owner (a shikigami's name, 'seimei' or 'you'), optional state (open, running, asks, review, paused, done; default open), worker (a shikigami id: tapping the task opens its page; its state then follows it) and numbered (default true: the next #NN; false for the user's to-dos and small items); it goes to the end of its owner's queue. update: id plus any of title, project, owner, state, worker. done: id. remove: id (drops an item that will not be done; an empty project goes too). order: ids, put first in their owners' queues in that order. project: name plus paused (true shuts it on the board) and/or color (#rrggbb, empty for the default tint).",
+   "inputSchema": {
+    "properties": {
+     "action": {
+      "type": "string",
+      "enum": [
+       "list",
+       "add",
+       "update",
+       "done",
+       "remove",
+       "order",
+       "project"
+      ]
+     },
+     "id": {
+      "type": "string",
+      "description": "#55, 55 or t3"
+     },
+     "ids": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "order: the new front of the queue"
+     },
+     "title": {
+      "type": "string"
+     },
+     "project": {
+      "type": "string"
+     },
+     "owner": {
+      "type": "string"
+     },
+     "state": {
+      "type": "string",
+      "enum": [
+       "open",
+       "running",
+       "asks",
+       "review",
+       "paused",
+       "done"
+      ]
+     },
+     "worker": {
+      "type": "string"
+     },
+     "numbered": {
+      "type": "boolean"
+     },
+     "name": {
+      "type": "string"
+     },
+     "paused": {
+      "type": "boolean"
+     },
+     "color": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "action"
+    ],
+    "type": "object"
+   },
+   "name": "tasks"
+  }
+ ]
+}

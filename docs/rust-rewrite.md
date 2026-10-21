@@ -220,6 +220,7 @@ Python stays installed for a week as the way back (same state files).
 - **Push.** The rules, FCM and Web Push are Rust integration tests against local fakes (`crates/server/tests/push.rs`).
 - **Read-only views.** The Agents and Usage tabs read the same state on Rust: workers listing and history, metrics, cost at API prices, the usage snapshot and the audit log, with shared cases in `tests/cases/views.json`. `tnoscreen` and `tmetrics` pass on it.
 - **Task board.** The board, the tasks tool and how a task follows its shikigami run in Rust over `tests/cases/tasks.json`; `ttasks` passes on it.
+- **Dispatcher.** The session on the proto crate with its turn routing (lanes, `re:` anchors, the held reply and its bounce), notes, idle compaction and reconnects; the guard hooks and audit, approval and permission cards, usage, and seimei's tools except the shikigami ones and watch. `/api/send`, `/api/interrupt` and `/api/approvals/{aid}` are in. `tests/cases/markers.json` and `tests/cases/tools.json` hold both sides; scripted chats give the same event log on both servers. `tu1`, `tchatlane` and `ttasks` pass; the rest of `ttraj`, `treply` and `tperm64` waits for the shikigami (P3d).
 - **Waiting for the rest of phase 3.** Until then the Rust server reports the dispatcher as disconnected and lists none of the user's sessions.
 
 **Size:** today's 7.8k lines of core Python and 4.3k of plugins should come to roughly 12 to 15k lines of Rust.

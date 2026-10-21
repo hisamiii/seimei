@@ -122,6 +122,12 @@ impl EventLog {
         open.len()
     }
 
+    /// The event with this id.
+    pub fn get(&self, id: i64) -> Option<Event> {
+        let g = self.inner.lock().unwrap();
+        usize::try_from(id - 1).ok().and_then(|i| g.events.get(i).cloned())
+    }
+
     /// Ids are dense and start at 1, so the id doubles as an index.
     pub fn after(&self, last: i64) -> Vec<Event> {
         let g = self.inner.lock().unwrap();

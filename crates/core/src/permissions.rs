@@ -2,7 +2,12 @@
 //! the control protocol's shape and go back as Claude Code sent them; tests/cases/permissions.json holds this and
 //! seimei/permissions.py to the same answers.
 
+use std::time::Duration;
+
+use seimei_proto::{Permission, PermissionRequest};
 use serde_json::{Map, Value, json};
+
+use crate::approvals::Approvals;
 
 pub const MODES: [&str; 6] = ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"];
 /// seimei's own card counts as denied after this; a shikigami's waits, with one reminder push after REMIND.
@@ -160,4 +165,148 @@ pub fn options(tool: &str, suggestions: &[Value], ceiling: &str) -> (Vec<Value>,
     }
     opts.push(json!({"id": "deny", "label": "Deny", "kind": "deny"}));
     (opts, updates)
+}
+
+fn diff(path: &str, old: &str, new: &str) -> String {
+    let text = similar::TextDiff::from_lines(old, new);
+    let mut out = vec![];
+    // Hunk headers mean nothing on a card: the first goes, later ones become a gap.
+    for (i, hunk) in text.unified_diff().context_radius(2).iter_hunks().enumerate() {
+        if i > 0 {
+            out.push("…".to_string());
+        }
+        for change in hunk.iter_changes() {
+            let sign = match change.tag() {
+                similar::ChangeTag::Delete => '-',
+                similar::ChangeTag::Insert => '+',
+                similar::ChangeTag::Equal => ' ',
+            };
+            out.push(format!("{sign}{}", change.value().trim_end_matches('\n')));
+        }
+    }
+    format!("{path}\n\n{}", out.join("\n"))
+}
+
+/// The card's action, title words and detail for a tool call.
+pub fn describe(tool: &str, inp: &Value, reason: Option<&str>) -> Value {
+    let s = |k: &str| match &inp[k] {
+        Value::String(v) => v.clone(),
+        Value::Null => String::new(),
+        v => v.to_string(),
+    };
+    let path = ["file_path", "notebook_path", "path"].iter().map(|k| s(k)).find(|p| !p.is_empty()).unwrap_or_default();
+    let card =
+        |action: &str, target: &str, detail: String| json!({"action": action, "target": target, "detail": detail});
+    let pretty = || serde_json::to_string_pretty(inp).unwrap_or_default();
+    match tool {
+        "Bash" => card("command", "run a command", s("command")),
+        "Write" => card("edit", "write a file", format!("{path}\n\n{}", s("content"))),
+        "Edit" => card("edit", "edit a file", diff(&path, &s("old_string"), &s("new_string"))),
+        "MultiEdit" => {
+            let parts: Vec<String> = (inp["edits"].as_array().into_iter().flatten())
+                .map(|e| {
+                    let text = |k: &str| e[k].as_str().unwrap_or("").to_string();
+                    diff("", &text("old_string"), &text("new_string")).trim().to_string()
+                })
+                .collect();
+            card("edit", "edit a file", format!("{path}\n\n{}", parts.join("\n\n")))
+        }
+        "Read" | "Glob" | "Grep" => {
+            let what = if path.is_empty() { s("pattern") } else { path };
+            let outside = reason.is_some_and(|r| r.contains("outside"));
+            card("read", if outside { "read outside its folder" } else { "read files" }, what)
+        }
+        "WebFetch" => card("web", "fetch a web page", s("url")),
+        "WebSearch" => card("web", "search the web", s("query")),
+        "ExitPlanMode" => card("plan", "start on its plan", s("plan")),
+        _ => match tool.strip_prefix("mcp__") {
+            Some(rest) => {
+                let (server, name) = rest.split_once("__").unwrap_or((rest, ""));
+                card("tool", format!("use {server} {name}").trim(), pretty())
+            }
+            None => card("tool", &format!("use {tool}"), pretty()),
+        },
+    }
+}
+
+/// What came back from a permission card, and the mode the user picked on it, if any.
+pub struct Decided {
+    pub permission: Permission,
+    pub mode: Option<String>,
+}
+
+fn deny(message: &str) -> Decided {
+    Decided { permission: Permission::Deny { message: message.into(), interrupt: false }, mode: None }
+}
+
+/// Claude Code's permission prompt as a card. worker: the shikigami's id (None for seimei, whose card counts as denied
+/// after DISPATCHER_WAIT; a shikigami's waits, with one reminder push). ceiling: the mode the plan card may go to;
+/// mode: the session's own mode now. waiting: told what the card is about while it is open, then None.
+pub async fn can_use(
+    approvals: &Approvals,
+    who: &str,
+    worker: Option<&str>,
+    req: &PermissionRequest,
+    ceiling: &str,
+    mode: &str,
+    waiting: Option<&(dyn Fn(Option<String>) + Send + Sync)>,
+) -> Decided {
+    let tool = req.tool_name.as_str();
+    if tool == "AskUserQuestion" {
+        return deny("Ask the user through seimei instead (your ask tool, or the chat).");
+    }
+    if mode == "bypassPermissions" {
+        // Claude Code still asks in bypass for its own safety checks ("This shell -c script runs rm and could not be
+        // checked"). Bypass stays card-free and blocks them.
+        let why = req.decision_reason.as_deref().unwrap_or("a safety check");
+        return deny(&format!(
+            "Claude Code blocked this even in bypass mode: {why}. Nobody was asked. Write the command so it can be \
+             checked (for example, no rm inside a shell -c script)."
+        ));
+    }
+    let mut card = describe(tool, &req.input, req.decision_reason.as_deref());
+    let (opts, updates) = options(tool, &req.suggestions, ceiling);
+    let detail = card["detail"].as_str().unwrap_or("").to_string();
+    let target = card["target"].as_str().unwrap_or("").to_string();
+    card["tool"] = json!(tool);
+    card["options"] = json!(opts);
+    if let Some(d) = req.description.as_deref().filter(|d| !d.is_empty() && *d != detail) {
+        card["sub"] = json!(d);
+    }
+    if let Some(r) = &req.decision_reason {
+        card["reason"] = json!(r);
+    }
+    if req.agent_id.is_some() {
+        card["subagent"] = json!(true);
+    }
+    if let Some(w) = waiting {
+        w(Some(format!("wants to {target}: {}", crate::util::chars(&detail, 200))));
+    }
+    let (wait, remind) = match worker {
+        Some(_) => (None, Some(Duration::from_secs(REMIND))),
+        None => (Some(Duration::from_secs(DISPATCHER_WAIT)), None),
+    };
+    let answer = approvals.card(card, who, worker, wait, remind).await;
+    if let Some(w) = waiting {
+        w(None);
+    }
+    let note = answer.note.as_deref().map(|n| format!(" They said: {n}")).unwrap_or_default();
+    match answer.outcome {
+        "approved" => {
+            let chosen = updates.get(answer.option.as_deref().unwrap_or("once")).and_then(Value::as_array).cloned();
+            let mode = (chosen.iter().flatten())
+                .find(|u| u["type"] == "setMode")
+                .and_then(|u| u["mode"].as_str().map(String::from));
+            let updated_permissions = chosen.filter(|c| !c.is_empty());
+            Decided { permission: Permission::Allow { updated_input: None, updated_permissions }, mode }
+        }
+        "expired" => {
+            deny("The user did not answer within 30 minutes, so it was denied. Ask them in chat before trying again.")
+        }
+        _ if answer.option.as_deref() == Some("chat") => deny(
+            "The user wrote in the chat instead of answering the card, so it was denied. Their message follows; go by it.",
+        ),
+        _ if tool == "ExitPlanMode" => deny(&format!("The user wants you to keep planning.{note}")),
+        _ => deny(&format!("The user denied this on their phone.{note}")),
+    }
 }
