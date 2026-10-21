@@ -27,7 +27,7 @@ from claude_agent_sdk import (
     tool,
 )
 
-from . import sessions
+from . import deploys, sessions
 from .aliases import Aliases
 from .archive import Archive
 from .events import EventLog
@@ -434,7 +434,10 @@ class Pool:
     async def _resume(self, w: Worker) -> bool:
         try:
             if w.rec.get("started"):
-                await w.send(RESUME)
+                # A deploy ends with this restart: whoever started it hears how it went.
+                await deploys.settled(self.path.parent)
+                said = deploys.note(self.path.parent)
+                await w.send(f"{RESUME}. {said}" if said else RESUME)
             else:
                 await w.send(w.rec.get("task", ""), shown="(its task again: seimei restarted before it began)")
             return True

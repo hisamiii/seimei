@@ -25,7 +25,7 @@ from .music import make_music_tools
 from .cast import Hub
 from .cost import Cost
 from .uploads import Uploads
-from . import discord as discord_link
+from . import deploys, discord as discord_link
 from .browser import Browser, make_browser_tools, socket_path
 from .push import FIREBASE, Fcm, Push, make_push_tools
 from .watches import Watches, make_watch_tools
@@ -164,12 +164,20 @@ def main():
     watcher = Watcher(events, pool.own_sessions, pool.notify, pool.archive)
     app = make_app(events, dispatcher, pool, files, approvals, guard, watcher, desk, auth, origins, state / "app", cost, push, uploads, cast)
 
+    async def deploy_note():
+        """seimei hears how the deploy that restarted it went (only one that just ended)."""
+        await deploys.settled(state)
+        d = deploys.last(state)
+        if d and d.get("state") != "running" and time.time() - float(d.get("finished") or 0) < 120:
+            dispatcher.note(deploys.note(state), key="deploy")
+
     async def start(app):
         await cast.cleanup()
         approvals.startup()
         events.close_open_tools()
         pool.startup()
         adopter.startup()
+        app["deploy_note"] = asyncio.create_task(deploy_note())
         app["dispatcher"] = asyncio.create_task(dispatcher.run())
         app["watcher"] = asyncio.create_task(watcher.run())
         app["archive"] = asyncio.create_task(pool.sweep())
