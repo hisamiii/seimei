@@ -48,7 +48,7 @@ class EventLog:
             self.to_chat()
         if kind in TURN or (kind == "worker" and what == "summoned"):
             # The answered message only matters on the reply text.
-            return {k: v for k, v in self.turn.items() if k != "re" or kind == "assistant"}
+            return {k: v for k, v in self.turn.items() if k != "re" or (kind == "assistant" and "re" not in ev)}
         if kind == "worker" and what not in ("asking", "replied"):
             return {"lane": "t"}
         if kind == "system" or (kind == "rate_limit" and ev.get("status") != "rejected"):

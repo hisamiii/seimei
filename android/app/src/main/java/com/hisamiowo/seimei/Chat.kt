@@ -228,7 +228,10 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
             val anchor = when {
                 type == "user" && ev.str("quote").isNotEmpty() -> Anchor(anchorText(ev.str("quote")), "e${ev.optLong("quote_id")}", "t")
                 // A reply far from what it answers says which message that was.
-                type == "assistant" && re > 0 && (re != lastUser || between) && said.containsKey(re) -> Anchor(anchorText(said[re]!!), "e$re", "c")
+                // re_pin: seimei named the message (re:), so the chip shows even right after it.
+                type == "assistant" && re > 0 && (ev.optBoolean("re_pin") || re != lastUser || between)
+                    && (said.containsKey(re) || ev.str("re_text").isNotEmpty()) ->
+                    Anchor(anchorText(said[re] ?: ev.str("re_text")), "e$re", "c")
                 else -> null
             }
             if (type == "user") {

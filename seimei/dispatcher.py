@@ -32,8 +32,12 @@ log = logging.getLogger("seimei")
 # style.md is appended to every message the dispatcher gets, for the model only; past this it is cut.
 STYLE_MAX = 500
 # A reply that starts with one of these goes to that lane, whatever started the turn: chat: moves the rest of an
-# event turn to the chat, trajectory: moves that one reply of the user's turn to the trajectory.
+# event turn to the chat, trajectory: moves that one reply of the user's turn to the trajectory. A first line
+# "re: <words from one of the user's messages>" anchors the reply to that message. They combine, in any order.
 MARKERS = ("chat:", "trajectory:")
+RE = "re:"
+RE_LINE_MAX = 200  # a re: line longer than this, or one that never ends, is text
+RE_SEARCH = 50  # the user's messages a re: quote is looked for in
 OFF_TOOLS = ["Agent", "Task", "Workflow", "NotebookEdit", "CronCreate", "CronDelete", "CronList", "RemoteTrigger",
              "PushNotification", "DesignSync", "EnterWorktree", "ExitWorktree", "ScheduleWakeup", "LSP"]
 
@@ -46,7 +50,10 @@ They talk to you through a web page, usually from their phone.
 - Replies are read on a phone: lead with the answer, keep it short, avoid wide tables.
 - Phone notifications are yours to decide: only approval cards push on their own. Use notify (level, collapse key, reply=true when they asked something and left the app), presence to see where they are, and watch rules to ping them when a shikigami or session finishes or asks, or the GPU queue frees.
 - Messages starting with [seimei] are events from the server, not typed by the user.
-- What you write in a turn a [seimei] line started shows in the user's Trajectory tab, not the chat; they see a one-line mention and a badge. A show_image or send_file in such a turn moves the rest of it to the chat. So does starting a reply with "chat:" (it is removed): use it when the user needs to see it (a question or decision for them, a result they asked for). Routine event handling stays unmarked. The mirror: in a turn the user started, a reply starting with "trajectory:" goes to the Trajectory instead (the chat gets a one-line mention). Unmarked, user turns go to the chat. Ping with notify when it is urgent.
+- What you write in a turn a [seimei] line started shows in the user's Trajectory tab, not the chat; they see a one-line mention and a badge. A show_image or send_file in such a turn moves the rest of it to the chat. Unmarked, user turns go to the chat. Ping with notify when it is urgent. Three markers at the start of a reply steer it; they are removed and combine in any order:
+  - "chat:" sends the reply (and the rest of an event turn) to the chat: a question or decision for the user, a result they asked for.
+  - "trajectory:" sends that reply of a user turn to the Trajectory; the chat gets a one-line mention.
+  - A first line "re: <5-60 words copied exactly from one of the user's recent messages>" shows the reply as an answer to that message.
 
 ## Shikigami
 Delegate real work (coding, research, anything longer than a few tool calls) to shikigami: worker sessions you start with mcp__seimei__summon.
@@ -96,8 +103,30 @@ Read what the request needs; don't page through history. There is no access to t
 """
 
 
-def marked(text: str) -> str | None:
-    return next((m for m in MARKERS if text.startswith(m)), None)
+def head(text: str, final: bool = True) -> tuple[list[str], str | None, str] | None:
+    """The markers a reply starts with: (lane markers, re: quote, the text after them). While streaming (final
+    False) None means the start could still turn out to be a marker."""
+    lanes, quote, rest = [], None, text
+    while True:
+        lead = rest.lstrip()
+        if m := next((m for m in MARKERS if lead.startswith(m)), None):
+            lanes.append(m)
+            rest = lead[len(m):]
+            continue
+        if quote is None and lead[:len(RE)].lower() == RE:
+            nl = lead.find("\n")
+            if 0 <= nl <= RE_LINE_MAX:
+                quote, rest = lead[len(RE):nl].strip(), lead[nl + 1:]
+                continue
+            if nl < 0 and not final and len(lead) <= RE_LINE_MAX:
+                return None
+        elif not final and (not lead or any(len(lead) < len(m) and m.startswith(lead.lower()) for m in MARKERS + (RE,))):
+            return None
+        return lanes, quote, lead if lanes or quote is not None else rest
+
+
+def flat(text: str) -> str:
+    return " ".join(text.lower().split())
 
 
 def why(text: str) -> str:
@@ -313,35 +342,32 @@ class Dispatcher:
                 if self.head is not None:
                     # Hold the start of a reply until it shows whether it is marked.
                     self.head += text
-                    lead = self.head.lstrip()
-                    if any(len(lead) < len(m) and m.startswith(lead) for m in MARKERS):
+                    if not (got := head(self.head, final=False)):
                         return
-                    text, self.head = self.head, None
-                    if m := marked(lead):
-                        text = lead[len(m):].lstrip()
-                        if m == "chat:":
-                            self.events.to_chat()
-                        elif self.events.turn.get("lane") != "t":
-                            self.block_lane = "t"
-                if text:
-                    lane = self.block_lane or self.events.turn.get("lane", "c")
-                    self.events.flash({"type": "delta", "text": text, "lane": lane})
+                    text = self._release(got)
+                self._delta(text)
+            elif kind == "content_block_stop" and self.head:
+                # A reply that ended while it still looked like a marker: it was text after all.
+                self._delta(self._release(head(self.head)))
             elif kind == "content_block_start" and ev["content_block"].get("type") == "thinking":
                 self.events.flash({"type": "thinking"})
         elif isinstance(msg, AssistantMessage):
+            self.head = None
             if msg.parent_tool_use_id:
                 return
             for b in msg.content:
                 if isinstance(b, TextBlock) and (text := b.text.strip()):
+                    lanes, quote, text = head(text)
                     where = {}
-                    if m := marked(text):
-                        text = text[len(m):].strip()
+                    for m in lanes:
                         if m == "chat:":
                             self.events.to_chat()
                         else:
                             where = self._to_trajectory()
+                    if quote is not None and (to := self._anchor(quote)):
+                        where |= {"re": to["id"], "re_text": " ".join(to.get("text", "").split())[:300], "re_pin": True}
                     self.block_lane = None
-                    if text:
+                    if text := text.strip():
                         self.events.add({"type": "assistant", "text": text, **where})
                 elif isinstance(b, ToolUseBlock):
                     self.events.add({"type": "tool", "tool_id": b.id, "name": b.name, "summary": summarize(b.input)})
@@ -380,6 +406,31 @@ class Dispatcher:
             self.events.turn = {"lane": "c", "re": users[-1]}
         elif not self.events.turn:
             self.events.turn = {"lane": "t", "turn": self.events.last_id + 1, "why": took[0][1] if took else ""}
+
+    def _release(self, got: tuple) -> str:
+        """A streaming reply's start is known: act on its lane markers and return the text to show."""
+        lanes, _, text = got
+        self.head = None
+        for m in lanes:
+            if m == "chat:":
+                self.events.to_chat()
+            elif self.events.turn.get("lane") != "t":
+                self.block_lane = "t"
+        return text.lstrip() if lanes or got[1] is not None else text
+
+    def _delta(self, text: str):
+        if text:
+            lane = self.block_lane or self.events.turn.get("lane", "c")
+            self.events.flash({"type": "delta", "text": text, "lane": lane})
+
+    def _anchor(self, quote: str) -> dict | None:
+        """The user's message a re: quote comes from: the newest of their last messages holding it."""
+        q = flat(quote.strip("\"'“”‘’«» ").removesuffix("…").removesuffix("...").strip("\"'“”‘’ "))
+        users = [e for e in self.events.events[-3000:] if e["type"] == "user"][-RE_SEARCH:]
+        hit = next((e for e in reversed(users) if q and q in flat(e.get("text") or "")), None) if len(q) >= 3 else None
+        if not hit:
+            log.info("re: %r matches none of the user's last %d messages; the reply keeps its default anchor", quote[:80], RE_SEARCH)
+        return hit
 
     def _to_trajectory(self) -> dict:
         """Where a reply marked trajectory: goes in the user's turn: its own trajectory turn, answering their message

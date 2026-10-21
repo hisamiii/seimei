@@ -580,9 +580,10 @@ export class Renderer {
       if (ev.type === 'user') {
         this.lastUser = ev.id;
         this.between = false;
-      } else if (ev.re && (ev.re !== this.lastUser || this.between) && said.has(ev.re)) {
+      } else if (ev.re && (ev.re_pin || ev.re !== this.lastUser || this.between) && (said.has(ev.re) || ev.re_text)) {
         // A reply far from what it answers says which message that was.
-        node.prepend(anchor(said.get(ev.re), ev.re, 'c'));
+        // re_pin: seimei named the message (re:), so the chip shows even right after it.
+        node.prepend(anchor(said.get(ev.re) || ev.re_text, ev.re, 'c'));
         this.between = false;
       }
       if (this.lane === 't' && ev.type === 'assistant') {
