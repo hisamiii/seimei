@@ -91,32 +91,57 @@ def address(s: dict) -> str:
     return "uds:" + (s["rec"].get("messagingSocketPath") or f"/run/user/{os.getuid()}/cc-socks/{s['pid']}.sock")
 
 
+MODELS = ("opus", "sonnet", "haiku")
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
+CONTEXTS = ("256k", "400k", "1m")
+# What summon must be told each time (rules.md: the sizing rule lives in the schema, not in memory).
+SUMMON_PICKS = ("cwd", "model", "effort", "context")
+EFFORT_GUIDE = ("reasoning effort, picked per task: low (or the haiku model) for lookups; medium for mockups, CSS and "
+                "config; high for research, kernels and risky or delicate work; xhigh or max only for escalations or "
+                "tasks seimei judges very important, never for long iterative work")
+CONTEXT_GUIDE = "where it compacts: 256k or 400k for most tasks; 1m only when the task really needs it"
+
+
+def summon_problem(args: dict) -> str:
+    """Why a summon call cannot go ahead (a pick missing or not one of the choices), or ""."""
+    missing = [k for k in SUMMON_PICKS if not str(args.get(k) or "").strip()]
+    if missing:
+        return (f"summon needs {', '.join(missing)}: pick {'it' if len(missing) == 1 else 'each'} for this task, there are no "
+                f"defaults. cwd: the project folder (~ only for home tasks). model: {'/'.join(MODELS)}. effort: "
+                f"{EFFORT_GUIDE}. context: {CONTEXT_GUIDE}.")
+    for k, choices in (("model", MODELS), ("effort", EFFORTS), ("context", CONTEXTS)):
+        if args[k] not in choices:
+            return f"summon: {k} must be one of {', '.join(choices)}, not {args[k]!r}."
+    return ""
+
+
 def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), uploads=None):
     @tool("summon", "Start a shikigami: a worker Claude Code session that works on a task on its own and reports back. "
-          "Pick a short lowercase name, the folder the task is about, and a model (opus for real work, sonnet for "
-          "routine jobs, haiku for quick lookups). Context is where it compacts: 400k by default, 256k for small jobs, "
-          "1m only when the task really needs it. Returns at once; the report arrives later.", {
+          "Every call picks name, task, cwd, model, effort and context for this task: there are no defaults. "
+          "Returns at once; the report arrives later.", {
               "type": "object",
               "properties": {
                   "name": {"type": "string", "description": "short lowercase name, like npu-dma or readme-fix"},
                   "task": {"type": "string", "description": "the full instructions; the worker sees nothing else"},
                   "cwd": {"type": "string", "description": "the project folder the task is about; ~ only when the task is about home"},
-                  "model": {"type": "string", "enum": ["opus", "sonnet", "haiku"], "default": "opus"},
-                  "effort": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max"],
-                             "description": "reasoning effort; leave out for the user's default"},
-                  "context": {"type": "string", "enum": ["256k", "400k", "1m"], "default": "400k"},
+                  "model": {"type": "string", "enum": list(MODELS),
+                            "description": "opus for real work, sonnet for routine jobs, haiku for quick lookups"},
+                  "effort": {"type": "string", "enum": list(EFFORTS), "description": EFFORT_GUIDE},
+                  "context": {"type": "string", "enum": list(CONTEXTS), "description": CONTEXT_GUIDE},
                   "subagent_model": {"type": "string", "enum": ["haiku", "sonnet", "opus"], "default": "haiku",
                                      "description": "model for the shikigami's own subagents; haiku unless a rare case needs more"},
                   "confirmed": {"type": "boolean", "description": f"set only after the user OKed more than {MAX_RUNNING} running workers"},
               },
-              "required": ["name", "task"]})
+              "required": ["name", "task", *SUMMON_PICKS]})
     async def summon(args):
+        if bad := summon_problem(args):
+            return text(bad, error=True)
         if pool.running() >= MAX_RUNNING and not args.get("confirmed"):
             return text(f"{pool.running()} shikigami are already running. Ask the user before starting more, "
                         "then call again with confirmed=true.", error=True)
         try:
-            w = await pool.summon(args["name"], args["task"], args.get("cwd", "~"), args.get("model", "opus"),
-                                  args.get("effort"), args.get("context") or "400k", args.get("subagent_model") or "haiku")
+            w = await pool.summon(args["name"], args["task"], args["cwd"], args["model"], args["effort"], args["context"],
+                                  args.get("subagent_model") or "haiku")
         except Exception as e:
             return text(f"Could not summon: {e}", error=True)
         r = w.rec
