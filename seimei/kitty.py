@@ -13,7 +13,9 @@ import re
 import subprocess
 from pathlib import Path
 
-PASSWORD = Path.home() / ".local/share/seimei/kitty-rc.conf"
+from .util import DATA
+
+PASSWORD = DATA / "kitty-rc.conf"
 # Claude Code's dialogs (permission prompts, questions, menus) end with one of these hints.
 DIALOG = re.compile(r"Enter to (select|confirm)|Esc to cancel|Do you want to (proceed|make this edit|create)")
 REOPEN = ("This session's kitty was started before remote control was on. Close that kitty window (all its tabs) "

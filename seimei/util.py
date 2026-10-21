@@ -67,4 +67,14 @@ def write_json(path: Path, data, private: bool = False):
 # sessions that read a picture over ~750 KB.
 STREAM_BUFFER = 64 << 20
 # Sessions seimei starts leave out the user's claude.ai connectors (Gmail, Drive, Docs).
+# seimei's own data folder (the state of the live service; --dev adds dev/): secrets placed by the user live here.
+DATA = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "seimei"
+
+
+def claude_cli() -> str:
+    """The claude executable sessions run: SEIMEI_CLAUDE (the tests' fake), else the one on PATH."""
+    import shutil
+    return os.environ.get("SEIMEI_CLAUDE") or shutil.which("claude") or "claude"
+
+
 NO_CONNECTORS = {"ENABLE_CLAUDEAI_MCP_SERVERS": "false"}

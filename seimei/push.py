@@ -38,13 +38,14 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from .events import EventLog
+from .util import DATA
 
 log = logging.getLogger(__name__)
 
 # Ping level -> the app's notification channel.
 LEVELS = {"silent": "quiet", "normal": "ping", "urgent": "urgent"}
 SCOPE = "https://www.googleapis.com/auth/firebase.messaging"
-FIREBASE = Path.home() / ".local/share/seimei/firebase"
+FIREBASE = DATA / "firebase"
 
 
 def b64(data: bytes) -> str:

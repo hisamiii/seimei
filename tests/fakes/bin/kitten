@@ -1,0 +1,30 @@
+#!/usr/bin/env python3
+"""A fake `kitten @` for the QA server: the user's sessions there "run" in kitty windows that exist only here. It
+shows an idle prompt, logs what would be typed to $FAKE_KITTEN_LOG, and refuses anything but the QA password, so a
+real one can never reach test code."""
+import json
+import os
+import sys
+import time
+
+QA_PASSWORD = "qa-kitty"
+
+argv = sys.argv[1:]
+if argv[:1] != ["@"]:
+    sys.exit("fake kitten: only remote control (kitten @)")
+env = argv[argv.index("--password-env") + 1] if "--password-env" in argv else ""
+if os.environ.get(env) != QA_PASSWORD:
+    sys.exit("fake kitten: not the QA password")
+cmd = next((a for a in argv[1:] if a in ("ls", "get-text", "send-text", "send-key")), None)
+match = argv[argv.index("--match") + 1] if "--match" in argv else ""
+if cmd == "get-text":
+    print("\n" + "─" * 40 + "\n> \n" + "─" * 40 + "\n  ? for shortcuts")
+elif cmd in ("send-text", "send-key"):
+    data = sys.stdin.read() if "--stdin" in argv else " ".join(argv[argv.index(match) + 1:])
+    if log := os.environ.get("FAKE_KITTEN_LOG"):
+        with open(log, "a") as f:
+            f.write(json.dumps({"t": time.time(), "match": match, "cmd": cmd, "data": data}) + "\n")
+elif cmd == "ls":
+    print("[]")
+else:
+    sys.exit(f"fake kitten: {cmd or argv[1:]} is not faked")

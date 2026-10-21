@@ -6,7 +6,6 @@ import logging
 import os
 import re
 import shlex
-import shutil
 import time
 import uuid
 from pathlib import Path
@@ -32,7 +31,7 @@ from . import deploys, permissions, sessions
 from .aliases import Aliases
 from .archive import Archive
 from .events import EventLog
-from .util import NO_CONNECTORS, STREAM_BUFFER, result_text, summarize, write_json
+from .util import NO_CONNECTORS, STREAM_BUFFER, claude_cli, result_text, summarize, write_json
 
 log = logging.getLogger("seimei.workers")
 
@@ -71,7 +70,7 @@ RESUME = "continue: seimei restarted, check your state first"
 RESUME_CAP = 3
 RESUME_WINDOW = 3600
 # Seconds to gather a burst of events into one message for the dispatcher.
-BATCH = 3
+BATCH = float(os.environ.get("SEIMEI_BATCH", 3))
 RECENT = 24 * 3600
 # Tool calls a shikigami may make on a task without a step list before it is reminded, once.
 NUDGE_AFTER = 15
@@ -169,7 +168,7 @@ class Worker:
         r = self.rec
         where = {"resume": r["session_id"]} if r.get("started") else {"session_id": r["session_id"]}
         return ClaudeAgentOptions(
-            cli_path=shutil.which("claude") or "claude",
+            cli_path=claude_cli(),
             cwd=r["cwd"],
             max_buffer_size=STREAM_BUFFER,
             model=r["model"],

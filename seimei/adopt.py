@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 from . import kitty, sessions
+from .util import claude_cli
 
 log = logging.getLogger("seimei.adopt")
 SHELLS = {"bash", "zsh", "fish", "sh", "dash"}
@@ -98,7 +99,7 @@ def stop_job(job_id: str) -> str:
     """`claude stop`: the daemon ends the session cleanly. Returns "" or what went wrong."""
     env = {k: v for k, v in os.environ.items() if k not in CLEAN_ENV}
     try:
-        p = subprocess.run(["claude", "stop", job_id], capture_output=True, text=True, timeout=60, env=env, cwd="/")
+        p = subprocess.run([claude_cli(), "stop", job_id], capture_output=True, text=True, timeout=60, env=env, cwd="/")
     except (OSError, subprocess.TimeoutExpired) as e:
         return str(e)
     return "" if p.returncode == 0 else (p.stderr or p.stdout).strip()[:300] or f"exit {p.returncode}"

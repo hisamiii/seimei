@@ -4,7 +4,6 @@ import asyncio
 import logging
 import os
 import re
-import shutil
 import uuid
 from pathlib import Path
 
@@ -25,7 +24,7 @@ from claude_agent_sdk import (
 
 from . import permissions, recall
 from .events import EventLog
-from .util import NO_CONNECTORS, STREAM_BUFFER, result_text, summarize
+from .util import NO_CONNECTORS, STREAM_BUFFER, claude_cli, result_text, summarize
 
 log = logging.getLogger("seimei")
 
@@ -262,7 +261,7 @@ class Dispatcher:
             self.sid_file.write_text(sid + "\n")
             where = {"session_id": sid}
         return ClaudeAgentOptions(
-            cli_path=shutil.which("claude") or "claude",
+            cli_path=claude_cli(),
             cwd=cwd,
             max_buffer_size=STREAM_BUFFER,
             model=self.cfg.get("model", "opus"),

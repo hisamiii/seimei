@@ -1,0 +1,11 @@
+#!/usr/bin/env python3
+"""The QA server's terminal ([sessions] terminal = "fake-terminal {cwd} {title}"): a release or a loan would open a
+window running the rest of the line; this only appends that command to $FAKE_TERMINAL_LOG and never runs it."""
+import os
+import shlex
+import sys
+
+cwd, title, *cmd = sys.argv[1:]
+if log := os.environ.get("FAKE_TERMINAL_LOG"):
+    with open(log, "a") as f:
+        f.write(shlex.join(cmd) + "\n")

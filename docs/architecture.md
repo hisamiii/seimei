@@ -86,5 +86,7 @@ dispatcher, and restarts the service. The result goes to `deploy/last.json`, whi
 
 ## Tests
 
-`uv run pytest` runs the offline suite; `-m web` adds the browser tests against the QA server (`tests/qa`, fake
-dispatcher and sessions, port 8431); `-m live` adds headless haiku sessions. See `tests/conftest.py`.
+`uv run pytest` runs the offline suite; `-m web` adds the browser tests against the QA server on port 8431
+(`tests/qa/start.sh`: seeded state, the server as it runs live, with `tests/fakes/claude.py` in place of Claude Code and
+a fake kitty and terminal; `SEIMEI_SERVER` picks the implementation); `-m live` adds headless haiku sessions. See
+`tests/conftest.py`.
