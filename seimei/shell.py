@@ -6,15 +6,18 @@ import shlex
 WRAPPERS = {"env", "nice", "ionice", "timeout", "doas", "sudo", "setsid", "nohup", "exec", "command", "time",
             "stdbuf", "chrt", "taskset", "xargs", "builtin"}
 SHELLS = {"sh", "bash", "zsh", "fish", "dash"}
-SEPARATORS = re.compile(r"&&|\|\||[;&|\n]")
+# Parens too: a group `(cmd)` and what is left of a nested `$(... $(...))` after the inner one goes.
+SEPARATORS = re.compile(r"&&|\|\||[;&|\n()]")
 HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1([^\n]*)\n(.*?)\n[ \t]*\2[ \t]*(?=\n|$)", re.S)
 SUBSHELL = re.compile(r"\$\(([^()]*)\)|`([^`]*)`|<\(([^()]*)\)")
 DEPTH = 4
+# Words that open or close a compound command; the command proper comes after them.
+KEYWORDS = {"!", "{", "}", "if", "then", "else", "elif", "fi", "do", "done", "while", "until", "esac"}
 
 
 def _unwrap(argv: list[str]) -> list[str]:
     """Drop env assignments and wrappers like `nice -n 19` or `timeout 5` in front of the real program."""
-    while argv and (re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", argv[0]) or argv[0] in WRAPPERS
+    while argv and (re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", argv[0]) or argv[0] in WRAPPERS or argv[0] in KEYWORDS
                     or (argv[0].startswith("-") and len(argv) > 1) or re.match(r"^\d+[smhd]?$", argv[0])):
         argv = argv[1:]
     return argv

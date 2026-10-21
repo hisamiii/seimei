@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use crate::approvals::{Approvals, check};
 use crate::events::EventLog;
 use crate::paths::{expand, home, normalize, realpath};
-use crate::shell::{commands, unwrap, words};
+use crate::shell::{Cmd, commands};
 
 /// Secrets a hijacked session would want to read or send away: the path under home, what it is, and the path
 /// components that name it even when the rest of the path is built in code (f"{home}/.ssh/id_ed25519").
@@ -46,20 +46,6 @@ fn re(pattern: &str) -> Regex {
 static CODE: LazyLock<Regex> = LazyLock::new(|| re(r"^(python[\d.]*|perl|ruby|node|nodejs|php|deno|bun|lua)$"));
 /// Both kinds, overlapping: code in "..." holds its paths in '...'.
 static LITERALS: LazyLock<[Regex; 2]> = LazyLock::new(|| [re(r"'([^'\n]*)'"), re(r#""((?:[^"\\\n]|\\.)*)""#)]);
-static SUBST: LazyLock<Regex> = LazyLock::new(|| {
-    re(&format!(
-        r"(?:^|[\s;&|(])(?:sudo\s+|doas\s+)?(?:{}|python[\d.]*|perl|ruby|node|php|source|\.)\s+(?:-\S+\s+)*<\(\s*(?:sudo\s+)?(?:{})\b",
-        SHELLS.join("|"),
-        DOWNLOADERS.join("|")
-    ))
-});
-static EVALED: LazyLock<Regex> = LazyLock::new(|| {
-    re(&format!(
-        r#"\b(?:{}|python[\d.]*|perl|ruby|node|eval|source)\s+(?:-[ce]\s+)?["']?\$\(\s*(?:{})\b"#,
-        SHELLS.join("|"),
-        DOWNLOADERS.join("|")
-    ))
-});
 // Driving kitty: only seimei may type into a session's window, on the user's tap in the app.
 static KITTY_SOCKET: LazyLock<Regex> =
     LazyLock::new(|| re(r"^(unix:|UNIX(-CONNECT)?:)?(/run/user/\d+|\$\{?XDG_RUNTIME_DIR\}?)/kitty-"));
@@ -71,17 +57,9 @@ static KITTY_CODE: LazyLock<Regex> = LazyLock::new(|| {
         r#"from\s+seimei\s+import\s+[^;\n]*\bkitty\b|["']KITTY_(LISTEN_ON|PUBLIC_KEY)["']"#
     ))
 });
-static SEGMENTS: LazyLock<Regex> = LazyLock::new(|| re(r"&&|\|\||[;&\n]"));
-static COMMANDS: LazyLock<Regex> = LazyLock::new(|| re(r"&&|\|\||[;&|\n()]"));
-static REDIRECTION: LazyLock<Regex> = LazyLock::new(|| re(r"^\d*[<>]+&?"));
-static ASSIGNMENT: LazyLock<Regex> = LazyLock::new(|| re(r"^[A-Za-z_]\w*="));
 static SHORT_FLAGS: LazyLock<Regex> = LazyLock::new(|| re(r"^-[a-zA-Z]+$"));
 static STDIN_FLAG: LazyLock<Regex> = LazyLock::new(|| re(r"^-[a-z]*s"));
 static CODE_FLAG: LazyLock<Regex> = LazyLock::new(|| re(r"^-[a-zA-Z]*[cemEpr]$"));
-
-fn base(prog: &str) -> &str {
-    prog.rsplit('/').next().unwrap_or(prog)
-}
 
 /// Which secret a path is or lies in, once its links are followed.
 fn secret_path(p: &Path) -> Option<&'static str> {
@@ -216,11 +194,10 @@ fn glob_hits(pattern: &Path) -> Vec<PathBuf> {
 /// The secret a path-like word reaches: as a real path from each base folder (globs included), or by the components
 /// that name a secret anywhere in it. Words with spaces are prose, not paths.
 fn secret_word(word: &str, bases: &[&Path]) -> Option<&'static str> {
-    let word = REDIRECTION.replace(word, "");
     if word.is_empty() || word.contains(char::is_whitespace) {
         return None;
     }
-    let word = expand(&word);
+    let word = expand(word);
     let have = parts(&word);
     for (_, name, names) in SECRETS {
         if names.iter().map(|n| parts(n)).any(|seq| have.windows(seq.len()).any(|w| w == seq)) {
@@ -286,40 +263,46 @@ fn stdin_program(argv: &[String]) -> bool {
     }
 }
 
-fn download_run(flat: &str) -> bool {
-    if SUBST.is_match(flat) || EVALED.is_match(flat) {
-        return true;
-    }
-    SEGMENTS.split(flat).any(|seg| {
-        let stages: Vec<Vec<String>> = seg
-            .split('|')
-            .map(|stage| {
-                let mut argv = unwrap(&words(stage));
-                if let Some(p) = argv.first_mut() {
-                    *p = base(p).to_string();
-                }
-                argv
-            })
-            .collect();
-        stages.iter().enumerate().any(|(i, argv)| {
-            argv.first().is_some_and(|p| DOWNLOADERS.contains(&p.as_str()))
-                && stages[i + 1..].iter().any(|a| !a.is_empty() && stdin_program(a))
-        })
+/// Whether a word is a command substitution whose command downloads: `$(curl ..)`, `<(wget ..)`.
+fn fetched(word: &str) -> bool {
+    let inner = (word.strip_prefix("$(").or_else(|| word.strip_prefix("<(")))
+        .and_then(|w| w.strip_suffix(')'))
+        .or_else(|| word.strip_prefix('`').and_then(|w| w.strip_suffix('`')));
+    inner.is_some_and(|i| {
+        commands(i)
+            .iter()
+            .any(|c| c.as_ref().is_none_or(|c| c.argv.first().is_some_and(|p| DOWNLOADERS.contains(&p.as_str()))))
     })
 }
 
-/// Values of the NAME=value words in front of each command, like D=~/.ssh in `D=~/.ssh; cat $D/id`.
-fn assignments(flat: &str) -> Vec<String> {
-    let mut out = vec![];
-    for part in COMMANDS.split(flat) {
-        for w in words(part) {
-            match w.split_once('=') {
-                Some((_, v)) if ASSIGNMENT.is_match(&w) => out.push(v.to_string()),
-                _ => break,
-            }
+/// The word that holds a program's script or code: the one after -c or -e, else its first argument.
+fn script_word(argv: &[String]) -> Option<&String> {
+    let mut args = argv[1..].iter();
+    while let Some(a) = args.next() {
+        if a == "-c" || CODE_FLAG.is_match(a) {
+            return args.next();
+        }
+        if !a.starts_with('-') {
+            return Some(a);
         }
     }
-    out
+    None
+}
+
+/// Something runs what a download gives it: `curl .. | sh`, `bash <(curl ..)`, `bash < <(curl ..)`,
+/// `eval "$(curl ..)"`, `python3 -c "$(curl ..)"`, or `$(curl ..)` as the program.
+fn download_run(cmds: &[&Cmd]) -> bool {
+    let downloads = |c: &&&Cmd| c.argv.first().is_some_and(|p| DOWNLOADERS.contains(&p.as_str()));
+    cmds.iter().any(|c| {
+        let Some(prog) = c.argv.first() else { return false };
+        let runs =
+            SHELLS.contains(&prog.as_str()) || CODE.is_match(prog) || matches!(prog.as_str(), "eval" | "source" | ".");
+        let piped = || cmds.iter().filter(downloads).any(|d| d.pipe == c.pipe && d.stage < c.stage);
+        let fed = || c.redirects.iter().any(|(op, t)| (op == "<" || op == "<<<") && fetched(t));
+        fetched(prog)
+            || (runs && script_word(&c.argv).is_some_and(|w| fetched(w)))
+            || (stdin_program(&c.argv) && (piped() || fed()))
+    })
 }
 
 fn kitty_argv(argv: &[String]) -> bool {
@@ -353,7 +336,11 @@ pub fn blocked(tool: &str, inp: &Value, cwd: &str) -> Option<String> {
     let cmd = inp.get("command").and_then(Value::as_str).unwrap_or("");
     let h = home().to_string_lossy();
     let flat = cmd.replace("${HOME}", &h).replace("$HOME", &h);
-    if download_run(&flat) {
+    let all = commands(&flat);
+    let Some(cmds) = all.iter().map(Option::as_ref).collect::<Option<Vec<&Cmd>>>() else {
+        return Some("a command nested too deep to check".into());
+    };
+    if download_run(&cmds) {
         return Some("running a download as a script".into());
     }
     if KITTY_ENV.is_match(&flat) {
@@ -361,17 +348,33 @@ pub fn blocked(tool: &str, inp: &Value, cwd: &str) -> Option<String> {
     }
     let mut here = cwd.to_path_buf();
     let mut code = false;
-    for argv in commands(&flat).into_iter().flatten() {
+    for c in cmds {
+        // Where it reads or writes, and NAME=value words: `cat <~/.ssh/id`, `D=~/.ssh; cat $D/id`. A fd (2>&1) or a
+        // heredoc's delimiter is no path.
+        let fd = |t: &str| t == "-" || t.chars().all(|c| c.is_ascii_digit());
+        let targets = c.redirects.iter().filter(|(op, t)| op != "<<" && !(op.ends_with('&') && fd(t)));
+        for v in c.assigns.iter().chain(targets.map(|(_, t)| t)) {
+            if KITTY_SOCKET.is_match(v) {
+                return Some(KITTY.into());
+            }
+            if let Some(name) = secret_word(v, &[cwd, &here]) {
+                return Some(format!("reading {name}"));
+            }
+        }
+        let argv = &c.argv;
+        if argv.is_empty() {
+            continue;
+        }
         // python3 ..., uv run python ...
         code |= argv.iter().take(3).any(|a| CODE.is_match(a));
         if argv[0] == "cd" {
             let target = argv[1..].iter().find(|a| !a.starts_with('-')).map_or("~", |a| a.as_str());
             here = normalize(&here, &expand(target));
         }
-        if kitty_argv(&argv) || argv.iter().any(|a| KITTY_SOCKET.is_match(a) || KITTY_VAR.is_match(a)) {
+        if kitty_argv(argv) || argv.iter().any(|a| KITTY_SOCKET.is_match(a) || KITTY_VAR.is_match(a)) {
             return Some(KITTY.into());
         }
-        if let Some(what) = rm_home(&argv, &here) {
+        if let Some(what) = rm_home(argv, &here) {
             return Some(format!("deleting {what}"));
         }
         if METADATA.contains(&argv[0].as_str()) {
@@ -383,9 +386,6 @@ pub fn blocked(tool: &str, inp: &Value, cwd: &str) -> Option<String> {
                 return Some(format!("reading {name}"));
             }
         }
-    }
-    if let Some(name) = assignments(&flat).iter().find_map(|v| secret_word(v, &[cwd])) {
-        return Some(format!("reading {name}"));
     }
     if code {
         // Code builds paths out of string literals: check each against the home folder as well.

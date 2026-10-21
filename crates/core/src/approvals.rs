@@ -57,7 +57,7 @@ fn claude_pid(pid: &str) -> bool {
 }
 
 fn argv_hit(argv: &[String]) -> Option<&'static str> {
-    let prog = argv[0].as_str();
+    let prog = argv.first()?.as_str();
     let has = |w: &str| argv.iter().any(|a| a == w);
     if prog == "kitty" && has("@") && KITTY_CLOSE.iter().any(|k| has(k)) {
         return Some("close a kitty window");
@@ -85,8 +85,12 @@ fn socket_hit(cmd: &str) -> bool {
     if REDIRECT.captures_iter(&shell).any(|m| m[1].contains("cc-socks")) {
         return true;
     }
-    for argv in commands(cmd) {
-        let Some(argv) = argv else { return true };
+    for c in commands(cmd) {
+        let Some(c) = c else { return true };
+        let argv = &c.argv;
+        if argv.is_empty() {
+            continue;
+        }
         let sock = argv[1..].iter().any(|a| a.contains("cc-socks"));
         if sock
             && (SOCKET_TOOLS.contains(&argv[0].as_str())
@@ -108,9 +112,9 @@ fn command_hit(cmd: &str) -> Option<&'static str> {
     if let Some(m) = RAW.captures(cmd) {
         return subcommand(&m[1]);
     }
-    for argv in commands(cmd) {
-        let Some(argv) = argv else { return Some("run a deeply nested command") };
-        if let Some(hit) = argv_hit(&argv) {
+    for c in commands(cmd) {
+        let Some(c) = c else { return Some("run a deeply nested command") };
+        if let Some(hit) = argv_hit(&c.argv) {
             return Some(hit);
         }
     }
@@ -139,8 +143,12 @@ fn cc_settings_hit(tool: &str, inp: &Value) -> Option<String> {
             return Some(m[1].to_string());
         }
     }
-    for argv in commands(cmd) {
-        let Some(argv) = argv else { return Some("a nested command".into()) };
+    for c in commands(cmd) {
+        let Some(c) = c else { return Some("a nested command".into()) };
+        let argv = &c.argv;
+        if argv.is_empty() {
+            continue;
+        }
         let hits: Vec<&String> = argv[1..].iter().filter(|a| CC_SETTINGS.is_match(a)).collect();
         let writes = WRITERS.contains(&argv[0].as_str())
             || (argv[0] == "sed" && argv.iter().any(|a| a.starts_with("-i") || a == "--in-place"));

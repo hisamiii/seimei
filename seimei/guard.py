@@ -1,6 +1,7 @@
 """One hook in front of every tool call of the dispatcher and the shikigami: a deny-list for what a prompt
 injection would reach for, Approve/Deny cards for the user's sessions, and an append-only audit log."""
 
+import codecs
 import glob
 import itertools
 import json
@@ -50,14 +51,41 @@ METADATA = {"ls", "stat", "test", "[", "[[", "du", "realpath", "readlink", "base
 LITERALS = (re.compile(r"'([^'\n]*)'"), re.compile(r"\"((?:[^\"\\\n]|\\.)*)\""))
 GLOB_LIMIT = 5000
 SUBST = re.compile(rf"(?:^|[\s;&|(])(?:sudo\s+|doas\s+)?(?:{'|'.join(SHELLS)}|python[\d.]*|perl|ruby|node|php|source|\.)\s+(?:-\S+\s+)*"
-                   rf"<\(\s*(?:sudo\s+)?(?:{'|'.join(DOWNLOADERS)})\b")
-EVALED = re.compile(rf"\b(?:{'|'.join(SHELLS)}|python[\d.]*|perl|ruby|node|eval|source)\s+(?:-[ce]\s+)?[\"']?\$\(\s*(?:{'|'.join(DOWNLOADERS)})\b")
+                   rf"(?:<\s*)?<\(\s*(?:sudo\s+)?(?:{'|'.join(DOWNLOADERS)})\b")
+EVALED = re.compile(rf"\b(?:{'|'.join(SHELLS)}|python[\d.]*|perl|ruby|node|eval|source)\s+(?:-[ce]\s+|<<<\s*)?[\"']?\$\(\s*(?:{'|'.join(DOWNLOADERS)})\b")
+# A download as the command itself: `$(curl ...)`.
+FETCHED = re.compile(rf"(?:^|[;&|(\n])\s*[\"']?(?:\$\(|`)\s*(?:sudo\s+)?(?:{'|'.join(DOWNLOADERS)})\b")
 # Driving kitty: only seimei may type into a session's window, on the user's tap in the app.
 KITTY_SOCKET = re.compile(r"^(unix:|UNIX(-CONNECT)?:)?(/run/user/\d+|\$\{?XDG_RUNTIME_DIR\}?)/kitty-")
 KITTY_ENV = re.compile(r"\$\{?KITTY_(LISTEN_ON|PUBLIC_KEY)\b")
 KITTY_CODE = re.compile(r"""["']kitt(y|en)["']\s*,\s*["'](\+kitten["']\s*,\s*["'])?@["']|\bseimei\.kitty\b|"""
                         r"""from\s+seimei\s+import\s+[^;\n]*\bkitty\b|["']KITTY_(LISTEN_ON|PUBLIC_KEY)["']""")
 KITTY = "driving kitty by remote control (only the user, from the app, types into sessions)"
+
+
+def _ansi_c(text: str) -> str:
+    """$'...' strings decoded and quoted plainly: `$'\x2essh'` is '.ssh'."""
+    def plain(m):
+        try:
+            return shlex.quote(codecs.decode(m.group(1).encode("latin-1", "backslashreplace"), "unicode_escape"))
+        except (UnicodeDecodeError, ValueError):
+            return m.group(0)
+    return re.sub(r"\$'((?:[^'\\]|\\.)*)'", plain, text)
+
+
+def _braces(word: str) -> list[str]:
+    """The words a word with braces stands for: `a{b,c}` is ab ac, `{1..3}` is 1 2 3."""
+    for m in re.finditer(r"(?<!\$)\{([^{}]*)\}", word):
+        inner = m.group(1)
+        if seq := re.fullmatch(r"(-?\d+)\.\.(-?\d+)", inner):
+            a, b = int(seq.group(1)), int(seq.group(2))
+            alts = [str(n) for n in range(a, b + (1 if b >= a else -1), 1 if b >= a else -1)][:256]
+        elif "," in inner:
+            alts = inner.split(",")
+        else:
+            continue
+        return [w for alt in alts for w in _braces(word[:m.start()] + alt + word[m.end():])][:256]
+    return [word]
 
 
 def _paths_in(inp: dict, cwd: str) -> list[Path]:
@@ -162,7 +190,7 @@ def _stdin_program(argv: list[str]) -> bool:
 
 
 def _download_run(flat: str) -> bool:
-    if SUBST.search(flat) or EVALED.search(flat):
+    if SUBST.search(flat) or EVALED.search(flat) or FETCHED.search(flat):
         return True
     for seg in re.split(r"&&|\|\||[;&\n]", flat):
         stages = []
@@ -212,7 +240,7 @@ def blocked(tool: str, inp: dict, cwd: str) -> str | None:
     if tool != "Bash":
         return None
     cmd = str(inp.get("command", ""))
-    flat = re.sub(r"(\$HOME|\$\{HOME\})", HOME, cmd)
+    flat = _ansi_c(re.sub(r"(\$HOME|\$\{HOME\})", HOME, cmd))
     if _download_run(flat):
         return "running a download as a script"
     if KITTY_ENV.search(flat):
@@ -232,7 +260,7 @@ def blocked(tool: str, inp: dict, cwd: str) -> str | None:
             return f"deleting {what}"
         if argv[0] in METADATA:
             continue
-        for a in argv[1:]:
+        for a in (w for arg in argv[1:] for w in _braces(arg)):
             for word in [a, a.split("=", 1)[1]] if "=" in a else [a]:
                 if name := _secret_word(word, [here]):
                     return f"reading {name}"
