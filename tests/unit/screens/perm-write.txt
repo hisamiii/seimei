@@ -6,7 +6,7 @@
   ⎿  Interrupted · What should Claude do instead?
 ✻ Cogitated for 1s · done 20:35Z
 ❯ Use the Write tool to create                                        
-  /home/me/work/perm-note.txt containing  
+  /home/me/work/perm-note.txt containing                           
   the single word hi.                                                 
 ● Write(perm-note.txt)
 ──────────────────────────────────────────────────────────────────────
