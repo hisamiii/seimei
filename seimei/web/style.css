@@ -914,7 +914,7 @@ mark { background: color-mix(in srgb, var(--primary) 30%, transparent); color: i
   body { grid-template-columns: 88px minmax(0, 1fr); }
   body > .bar, .ltabs, body > main { grid-column: 2; }
   .bottom { display: contents; }
-  .composer { grid-column: 2; grid-row: 4; background: var(--surface-low); margin: 0 24px 0 0; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+  .composer { grid-column: 2; grid-row: 4; background: var(--surface-low); margin: 0; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
   body > main.page { grid-row: 3 / 5; }
   .navbar {
     grid-column: 1; grid-row: 1 / -1; flex-direction: column; justify-content: flex-start; gap: 12px;
@@ -922,6 +922,10 @@ mark { background: color-mix(in srgb, var(--primary) 30%, transparent); color: i
   }
   .nav-item { flex: none; height: 56px; }
   body.typing .navbar { display: flex; }
+}
+/* The composer continues the chat pane: the same side margins, so the two read as one surface (#83). */
+@media (min-width: 900px) {
+  .composer { margin: 0 24px; }
 }
 /* Wide: the header and the tabs line up with the 720 px content column. */
 @media (min-width: 840px) {
