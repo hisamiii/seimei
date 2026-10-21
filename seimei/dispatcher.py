@@ -44,6 +44,8 @@ RE_SEARCH = 50  # the user's messages a re: quote is looked for in
 HOLD = 30 * 60
 # Idle this long after a turn (the 1 h prompt cache still warm) with this much context: compact now, at a natural
 # break, instead of mid-task at the window's edge.
+# Tokens at which the dispatcher's context compacts (CLAUDE_CODE_AUTO_COMPACT_WINDOW); config [dispatcher] compact_window.
+COMPACT_WINDOW = 400_000
 IDLE_COMPACT = float(os.environ.get("SEIMEI_IDLE_COMPACT", 40 * 60))
 IDLE_COMPACT_MIN = int(os.environ.get("SEIMEI_IDLE_COMPACT_MIN", 150_000))
 BOUNCE = "[seimei] mark this reply chat: or trajectory: (answer with just the marker; the reply is moved for you)"
@@ -248,6 +250,13 @@ class Dispatcher:
         if changed:
             self.events.flash(self.state())
 
+    def compact_window(self) -> int:
+        try:
+            return int(self.cfg.get("compact_window", COMPACT_WINDOW))
+        except (TypeError, ValueError):
+            log.warning("[dispatcher] compact_window is not a number; using %d", COMPACT_WINDOW)
+            return COMPACT_WINDOW
+
     def _options(self) -> ClaudeAgentOptions:
         cwd = os.path.expanduser(self.cfg.get("cwd", "~"))
         sid = self.sid_file.read_text().strip() if self.sid_file.exists() else ""
@@ -267,7 +276,8 @@ class Dispatcher:
             include_partial_messages=True,
             setting_sources=["user", "project", "local"],
             system_prompt={"type": "preset", "preset": "claude_code", "append": self.prompt()},
-            env={**queue_env("seimei"), **NO_CONNECTORS},
+            # It compacts at this many tokens (config [dispatcher] compact_window), whatever the model's window is.
+            env={**queue_env("seimei"), **NO_CONNECTORS, "CLAUDE_CODE_AUTO_COMPACT_WINDOW": str(self.compact_window())},
             # Its own tools, minus what it has no use for: it delegates through summon (subagents would be invisible
             # to the user) and pings through notify. Agent is still called Task in some CLI versions.
             disallowed_tools=OFF_TOOLS,

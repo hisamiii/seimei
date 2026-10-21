@@ -7,3 +7,4 @@ origin = "https://seimei.example.org"  # also the passkey domain
 [dispatcher]
 model = "opus"
 cwd = "~"
+compact_window = 400000              # tokens at which its context compacts
