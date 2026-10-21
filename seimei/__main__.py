@@ -32,6 +32,7 @@ from .files import Files
 from .guard import Guard
 from .server import make_app
 from .queue import QueueWatcher, make_queue_tools
+from .adopt import Adopter, make_adopt_tools
 from .sessions import Watcher
 from .tools import make_tools
 from .usage import Usage
@@ -150,7 +151,7 @@ def main():
     push = Push(events, auth, Fcm(FIREBASE / "service-account.json"), state)
     push.watches = Watches(state / "watches.json", push, lambda line: pool.notify(line), pool.queue_names)
     dispatcher = Dispatcher(disp, events, state, make_tools(pool, files, events, make_desktop_tools(desk, files, events, layout)
-                                                                 + make_music_tools(approvals) + make_queue_tools(approvals) + make_push_tools(push) + make_watch_tools(push.watches)
+                                                                 + make_music_tools(approvals) + make_queue_tools(approvals) + make_adopt_tools(Adopter(pool, approvals)) + make_push_tools(push) + make_watch_tools(push.watches)
                                                                  + make_browser_tools(browser, approvals)
                                                                  + discord_link.make_discord_tools(discord, approvals, uploads), uploads),
                             guard, usage)

@@ -69,6 +69,10 @@ BATCH = 3
 RECENT = 24 * 3600
 
 
+def slug(name: str) -> str:
+    return re.sub(r"[^a-z0-9-]+", "-", name.lower()).strip("-")[:32] or "worker"
+
+
 def first_line(text: str, n: int = 160) -> str:
     line = next((l.strip() for l in text.splitlines() if l.strip()), "")
     return line if len(line) <= n else line[: n - 1] + "…"
@@ -529,7 +533,7 @@ class Pool:
 
     async def summon(self, name: str, task: str, cwd: str, model: str, effort: str | None = None, context: str = "400k",
                      subagents: str = "haiku") -> Worker:
-        name = re.sub(r"[^a-z0-9-]+", "-", name.lower()).strip("-")[:32] or "worker"
+        name = slug(name)
         path = Path(os.path.expanduser(cwd or "~")).resolve()
         if not path.is_dir():
             raise ValueError(f"no such folder: {path}")
@@ -546,6 +550,20 @@ class Pool:
                          "cwd": str(path), "model": rec["model"], "effort": rec["effort"], "context_cap": context,
                          "subagents": rec["subagents"]})
         await w.send(task)
+        return w
+
+    async def adopt(self, name: str, session_id: str, cwd: str, model: str, effort: str | None, context: str, origin: str,
+                    first: str) -> Worker:
+        """A shikigami that resumes one of the user's sessions (adopt.py ended its process)."""
+        now = time.time()
+        rec = {"id": uuid.uuid4().hex[:8], "name": slug(name), "task": f"Adopted from your session \"{origin}\".", "cwd": cwd,
+               "model": model, "effort": effort, "context_cap": context, "subagents": "haiku", "session_id": session_id,
+               "state": "starting", "created": now, "updated": now, "summary": "", "started": True, "adopted": origin}
+        w = Worker(self, rec)
+        self.workers[rec["id"]] = w
+        self.events.add({"type": "worker", "worker": w.id, "name": w.name, "event": "summoned", "text": rec["task"],
+                         "cwd": cwd, "model": model, "effort": effort, "context_cap": context, "subagents": "haiku"})
+        await w.send(first)
         return w
 
     def report(self, w: Worker, event: str, text: str):
