@@ -11,7 +11,7 @@ from pathlib import Path
 
 from . import desktop
 from .events import EventLog
-from .shell import commands
+from .shell import HEREDOC, commands
 
 WAIT = 600
 # A card shows the whole thing it asks about (a Discord edit has the old and the new text).
@@ -20,7 +20,12 @@ DETAIL = 6000
 SUBCOMMANDS = {"stop": "stop a session", "kill": "stop a session", "attach": "attach to a session",
                "rm": "delete a session", "respawn": "restart a session"}
 RESUME = {"-r", "--resume", "-c", "--continue"}
-SOCKET_WRITERS = re.compile(r"\b(socat|nc|ncat|netcat|python3?|node|perl)\b|--unix-socket")
+# Writing to a session's messaging socket (cc-socks) means real socket use: a socket tool with the path in its own
+# arguments, a redirect into it, or code that opens a socket. The path inside text (a note, a heredoc body) is not.
+SOCKET_TOOLS = {"socat", "nc", "ncat", "netcat"}
+SOCKET_CODE = re.compile(r"\bsocket\s*\.\s*socket\b|AF_UNIX|\.connect\s*\(|open_unix_connection|create_unix_connection|"
+                         r"UnixConnector|\bnet\s*\.\s*(connect|createConnection)\b|IO::Socket")
+SOCKET_LANGS = re.compile(r"\b(python3?(\.\d+)?|node|perl)\b")
 # Fail closed on wrappers the parser does not unwrap, e.g. `doas -u q claude stop x`.
 RAW = re.compile(r"\bclaude\s+(stop|kill|attach|rm|respawn)\b")
 # A call from a script, e.g. subprocess.run(["claude", "stop", ...]).
@@ -102,8 +107,21 @@ def _argv_hit(argv: list[str]) -> str | None:
     return None
 
 
+def _socket_hit(cmd: str) -> bool:
+    shell = HEREDOC.sub(lambda m: m.group(3), cmd)
+    if any("cc-socks" in m.group(1) for m in REDIRECT.finditer(shell)):
+        return True
+    for argv in commands(cmd):
+        if argv is None:
+            return True
+        sock = any("cc-socks" in a for a in argv[1:])
+        if sock and (argv[0] in SOCKET_TOOLS or argv[0] == "curl" and any(a.startswith("--unix-socket") for a in argv)):
+            return True
+    return bool(SOCKET_LANGS.search(cmd) and SOCKET_CODE.search(cmd))
+
+
 def _command_hit(cmd: str) -> str | None:
-    if "cc-socks" in cmd and SOCKET_WRITERS.search(cmd):
+    if "cc-socks" in cmd and _socket_hit(cmd):
         return "write to a session socket"
     if QUOTED.search(cmd):
         return "run claude from a script"
