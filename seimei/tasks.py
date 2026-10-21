@@ -36,7 +36,7 @@ def seed() -> dict:
         ("t6", "Clean up yah", "yah cleanup", "cleanup", "paused", "313245d5"),
         ("t7", "Minecraft harness", "minecraft harness", "mc", "paused", "e468acc5"),
     ]
-    tasks = [{"id": i, "title": t, "project": p, "owner": o, "state": s, "done_at": now - 60 * n if s == "done" else None,
+    tasks = [{"id": i, "title": t, "project": p, "owner": o, "state": s, "done_at": now - 60 * (len(rows) - n) if s == "done" else None,
               "worker": w, "created": now, "updated": now} for n, (i, t, p, o, s, w) in enumerate(rows)]
     projects = [{"name": n, "color": None, "paused": n in ("yah cleanup", "minecraft harness")}
                 for n in ("seimei", "discord tiled", "desktop", "yah cleanup", "minecraft harness")]
