@@ -123,6 +123,16 @@ class Board:
         self._changed()
         return p
 
+    def remove(self, tid: str) -> dict:
+        """Drops a task for good (one that will not be done); a project left empty goes with it."""
+        t = self.find(tid)
+        if not t:
+            raise KeyError(f"no task {tid}")
+        self.data["tasks"].remove(t)
+        self._trim(t["project"])
+        self._changed()
+        return t
+
     def tick(self, tid: str, done: bool) -> dict:
         """The user ticks one of their own items off on the phone, or back on."""
         t = self.find(tid)
@@ -165,15 +175,15 @@ def make_task_tools(board: Board) -> list:
 
     @tool("tasks", "The user's task board (the Tasks tab next to Chat | Trajectory), yours to keep current: add an item "
           "when you queue work, set it running when a shikigami starts on it, done when it lands; the user's own "
-          "to-dos are owner 'you' (they can tick those off themselves). action: list | add | update | done | project. "
+          "to-dos are owner 'you' (they can tick those off themselves). action: list | add | update | done | remove | project. "
           "add: title, project, owner (a shikigami's name, 'seimei' or 'you'), optional state (open, running, paused, "
           "done; default open), worker (a shikigami id: tapping the task opens its page) and numbered (default true: "
           "the next #NN; false for the user's to-dos and small items). update: id plus any of title, project, owner, "
-          "state, worker. done: id. project: name plus paused (true shuts it on the board) and/or color (#rrggbb, empty "
+          "state, worker. done: id. remove: id (drops an item that will not be done; an empty project goes too). project: name plus paused (true shuts it on the board) and/or color (#rrggbb, empty "
           "for the default tint).", {
               "type": "object",
               "properties": {
-                  "action": {"type": "string", "enum": ["list", "add", "update", "done", "project"]},
+                  "action": {"type": "string", "enum": ["list", "add", "update", "done", "remove", "project"]},
                   "id": {"type": "string", "description": "#55, 55 or t3"},
                   "title": {"type": "string"}, "project": {"type": "string"}, "owner": {"type": "string"},
                   "state": {"type": "string", "enum": list(STATES)}, "worker": {"type": "string"},
@@ -198,6 +208,12 @@ def make_task_tools(board: Board) -> list:
                     fields["state"] = "done"
                 t = board.update(a["id"], **fields)
                 return text(f"{t['id']} {t['title']}: {t['state']} ({t['project']}, {t['owner']}).")
+            if act == "remove":
+                if not a.get("id"):
+                    return text("remove needs an id.", True)
+                t = board.remove(a["id"])
+                gone = "" if any(p["name"] == t["project"] for p in board.data["projects"]) else f"; {t['project']} is empty and left the board"
+                return text(f"Removed {t['id']} {t['title']}{gone}.")
             if act == "project":
                 name = a.get("name") or a.get("project")
                 if not name:
