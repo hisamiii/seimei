@@ -347,9 +347,10 @@ def running_output(pid: int, lines: int = 4) -> list[str]:
 def timeline(path: Path, start: int | None = None, events: int = 400) -> dict:
     """The session as the chat log draws it: user and assistant texts, tool calls and their results.
 
-    From byte start on (the next poll passes back "next"), or the transcript's last events on the first read."""
+    From byte start on (the next poll passes back "next"), or the transcript's last events on the first read. A start
+    too far back (a page's copy from long ago) reads like a first read, with "reset": the copy is too old to extend."""
     size = path.stat().st_size
-    tail = start is None
+    tail = start is None or size - start > TAIL
     rows, nxt = _rows(path, max(size - TAIL, 0) if tail else min(start, size))
     out = []
     for row in rows:
@@ -372,9 +373,9 @@ def timeline(path: Path, start: int | None = None, events: int = 400) -> dict:
             elif b.get("type") == "tool_use":
                 out.append({"id": f"{uid}:{i}", "type": "tool", "name": b.get("name"), "tool_id": b["id"],
                             "summary": _summary(b.get("input") or {}), "t": t})
-    if tail and len(out) > events:
-        out = out[-events:]
-    return {"events": out, "next": nxt}
+    if len(out) > events:
+        out, tail = out[-events:], True
+    return {"events": out, "next": nxt, "reset": tail}
 
 
 

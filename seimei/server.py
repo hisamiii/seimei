@@ -34,6 +34,7 @@ CSP = ("default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script
 HEARTBEAT = 15
 MAX_IMAGES = 6
 MAX_FILES = 10
+PAGE = 400  # events an agent's page loads at most at once
 
 
 def load_web() -> tuple[str, dict[str, bytes]]:
@@ -520,10 +521,21 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
         return await asyncio.to_thread(metrics.collect, pool, cost, worker_events, ids) if cost else []
 
     async def worker_history(request):
+        """A shikigami's row and its log: the last PAGE events, or those after ?after= (a page's cached copy). When more
+        than PAGE came since, only the last PAGE come, with "reset": the copy is too old to extend."""
         w = worker(request)
-        m = await worker_metrics([w.id])
+        after = request.query.get("after", "")
+        evs, reset = (w.log.after(int(after)), False) if after.isdigit() else (w.log.before(None, PAGE), True)
+        if len(evs) > PAGE:
+            evs, reset = evs[-PAGE:], True
         return web.json_response({"worker": {**w.info(), "task": w.rec["task"], "question": w.rec.get("question")},
-                                  "events": w.log.before(None, 400), "metrics": m[0] if m else None})
+                                  "events": evs, "reset": reset})
+
+    async def worker_metrics_view(request):
+        """Its run so far (metrics.py), for the details sheet: kept off the page's own load, since pricing every
+        transcript takes a while."""
+        m = await worker_metrics([worker(request).id])
+        return web.json_response({"metrics": m[0] if m else None})
 
     async def metrics_view(request):
         return web.json_response({"workers": await worker_metrics()})
@@ -598,6 +610,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     app.router.add_get("/api/app/seimei.apk", apk)
     app.router.add_get("/api/workers", workers_all)
     app.router.add_get("/api/workers/{id}", worker_history)
+    app.router.add_get("/api/workers/{id}/metrics", worker_metrics_view)
     app.router.add_post("/api/workers/{id}/send", worker_send)
     app.router.add_post("/api/workers/{id}/stop", worker_stop)
     app.router.add_post("/api/workers/{id}/archive", worker_archive)

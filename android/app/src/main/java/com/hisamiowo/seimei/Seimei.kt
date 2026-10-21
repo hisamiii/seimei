@@ -25,6 +25,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -73,16 +74,36 @@ class Page(val kind: String, val id: String) {
     var draft by mutableStateOf("")
     var files by mutableStateOf<List<Attachment.Doc>>(emptyList())
     var details by mutableStateOf(false)
-    /** A shikigami's run so far (metrics.py), as of opening the page. */
+    /** A shikigami's run so far (metrics.py), fetched when its details open. */
     var metrics by mutableStateOf<JSONObject?>(null)
-    internal val chat = Chat()
+    internal var chat = Chat()
+    /** The events as they came (the last Store.PAGE_KEEP), for the copy kept on the phone. */
+    internal var raw: List<JSONObject> = emptyList()
     internal var next: Long? = null
     internal var last = 0L
     internal var poll: Job? = null
+    internal var save: Job? = null
+
+    /** Adds what is new in [evs], or starts over with them ([reset]: the laptop sent a fresh copy). */
+    fun take(evs: List<JSONObject>, reset: Boolean) {
+        val fresh = if (reset) evs else Store.fresh(raw, evs)
+        if (reset) chat = Chat()
+        raw = (if (reset) fresh else raw + fresh).takeLast(Store.PAGE_KEEP)
+        fresh.forEach(chat::add)
+        for (e in fresh) if (e.opt("id") is Number) last = maxOf(last, e.getLong("id"))
+        items = chat.items.toList()
+    }
 }
 
 class Seimei(app: Application) : AndroidViewModel(app) {
     val prefs = Prefs(app)
+    private val store = Store(app.noBackupFilesDir)
+    /** The chat as last seen, read from the phone while the app starts and unlocks. */
+    private val stored = viewModelScope.async(Dispatchers.IO) { if (prefs.device != null) store.read(Store.CHAT) else null }
+    private var restored = false
+    private var chatSave: Job? = null
+    /** Counts page opens, so a slow answer for a page no longer wanted is dropped. */
+    private var opening = 0
     var api = Api(prefs.server)
         private set
 
@@ -205,6 +226,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                     return@launch
                 }
                 api = Api(url)
+                forgetConversations()
                 val pub = withContext(Dispatchers.Default) { DeviceKey.create(fp) }
                 val r = api.post("api/devices/claim", JSONObject().put("code", code).put("name", name.trim()).put("public_key", pub))
                 prefs.server = url
@@ -289,6 +311,22 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         api.token = null
         phase = Phase.Pair
         authError = why
+        forgetConversations()
+    }
+
+    /** No copies of conversations stay on a phone that is not paired (or pairs with another laptop). */
+    private fun forgetConversations() {
+        restored = true
+        chatSave?.cancel()
+        page?.let { it.poll?.cancel(); it.save?.cancel() }
+        page = null
+        opening++
+        events = ArrayList()
+        lastId = 0
+        firstId = 0
+        hasOlder = false
+        rebuild()
+        viewModelScope.launch(Dispatchers.IO) { store.clear() }
     }
 
     private fun lock() {
@@ -325,6 +363,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         visible = false
         Push.visible = false
         backgroundSince = System.currentTimeMillis()
+        saveChat(now = true)
         stream?.cancel()
         stream = null
         api.closeStream()
@@ -332,8 +371,6 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     }
 
     private fun start() {
-        events = ArrayList()
-        lastId = 0
         if (foreground) connect()
     }
 
@@ -353,7 +390,8 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 val ch = Channel<JSONObject>(Channel.UNLIMITED)
                 val reader = launch { for (ev in ch) handle(ev) }
                 try {
-                    if (events.isEmpty()) loadHistory()
+                    restore()
+                    if (events.isEmpty()) loadHistory() else catchUp()
                     api.stream(lastId, onOpen = { ch.trySend(OPEN) }) { ch.trySend(it) }
                 } catch (e: HttpError) {
                     if (e.code == 401) {
@@ -383,20 +421,68 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         val r = api.get("api/history?limit=200")
         val evs = r.getJSONArray("events")
         events = ArrayList(List(evs.length()) { evs.getJSONObject(it) })
-        firstId = events.firstOrNull()?.optLong("id") ?: 0
-        hasOlder = firstId > 1
         lastId = r.getLong("last")
         r.optJSONObject("state")?.let { setState(it) }
         takeWorkers(r.optJSONArray("workers").objects())
         // A send that got through while the connection was down is in the history now.
         val echoed = events.map { it.str("cid") }.toSet()
         pending.removeAll { it.cid in echoed }
+        shown()
+        saveChat()
+    }
+
+    /** The chat kept on the phone, drawn at once on the first connect; the stream then brings what came since. */
+    private suspend fun restore() {
+        if (restored) return
+        restored = true
+        val c = stored.await() ?: return
+        if (events.isNotEmpty()) return
+        val evs = c.optJSONArray("events").objects()
+        if (evs.isEmpty()) return
+        events = ArrayList(evs)
+        lastId = events.last().optLong("id")
+        shown()
+    }
+
+    /** With a copy at hand, only the state and the list come fresh; a copy too far behind is fetched anew. */
+    private suspend fun catchUp() {
+        val r = api.get("api/history?limit=0")
+        val last = r.getLong("last")
+        if (last < lastId || last - lastId > Store.CHAT_KEEP) return loadHistory()
+        r.optJSONObject("state")?.let { setState(it) }
+        takeWorkers(r.optJSONArray("workers").objects())
+    }
+
+    private fun shown() {
+        firstId = events.firstOrNull()?.optLong("id") ?: 0
+        hasOlder = firstId > 1
         rebuild()
         // The first visit starts with nothing unseen; later ones count what came while away.
         val worth = events.filter { it.worth() }
         lastTraj = maxOf(lastTraj, worth.lastOrNull()?.optLong("id") ?: 0)
         if (prefs.trajSeen == 0L) prefs.trajSeen = lastTraj
         unseen = worth.count { it.optLong("id") > prefs.trajSeen }
+    }
+
+    /** Keeps the chat's last events on the phone, a moment after they change (or [now], when leaving the app). */
+    private fun saveChat(now: Boolean = false) {
+        if (events.isEmpty() || prefs.device == null) return
+        chatSave?.cancel()
+        chatSave = viewModelScope.launch {
+            if (!now) delay(1500)
+            val data = JSONObject().put("events", Store.tail(events, Store.CHAT_KEEP)).toString()
+            withContext(Dispatchers.IO + NonCancellable) { store.write(Store.CHAT, data) }
+        }
+    }
+
+    private fun savePage(pg: Page) {
+        pg.save?.cancel()
+        pg.save = viewModelScope.launch {
+            delay(1000)
+            val data = JSONObject().put("events", JSONArray(pg.raw)).put("last", pg.last).put("row", pg.row)
+                .apply { pg.next?.let { put("next", it) } }.toString()
+            withContext(Dispatchers.IO + NonCancellable) { store.write(Store.pageKey(pg.kind, pg.id), data) }
+        }
     }
 
     fun loadOlder() {
@@ -495,6 +581,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             route(ev)
             publish()
             count(ev)
+            saveChat()
             // The chat dot is for the conversation; the trajectory keeps its own count.
             if (tab != "chat" && !ev.inTraj() && type in setOf("assistant", "approval", "worker", "image", "file")) unread = true
             return
@@ -558,7 +645,10 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         allFetched = now
         viewModelScope.launch {
             try {
-                allWorkers = api.get("api/workers").getJSONArray("workers").objects()
+                val all = api.get("api/workers").getJSONArray("workers").objects()
+                allWorkers = all
+                val gone = all.filter { it.optBoolean("archived") }.map { Store.pageKey("worker", it.str("id")) }
+                withContext(Dispatchers.IO) { gone.forEach(store::drop) }
             } catch (e: IOException) {
             }
         }
@@ -598,26 +688,63 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     fun openSession(pid: Long) = openPage("session", pid.toString())
 
     private fun openPage(kind: String, id: String) {
+        val token = ++opening
+        page?.poll?.cancel()
         viewModelScope.launch {
+            val kept = withContext(Dispatchers.IO) { store.read(Store.pageKey(kind, id)) }
+            if (token != opening) return@launch
+            val listed = (if (kind == "worker") workers.firstOrNull { it.str("id") == id }
+                else sessions.firstOrNull { it.optLong("pid").toString() == id }) ?: JSONObject()
+            val shown = kept?.let { k ->
+                Page(kind, id).also { pg ->
+                    pg.take(k.optJSONArray("events").objects(), reset = true)
+                    pg.last = k.optLong("last")
+                    if (k.has("next")) pg.next = k.getLong("next")
+                    pg.row = (k.optJSONObject("row") ?: JSONObject()).merged(listed)
+                    page = pg
+                    presence()
+                }
+            }
             try {
-                val r = api.get(if (kind == "worker") "api/workers/$id" else "api/sessions/$id")
-                page?.poll?.cancel()
-                val pg = Page(kind, id)
-                val evs = r.getJSONArray("events").objects()
-                evs.forEach(pg.chat::add)
-                pg.items = pg.chat.items.toList()
-                if (kind == "worker") {
-                    pg.last = evs.lastOrNull()?.optLong("id") ?: 0
-                    pg.row = r.getJSONObject("worker").merged(workers.firstOrNull { it.str("id") == id } ?: JSONObject())
-                    pg.metrics = r.optJSONObject("metrics")
-                } else {
+                var r = api.get(when {
+                    kind == "worker" -> if (shown != null) "api/workers/$id?after=${shown.last}" else "api/workers/$id"
+                    shown?.next != null -> "api/sessions/$id?from=${shown.next}"
+                    else -> "api/sessions/$id"
+                })
+                // A pid the system gave to another session since: that one is new to this phone.
+                val sid = shown?.row?.str("session_id").orEmpty()
+                if (kind == "session" && shown?.next != null && sid.isNotEmpty() && r.getJSONObject("session").str("session_id") != sid)
+                    r = api.get("api/sessions/$id").put("reset", true)
+                if (token != opening) return@launch
+                val pg = shown ?: Page(kind, id)
+                pg.take(r.getJSONArray("events").objects(), reset = shown == null || r.optBoolean("reset"))
+                if (kind == "worker") pg.row = r.getJSONObject("worker").merged(listed)
+                else {
+                    pg.row = listed
                     takeSession(pg, r)
                     pg.poll = viewModelScope.launch { pollSession(pg) }
                 }
-                page = pg
-                presence()
+                if (shown == null) {
+                    page = pg
+                    presence()
+                }
+                savePage(pg)
+            } catch (e: HttpError) {
+                if (shown == null) snack = "Could not reach the laptop."
+                else if (e.code == 404) shown.note = "The laptop no longer has this; it shows the last copy."
             } catch (e: IOException) {
-                snack = "Could not reach the laptop."
+                snack = if (shown == null) "Could not reach the laptop." else "Offline: this is the last copy."
+            }
+        }
+    }
+
+    /** A shikigami's run so far, for its details: priced on the laptop when asked, not with every page load. */
+    fun loadMetrics(pg: Page) {
+        if (pg.kind != "worker") return
+        viewModelScope.launch {
+            try {
+                pg.metrics = api.get("api/workers/${pg.id}/metrics").optJSONObject("metrics")
+            } catch (e: IOException) {
             }
         }
     }
@@ -645,9 +772,9 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                     openPage("session", pg.id)
                     return
                 }
-                r.getJSONArray("events").objects().forEach(pg.chat::add)
-                pg.items = pg.chat.items.toList()
+                pg.take(r.getJSONArray("events").objects(), r.optBoolean("reset"))
                 takeSession(pg, r)
+                savePage(pg)
             } catch (e: HttpError) {
                 if (e.code == 404) pg.reach = "The session has ended."
             } catch (e: IOException) {
@@ -660,12 +787,12 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         val e = ev.optJSONObject("ev") ?: return
         // The page loaded the log a moment ago; skip what it already holds.
         if (e.has("id") && e.getLong("id") <= pg.last) return
-        if (e.has("id")) pg.last = e.getLong("id")
-        pg.chat.add(e)
-        pg.items = pg.chat.items.toList()
+        pg.take(listOf(e), reset = false)
+        savePage(pg)
     }
 
     fun closePage() {
+        opening++
         page?.poll?.cancel()
         page = null
         presence()
@@ -778,6 +905,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             allWorkers = allWorkers?.let { flag(it, "id") }
         } else sessions = flag(sessions, "pid")
         page?.takeIf { it.kind == a.kind && it.id == a.id }?.let { it.row = it.row.merged(JSONObject().put("archived", on)) }
+        if (on && page?.let { it.kind == a.kind && it.id == a.id } != true) viewModelScope.launch(Dispatchers.IO) { store.drop(Store.pageKey(a.kind, a.id)) }
         if (offerUndo) {
             undo = { setArchived(a, !on, false) }
             snack = "${if (on) "Archived" else "Unarchived"} ${a.name}"

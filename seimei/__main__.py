@@ -175,6 +175,8 @@ def main():
         pool.startup()
         adopter.startup()
         app["deploy_note"] = asyncio.create_task(deploy_note())
+        # Pricing reads every transcript once (seconds); do it now, not on the first Usage or details view.
+        app["cost"] = asyncio.create_task(asyncio.to_thread(cost.scan))
         app["dispatcher"] = asyncio.create_task(dispatcher.run())
         app["watcher"] = asyncio.create_task(watcher.run())
         app["archive"] = asyncio.create_task(pool.sweep())

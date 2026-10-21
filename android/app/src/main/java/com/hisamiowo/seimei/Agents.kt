@@ -715,6 +715,7 @@ fun Details(vm: Seimei, pg: Page) {
     val r = pg.row
     val cs = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
+    LaunchedEffect(pg) { vm.loadMetrics(pg) }
     ModalBottomSheet({ pg.details = false }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = cs.surfaceContainer) {
         Column(Modifier.padding(start = 20.dp, end = 20.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -733,7 +734,7 @@ fun Details(vm: Seimei, pg: Page) {
                 Fact("Context", r.context()?.let { "$it% used" } ?: "")
                 if (pg.kind == "worker") Fact("Started", atTime(r.optDouble("created")).replace(Regex("^at "), "today at ").cap())
                 else Fact("Last active", atTime(r.optDouble("active")).replace(Regex("^at "), "today at ").cap())
-                // What its run took (metrics.py), as of opening the page.
+                // What its run took (metrics.py), once the laptop has priced it.
                 if (pg.kind == "worker") pg.metrics?.let { m -> for ((k, v) in metricFacts(m)) Fact(k, v) }
             }
             val state = r.str("state")
