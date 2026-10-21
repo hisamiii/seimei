@@ -193,6 +193,9 @@ The #77 suite is the gate. Its three layers carry over differently:
   run, each with a thin runner. That covers the guard (97 precise cases plus the word list), shell parsing, push
   rules, the Web Push RFC 8291 vector, FCM, task board and follow rules, metrics, archive rules, permission options,
   auth and the tripwire.
+  Phase 0 moved the pure ones to `tests/cases/`: the guard (126 cases), permission options and the RFC 8291 vector.
+  The scenario ones (push rules, FCM, board and follow, metrics, archive, auth) drive Python objects today; each
+  moves when its Rust module lands.
 - **Live (`-m live`).** permtest and tunetest describe behavior, not internals. They get a Rust twin that drives the
   same scenarios on haiku in the test config dir.
 

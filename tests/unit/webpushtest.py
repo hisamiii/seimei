@@ -25,16 +25,17 @@ def check(n, ok, x=""):
     print("PASS" if ok else "FAIL", n, "" if ok else str(x)[:300], flush=True)
 
 
-# RFC 8291, Appendix A.
-AS_PRIVATE = "yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw"
-AS_PUBLIC = "BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8"
-UA_PUBLIC = "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4"
-UA_PRIVATE = "q1dXpw3UpT5VOmu_cf_v6ih07Aems3njxI-JWgLcM94"
-SALT = "DGv6ra1nlYgDCS1FRnbzlw"
-AUTH = "BTBZMqHH6r4Tts7J_aSIgg"
-PLAIN = "V2hlbiBJIGdyb3cgdXAsIEkgd2FudCB0byBiZSBhIHdhdGVybWVsb24"
-HEADER = "DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z 9KsN6nGRTbVYI_c7VJSPQTBtkgcy27ml mlMoZIIgDll6e3vCYLocInmYWAmS6Tlz AC8wEqKK6PBru3jl7A8"
-CIPHER = "8pfeW0KbunFT06SuDKoJH9Ql87S1QUrd irN6GcG7sFz1y1sqLgVi1VhjVkHsUoEs bI_0LpXMuGvnzQ"
+# RFC 8291, Appendix A (tests/cases/webpush.json, shared with the Rust server's tests).
+_V = json.loads((Path(__file__).resolve().parents[1] / "cases/webpush.json").read_text())["rfc8291"]
+AS_PRIVATE = _V["as_private"]
+AS_PUBLIC = _V["as_public"]
+UA_PUBLIC = _V["ua_public"]
+UA_PRIVATE = _V["ua_private"]
+SALT = _V["salt"]
+AUTH = _V["auth"]
+PLAIN = _V["plain"]
+HEADER = _V["header"]
+CIPHER = _V["cipher"]
 
 
 def private(b: str) -> ec.EllipticCurvePrivateKey:
