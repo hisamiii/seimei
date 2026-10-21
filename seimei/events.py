@@ -44,6 +44,8 @@ class EventLog:
         kind, what = ev["type"], ev.get("event")
         if "lane" in ev:
             return {}
+        if kind in ("image", "file"):
+            self.to_chat()
         if kind in TURN or (kind == "worker" and what == "summoned"):
             # The answered message only matters on the reply text.
             return {k: v for k, v in self.turn.items() if k != "re" or kind == "assistant"}
@@ -52,6 +54,12 @@ class EventLog:
         if kind == "system" or (kind == "rate_limit" and ev.get("status") != "rejected"):
             return {"lane": "t"}
         return {}
+
+    def to_chat(self):
+        """An event turn has something for the user (a picture, a file, a reply marked chat:): the rest of it shows
+        in the chat, saying what started it ("from": the trajectory turn)."""
+        if self.turn.get("lane") == "t":
+            self.turn = {"lane": "c", "from": self.turn["turn"], "why": self.turn.get("why", "")}
 
     def flash(self, ev: dict):
         """Send a transient event (text deltas, state) that is never stored or replayed."""

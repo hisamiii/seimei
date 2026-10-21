@@ -550,6 +550,12 @@ export class Renderer {
       this.activity = null;
       this.put(el('div', 'trig', ev.why ? `after ${ev.why}` : 'on its own'));
     } else if (this.lane === 't' && !ev.turn) this.turn = null;
+    // The part of an event turn that came to the chat (a picture, a reply for the user) says what started it.
+    if (this.lane === 'c' && ev.from && ev.from !== this.from && ev.type !== 'tool_result') {
+      this.from = ev.from;
+      this.activity = null;
+      this.put(el('div', 'trig', ev.why ? `after ${ev.why}` : 'on its own'));
+    } else if (this.lane === 'c' && !ev.from) this.from = null;
     // The summoned card already says it.
     if (ev.type === 'tool' && ev.name === 'mcp__seimei__summon') return;
     if (ev.type === 'tool') {

@@ -87,6 +87,7 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
     private var between = false
     // Trajectory: the dispatcher turn being drawn.
     private var turn = 0L
+    private var from = 0L
     private var day: LocalDate? = null
     private var activity = -1
     private val tools = HashMap<String, Int>()
@@ -187,6 +188,14 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
             val why = ev.str("why")
             put(Item.Trig("g$key", if (why.isEmpty()) "on its own" else "after $why"))
         } else if (lane == "t" && turnId == 0L) turn = 0
+        // The part of an event turn that came to the chat (a picture, a reply for the user) says what started it.
+        val fromId = ev.optLong("from")
+        if (lane == "c" && fromId > 0 && fromId != from && type != "tool_result") {
+            from = fromId
+            activity = -1
+            val why = ev.str("why")
+            put(Item.Trig("f$key", if (why.isEmpty()) "on its own" else "after $why"))
+        } else if (lane == "c" && fromId == 0L) from = 0
         // The summoned card already says it.
         if (type == "tool" && ev.str("name") == "mcp__seimei__summon") return
         if (type == "tool") {

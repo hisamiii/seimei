@@ -29,6 +29,8 @@ from .util import NO_CONNECTORS, STREAM_BUFFER, queue_env, result_text, summariz
 log = logging.getLogger("seimei")
 
 # Built-in tools the dispatcher has no use for. It keeps SendMessage/ListAgents, Monitor, ToolSearch and auto-memory.
+# A reply in an event turn that starts with this goes to the chat, not the trajectory.
+CHAT = "chat:"
 OFF_TOOLS = ["Agent", "Task", "Workflow", "NotebookEdit", "CronCreate", "CronDelete", "CronList", "RemoteTrigger",
              "PushNotification", "DesignSync", "EnterWorktree", "ExitWorktree", "ScheduleWakeup", "LSP"]
 
@@ -41,7 +43,7 @@ They talk to you through a web page, usually from their phone.
 - Replies are read on a phone: lead with the answer, keep it short, avoid wide tables.
 - Phone notifications are yours to decide: only approval cards push on their own. Use notify (level, collapse key, reply=true when they asked something and left the app), presence to see where they are, and watch rules to ping them when a shikigami or session finishes or asks, or the GPU queue frees.
 - Messages starting with [seimei] are events from the server, not typed by the user.
-- What you write in a turn a [seimei] line started shows in the user's Trajectory tab, not the chat; they see a one-line mention and a badge. When they must act on it, say so plainly, or ping with notify.
+- What you write in a turn a [seimei] line started shows in the user's Trajectory tab, not the chat; they see a one-line mention and a badge. A show_image or send_file in such a turn moves the rest of it to the chat. So does starting a reply with "chat:" (it is removed): use it when the user needs to see it (a question or decision for them, a result they asked for). Routine event handling stays unmarked. Ping with notify when it is urgent.
 
 ## Shikigami
 Delegate real work (coding, research, anything longer than a few tool calls) to shikigami: worker sessions you start with mcp__seimei__summon.
@@ -117,6 +119,7 @@ class Dispatcher:
         self.busy = False
         self.stopping = False
         self.pending: list[str] = []
+        self.head: str | None = None  # the start of a streaming reply, held until it shows whether it says chat:
         # What was sent since the last model step: ("user", event id) or ("event", why); see _step.
         self.inputs: list[tuple[str, object]] = []
         self.write_lock = asyncio.Lock()
@@ -272,16 +275,34 @@ class Dispatcher:
             if kind == "message_start":
                 self._set(busy=True)
                 self._step()
+            elif kind == "content_block_start" and ev["content_block"].get("type") == "text":
+                self.head = ""
             elif kind == "content_block_delta" and ev["delta"].get("type") == "text_delta":
-                self.events.flash({"type": "delta", "text": ev["delta"]["text"], "lane": self.events.turn.get("lane", "c")})
+                text = ev["delta"]["text"]
+                if self.head is not None:
+                    # Hold the start of a reply until it shows whether it is marked chat:.
+                    self.head += text
+                    lead = self.head.lstrip()
+                    if len(lead) < len(CHAT) and CHAT.startswith(lead):
+                        return
+                    text, self.head = self.head, None
+                    if lead.startswith(CHAT):
+                        self.events.to_chat()
+                        text = lead[len(CHAT):].lstrip()
+                if text:
+                    self.events.flash({"type": "delta", "text": text, "lane": self.events.turn.get("lane", "c")})
             elif kind == "content_block_start" and ev["content_block"].get("type") == "thinking":
                 self.events.flash({"type": "thinking"})
         elif isinstance(msg, AssistantMessage):
             if msg.parent_tool_use_id:
                 return
             for b in msg.content:
-                if isinstance(b, TextBlock) and b.text.strip():
-                    self.events.add({"type": "assistant", "text": b.text})
+                if isinstance(b, TextBlock) and (text := b.text.strip()):
+                    if text.startswith(CHAT):
+                        self.events.to_chat()
+                        text = text[len(CHAT):].strip()
+                    if text:
+                        self.events.add({"type": "assistant", "text": text})
                 elif isinstance(b, ToolUseBlock):
                     self.events.add({"type": "tool", "tool_id": b.id, "name": b.name, "summary": summarize(b.input)})
         elif isinstance(msg, UserMessage):
