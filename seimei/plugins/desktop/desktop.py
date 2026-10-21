@@ -1,18 +1,17 @@
-"""The niri desktop. Its socket is looked up on every call, so seimei outlives niri restarts."""
+"""The desktop: what seimei sees and drives in the user's graphical session, through a backend for the window
+manager (backends/). The backend finds the session on every call, so seimei outlives WM restarts."""
 
 import asyncio
 import json
 import logging
 import os
 import re
-import shlex
-import socket
-import subprocess
 import tempfile
 import time
 from pathlib import Path
 
 from ...events import EventLog
+from .backends import Backend, NoDesktop
 from .uinput import Keyboard, Pointer
 
 log = logging.getLogger("seimei.desktop")
@@ -25,87 +24,32 @@ UNLOCK = "unlock"
 # Full-screen shots are scaled from logical pixels so the long edge stays near what the model sees at full detail.
 SHOT_EDGE = 1568
 DOWN_GRACE = 8
-# Windows seimei opened: closing them needs no card. Ids are niri's and die with it.
+# Windows seimei opened: closing them needs no card. Ids are the WM's and die with it.
 OURS: dict[int, dict] = {}
+# The backend in use (set by the plugin); the module functions below go through it.
+BACKEND: Backend | None = None
 
 
-class NoDesktop(RuntimeError):
-    pass
-
-
-def find_socket() -> Path | None:
-    for path in sorted(RUN.glob("niri.*.sock"), key=lambda p: -p.stat().st_mtime):
-        try:
-            with socket.socket(socket.AF_UNIX) as s:
-                s.settimeout(1)
-                s.connect(str(path))
-            return path
-        except OSError:
-            continue
-    return None
+def backend() -> Backend:
+    if BACKEND is None:
+        raise NoDesktop("no desktop backend (the desktop plugin is off)")
+    return BACKEND
 
 
 def env() -> dict:
-    sock = find_socket()
-    if not sock:
-        raise NoDesktop("no desktop session (niri is not running)")
-    e = dict(os.environ, NIRI_SOCKET=str(sock))
-    if m := re.match(r"niri\.(wayland-\d+)\.\d+\.sock$", sock.name):
-        e["WAYLAND_DISPLAY"] = m.group(1)
-    return e
-
-
-def ipc(request):
-    """One request on niri's socket: "Windows", "Workspaces", "Outputs", "FocusedWindow", "KeyboardLayouts"."""
-    sock = find_socket()
-    if not sock:
-        raise NoDesktop("no desktop session (niri is not running)")
-    with socket.socket(socket.AF_UNIX) as s:
-        s.settimeout(5)
-        s.connect(str(sock))
-        s.sendall(json.dumps(request).encode() + b"\n")
-        buf = b""
-        while not buf.endswith(b"\n"):
-            chunk = s.recv(1 << 16)
-            if not chunk:
-                break
-            buf += chunk
-    reply = json.loads(buf)
-    if "Err" in reply:
-        raise RuntimeError(reply["Err"])
-    ok = reply["Ok"]
-    return ok[request] if isinstance(request, str) and isinstance(ok, dict) and request in ok else ok
-
-
-def action(*args: str, timeout: float = 10) -> str:
-    r = subprocess.run(["niri", "msg", "action", *args], env=env(), capture_output=True, text=True, timeout=timeout)
-    if r.returncode:
-        raise RuntimeError((r.stderr or r.stdout).strip() or f"niri action {args[0]} failed")
-    return r.stdout.strip()
+    return backend().env()
 
 
 def focused_id() -> int | None:
-    try:
-        w = ipc("FocusedWindow")
-    except Exception:
-        return None
-    return w["id"] if w else None
+    return backend().focused_id()
 
 
 def window(wid: int) -> dict | None:
-    return next((w for w in ipc("Windows") if w["id"] == wid), None)
+    return backend().window(wid)
 
 
 def locked() -> bool:
-    """A screen locker is up. niri does not report it, so look for the locker process."""
-    for p in Path("/proc").iterdir():
-        if p.name.isdigit():
-            try:
-                if (p / "comm").read_text().strip() in ("swaylock", "hyprlock", "gtklock", "waylock"):
-                    return True
-            except OSError:
-                pass
-    return False
+    return backend().locked()
 
 
 def _ancestors(pid: int):
@@ -119,23 +63,8 @@ def _ancestors(pid: int):
             return
 
 
-def _output(name: str) -> dict:
-    return ipc("Outputs")[name]["logical"]
-
-
 # A region shot stays under this, so it fits a tool result and the model's image budget.
 REGION_MAX = 800_000
-# Read-only niri queries the dispatcher may make (niri msg --json <what>).
-QUERIES = ("outputs", "workspaces", "windows", "focused-window", "focused-output", "layers", "keyboard-layouts", "version")
-
-
-def query(what: str) -> str:
-    if what not in QUERIES:
-        raise ValueError(f"what is one of {', '.join(QUERIES)}")
-    r = subprocess.run(["niri", "msg", "--json", what], env=env(), capture_output=True, text=True, timeout=10)
-    if r.returncode:
-        raise RuntimeError(r.stderr.strip() or f"niri msg {what} failed")
-    return json.dumps(json.loads(r.stdout), separators=(",", ":"))
 
 
 def _bar_height() -> int:
@@ -155,18 +84,24 @@ def _bar_height() -> int:
 
 
 def _screen_scale() -> float:
-    outs = [o["logical"] for o in ipc("Outputs").values() if o.get("logical")]
+    outs = list(backend().outputs().values())
     edge = max(max(o["x"] + o["width"] for o in outs), max(o["y"] + o["height"] for o in outs))
     return min(1.0, SHOT_EDGE / edge)
 
 
 class Desktop:
-    def __init__(self, events: EventLog, note=None, secret: Path | None = None):
+    def __init__(self, events: EventLog, note=None, secret: Path | None = None, backend: Backend | None = None):
+        global BACKEND
+        if backend is not None:
+            BACKEND = backend
+        self.b = BACKEND
         self.events = events
         self.secret = secret
         self.note = note or (lambda text: None)
         self.up = None
         self.windows: dict[int, dict] = {}
+        # The first window list of a stream is what was there already, not windows that just opened.
+        self.listed = False
         self.workspaces: dict[int, dict] = {}
         self.layouts = {"names": [], "current_idx": 0}
         self.waiting: list[tuple[int, asyncio.Future]] = []
@@ -174,72 +109,66 @@ class Desktop:
         self.lock = asyncio.Lock()
         self.driving_until = 0.0
         self.halted_until = 0.0
-        self.listeners = []
 
     # ---------- event stream ----------
 
     async def run(self):
         down_since = None
+        label = self.b.label
         while True:
-            sock = await asyncio.to_thread(find_socket)
-            if not sock:
+            if not await asyncio.to_thread(self.b.up):
                 down_since = down_since or time.monotonic()
                 if self.up and time.monotonic() - down_since > DOWN_GRACE:
                     self.up = False
                     OURS.clear()
-                    self.events.add({"type": "system", "level": "warn", "text": "The desktop went down (niri is not running)."})
-                    self.note("The desktop went down: niri is not running, so desktop tools fail until it is back.")
+                    self.events.add({"type": "system", "level": "warn", "text": f"The desktop went down ({label} is not running)."})
+                    self.note(f"The desktop went down: {label} is not running, so desktop tools fail until it is back.")
                 await asyncio.sleep(2)
                 continue
             down_since = None
             try:
-                await self._stream(sock)
-            except (OSError, ValueError, asyncio.IncompleteReadError) as e:
-                log.info("niri event stream ended: %s", e)
+                async for kind, body in self.b.events():
+                    if kind == "up":
+                        self.listed = False
+                        if self.up is False:
+                            self.events.add({"type": "system", "text": "The desktop is back."})
+                            self.note(f"The desktop is back: {label} is running again.")
+                        self.up = True
+                    else:
+                        self._event(kind, body)
+            except (OSError, ValueError, RuntimeError, asyncio.IncompleteReadError) as e:
+                log.info("%s event stream ended: %s", label, e)
             await asyncio.sleep(1)
 
-    async def _stream(self, sock: Path):
-        reader, writer = await asyncio.open_unix_connection(str(sock), limit=1 << 24)
-        try:
-            writer.write(b'"EventStream"\n')
-            await writer.drain()
-            json.loads(await reader.readline())
-            if self.up is False:
-                self.events.add({"type": "system", "text": "The desktop is back."})
-                self.note("The desktop is back: niri is running again.")
-            self.up = True
-            while line := await reader.readline():
-                self._event(json.loads(line))
-        finally:
-            writer.close()
-
-    def _event(self, ev: dict):
-        (kind, body), = ev.items()
-        if kind == "WindowsChanged":
-            self.windows = {w["id"]: w for w in body["windows"]}
+    def _event(self, kind: str, body):
+        if kind == "windows":
+            new = [w for w in body if w["id"] not in self.windows]
+            first, self.listed = not self.listed, True
+            self.windows = {w["id"]: w for w in body}
             for wid in list(OURS):
                 if wid not in self.windows:
                     OURS.pop(wid)
-        elif kind == "WindowOpenedOrChanged":
-            w = body["window"]
-            new = w["id"] not in self.windows
-            self.windows[w["id"]] = w
+            # A backend that only sends whole lists: the new windows are the opened ones.
+            if not first:
+                for w in new:
+                    self._match(w)
+        elif kind == "opened":
+            new = body["id"] not in self.windows
+            self.windows[body["id"]] = body
             if new:
-                self._match(w)
-        elif kind == "WindowClosed":
-            self.windows.pop(body["id"], None)
-            OURS.pop(body["id"], None)
-        elif kind == "WindowUrgencyChanged":
-            if w := self.windows.get(body["id"]):
-                w["is_urgent"] = body["urgent"]
-        elif kind == "WorkspacesChanged":
-            self.workspaces = {w["id"]: w for w in body["workspaces"]}
-        elif kind == "KeyboardLayoutsChanged":
-            self.layouts = body["keyboard_layouts"]
-        elif kind == "KeyboardLayoutSwitched":
-            self.layouts["current_idx"] = body["idx"]
-        for fn in self.listeners:
-            fn(kind, body)
+                self._match(body)
+        elif kind == "closed":
+            self.windows.pop(body, None)
+            OURS.pop(body, None)
+        elif kind == "urgent":
+            if w := self.windows.get(body[0]):
+                w["is_urgent"] = body[1]
+        elif kind == "workspaces":
+            self.workspaces = {w["id"]: w for w in body}
+        elif kind == "layouts":
+            self.layouts = body
+        elif kind == "layout_idx":
+            self.layouts["current_idx"] = body
 
     def _match(self, w: dict):
         for pid, fut in list(self.waiting):
@@ -249,11 +178,11 @@ class Desktop:
     # ---------- reading ----------
 
     def overview(self) -> str:
-        wins, spaces, outs = ipc("Windows"), ipc("Workspaces"), ipc("Outputs")
-        layouts = ipc("KeyboardLayouts")
+        b = self.b
+        wins, spaces, outs = b.windows(), b.workspaces(), b.outputs()
+        layouts = b.layouts()
         lines = []
-        for name, o in outs.items():
-            lg = o.get("logical") or {}
+        for name, lg in outs.items():
             lines.append(f"Output {name}: {lg.get('width')}x{lg.get('height')} logical, scale {lg.get('scale')}")
         focused = next((w["id"] for w in wins if w["is_focused"]), None)
         for ws in sorted(spaces, key=lambda s: (s["output"] or "", s["idx"])):
@@ -261,15 +190,16 @@ class Desktop:
             head = f"Workspace {ws['idx']}" + (f" \"{ws['name']}\"" if ws["name"] else "") + f" on {ws['output']}"
             head += " (active)" if ws["is_active"] else ""
             lines.append(head + (":" if here else ": empty"))
-            for w in sorted(here, key=lambda w: (w["layout"].get("pos_in_scrolling_layout") or [99, 99])):
+            for w in sorted(here, key=lambda w: (w.get("pos") or [99, 99])):
                 flags = [f for f, on in (("focused", w["id"] == focused), ("urgent", w["is_urgent"]),
                                          ("floating", w["is_floating"]), ("opened by seimei", w["id"] in OURS)) if on]
                 lines.append(f"  window {w['id']}: {w['app_id']} \"{w['title']}\"" + (f" [{', '.join(flags)}]" if flags else ""))
         floating = [w for w in wins if w["workspace_id"] is None]
         for w in floating:
             lines.append(f"  window {w['id']}: {w['app_id']} \"{w['title']}\" (no workspace)")
-        lines.append("Keyboard layout: " + layouts["names"][layouts["current_idx"]] + " (of " + ", ".join(layouts["names"]) + ")")
-        lines.append("Screen locked" if locked() else "Screen unlocked")
+        if layouts and layouts.get("names"):
+            lines.append("Keyboard layout: " + layouts["names"][layouts["current_idx"]] + " (of " + ", ".join(layouts["names"]) + ")")
+        lines.append("Screen locked" if b.locked() else "Screen unlocked")
         return "\n".join(lines)
 
     def urgent(self) -> list[dict]:
@@ -281,15 +211,15 @@ class Desktop:
         """The whole screen as JPEG, or one window (even on another workspace) as PNG."""
         if window_id is None:
             scale = await asyncio.to_thread(_screen_scale)
-            return await self._grim(scale, 80), "image/jpeg"
+            return await self.b.screen(scale, 80), "image/jpeg"
         if not await asyncio.to_thread(window, window_id):
             raise ValueError(f"no window {window_id}")
-        return await asyncio.to_thread(self._window_shot, window_id), "image/png"
+        return await asyncio.to_thread(self.b.window_shot, window_id), "image/png"
 
     async def region(self, box: list[float] | None = None, target: str | None = None) -> tuple[bytes, str, str]:
         """Part of the screen at full resolution: box is x, y, w, h in pixels of the whole-screen screenshot (like
         click), or a named target. Returns the image, its type and the logical geometry taken."""
-        outs = [o["logical"] for o in (await asyncio.to_thread(ipc, "Outputs")).values() if o.get("logical")]
+        outs = list((await asyncio.to_thread(self.b.outputs)).values())
         o = outs[0]
         if target:
             bar = await asyncio.to_thread(_bar_height) if target == "bar" else 0
@@ -311,43 +241,10 @@ class Desktop:
         full = o.get("scale") or 1
         # PNG while it fits, then JPEG at falling quality, then smaller.
         for kind, q, s in (("png", 0, full), ("jpeg", 90, full), ("jpeg", 75, full), ("jpeg", 75, full * .7), ("jpeg", 70, full * .5)):
-            args = ["grim", "-g", geo, "-s", f"{s:.3f}", "-t", kind] + (["-q", str(q)] if kind == "jpeg" else []) + ["-"]
-            proc = await asyncio.create_subprocess_exec(*args, env=await asyncio.to_thread(env), stdout=subprocess.PIPE,
-                                                        stderr=subprocess.PIPE)
-            out, err = await proc.communicate()
-            if proc.returncode:
-                raise RuntimeError(err.decode().strip() or "grim failed")
+            out = await self.b.region(geo, s, kind, q)
             if len(out) <= REGION_MAX:
                 return out, f"image/{kind}", geo
         return out, "image/jpeg", geo
-
-    async def _grim(self, scale: float, quality: int) -> bytes:
-        proc = await asyncio.create_subprocess_exec("grim", "-s", f"{scale:.3f}", "-t", "jpeg", "-q", str(quality), "-",
-                                                    env=await asyncio.to_thread(env), stdout=subprocess.PIPE,
-                                                    stderr=subprocess.PIPE)
-        out, err = await proc.communicate()
-        if proc.returncode:
-            raise RuntimeError(err.decode().strip() or "grim failed")
-        return out
-
-    def _window_shot(self, window_id: int) -> bytes:
-        """niri's window capture also takes over the clipboard, so the clipboard is put back afterwards."""
-        e = env()
-        saved = _save_clipboard(e)
-        with tempfile.TemporaryDirectory(prefix="seimei-shot-") as d:
-            path = Path(d) / "w.png"
-            try:
-                action("screenshot-window", "--id", str(window_id), "--write-to-disk", "true", "--path", str(path))
-                for _ in range(60):
-                    if path.exists() and path.stat().st_size and _png_complete(path):
-                        break
-                    time.sleep(0.05)
-                else:
-                    raise RuntimeError("niri did not write the window shot")
-                return path.read_bytes()
-            finally:
-                _restore_clipboard(saved)
-                _dismiss_shot_notice(e, str(path))
 
     # ---------- launching ----------
 
@@ -357,7 +254,7 @@ class Desktop:
         fd, pidfile = tempfile.mkstemp(prefix="seimei-spawn-")
         os.close(fd)
         try:
-            await asyncio.to_thread(action, "spawn-sh", "--", f"echo $$ > {pidfile}; exec {command}")
+            await asyncio.to_thread(self.b.spawn_sh, f"echo $$ > {pidfile}; exec {command}")
             pid = None
             for _ in range(40):
                 text = Path(pidfile).read_text().strip()
@@ -370,6 +267,11 @@ class Desktop:
         if not pid:
             raise RuntimeError("the command did not start")
         known = next((w for w in self.windows.values() if pid in _ancestors(w.get("pid") or 0)), None)
+        if not known and not self.up:
+            # No event stream (yet): look at the window list directly.
+            known = await self._poll_for(pid, wait)
+            if not known:
+                return None
         fut = asyncio.get_running_loop().create_future()
         entry = (pid, fut)
         self.waiting.append(entry)
@@ -384,15 +286,17 @@ class Desktop:
             await asyncio.to_thread(self._to_own_workspace, w)
         return w
 
+    async def _poll_for(self, pid: int, wait: float) -> dict | None:
+        end = time.monotonic() + wait
+        while time.monotonic() < end:
+            wins = await asyncio.to_thread(self.b.windows)
+            if w := next((w for w in wins if pid in _ancestors(w.get("pid") or 0)), None):
+                return w
+            await asyncio.sleep(0.25)
+        return None
+
     def _to_own_workspace(self, w: dict):
-        spaces = ipc("Workspaces")
-        if not any(s["name"] == WORKSPACE for s in spaces):
-            ws = next(s for s in spaces if s["id"] == w["workspace_id"])
-            empty = [s for s in spaces if s["output"] == ws["output"] and s["active_window_id"] is None]
-            if not empty:
-                raise RuntimeError("no empty workspace to name")
-            action("set-workspace-name", "--workspace", str(max(empty, key=lambda s: s["idx"])["idx"]), WORKSPACE)
-        action("move-window-to-workspace", "--window-id", str(w["id"]), "--focus", "false", WORKSPACE)
+        self.b.to_named_workspace(w["id"], WORKSPACE)
 
     # ---------- input ----------
 
@@ -424,7 +328,7 @@ class Desktop:
         if not window(window_id):
             raise ValueError(f"no window {window_id}")
         if focused_id() != window_id:
-            action("focus-window", "--id", str(window_id))
+            self.b.focus(window_id)
             time.sleep(0.25)
         w = window(window_id)
         if not w or not w["is_focused"]:
@@ -433,10 +337,10 @@ class Desktop:
 
     def _us_layout(self) -> int | None:
         """Switch to the US layout for typing; returns the layout to switch back to."""
-        layouts = ipc("KeyboardLayouts")
-        if layouts["current_idx"] == 0 or not layouts["names"][0].startswith("English (US)"):
+        layouts = self.b.layouts()
+        if not layouts or layouts["current_idx"] == 0 or not layouts["names"][0].startswith("English (US)"):
             return None
-        action("switch-layout", "0")
+        self.b.switch_layout(0)
         time.sleep(0.05)
         return layouts["current_idx"]
 
@@ -465,7 +369,7 @@ class Desktop:
             if back is not None:
                 time.sleep(0.5)
                 try:
-                    action("switch-layout", str(back))
+                    self.b.switch_layout(back)
                 except Exception:
                     pass
         for _ in range(30):
@@ -489,7 +393,7 @@ class Desktop:
                 self.keyboard.type(text[i:i + 64])
         finally:
             if back is not None:
-                action("switch-layout", str(back))
+                self.b.switch_layout(back)
 
     async def keys(self, window_id: int, combos: list[str]):
         async with self.lock:
@@ -507,7 +411,7 @@ class Desktop:
                 time.sleep(0.05)
         finally:
             if back is not None:
-                action("switch-layout", str(back))
+                self.b.switch_layout(back)
 
     async def click(self, x: float, y: float, window_id: int | None = None, button: str = "left", count: int = 1,
                     scroll: int = 0):
@@ -515,15 +419,15 @@ class Desktop:
             await asyncio.to_thread(self._click, x, y, window_id, button, count, scroll)
 
     def _click(self, x, y, window_id, button, count, scroll):
-        """x, y are pixels of the latest full-screen screenshot. niri reports no positions for tiled windows,
-        so a window id only guards that the screen still shows what the screenshot showed."""
+        """x, y are pixels of the latest full-screen screenshot. A window id only guards that the screen still shows
+        what the screenshot showed (niri reports no positions for tiled windows)."""
         if locked():
             raise RuntimeError("the screen is locked; unlock it first")
         if window_id is not None and focused_id() != window_id:
             raise RuntimeError(f"window {window_id} is no longer focused; focus it and take a new screenshot")
         scale = _screen_scale()
         sx, sy = x / scale, y / scale
-        outs = [o["logical"] for o in ipc("Outputs").values() if o.get("logical")]
+        outs = list(self.b.outputs().values())
         if len(outs) > 1:
             raise RuntimeError("pointer input is only set up for a single display")
         o = outs[0]
@@ -535,55 +439,3 @@ class Desktop:
         elif count:
             self.pointer.click(button, count)
 
-
-def _png_complete(path: Path) -> bool:
-    with open(path, "rb") as f:
-        f.seek(-12, 2)
-        return f.read().endswith(b"IEND\xaeB`\x82")
-
-
-def _save_clipboard(e: dict) -> tuple[str, bytes] | None:
-    """The clipboard's main type and data. Never logged: it may hold a password."""
-    try:
-        types = subprocess.run(["wl-paste", "--list-types"], env=e, capture_output=True, text=True, timeout=2).stdout.split()
-        if not types:
-            return None
-        kind = next((t for t in types if t.startswith("text/plain;charset=utf-8")), types[0])
-        data = subprocess.run(["wl-paste", "-n", "-t", kind], env=e, capture_output=True, timeout=3).stdout
-        return (kind, data) if len(data) < 64 << 20 else None
-    except (OSError, subprocess.SubprocessError):
-        return None
-
-
-def _restore_clipboard(saved: tuple[str, bytes] | None):
-    """Hand the old clipboard to a wl-copy started by niri, so it stays when seimei restarts."""
-    try:
-        if not saved:
-            action("spawn", "--", "wl-copy", "--clear")
-            return
-        kind, data = saved
-        fd, path = tempfile.mkstemp(prefix="seimei-clip-")
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
-        action("spawn-sh", "--", f"wl-copy -t {shlex.quote(kind)} < {path}; rm -f {path}")
-    except Exception:
-        log.warning("could not restore the clipboard")
-
-
-def _dismiss_shot_notice(e: dict, path: str):
-    """niri announces every window shot in a notification; take ours down, leaving no history."""
-    for _ in range(20):
-        try:
-            shown = json.loads(subprocess.run(["makoctl", "list", "-j"], env=e, capture_output=True, text=True,
-                                              timeout=2).stdout or "[]")
-        except (OSError, ValueError, subprocess.SubprocessError):
-            return
-        if isinstance(shown, dict):
-            shown = [n for group in shown.get("data", []) for n in group]
-        mine = [n for n in shown if path in json.dumps(n)]
-        if mine:
-            for n in mine:
-                nid = n["id"]["data"] if isinstance(n["id"], dict) else n["id"]
-                subprocess.run(["makoctl", "dismiss", "-n", str(nid), "--no-history"], env=e, capture_output=True, timeout=2)
-            return
-        time.sleep(0.05)
