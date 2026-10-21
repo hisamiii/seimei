@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use seimei_core::auth::Auth;
 use seimei_core::events::EventLog;
+use seimei_core::push::{Fcm, Push, WebPush};
 use seimei_core::util::{config_file, data_dir};
 use serde_json::Value;
 
@@ -193,18 +194,27 @@ fn main() {
     };
 
     let events = Arc::new(EventLog::open(&state.join("events.jsonl")).unwrap_or_else(|e| die(&format!("events: {e}"))));
+    let push = Push::new(
+        events.clone(),
+        auth.clone(),
+        Fcm::new(data_dir().join("firebase/service-account.json")),
+        &state,
+        WebPush::new(state.join("push-vapid.pem"), &origin),
+    );
     if let Some(auth) = &auth {
-        let ev = events.clone();
-        auth.set_alarm(Box::new(move |title, text| seimei_server::App::alarm(&ev, title, text)));
+        let (ev, p) = (events.clone(), push.clone());
+        auth.set_alarm(Box::new(move |title, text| seimei_server::App::alarm(&ev, &p, title, text)));
     }
     let web = std::env::var_os("SEIMEI_WEB")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../seimei/web"));
-    let app = Arc::new(seimei_server::App::new(events.clone(), auth, origins, &web, &state));
+    let app = Arc::new(seimei_server::App::new(events.clone(), auth, origins, &web, &state, push.clone()));
 
     let rt = tokio::runtime::Runtime::new().expect("a runtime");
     rt.block_on(async move {
         events.close_open_tools("Interrupted by a seimei restart.");
+        tokio::spawn(push.run());
+        tokio::spawn(app.uploads.clone().run());
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
             .await
             .unwrap_or_else(|e| die(&format!("port {port}: {e}")));

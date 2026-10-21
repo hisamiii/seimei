@@ -3,6 +3,7 @@
 
 #![allow(clippy::result_large_err)] // axum responses as the error side, as handlers return them
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
@@ -18,6 +19,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use seimei_core::auth::Auth;
 use seimei_core::events::{Event, EventLog};
+use seimei_core::files::Files;
+use seimei_core::push::{self as push_mod, Push};
+use seimei_core::uploads::Uploads;
 use seimei_core::util::{now, read_json, write_json};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
@@ -55,6 +59,9 @@ pub struct App {
     pub app_dir: PathBuf,
     pub theme: PathBuf,
     tasks: PathBuf,
+    pub files: Arc<Files>,
+    pub uploads: Arc<Uploads>,
+    pub push: Arc<Push>,
 }
 
 impl App {
@@ -64,6 +71,7 @@ impl App {
         origins: HashSet<String>,
         web: &Path,
         state: &Path,
+        push: Arc<Push>,
     ) -> App {
         // Only these Host headers are served: a page using DNS rebinding cannot read the API from the browser (L4).
         let mut hosts: HashSet<String> = ["localhost", "127.0.0.1", "::1"].map(String::from).into();
@@ -84,12 +92,37 @@ impl App {
             app_dir: state.join("app"),
             theme: state.join("theme.json"),
             tasks: state.join("tasks.json"),
+            files: Arc::new(Files::new(state)),
+            uploads: Arc::new(Uploads::new(state)),
+            push,
         }
     }
 
     /// Urgent: a phone paired, a passkey added, login data forged on the server.
-    pub fn alarm(events: &EventLog, title: &str, text: &str) {
+    pub fn alarm(events: &EventLog, push: &Arc<Push>, title: &str, text: &str) {
         events.add(json!({"type": "system", "level": "error", "text": format!("{title}. {text}")}));
+        push.ping(title, text, "urgent", None, false);
+    }
+
+    /// Pictures carry their size, so lazy images keep their space before they load (QA B13).
+    fn sized<'a>(&self, ev: &'a Value) -> Cow<'a, Value> {
+        let mut ev = Cow::Borrowed(ev);
+        if ev["type"] == "image"
+            && ev.get("w").is_none()
+            && let Some([w, h]) = self.files.dims(ev["file"].as_str().unwrap_or(""))
+        {
+            let e = ev.to_mut();
+            e["w"] = json!(w);
+            e["h"] = json!(h);
+        }
+        if ev.get("sizes").is_none()
+            && let Some(images) = ev["images"].as_array().filter(|i| !i.is_empty())
+        {
+            let sizes: Vec<[u32; 2]> =
+                images.iter().map(|n| self.files.dims(n.as_str().unwrap_or("")).unwrap_or([0, 0])).collect();
+            ev.to_mut()["sizes"] = json!(sizes);
+        }
+        ev
     }
 
     /// The dispatcher's state until it is ported (phase 3): never connected, never busy.
@@ -159,7 +192,11 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/app", get(app_info))
         .route("/api/app/seimei.apk", get(apk))
         .route("/api/theme", get(theme_get).post(theme_set))
-        .route("/api/tasks", get(tasks_view));
+        .route("/api/tasks", get(tasks_view))
+        .route("/api/presence", post(presence))
+        .route("/api/files/{name}", get(file))
+        .route("/api/upload", post(upload))
+        .route("/api/uploads/{id}", get(uploaded));
     if app.auth.is_some() {
         r = r
             .route("/api/auth/password", post(login_password))
@@ -173,7 +210,10 @@ pub fn router(app: Arc<App>) -> Router {
             .route("/api/devices/challenge", post(device_challenge))
             .route("/api/devices/login", post(device_login))
             .route("/api/devices", get(devices))
-            .route("/api/devices/{id}/revoke", post(revoke));
+            .route("/api/devices/{id}/revoke", post(revoke))
+            .route("/api/devices/push", get(push_info).post(push_token))
+            .route("/api/devices/push/test", post(push_test))
+            .route("/api/push/ws", get(push_ws));
     }
     r.fallback(not_found).layer(middleware::from_fn_with_state(app.clone(), guard)).with_state(app)
 }
@@ -390,7 +430,9 @@ async fn register(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> Respo
             json!({"ok": false, "error": seimei_core::util::chars(&e.0, 200)}),
         );
     }
-    auth(&app).alarm(
+    App::alarm(
+        &app.events,
+        &app.push,
         "A passkey was added",
         &format!(
             "{}. If it was not you, run `seimei lockdown` on the server.",
@@ -424,7 +466,9 @@ async fn claim(State(app): Shared, bytes: Bytes) -> Response {
     match auth(&app).claim(&s(&b, "code"), &s(&b, "name"), &s(&b, "public_key")) {
         Ok(device) => {
             let name = auth(&app).device(&device).map(|d| s(&d, "name")).unwrap_or_default();
-            auth(&app).alarm(
+            App::alarm(
+                &app.events,
+                &app.push,
                 "A phone was paired",
                 &format!("{name}. If it was not you, run `seimei lockdown` on the server."),
             );
@@ -476,6 +520,7 @@ async fn revoke(State(app): Shared, UrlPath(id): UrlPath<String>) -> Response {
     if !auth(&app).revoke(&id) {
         return not_found().await;
     }
+    app.push.stream.drop_device(&id);
     ok(json!({"ok": true}))
 }
 
@@ -560,7 +605,7 @@ async fn history(State(app): Shared, Query(q): Query<HashMap<String, String>>) -
         return text(StatusCode::BAD_REQUEST, "400: Bad Request");
     };
     let events: Vec<Event> = app.events.before(before, limit.clamp(0, 1000) as usize);
-    let events: Vec<&Value> = events.iter().map(|e| e.as_ref()).collect();
+    let events: Vec<Cow<Value>> = events.iter().map(|e| app.sized(e)).collect();
     ok(json!({"events": events, "last": app.events.last_id(), "state": app.state(), "workers": app.workers()["list"]}))
 }
 
@@ -570,7 +615,7 @@ fn sse(ev: &Value) -> Bytes {
 }
 
 async fn stream(State(app): Shared, headers: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
-    let mut last: i64 = headers
+    let last: i64 = headers
         .get("last-event-id")
         .and_then(|h| h.to_str().ok())
         .map(String::from)
@@ -579,13 +624,39 @@ async fn stream(State(app): Shared, headers: HeaderMap, Query(q): Query<HashMap<
         .unwrap_or(0);
     let mut sub = app.events.subscribe();
     let (tx, rx) = mpsc::channel::<Result<Bytes, Infallible>>(64);
+    // A phone with its stream open has the app on screen, so it gets no pushes meanwhile.
+    let device = app.auth.as_ref().and_then(|a| a.device_of(&headers));
+    let alive = tx.clone();
+    let opened = app.push.opened(device.as_deref(), Box::new(move || !alive.is_closed()));
     tokio::spawn(async move {
+        stream_events(&app, &headers, &mut sub, &tx, last).await;
+        app.push.closed(device.as_deref(), opened);
+    });
+    (
+        [
+            (header::CONTENT_TYPE, "text/event-stream"),
+            (header::CACHE_CONTROL, "no-cache, no-transform"),
+            (header::HeaderName::from_static("x-accel-buffering"), "no"),
+        ],
+        Body::from_stream(ReceiverStream::new(rx)),
+    )
+        .into_response()
+}
+
+async fn stream_events(
+    app: &App,
+    headers: &HeaderMap,
+    sub: &mut mpsc::Receiver<Event>,
+    tx: &mpsc::Sender<Result<Bytes, Infallible>>,
+    mut last: i64,
+) {
+    {
         let send = |b: Bytes| {
             let tx = tx.clone();
             async move { tx.send(Ok(b)).await.is_ok() }
         };
         for ev in app.events.after(last) {
-            if !send(sse(&ev)).await {
+            if !send(sse(&app.sized(&ev))).await {
                 return;
             }
             last = ev["id"].as_i64().unwrap_or(last);
@@ -601,7 +672,7 @@ async fn stream(State(app): Shared, headers: HeaderMap, Query(q): Query<HashMap<
             if let Some(a) = &app.auth
                 && checked.elapsed() > HEARTBEAT
             {
-                if !a.session(&headers) {
+                if !a.session(headers) {
                     break;
                 }
                 checked = Instant::now();
@@ -617,21 +688,211 @@ async fn stream(State(app): Shared, headers: HeaderMap, Query(q): Query<HashMap<
                         }
                         last = id;
                     }
-                    sse(&ev)
+                    sse(&app.sized(&ev))
                 }
             };
             if !send(chunk).await {
                 break;
             }
         }
-    });
+    }
+}
+
+/// The paired phone a request comes from; only the phone app registers for notifications.
+fn this_phone(app: &App, headers: &HeaderMap) -> Result<String, Response> {
+    app.auth
+        .as_ref()
+        .and_then(|a| a.device_of(headers))
+        .ok_or_else(|| text(StatusCode::FORBIDDEN, "only the phone app registers for notifications"))
+}
+
+/// What the app needs to register (the VAPID key) and how this phone is reached now.
+async fn push_info(State(app): Shared, headers: HeaderMap) -> Response {
+    let dev = match this_phone(&app, &headers) {
+        Ok(d) => d,
+        Err(r) => return r,
+    };
+    let rec = auth(&app).device(&dev).and_then(|d| d.get("push").cloned()).filter(|r| !r.is_null());
+    ok(json!({"vapid": app.push.webpush.public(), "way": rec.as_ref().map(Push::way),
+              "sending": rec.as_ref().is_some_and(|r| app.push.can_send(r))}))
+}
+
+/// The app registers after each login: {"token"} from Firebase, {"up": {endpoint, p256dh, auth}} from a UnifiedPush
+/// app, or {"ws": true} for the background connection (the answer carries its secret). Nothing turns them off.
+async fn push_token(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> Response {
+    let dev = match this_phone(&app, &headers) {
+        Ok(d) => d,
+        Err(r) => return r,
+    };
+    let b = match body(&bytes) {
+        Ok(b) => b,
+        Err(r) => return r,
+    };
+    let mut out = json!({"ok": true});
+    let rec = if let Some(up) = b.get("up").filter(|u| u.is_object()) {
+        let field = |k: &str, n: usize| json!(seimei_core::util::cut(up[k].as_str().unwrap_or(""), n));
+        let rec = json!({"up": field("endpoint", 2048), "p256dh": field("p256dh", 200), "auth": field("auth", 100)});
+        if !push_mod::valid_endpoint(rec["up"].as_str().unwrap()) || rec["p256dh"] == "" || rec["auth"] == "" {
+            return text(StatusCode::BAD_REQUEST, "not a push endpoint");
+        }
+        Some(rec)
+    } else if b.get("ws").is_some_and(|w| w.as_bool() == Some(true) || w.as_i64().is_some_and(|n| n != 0)) {
+        let secret = seimei_core::util::token_urlsafe(32);
+        out["ws"] = json!(secret);
+        Some(json!({"ws": push_mod::secret_hash(&secret)}))
+    } else {
+        Some(json!(seimei_core::util::cut(&s(&b, "token"), 4096))).filter(|t| t != "")
+    };
+    if !rec.as_ref().is_some_and(|r| r.get("ws").is_some()) {
+        app.push.stream.drop_device(&dev);
+    }
+    auth(&app).set_push(&dev, rec.clone());
+    out["sending"] = json!(rec.as_ref().is_some_and(|r| app.push.can_send(r)));
+    ok(out)
+}
+
+async fn push_test(State(app): Shared, headers: HeaderMap) -> Response {
+    let dev = match this_phone(&app, &headers) {
+        Ok(d) => d,
+        Err(r) => return r,
+    };
+    if auth(&app).device(&dev).and_then(|d| d.get("push").cloned()).is_none() {
+        return text(StatusCode::CONFLICT, "this phone has no notifications registered");
+    }
+    app.push.test(&dev);
+    ok(json!({"ok": true}))
+}
+
+/// GET /api/push/ws with "Authorization: Push <device> <secret>": the secret only opens this stream.
+async fn push_ws(
+    State(app): Shared,
+    headers: HeaderMap,
+    ws: Result<axum::extract::WebSocketUpgrade, axum::extract::ws::rejection::WebSocketUpgradeRejection>,
+) -> Response {
+    let authz = headers.get(header::AUTHORIZATION).and_then(|h| h.to_str().ok()).unwrap_or("");
+    let Some(dev) = app.push.stream_device(authz) else {
+        return text(StatusCode::UNAUTHORIZED, "not a push stream");
+    };
+    let ws = match ws {
+        Ok(ws) => ws,
+        Err(e) => return e.into_response(),
+    };
+    ws.on_upgrade(move |mut sock| async move {
+        use axum::extract::ws::Message;
+        let (id, mut rx) = app.push.stream.connect(&dev);
+        let mut beat = tokio::time::interval(Duration::from_secs(45));
+        beat.tick().await;
+        loop {
+            tokio::select! {
+                msg = rx.recv() => match msg {
+                    Some(text) => if sock.send(Message::Text(text.into())).await.is_err() { break },
+                    // Dropped (unpaired, or the phone switched ways): close it.
+                    None => {
+                        let _ = sock.send(Message::Close(None)).await;
+                        break;
+                    }
+                },
+                incoming = sock.recv() => match incoming {
+                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
+                    _ => {}
+                },
+                _ = beat.tick() => if sock.send(Message::Ping(Bytes::new())).await.is_err() { break },
+            }
+        }
+        app.push.stream.disconnect(&dev, id);
+    })
+}
+
+/// The app tells which view it shows (chat, another tab, an agent's page): replies skip only the chat.
+async fn presence(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> Response {
+    let b = match body(&bytes) {
+        Ok(b) => b,
+        Err(r) => return r,
+    };
+    let view = seimei_core::util::chars(&s(&b, "view"), 20);
+    let dev = app.auth.as_ref().and_then(|a| a.device_of(&headers));
+    if !view.is_empty() {
+        app.push.shows(dev.as_deref(), &view);
+    }
+    ok(json!({"ok": true}))
+}
+
+/// An image: ?w=thumb for the chat-sized one, ?download=1 for the original as a download.
+async fn file(
+    State(app): Shared,
+    UrlPath(name): UrlPath<String>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Response {
+    let thumb = q.get("w").map(String::as_str) == Some("thumb");
+    let files = app.files.clone();
+    let n = name.clone();
+    let path = if thumb {
+        tokio::task::spawn_blocking(move || files.thumb(&n)).await.ok().flatten()
+    } else {
+        app.files.path(&name)
+    };
+    let Some(path) = path else { return not_found().await };
+    let Ok(data) = tokio::fs::read(&path).await else { return not_found().await };
+    let name_s = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let mut r = (
+        [(header::CONTENT_TYPE, mime(&name_s)), (header::CACHE_CONTROL, "private, max-age=31536000, immutable")],
+        data,
+    )
+        .into_response();
+    if q.get("download").is_some_and(|d| !d.is_empty()) && !thumb {
+        let ext = path.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+        let v = format!("attachment; filename=\"seimei-{}{ext}\"", seimei_core::util::cut(&name, 8));
+        r.headers_mut().insert(header::CONTENT_DISPOSITION, HeaderValue::from_str(&v).unwrap());
+    }
+    r
+}
+
+/// Python's urllib.parse.quote: everything but letters, digits, "_.-~" and "/" percent-encoded.
+fn quote(s: &str) -> String {
+    s.bytes()
+        .map(|b| {
+            if b.is_ascii_alphanumeric() || b"_.-~/".contains(&b) {
+                (b as char).to_string()
+            } else {
+                format!("%{b:02X}")
+            }
+        })
+        .collect()
+}
+
+async fn upload(State(app): Shared, Query(q): Query<HashMap<String, String>>, req: Request) -> Response {
+    use futures_util::StreamExt;
+    let name = q.get("name").cloned().unwrap_or("file".into());
+    let Ok(mut inc) = app.uploads.receive(&name) else {
+        return text(StatusCode::INTERNAL_SERVER_ERROR, "could not store the file");
+    };
+    let mut body = req.into_body().into_data_stream();
+    let too_large = json!({"error": format!("files are limited to {} MB", seimei_core::uploads::MAX_BYTES >> 20)});
+    while let Some(chunk) = body.next().await {
+        let Ok(chunk) = chunk else { return text(StatusCode::BAD_REQUEST, "400: Bad Request") };
+        if inc.write(&chunk).is_err() {
+            return json_status(StatusCode::PAYLOAD_TOO_LARGE, too_large);
+        }
+    }
+    let id = inc.finish();
+    match app.uploads.info(&id) {
+        Some(i) => ok(json!({"id": i["id"], "name": i["name"], "size": i["size"], "kind": i["kind"]})),
+        None => text(StatusCode::INTERNAL_SERVER_ERROR, "could not store the file"),
+    }
+}
+
+async fn uploaded(State(app): Shared, UrlPath(id): UrlPath<String>) -> Response {
+    let Some(path) = app.uploads.path(&id) else { return not_found().await };
+    let Ok(data) = tokio::fs::read(&path).await else { return not_found().await };
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    // Always a download, never rendered: the file is untrusted.
     (
         [
-            (header::CONTENT_TYPE, "text/event-stream"),
-            (header::CACHE_CONTROL, "no-cache, no-transform"),
-            (header::HeaderName::from_static("x-accel-buffering"), "no"),
+            (header::CONTENT_TYPE, "application/octet-stream".to_string()),
+            (header::CACHE_CONTROL, "private, no-store".to_string()),
+            (header::CONTENT_DISPOSITION, format!("attachment; filename*=UTF-8''{}", quote(&name))),
         ],
-        Body::from_stream(ReceiverStream::new(rx)),
+        data,
     )
         .into_response()
 }
