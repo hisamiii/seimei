@@ -100,6 +100,8 @@ export class LiveStream {
     this.dec.configure(cfg);
     this.needKey = true;
     this.shown = false;
+    // The GOP sent on joining went by while the decoder was being set up: start from a fresh keyframe.
+    this.ws?.send('key');
   }
 
   closeDecoder() {

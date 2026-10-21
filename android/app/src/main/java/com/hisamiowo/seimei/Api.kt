@@ -52,6 +52,11 @@ class Api(server: String) {
 
     suspend fun get(path: String) = JSONObject(String(call(request(path).build())))
 
+    /** A WebSocket to [path] (the display stream), with the bearer token like every call. */
+    fun socket(path: String, listener: okhttp3.WebSocketListener): okhttp3.WebSocket =
+        client.newBuilder().pingInterval(10, TimeUnit.SECONDS).readTimeout(0, TimeUnit.SECONDS).build()
+            .newWebSocket(request(path).build(), listener)
+
     suspend fun bytes(path: String) = call(request(path).build())
 
     suspend fun post(path: String, body: JSONObject = JSONObject()): JSONObject {

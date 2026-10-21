@@ -32,6 +32,7 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -90,6 +91,12 @@ fun ScreenTab(vm: Seimei) {
     val scroll = rememberScrollState()
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
+    // The whole screen comes as live video; a window (and a phone without an H.264 decoder) as stills.
+    val player = remember { LivePlayer { vm.api } }
+    val useLive = mode == "screen" && !player.unsupported
+    var liveFull by remember { mutableStateOf(false) }
+    LaunchedEffect(useLive, paused, vm.visible) { if (useLive && !paused && vm.visible) player.start() else player.stop() }
+    DisposableEffect(Unit) { onDispose { player.stop() } }
 
     val windows = desk?.optJSONArray("workspaces").objects().flatMap { it.optJSONArray("windows").objects() }
     val target = if (mode == "screen") null else windows.firstOrNull { it.optLong("id") == window } ?: windows.firstOrNull { it.optBoolean("focused") }
@@ -103,8 +110,8 @@ fun ScreenTab(vm: Seimei) {
             vm.desktop()?.let { desk = it }
         }
     }
-    LaunchedEffect(mode, targetId, paused, vm.visible) {
-        while (vm.visible && !paused) {
+    LaunchedEffect(mode, targetId, paused, vm.visible, useLive) {
+        while (vm.visible && !paused && !useLive) {
             // Each frame is ~180 KB: on a metered network one every 3 s instead of every second.
             val metered = ctx.getSystemService(android.net.ConnectivityManager::class.java)?.isActiveNetworkMetered == true
             var wait = if (mode == "screen") (if (metered) 3000L else 1000L) else 4000L
@@ -139,12 +146,18 @@ fun ScreenTab(vm: Seimei) {
             Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(cs.surfaceContainerLowest).heightIn(min = 160.dp),
             contentAlignment = Alignment.Center,
         ) {
-            frame?.let { b ->
+            if (useLive) {
+                val (w, h) = player.size ?: (800 to 1280)
+                Box(Modifier.heightIn(max = maxWidth * 1.6f).aspectRatio(w.toFloat() / h).clickable { liveFull = true }) {
+                    LiveSurface(player, Modifier.fillMaxSize())
+                }
+            } else frame?.let { b ->
                 Image(b, "The laptop screen", Modifier.fillMaxWidth().heightIn(max = maxWidth * 1.6f).aspectRatio(b.width.toFloat() / b.height)
                     .clickable { zoom = true }, contentScale = ContentScale.Fit)
             }
             LiveChip(!paused, Modifier.align(Alignment.TopEnd).padding(12.dp))
-            if (msg.isNotEmpty()) Text(msg, fontSize = 14.sp, color = Color.White,
+            val shown = if (useLive) (if (paused) "" else player.note) else msg
+            if (shown.isNotEmpty()) Text(shown, fontSize = 14.sp, color = Color.White,
                 modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(Color.Black.copy(alpha = .6f)).padding(horizontal = 12.dp, vertical = 8.dp))
         }
         val out = desk?.optJSONArray("outputs").objects().firstOrNull()
@@ -156,7 +169,7 @@ fun ScreenTab(vm: Seimei) {
             }
             FilledTonalButton({ paused = !paused }) { Text(if (paused) "Resume" else "Pause") }
             Spacer(Modifier.width(8.dp))
-            FilledTonalIconButton({ if (frame != null) zoom = true }) { Icon(Icons.full, "Full screen", Modifier.size(18.dp)) }
+            FilledTonalIconButton({ if (useLive) liveFull = true else if (frame != null) zoom = true }) { Icon(Icons.full, "Full screen", Modifier.size(18.dp)) }
         }
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
             SegmentedButton(mode == "screen", { pick("screen", null) }, SegmentedButtonDefaults.itemShape(0, 2)) { Text("Whole screen") }
@@ -185,6 +198,29 @@ fun ScreenTab(vm: Seimei) {
         Spacer(Modifier.size(8.dp))
     }
     if (zoom) frame?.let { ZoomBitmap(it) { zoom = false } }
+    if (liveFull && useLive) {
+        Dialog({ liveFull = false }, DialogProperties(usePlatformDefaultWidth = false)) {
+            val (w, h) = player.size ?: (800 to 1280)
+            Box(Modifier.fillMaxSize().background(Color.Black).clickable { liveFull = false }, contentAlignment = Alignment.Center) {
+                LiveSurface(player, Modifier.aspectRatio(w.toFloat() / h))
+            }
+        }
+    }
+}
+
+/** A surface the live stream draws on while it exists; a later one (full screen) takes over until it goes. */
+@Composable
+fun LiveSurface(player: LivePlayer, modifier: Modifier) {
+    androidx.compose.ui.viewinterop.AndroidView({ c ->
+        android.view.SurfaceView(c).apply {
+            contentDescription = "The laptop screen, live"
+            holder.addCallback(object : android.view.SurfaceHolder.Callback {
+                override fun surfaceCreated(h: android.view.SurfaceHolder) = player.attach(h.surface)
+                override fun surfaceChanged(h: android.view.SurfaceHolder, f: Int, w: Int, ht: Int) {}
+                override fun surfaceDestroyed(h: android.view.SurfaceHolder) = player.detach(h.surface)
+            })
+        }
+    }, modifier)
 }
 
 @Composable
