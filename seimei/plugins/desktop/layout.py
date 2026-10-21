@@ -14,7 +14,7 @@ from ...util import read_json, write_json
 
 log = logging.getLogger("seimei.layout")
 
-SESSIONS = Path.home() / ".claude" / "sessions"
+SESSIONS = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "sessions"
 EVERY = 30
 MAX_AGE = 3 * 86400
 SKIP_APPS = {"kitty-quick-access"}

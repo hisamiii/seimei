@@ -6,12 +6,13 @@ Other machines on the same account are not included.
 """
 
 import json
+import os
 import threading
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
-PROJECTS = Path.home() / ".claude/projects"
+PROJECTS = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "projects"
 
 # USD per million tokens: input, 5-minute cache write, 1-hour cache write, cache read, output.
 # From https://platform.claude.com/docs/en/about-claude/pricing (checked 2026-10-20). Longest prefix wins.

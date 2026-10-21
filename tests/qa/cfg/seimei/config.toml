@@ -1,0 +1,5 @@
+[server]
+port = 8430
+
+[plugins]
+enabled = ["desktop", "discord", "browser", "music", "queue"]

@@ -15,7 +15,8 @@ from .events import EventLog
 
 log = logging.getLogger("seimei.sessions")
 
-CLAUDE = Path.home() / ".claude"
+# Claude Code's config dir: CLAUDE_CONFIG_DIR when set (tests run their sessions in their own).
+CLAUDE = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
 TAIL = 4 << 20
 TEXT = 1500
 

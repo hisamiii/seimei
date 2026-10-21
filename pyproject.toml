@@ -15,11 +15,14 @@ package = false
 
 [dependency-groups]
 dev = [
+    "playwright>=1.64.0",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
+    "requests>=2.34.2",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+addopts = "-m 'not web and not live'"
 pythonpath = ["."]
