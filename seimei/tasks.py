@@ -23,9 +23,10 @@ YOU = "you"
 # How many done tasks the board keeps per project; older ones drop off.
 DONE_KEEP = 30
 # A linked task's state for each shikigami state: it works, waits on a question, or finished and waits for seimei's
-# check (failed ones too: seimei looks at those first); a stop or a restart parks it.
+# check (failed ones too: seimei looks at those first); a stop or a restart parks it; given to the user, it is theirs
+# to carry on (release makes them its owner).
 FOLLOW = {"starting": "running", "running": "running", "laptop": "running", "asking": "asks", "done": "review",
-          "failed": "review", "stopped": "paused", "interrupted": "paused"}
+          "failed": "review", "stopped": "paused", "interrupted": "paused", "released": "open"}
 LIVE = {"starting", "running", "asking", "laptop"}
 # A review item older than this shows up in the drift line.
 REVIEW_STALE = 2 * 3600
@@ -203,9 +204,10 @@ class Board:
     # ---------- following the shikigami ----------
 
     def current(self, worker: str) -> dict | None:
-        """The task a shikigami works on: the one linked to it last that is not done."""
+        """The task a shikigami works on: of those linked to it and not done, the one it is followed on (seimei may queue
+        its next task on it early: that one takes over once this one is done), else the one linked last."""
         mine = [t for t in self.data["tasks"] if t.get("worker") == worker and t["state"] != "done"]
-        return max(mine, key=lambda t: t.get("linked") or t["created"], default=None)
+        return max(mine, key=lambda t: (t.get("wstate") is not None, t.get("linked") or t["created"]), default=None)
 
     def attach(self, worker: str, owner: str, task: str, project: str, title: str, link: str | None = None) -> dict:
         """A new shikigami's task: the one [link] names, or one of its own (seimei's #NN when [task] starts with one).

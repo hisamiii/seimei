@@ -6,6 +6,7 @@ import base64
 import binascii
 import hashlib
 import json
+import logging
 import mimetypes
 import urllib.parse
 from pathlib import Path
@@ -75,10 +76,12 @@ def unattach(events: list[dict], uploads) -> list[dict]:
     return events
 
 
+log = logging.getLogger("seimei.server")
+
 def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files, approvals: Approvals,
              tool_guard: Guard, watcher: Watcher, desk: Desktop, auth: Auth | None, origins: set[str],
              app_dir: Path | None = None, cost: Cost | None = None, push: Push | None = None,
-             uploads: Uploads | None = None, board=None) -> web.Application:
+             uploads: Uploads | None = None, board=None, adopter=None) -> web.Application:
     @web.middleware
     async def guard(request: web.Request, handler):
         # Never trust the peer address: cloudflared connects from localhost too.
@@ -598,6 +601,34 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
                         "window there, so message it only after that window is closed.")
         return web.json_response({"ok": True, "window": win and win["id"]})
 
+    async def worker_release(request):
+        """Give me: the shikigami becomes one of the user's sessions (their tap is the OK)."""
+        w = worker(request)
+        if w.rec["state"] == "released":
+            return web.json_response({"error": f"{w.name} is your session already."}, status=409)
+        try:
+            out = await adopter.release(w, card=False)
+        except (RuntimeError, NoDesktop) as e:
+            return web.json_response({"error": str(e)}, status=409)
+        if w.rec["state"] != "released":
+            return web.json_response({"error": out}, status=409)
+        dispatcher.note(f"the user took it themselves: {out}")
+        return web.json_response({"ok": True})
+
+    async def session_adopt(request):
+        """Hand to seimei: adopt this session as a shikigami, through the same card as seimei's adopt."""
+        s, _ = user_session(request)
+
+        async def go():
+            try:
+                out = await adopter.request(str(s["pid"]))
+            except Exception as e:
+                log.exception("hand to seimei failed")
+                out = f"handing session \"{s['name']}\" to seimei failed: {e}"
+            dispatcher.note(f"the user tapped Hand to seimei on their session \"{s['name']}\": {out}")
+        asyncio.get_running_loop().create_task(go())
+        return web.json_response({"ok": True})
+
     async def interrupt(request):
         await dispatcher.interrupt()
         return web.json_response({"ok": True})
@@ -635,6 +666,8 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     app.router.add_post("/api/workers/{id}/stop", worker_stop)
     app.router.add_post("/api/workers/{id}/archive", worker_archive)
     app.router.add_post("/api/workers/{id}/laptop", worker_laptop)
+    app.router.add_post("/api/workers/{id}/release", worker_release)
+    app.router.add_post("/api/sessions/{pid:[0-9]+}/adopt", session_adopt)
     if auth:
         app.router.add_post("/api/auth/password", login_password)
         app.router.add_post("/api/auth/passkey/options", passkey_options)

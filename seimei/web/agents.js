@@ -15,7 +15,7 @@ function stateText(w) {
   return {
     starting: 'Starting', running: `Working since ${since}`, asking: 'Waiting for your answer', done: `Finished ${at}`,
     failed: `Failed ${at}`, stopped: `Stopped ${at}`, interrupted: `Interrupted ${at}`,
-    laptop: `Open on the laptop since ${since}`,
+    laptop: `Open on the laptop since ${since}`, released: `Your session since ${since}`,
   }[w.state] || w.state;
 }
 
@@ -274,7 +274,7 @@ function rowMenu(x) {
 }
 
 function archived() {
-  return [...(all || S.workers).filter((w) => w.archived && !ACTIVE.has(w.state)).map(fromWorker),
+  return [...(all || S.workers).filter((w) => w.archived && !ACTIVE.has(w.state) && w.state !== 'released').map(fromWorker),
     ...S.sessions.filter((s) => s.archived).map(fromSession)].sort((a, b) => b.since - a.since);
 }
 
@@ -337,7 +337,8 @@ export function renderAgents() {
   if (ask.length) parts.push(group('Needs you', 'ask', ask));
   if (work.length) parts.push(group('Working', 'work', work));
   if (idle.length) parts.push(group('Idle', 'idle', idle));
-  const done = (all || S.workers).filter((w) => !ACTIVE.has(w.state) && !w.archived).sort((a, b) => b.updated - a.updated);
+  // One given to the user (released) is with their sessions now.
+  const done = (all || S.workers).filter((w) => !ACTIVE.has(w.state) && !w.archived && w.state !== 'released').sort((a, b) => b.updated - a.updated);
   if (done.length) {
     const shown = showAll ? done : done.slice(0, 15);
     parts.push(group('Finished shikigami', 'done', shown.map(fromWorker)));
@@ -417,6 +418,12 @@ function head() {
     P.stop.hidden = !ACTIVE.has(P.row.state) || P.row.state === 'asking';
     question(P.row.state === 'asking' ? { text: P.row.question } : null);
   }
+  const can = P.kind === 'worker' ? P.row.started !== false && !['released', 'starting'].includes(P.row.state)
+    : ['interactive', 'background'].includes(P.row.kind);
+  P.hand.hidden = !can;
+  P.hand.textContent = P.kind === 'worker' ? 'Give to me' : 'Hand to seimei';
+  P.hand.setAttribute('aria-label', P.kind === 'worker'
+    ? `Give ${x.name} to me: it goes on as my own session on the laptop` : `Hand ${x.name} to seimei as a shikigami`);
   P.banner.hidden = !P.row.archived;
   if (P.row.archived) {
     const un = el('button', 'sl', 'Unarchive');
@@ -427,6 +434,21 @@ function head() {
       : 'Archived: hidden from the list, still running. It comes back when it does something.'), un);
   }
   composerState();
+}
+
+// Give to me: the shikigami goes on as the user's own session (their tap is the OK). Hand to seimei: the session
+// becomes a shikigami once the user approves the card in the chat, as when seimei adopts one.
+async function handoff() {
+  if (!P) return;
+  const { kind, id, row } = P;
+  P.hand.disabled = true;
+  const r = await postJSON(kind === 'worker' ? `api/workers/${encodeURIComponent(id)}/release` : `api/sessions/${id}/adopt`, {});
+  if (P) P.hand.disabled = false;
+  if (!r.ok) return snack(r.error);
+  if (kind === 'worker') {
+    snack(`${row.name} is your session now, open on the laptop.`);
+    history.back();
+  } else snack('Approve the card in Chat to hand it over.');
 }
 
 // The question card at the end of the timeline: options to tap when the laptop can be reached.
@@ -719,7 +741,7 @@ function details() {
   }
   body.push(facts);
   const actions = el('div', 'dactions');
-  if (P.kind === 'worker' && r.state !== 'laptop' && r.started !== false) actions.append(laptopButton(r));
+  if (P.kind === 'worker' && !['laptop', 'released'].includes(r.state) && r.started !== false) actions.append(laptopButton(r));
   if (P.kind === 'worker' && ACTIVE.has(r.state)) actions.append(stopButton(r));
   const x = P.kind === 'worker' ? fromWorker(r) : fromSession(r);
   if (x.state === 'done' || x.state === 'idle') {
@@ -811,7 +833,12 @@ function build(kind, id, row) {
   const sub = el('div', 'sub');
   titles.append(title, sub);
   const r = el('span');
-  bar.append(back, titles, r);
+  // One tap each way between seimei and the user: Give to me on a shikigami, Hand to seimei on a session.
+  const hand = el('button', 'handoff sl');
+  hand.type = 'button';
+  hand.hidden = true;
+  hand.addEventListener('click', handoff);
+  bar.append(back, titles, hand, r);
 
   const main = el('main', 'stl');
   const thread = el('div', 'sthread');
@@ -857,7 +884,7 @@ function build(kind, id, row) {
   banner.hidden = true;
   sp.replaceChildren(bar, banner, main, foot);
 
-  P = { kind, id, row, title, sub, ring: r, banner, main, thread, empty, qbox, note: noteEl, tray: trayEl, input, attach, send, stop,
+  P = { kind, id, row, title, sub, ring: r, hand, banner, main, thread, empty, qbox, note: noteEl, tray: trayEl, input, attach, send, stop,
     files: [], next: null, ask: null, askKey: undefined, pinned: true, renderer: new Renderer(thread), ids: new Set(), raw: [], last: 0 };
 
   main.addEventListener('scroll', () => { if (P) P.pinned = nearBottom(); }, { passive: true });

@@ -988,6 +988,25 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         "no answer"
     }
 
+    /** Give to me (a shikigami goes on as the user's own session) or Hand to seimei (a session becomes a shikigami once
+     * the card in the chat is approved): one tap each way. */
+    fun handoff(pg: Page) {
+        val worker = pg.kind == "worker"
+        viewModelScope.launch {
+            try {
+                api.post(if (worker) "api/workers/${pg.id}/release" else "api/sessions/${pg.id}/adopt")
+                if (worker) {
+                    closePage()
+                    snack = "${pg.row.str("name")} is your session now, open on the laptop."
+                } else snack = "Approve the card in Chat to hand it over."
+            } catch (e: HttpError) {
+                snack = try { JSONObject(e.body).optString("error") } catch (x: JSONException) { "" }.ifEmpty { errorOf(e) }
+            } catch (e: IOException) {
+                snack = errorOf(e)
+            }
+        }
+    }
+
     // ---------- usage ----------
 
     fun refreshCost() {

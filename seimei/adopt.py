@@ -144,6 +144,8 @@ class Adopter:
     def __init__(self, pool, approvals, rows=None):
         self.pool = pool
         self.approvals = approvals
+        # The desktop (set in __main__): a released shikigami opens in kitty there.
+        self.desk = None
         self.rows = rows or (lambda: sessions.listing(pool.own_sessions()))
         self.waiting: dict[int, asyncio.Task] = {}
         # Approved adoptions waiting for an idle, kept across seimei restarts: {pid: {"s": row, "args": ..., "until": t}}.
@@ -263,6 +265,28 @@ class Adopter:
             if done:
                 self._forget(s["pid"])
 
+    async def release(self, w, card: bool) -> str:
+        """Give a shikigami to the user as one of their sessions. seimei asks first (card); the user's own tap does
+        not. Returns what happened, for the dispatcher."""
+        if w.rec["state"] == "released":
+            return f"{w.name} is the user's session already."
+        if not w.rec.get("started"):
+            return f"{w.name} has no session yet; nothing to hand over."
+        if card:
+            outcome = await self.approvals.hold({
+                "action": "command", "target": f"give shikigami {w.name} to you as your own session",
+                "detail": (f"{'It is stopped first, then i' if w.rec['state'] in ('running', 'asking') else 'I'}t opens in a kitty "
+                           f"window on the laptop (claude-queue {w.name} --resume, in {w.rec['cwd']}) as your session "
+                           "named " + w.name + ". It stops reporting to seimei and is never resumed by it; tap Hand to "
+                           "seimei on its session page to give it back.")}, "seimei", None)
+            if outcome != "approved":
+                return f"The user {outcome} it; {w.name} stays a shikigami."
+        win = await w.release(self.desk)
+        self.pool.events.add({"type": "system", "text": f"shikigami {w.name} is now your session on the laptop."})
+        return (f"released shikigami {w.name} ({w.id}) to the user: it is their session \"{w.name}\" now"
+                + (" in a kitty window on the laptop" if win else " in the window it was already open in")
+                + "; it no longer reports to you, and adopting that session makes it this shikigami again.")
+
     async def adopt(self, s: dict, interrupt: bool, name: str = "", model: str = "", effort: str = "", context: str = "",
                     close_window: bool = False, project: str = "", task_id: str = "") -> str:
         pid = s["pid"]
@@ -378,4 +402,22 @@ def make_adopt_tools(adopter: Adopter) -> list:
             return {"content": [{"type": "text", "text": f"Adopting failed: {e}"}], "is_error": True}
         return {"content": [{"type": "text", "text": out[0].upper() + out[1:]}]}
 
-    return [adopt]
+    @tool("release", "Give a shikigami to the user for good: it stops (if it works) and goes on as one of their own "
+          "sessions, same conversation, in a kitty window on the laptop under its name. It no longer reports, you "
+          "cannot message it, and it is not resumed; its board task becomes the user's. The user approves first. "
+          "Adopting that session later (adopt, or their Hand to seimei tap) makes it the same shikigami again, with "
+          "its history. For a short look on the laptop that stays yours, the user has On laptop instead.", {
+              "type": "object", "properties": {"worker": {"type": "string", "description": "the shikigami's id or name"}},
+              "required": ["worker"]})
+    async def release(a):
+        w = adopter.pool.find(str(a["worker"]))
+        if not w:
+            return {"content": [{"type": "text", "text": f"No shikigami {a['worker']!r}."}], "is_error": True}
+        try:
+            out = await adopter.release(w, card=True)
+        except Exception as e:
+            log.exception("release failed")
+            return {"content": [{"type": "text", "text": f"Releasing failed: {e}"}], "is_error": True}
+        return {"content": [{"type": "text", "text": out[0].upper() + out[1:]}]}
+
+    return [adopt, release]

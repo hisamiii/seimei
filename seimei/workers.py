@@ -239,11 +239,41 @@ class Worker:
                    for s in live({}))
 
     async def hand_over(self, desk) -> dict:
-        """Let go of the session and open it with `claude --resume` in a kitty window on the laptop."""
-        if not self.rec.get("started"):
-            raise RuntimeError("it has no session yet")
+        """Lend the session to the user: open it with `claude --resume` in a kitty window on the laptop. It stays a
+        shikigami: once the window is closed, the next message resumes it here."""
+        if self.rec["state"] == "released":
+            raise RuntimeError("it is your session already")
         if self.on_laptop():
             raise RuntimeError("it is already open on the laptop")
+        w = await self._to_laptop(desk, f"shikigami {self.name}", "")
+        self._set("laptop", summary="Open on the laptop.", laptop_window=w and w["id"])
+        return w
+
+    async def release(self, desk) -> dict | None:
+        """Give the session to the user for good: it opens like a loan, but as one of their sessions under its own
+        name. No reports, no resume, no messages from seimei; adopting the session makes it this shikigami again."""
+        if self.rec["state"] == "released":
+            raise RuntimeError("it is your session already")
+        if self.on_laptop():
+            # Lent already: that window becomes theirs as it is.
+            w = None
+        else:
+            w = await self._to_laptop(desk, self.name, f" --name {shlex.quote(self.name)}")
+        path = sessions.transcript({"sessionId": self.rec["session_id"], "cwd": self.rec["cwd"]})
+        self._set("released", summary="Handed to you as a session.", question=None,
+                  laptop_window=w["id"] if w else self.rec.get("laptop_window"),
+                  released={"at": time.time(), "path": str(path) if path else None,
+                            "offset": path.stat().st_size if path else 0})
+        self._add({"type": "system", "text": "Handed to you: it goes on as your session on the laptop."})
+        board = self.pool.board
+        if board and (t := board.current(self.id)):
+            board.update(t["id"], owner="you")
+        return w
+
+    async def _to_laptop(self, desk, title: str, extra: str) -> dict | None:
+        """Stop it if it works, let go of its process, and resume the session in kitty on the laptop."""
+        if not self.rec.get("started"):
+            raise RuntimeError("it has no session yet")
         if self.rec["state"] in ACTIVE:
             await self.stop()
             for _ in range(150):
@@ -262,15 +292,16 @@ class Worker:
                 await asyncio.gather(self.reader, return_exceptions=True)
             r = self.rec
             # claude-queue keeps it pausable by benches, like the worker was.
-            cmd = (f"kitty -d {shlex.quote(r['cwd'])} --title {shlex.quote('shikigami ' + r['name'])} "
-                   f"claude-queue {shlex.quote(r['name'])} --resume {r['session_id']}")
-            w = await desk.spawn(cmd, own_workspace=False)
-            self._set("laptop", summary="Open on the laptop.", laptop_window=w and w["id"])
-        return w
+            cmd = (f"kitty -d {shlex.quote(r['cwd'])} --title {shlex.quote(title)} "
+                   f"claude-queue {shlex.quote(r['name'])} --resume {r['session_id']}{extra}")
+            return await desk.spawn(cmd, own_workspace=False)
 
     async def send(self, text: str, shown: str | None = None, files: list[dict] | None = None):
         """Start the session if needed and hand it a message; folds into a running turn. The log keeps what the user
         wrote (shown) and their files as chips; the session gets text, with the files' paths."""
+        if self.rec["state"] == "released":
+            raise RuntimeError(f"{self.name} is the user's own session now; it becomes a shikigami again only when "
+                               "adopted (the user taps Hand to seimei, or you adopt it with their OK)")
         if await asyncio.to_thread(self.on_laptop):
             raise RuntimeError(f"{self.name} is open on the laptop; message it there, or close that window first")
         async with self.lock:
@@ -562,12 +593,13 @@ class Pool:
     def listing(self) -> dict:
         now = time.time()
         recent = [{**w.info(), **w.brief()} for w in self.workers.values()
-                  if w.rec["state"] in ACTIVE or now - w.rec.get("updated", 0) < RECENT]
+                  if w.rec["state"] != "released" and (w.rec["state"] in ACTIVE or now - w.rec.get("updated", 0) < RECENT)]
         return {"type": "workers", "list": recent, "total": len(self.workers)}
 
     def own_sessions(self) -> dict[str, str]:
         """seimei's own sessions by session id, so listings can tell them from the user's."""
-        labels = {w.rec["session_id"]: f"shikigami {w.name}" for w in self.workers.values()}
+        # A released one is the user's: it shows with their sessions.
+        labels = {w.rec["session_id"]: f"shikigami {w.name}" for w in self.workers.values() if w.rec["state"] != "released"}
         sid = self.dispatcher.session_id() if self.dispatcher else None
         if sid:
             labels[sid] = "seimei (you)"
@@ -575,7 +607,8 @@ class Pool:
 
     def queue_names(self) -> dict[str, str]:
         """Who each claude-queue name is: shikigami, seimei and the user's sessions (by CLAUDE_QUEUE in their env)."""
-        out = {re.sub(r"[^A-Za-z0-9_]", "_", w.name): f"shikigami {w.name}" for w in self.workers.values()}
+        out = {re.sub(r"[^A-Za-z0-9_]", "_", w.name): f"shikigami {w.name}" for w in self.workers.values()
+               if w.rec["state"] != "released"}
         out["seimei"] = "seimei (you)"
         for s in sessions.live({}):
             try:
@@ -631,7 +664,10 @@ class Pool:
 
     async def adopt(self, name: str, session_id: str, cwd: str, model: str, effort: str | None, context: str, origin: str,
                     first: str, project: str | None = None, link: str | None = None) -> Worker:
-        """A shikigami that resumes one of the user's sessions (adopt.py ended its process)."""
+        """A shikigami that resumes one of the user's sessions (adopt.py ended its process). One released earlier
+        comes back as itself: same id, name and log, with what was done in the session meanwhile."""
+        if old := self.released(session_id, cwd):
+            return await self._readopt(old, session_id, model, effort, context, origin, first, project, link)
         now = time.time()
         rec = {"id": uuid.uuid4().hex[:8], "name": slug(name), "task": f"Adopted from your session \"{origin}\".", "cwd": cwd,
                "model": model, "effort": effort, "context_cap": context, "subagents": "haiku", "session_id": session_id,
@@ -645,6 +681,48 @@ class Pool:
             self._file(w, origin, project, None)
         self.events.add({"type": "worker", "worker": w.id, "name": w.name, "event": "summoned", "text": rec["task"],
                          "cwd": cwd, "model": model, "effort": effort, "context_cap": context, "subagents": "haiku"})
+        await w.send(first)
+        return w
+
+    def released(self, session_id: str, cwd: str) -> Worker | None:
+        """The released shikigami this session is (Claude Code may have moved it on to a new transcript)."""
+        now = sessions.transcript({"sessionId": session_id, "cwd": cwd})
+        for w in self.workers.values():
+            if w.rec["state"] == "released" and (w.rec["session_id"] == session_id or now and sessions.transcript(
+                    {"sessionId": w.rec["session_id"], "cwd": w.rec["cwd"]}) == now):
+                return w
+        return None
+
+    async def _readopt(self, w: Worker, session_id: str, model: str, effort: str | None, context: str, origin: str,
+                       first: str, project: str | None, link: str | None) -> Worker:
+        r = w.rec
+        gone = r.get("released") or {}
+        path = sessions.transcript({"sessionId": session_id, "cwd": r["cwd"]})
+        if path:
+            # What the user and the session did on the laptop, so the page reads on without a gap.
+            start = gone.get("offset", 0) if gone.get("path") == str(path) else 0
+            try:
+                tl = await asyncio.to_thread(sessions.timeline, path, start)
+            except OSError:
+                tl = {"events": []}
+            if tl["events"]:
+                w._add({"type": "system", "text": f"In your session \"{origin}\" on the laptop:"})
+                for ev in tl["events"]:
+                    w._add({k: v for k, v in ev.items() if k not in ("id", "t")})
+        r.update(session_id=session_id, model=model or r["model"], effort=effort or r.get("effort"),
+                 context_cap=context or r.get("context_cap"), started=True, released=None, laptop_window=None,
+                 adopted=origin, question=None)
+        w.tasks.clear()
+        w.steps.clear()
+        cur = self.board.current(w.id) if self.board else None
+        try:
+            self._file(w, origin, project, link or (cur and cur["id"]))
+        except KeyError:
+            self._file(w, origin, project, cur and cur["id"])
+        self.events.add({"type": "worker", "worker": w.id, "name": w.name, "event": "summoned",
+                         "text": f"Back from your session \"{origin}\".", "cwd": r["cwd"], "model": r["model"],
+                         "effort": r.get("effort"), "context_cap": r.get("context_cap"), "subagents": r.get("subagents")})
+        w._set("starting", summary="")
         await w.send(first)
         return w
 

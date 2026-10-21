@@ -128,6 +128,7 @@ fun stateText(w: JSONObject): String {
         "stopped" -> "Stopped $at"
         "interrupted" -> "Interrupted $at"
         "laptop" -> "Open on the laptop since $since"
+        "released" -> "Your session since $since"
         else -> w.str("state")
     }
 }
@@ -245,7 +246,8 @@ fun AgentsTab(vm: Seimei) {
     val ask = by("ask")
     val work = by("work")
     val idle = by("idle")
-    val done = (vm.allWorkers ?: vm.workers).filter { it.str("state") !in ACTIVE && !it.optBoolean("archived") }
+    // One given to the user (released) is with their sessions now.
+    val done = (vm.allWorkers ?: vm.workers).filter { it.str("state") !in ACTIVE && !it.optBoolean("archived") && it.str("state") != "released" }
         .sortedByDescending { it.optDouble("updated") }
     val archived = archivedAgents(vm)
     if (items.isEmpty() && done.isEmpty() && archived.isEmpty()) {
@@ -281,7 +283,7 @@ fun AgentsTab(vm: Seimei) {
 // ---------- the archive (#43): hidden from the list, never stopped or deleted ----------
 
 fun archivedAgents(vm: Seimei): List<Agent> =
-    ((vm.allWorkers ?: vm.workers).filter { it.optBoolean("archived") && it.str("state") !in ACTIVE }.map(::fromWorker) +
+    ((vm.allWorkers ?: vm.workers).filter { it.optBoolean("archived") && it.str("state") !in ACTIVE && it.str("state") != "released" }.map(::fromWorker) +
         vm.sessions.filter { it.optBoolean("archived") }.map { fromSession(it, vm.seen) }).sortedByDescending { it.since }
 
 /** The text a search match shows in, and where the match sits: the line, else the task or project around it. */
@@ -519,6 +521,15 @@ fun AgentPage(vm: Seimei, pg: Page) {
                             color = if (a.state == "ask") PEACH else LocalExtra.current.text3, maxLines = 1)
                     }
                 }
+                // One tap each way between seimei and the user.
+                val canHand = if (pg.kind == "worker") pg.row.optBoolean("started", true) && pg.row.str("state") !in setOf("released", "starting")
+                    else pg.row.str("kind") in setOf("interactive", "background")
+                if (canHand) FilledTonalButton({ vm.handoff(pg) }, Modifier.heightIn(min = 36.dp).padding(end = 4.dp)
+                    .semantics { contentDescription = if (pg.kind == "worker") "Give ${a.name} to me: it goes on as my own session on the laptop"
+                        else "Hand ${a.name} to seimei as a shikigami" },
+                    contentPadding = PaddingValues(horizontal = 12.dp)) {
+                    Text(if (pg.kind == "worker") "Give to me" else "Hand to seimei", fontSize = 13.sp, maxLines = 1)
+                }
                 ContextRing(a.context) { pg.details = true }
             }
             if (a.archived) Row(
@@ -738,7 +749,7 @@ fun Details(vm: Seimei, pg: Page) {
                 if (pg.kind == "worker") pg.metrics?.let { m -> for ((k, v) in metricFacts(m)) Fact(k, v) }
             }
             val state = r.str("state")
-            if (pg.kind == "worker" && state != "laptop" && r.optBoolean("started")) {
+            if (pg.kind == "worker" && state != "laptop" && state != "released" && r.optBoolean("started")) {
                 // A running worker gets stopped first, so it takes a second tap.
                 var armed by remember { mutableStateOf(false) }
                 var sending by remember { mutableStateOf(false) }

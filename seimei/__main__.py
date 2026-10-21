@@ -150,6 +150,7 @@ def main():
     adopter = Adopter(pool, approvals)
     usage = Usage(events, state, cost, STATE / "ratelog/rates.jsonl")
     desk = Desktop(events, lambda t: dispatcher.note(t), state / UNLOCK)
+    adopter.desk = desk
     board = Board(state / "tasks.json", events)
     layout = Layout(desk, approvals, events, state)
     push = Push(events, auth, Fcm(FIREBASE / "service-account.json"), state)
@@ -165,7 +166,7 @@ def main():
                                             if not pool.archive.worker(w.rec) or board.current(w.id)})
     guard.tell = pool.tell
     watcher = Watcher(events, pool.own_sessions, pool.notify, pool.archive)
-    app = make_app(events, dispatcher, pool, files, approvals, guard, watcher, desk, auth, origins, state / "app", cost, push, uploads, board)
+    app = make_app(events, dispatcher, pool, files, approvals, guard, watcher, desk, auth, origins, state / "app", cost, push, uploads, board, adopter)
 
     async def deploy_note():
         """seimei hears how the deploy that restarted it went (only one that just ended)."""
