@@ -5,14 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="theme-color" content="#1e1e2e">
 <title>seimei</title>
-<link rel="icon" href="static/star.svg" type="image/svg+xml">
+<link rel="icon" href="static/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="static/apple-touch-icon.png">
 <link rel="preload" href="static/fonts/google-sans-flex-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="static/style.css">
 <script type="module" src="static/app.js"></script>
 </head>
 <body>
 <header class="bar">
-  <span class="avatar"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 17.88 20.09 2.49 8.91h19.02L6.12 20.09Z"/></svg></span>
+  <span class="avatar"><i class="glyph g22" aria-hidden="true"></i></span>
   <div class="titles">
     <h1 id="title">seimei</h1>
     <span class="status" id="status" data-s="connecting"><span class="dot"></span><span id="status-text">connecting</span></span>
@@ -40,7 +41,7 @@
     <p class="traj-empty" id="traj-empty">Shikigami reports, restarts and what seimei did about them show here.</p>
   </div>
   <div class="hello" id="hello" hidden>
-    <img src="static/star.svg" alt="" width="56" height="56">
+    <img src="static/icon.svg" alt="" width="56" height="56">
     <b>Ask seimei anything</b>
   </div>
   <div class="working" id="working" hidden>working</div>
@@ -53,7 +54,7 @@
     </div>
   </section>
   <section class="away" id="away" hidden>
-    <span class="badge"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 17.88 20.09 2.49 8.91h19.02L6.12 20.09Z"/></svg></span>
+    <span class="badge"><i class="glyph g48" aria-hidden="true"></i></span>
     <h2>The laptop went quiet</h2>
     <p>It is probably asleep. Everything is paused where it was, and this page reconnects on its own when it wakes.</p>
     <button class="sl" id="retry">Try now</button>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- seimei launcher icon, M3 TonalSpot from seed #CBA6F7 -->
+    <color name="ic_launcher_background">#D9BEF6</color>
+    <color name="ic_launcher_glyph">#4D3867</color>
+</resources>

@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
@@ -91,6 +92,8 @@ import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.DefaultLifecycleObserver
@@ -291,13 +294,24 @@ class MainActivity : ComponentActivity() {
 
 // ---------- pairing and unlocking ----------
 
+/** The seiman (the launcher icon's glyph), in onPrimaryContainer. */
+@Composable
+fun Glyph(size: Dp) {
+    // The drawable is the adaptive icon's 108-unit layer and the glyph spans its middle 60: drawn 1.8x, the glyph
+    // fills size (the rest is transparent).
+    Box(Modifier.size(size), contentAlignment = Alignment.Center) {
+        Icon(painterResource(R.drawable.ic_seimei_monochrome), null, Modifier.requiredSize(size * 1.8f),
+            tint = MaterialTheme.colorScheme.onPrimaryContainer)
+    }
+}
+
 @Composable
 fun Mark(size: Int = 72) {
     Box(
         Modifier.size(size.dp).clip(RoundedCornerShape((size * 0.28f).dp)).background(MaterialTheme.colorScheme.primaryContainer),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(Icons.star, null, Modifier.size((size * 0.55f).dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+        Glyph((size * 0.6f).dp)
     }
 }
 
@@ -477,7 +491,7 @@ fun Header(vm: Seimei) {
     var menu by remember { mutableStateOf(false) }
     Row(Modifier.statusBarsPadding().fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer), contentAlignment = Alignment.Center) {
-            Icon(Icons.star, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+            Glyph(24.dp)
         }
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {

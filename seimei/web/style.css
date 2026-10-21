@@ -93,6 +93,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 /* Top app bar */
 .bar { display: flex; align-items: center; gap: 12px; height: 64px; padding: 0 16px 0 12px; padding-top: env(safe-area-inset-top); }
+/* The seiman, in the element's colour. */
+.glyph { display: block; flex: none; background: currentColor; -webkit-mask: url(mark.svg) center / contain no-repeat; mask: url(mark.svg) center / contain no-repeat; }
+.glyph.g22 { width: 22px; height: 22px; }
+.glyph.g40 { width: 40px; height: 40px; }
+.glyph.g48 { width: 48px; height: 48px; }
 .avatar {
   flex: none; width: 40px; height: 40px; border-radius: 50%;
   background: var(--primary-container); color: var(--on-primary-container);
