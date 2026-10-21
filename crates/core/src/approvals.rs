@@ -262,14 +262,21 @@ impl Approvals {
         self.events.add(ev);
         // Ends the card however the wait ends, also when the future is dropped.
         let mut guard = CardEnd { cards: self, aid: aid.clone(), what: &what, answer: None };
-        if let Some(r) = remind
-            && tokio::time::timeout(r, &mut rx).await.is_err()
-        {
-            self.events.flash(json!({"type": "approval_remind", "aid": aid}));
-        }
-        let got = match wait {
-            Some(w) => tokio::time::timeout(w, &mut rx).await.ok(),
-            None => Some((&mut rx).await),
+        // An answer before the reminder is the answer.
+        let early = match remind {
+            Some(r) => match tokio::time::timeout(r, &mut rx).await {
+                Ok(got) => Some(got),
+                Err(_) => {
+                    self.events.flash(json!({"type": "approval_remind", "aid": aid}));
+                    None
+                }
+            },
+            None => None,
+        };
+        let got = match (early, wait) {
+            (Some(got), _) => Some(got),
+            (None, Some(w)) => tokio::time::timeout(w, &mut rx).await.ok(),
+            (None, None) => Some((&mut rx).await),
         };
         let answer = match got {
             Some(Ok((approve, option, note))) => {

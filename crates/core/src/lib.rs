@@ -4,6 +4,7 @@ pub mod approvals;
 pub mod archive;
 pub mod auth;
 pub mod cost;
+pub mod deploys;
 pub mod dispatcher;
 pub mod events;
 pub mod files;

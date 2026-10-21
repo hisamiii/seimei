@@ -3,6 +3,7 @@
 //! tools/list, the descriptions being prompt text); the Python server is held to the same file.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::Path;
 use std::sync::{Arc, LazyLock, Mutex};
 
@@ -11,14 +12,30 @@ use serde_json::{Value, json};
 use crate::cost::Cost;
 use crate::events::EventLog;
 use crate::files::{Files, MAX_BYTES};
+use crate::metrics::WorkerEvents;
+use crate::paths::home;
 use crate::push::Push;
 use crate::tasks::Board;
+use crate::transcripts::transcript;
 use crate::uploads::Uploads;
 use crate::usage::Usage;
-use crate::util::chars;
+use crate::util::{chars, now};
+use crate::workers::{ACTIVE, CONTEXTS, EFFORTS, MODELS, Pool, Summon, Worker};
 
 static SERVER: LazyLock<Value> =
     LazyLock::new(|| serde_json::from_str(include_str!("../../../tests/cases/tools.json")).expect("tools.json"));
+
+/// More running shikigami than this need the user's OK.
+const MAX_RUNNING: usize = 5;
+/// A peek's text, at most: it lands in the dispatcher's context and stays there until a compaction.
+const PEEK_MAX: usize = 6000;
+/// What summon must be told each time (rules.md: the sizing rule lives in the schema, not in memory).
+const SUMMON_PICKS: [&str; 4] = ["cwd", "model", "effort", "context"];
+const EFFORT_GUIDE: &str = "reasoning effort, picked per task: low (or the haiku model) for lookups; medium for \
+                            mockups, CSS and config; high for research, kernels and risky or delicate work; xhigh or \
+                            max only for escalations or tasks seimei judges very important, never for long iterative \
+                            work";
+const CONTEXT_GUIDE: &str = "where it compacts: 256k or 400k for most tasks; 1m only when the task really needs it";
 
 pub struct Tools {
     pub events: Arc<EventLog>,
@@ -28,51 +45,310 @@ pub struct Tools {
     pub usage: Arc<Usage>,
     pub cost: Arc<Cost>,
     pub push: Arc<Push>,
+    pub pool: Arc<Pool>,
+    pub worker_events: Arc<WorkerEvents>,
 }
 
-fn text(t: &str, error: bool) -> Value {
+pub fn text(t: &str, error: bool) -> Value {
     json!({"content": [{"type": "text", "text": t}], "isError": error})
+}
+
+/// One JSON-RPC message to an in-process MCP server (`spec`: its initialize and tools); None for a notification.
+pub async fn serve<F, Fut>(spec: &Value, message: Value, call: F) -> Option<Value>
+where
+    F: FnOnce(String, Value) -> Fut,
+    Fut: Future<Output = Value>,
+{
+    let id = message.get("id").cloned()?;
+    let result = match message["method"].as_str().unwrap_or("") {
+        "initialize" => {
+            let mut r = spec["initialize"].clone();
+            if let Some(v) = message["params"]["protocolVersion"].as_str() {
+                r["protocolVersion"] = json!(v);
+            }
+            r
+        }
+        "ping" => json!({}),
+        "tools/list" => json!({"tools": spec["tools"]}),
+        "tools/call" => {
+            let name = message["params"]["name"].as_str().unwrap_or("").to_string();
+            call(name, message["params"]["arguments"].clone()).await
+        }
+        _ => {
+            let error = json!({"code": -32601, "message": "Method not found"});
+            return Some(json!({"jsonrpc": "2.0", "id": id, "error": error}));
+        }
+    };
+    Some(json!({"jsonrpc": "2.0", "id": id, "result": result}))
+}
+
+/// An argument as text: strings as they are, other values as JSON, missing as "".
+fn arg(a: &Value, k: &str) -> String {
+    match &a[k] {
+        Value::String(v) => v.clone(),
+        Value::Null => String::new(),
+        v => v.to_string(),
+    }
+}
+
+/// Why a summon call cannot go ahead (a pick missing or not one of the choices), or "".
+pub fn summon_problem(a: &Value) -> String {
+    let given = |k: &str| match &a[k] {
+        Value::Null | Value::Bool(false) => false,
+        Value::Number(n) => n.as_f64() != Some(0.0),
+        Value::String(s) => !s.trim().is_empty(),
+        _ => true,
+    };
+    let missing: Vec<&str> = SUMMON_PICKS.into_iter().filter(|k| !given(k)).collect();
+    if !missing.is_empty() {
+        let each = if missing.len() == 1 { "it" } else { "each" };
+        return format!(
+            "summon needs {}: pick {each} for this task, there are no defaults. cwd: the project folder (~ only for \
+             home tasks). model: {}. effort: {EFFORT_GUIDE}. context: {CONTEXT_GUIDE}.",
+            missing.join(", "),
+            MODELS.join("/")
+        );
+    }
+    let contexts = CONTEXTS.map(|c| c.0);
+    for (k, choices) in [("model", &MODELS[..]), ("effort", &EFFORTS[..]), ("context", &contexts[..])] {
+        if !a[k].as_str().is_some_and(|v| choices.contains(&v)) {
+            let shown = match &a[k] {
+                Value::String(s) => format!("'{s}'"),
+                v => v.to_string(),
+            };
+            return format!("summon: {k} must be one of {}, not {shown}.", choices.join(", "));
+        }
+    }
+    String::new()
+}
+
+/// head, then as many of the newest lines as fit in PEEK_MAX, saying where the rest is when some are left out.
+pub fn capped(head: &str, lines: &[String], full: &str) -> String {
+    let len = |s: &str| s.chars().count();
+    let (mut out, mut size, mut cut) = (vec![], len(head), false);
+    for ln in lines.iter().rev() {
+        if size + len(ln) + 1 > PEEK_MAX {
+            cut = true;
+            let room = PEEK_MAX as i64 - size as i64 - 5;
+            if out.is_empty() && room > 200 {
+                let tail: String = ln.chars().skip(len(ln).saturating_sub(room as usize)).collect();
+                out.push(format!("... {tail}"));
+            }
+            break;
+        }
+        out.push(ln.clone());
+        size += len(ln) + 1;
+    }
+    let mut all = vec![head.to_string()];
+    if cut {
+        all.push(format!("[... older lines left out; all of it is in {full}]"));
+    }
+    all.extend(out.into_iter().rev());
+    all.join("\n")
+}
+
+/// "12 min ago", "3 h ago", "2 d ago".
+fn since(t: f64) -> String {
+    let s = (now() - t) as i64;
+    if s < 3600 {
+        format!("{} min ago", s.div_euclid(60))
+    } else if s < 86400 {
+        format!("{} h ago", s / 3600)
+    } else {
+        format!("{} d ago", s / 86400)
+    }
+}
+
+/// The checkout a folder belongs to (a git worktree counts as its own), else the folder itself.
+fn repo_of(path: &str) -> String {
+    let out = std::process::Command::new("git").args(["-C", path, "rev-parse", "--show-toplevel"]).output();
+    match out {
+        Ok(o) if o.status.success() && !String::from_utf8_lossy(&o.stdout).trim().is_empty() => {
+            String::from_utf8_lossy(&o.stdout).trim().to_string()
+        }
+        _ => path.into(),
+    }
+}
+
+/// A heads-up when someone else already works in the new worker's checkout: an active shikigami there. Home is no
+/// checkout, so a worker in ~ gets none. (The user's busy sessions there join this with the sessions watcher.)
+fn writers(pool: &Pool, w: &Worker) -> Option<String> {
+    let home = home().display().to_string();
+    let cwd = w.get("cwd").as_str().unwrap_or("").to_string();
+    if cwd == home {
+        return None;
+    }
+    let root = repo_of(&cwd);
+    let busy: Vec<String> = (pool.all().iter())
+        .filter(|x| x.id != w.id)
+        .map(|x| x.rec())
+        .filter(|x| {
+            let xc = x["cwd"].as_str().unwrap_or("");
+            ACTIVE.contains(&x["state"].as_str().unwrap_or("")) && xc != home && (xc == cwd || repo_of(xc) == root)
+        })
+        .map(|x| format!("{} (shikigami, {})", x["name"].as_str().unwrap_or(""), x["state"].as_str().unwrap_or("")))
+        .collect();
+    if busy.is_empty() {
+        return None;
+    }
+    let short = root.replacen(&home, "~", 1);
+    let base = Path::new(&root).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    Some(format!(
+        "Heads-up: {} also {} in {short}. Two writers in one checkout can overwrite each other's changes. If both edit \
+         files there, stop this one and summon it in its own worktree (git -C {short} worktree add ../{base}-{}).",
+        busy.join(", "),
+        if busy.len() == 1 { "works" } else { "work" },
+        w.name()
+    ))
 }
 
 impl Tools {
     /// One JSON-RPC message; None for a notification.
     pub async fn handle(self: Arc<Self>, message: Value) -> Option<Value> {
-        let id = message.get("id").cloned()?;
-        let method = message["method"].as_str().unwrap_or("");
-        let result = match method {
-            "initialize" => {
-                let mut r = SERVER["initialize"].clone();
-                if let Some(v) = message["params"]["protocolVersion"].as_str() {
-                    r["protocolVersion"] = json!(v);
+        serve(&SERVER, message, |name, args| async move { self.call(&name, &args).await }).await
+    }
+
+    async fn call(self: Arc<Self>, name: &str, a: &Value) -> Value {
+        match name {
+            "summon" => self.summon(a).await,
+            "message" => {
+                let Some(w) = self.pool.find(&arg(a, "worker")) else { return text("No such shikigami.", true) };
+                match w.send(&arg(a, "text"), None, vec![]).await {
+                    Ok(()) => text(&format!("Sent to {}.", w.name()), false),
+                    Err(e) => text(&e, true),
                 }
-                r
             }
-            "ping" => json!({}),
-            "tools/list" => json!({"tools": SERVER["tools"]}),
-            "tools/call" => {
-                let name = message["params"]["name"].as_str().unwrap_or("").to_string();
-                let args = message["params"]["arguments"].clone();
-                let me = self.clone();
-                tokio::task::spawn_blocking(move || me.call(&name, &args))
+            "stop" => {
+                let Some(w) = self.pool.find(&arg(a, "worker")) else { return text("No such shikigami.", true) };
+                let state = w.state();
+                if !ACTIVE.contains(&state.as_str()) {
+                    return text(&format!("{} is not running ({state}).", w.name()), false);
+                }
+                w.stop().await;
+                text(&format!("Stopping {}.", w.name()), false)
+            }
+            "tune" => {
+                let Some(w) = self.pool.find(&arg(a, "worker")) else { return text("No such shikigami.", true) };
+                let (effort, model) = (arg(a, "effort"), arg(a, "model"));
+                let pick = |s: &str| Some(s.to_string()).filter(|s| !s.is_empty());
+                match w.tune(pick(&effort).as_deref(), pick(&model).as_deref(), "seimei").await {
+                    Err(e) => text(&e, true),
+                    Ok(changed) if changed.is_empty() => text(&format!("{} already runs like that.", w.name()), false),
+                    Ok(changed) => {
+                        let later = if w.get("effort_next").as_str().is_some_and(|e| !e.is_empty()) {
+                            " (the effort from its next turn)"
+                        } else {
+                            ""
+                        };
+                        text(&format!("{}: {}{later}.", w.name(), changed.join(", ")), false)
+                    }
+                }
+            }
+            _ => {
+                let (me, name, a) = (self.clone(), name.to_string(), a.clone());
+                tokio::task::spawn_blocking(move || me.blocking(&name, &a))
                     .await
                     .unwrap_or_else(|e| text(&format!("The tool failed: {e}"), true))
             }
-            _ => {
-                let error = json!({"code": -32601, "message": "Method not found"});
-                return Some(json!({"jsonrpc": "2.0", "id": id, "error": error}));
-            }
-        };
-        Some(json!({"jsonrpc": "2.0", "id": id, "result": result}))
+        }
     }
 
-    /// A tool call: blocking (files, pricing).
-    fn call(&self, name: &str, a: &Value) -> Value {
-        let s = |k: &str| match &a[k] {
-            Value::String(v) => v.clone(),
-            Value::Null => String::new(),
-            v => v.to_string(),
+    async fn summon(&self, a: &Value) -> Value {
+        let bad = summon_problem(a);
+        if !bad.is_empty() {
+            return text(&bad, true);
+        }
+        let running = self.pool.running();
+        if running >= MAX_RUNNING && a["confirmed"] != true {
+            return text(
+                &format!(
+                    "{running} shikigami are already running. Ask the user before starting more, then call again with \
+                     confirmed=true."
+                ),
+                true,
+            );
+        }
+        let opt = |k: &str| Some(arg(a, k)).filter(|s| !s.is_empty());
+        let tools = (a["tools"].as_array().into_iter().flatten()).map(|t| arg(&json!({"t": t}), "t")).collect();
+        let s = Summon {
+            name: arg(a, "name"),
+            task: arg(a, "task"),
+            cwd: arg(a, "cwd"),
+            model: arg(a, "model"),
+            effort: opt("effort"),
+            context: arg(a, "context"),
+            subagents: opt("subagent_model").unwrap_or_else(|| "haiku".into()),
+            project: opt("project"),
+            link: opt("task_id"),
+            tools,
+            mode: opt("mode"),
         };
+        let w = match self.pool.summon(s).await {
+            Ok(w) => w,
+            Err(e) => return text(&format!("Could not summon: {e}"), true),
+        };
+        let r = w.rec();
+        let s = |k: &str| r[k].as_str().unwrap_or("").to_string();
+        let effort = r["effort"].as_str().filter(|e| !e.is_empty()).unwrap_or("default");
+        let mut said = format!(
+            "Summoned {} ({}) in {} on {}, effort {effort}, mode {}, context {}, subagents on {}.",
+            s("name"),
+            w.id,
+            s("cwd"),
+            s("model"),
+            w.mode(),
+            s("context_cap"),
+            s("subagents")
+        );
+        if !s("board_task").is_empty() {
+            said += &format!(" On the board as {}.", s("board_task"));
+        }
+        let (pool, w2) = (self.pool.clone(), w.clone());
+        if let Ok(Some(crowd)) = tokio::task::spawn_blocking(move || writers(&pool, &w2)).await {
+            said += &format!("\n\n{crowd}");
+        }
+        text(&said, false)
+    }
+
+    /// A tool call that reads or writes files (pricing, images, the board): run off the async threads.
+    fn blocking(&self, name: &str, a: &Value) -> Value {
+        let s = |k: &str| arg(a, k);
         match name {
+            "workers" => self.workers(a),
+            "peek" => {
+                let Some(w) = self.pool.find(&s("worker")) else { return text("No such shikigami.", true) };
+                let count = a["count"].as_i64().or_else(|| s("count").parse().ok()).unwrap_or(30).max(0) as usize;
+                let mut lines = vec![];
+                for ev in w.log.before(None, count) {
+                    let t = |k: &str, n| chars(ev[k].as_str().unwrap_or(""), n);
+                    match ev["type"].as_str().unwrap_or("") {
+                        kind @ ("user" | "assistant") => lines.push(format!("[{kind}] {}", t("text", 1500))),
+                        "tool" => lines.push(format!(
+                            "[tool] {}: {}",
+                            ev["name"].as_str().unwrap_or(""),
+                            ev["summary"].as_str().unwrap_or("")
+                        )),
+                        "tool_result" if ev["error"] == true => lines.push(format!("[tool error] {}", t("text", 300))),
+                        _ => {}
+                    }
+                }
+                let r = w.rec();
+                let path = (r["started"] == true)
+                    .then(|| transcript(r["session_id"].as_str().unwrap_or(""), r["cwd"].as_str().unwrap_or("")))
+                    .flatten();
+                let full = match path {
+                    Some(p) => format!("its transcript: {}", p.display()),
+                    None => format!("its log: {}", w.log.path().display()),
+                };
+                let head = format!(
+                    "{} ({}) is {}. Task: {}",
+                    w.name(),
+                    w.id,
+                    w.state(),
+                    chars(r["task"].as_str().unwrap_or(""), 500)
+                );
+                text(&capped(&head, &lines, &full), false)
+            }
             "show_image" => {
                 let path = crate::paths::expand(&s("path"));
                 let path = Path::new(&path);
@@ -125,7 +401,7 @@ impl Tools {
                         if r["open"] == true {
                             format!("{phone}: open on {}", r["view"].as_str().unwrap_or(""))
                         } else if let Some(left) = r["left"].as_f64() {
-                            format!("{phone}: closed (left {})", ago(crate::util::now() - left))
+                            format!("{phone}: closed (left {})", ago(now() - left))
                         } else {
                             format!("{phone}: closed")
                         }
@@ -138,6 +414,52 @@ impl Tools {
             }
             _ => text(&format!("Tool '{name}' not found"), true),
         }
+    }
+
+    /// Shikigami from the last day, the archived ones, or every one's task metrics.
+    fn workers(&self, a: &Value) -> Value {
+        if a["metrics"] == true {
+            let mut only = None;
+            if a["worker"].as_str().is_some_and(|w| !w.is_empty()) {
+                let Some(w) = self.pool.find(&arg(a, "worker")) else { return text("No such shikigami.", true) };
+                only = Some(w.id.clone());
+            }
+            let rows = self.pool.metrics(&self.cost, &self.worker_events, only.as_deref());
+            return text(&crate::metrics::text(&rows), false);
+        }
+        let archived = a["archived"] == true;
+        let rows: Vec<Value> = if archived {
+            let mut old: Vec<Value> =
+                self.pool.all().iter().map(|w| w.rec()).filter(|r| self.pool.archive.worker(r)).collect();
+            let updated = |r: &Value| r["updated"].as_f64().unwrap_or(0.0);
+            old.sort_by(|x, y| updated(y).total_cmp(&updated(x)));
+            old.iter().take(50).map(|r| self.pool.info(r)).collect()
+        } else {
+            let listing = self.pool.listing();
+            (listing["list"].as_array().into_iter().flatten()).filter(|w| w["archived"] != true).cloned().collect()
+        };
+        if rows.is_empty() {
+            return text(if archived { "No archived shikigami." } else { "No shikigami in the last day." }, false);
+        }
+        let lines: Vec<String> = rows
+            .iter()
+            .map(|w| {
+                let s = |k: &str| w[k].as_str().unwrap_or("").to_string();
+                let mut line = format!(
+                    "{} ({}): {}, {}, in {}",
+                    s("name"),
+                    s("id"),
+                    s("state"),
+                    since(w["updated"].as_f64().unwrap_or(0.0)),
+                    s("cwd")
+                );
+                if !s("summary").is_empty() {
+                    line += &format!(": {}", s("summary"));
+                }
+                line
+            })
+            .collect();
+        text(&lines.join("\n"), false)
     }
 }
 

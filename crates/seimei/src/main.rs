@@ -12,7 +12,6 @@ use seimei_core::events::EventLog;
 use seimei_core::permissions::configured;
 use seimei_core::push::{Fcm, Push, WebPush};
 use seimei_core::util::{config_file, data_dir};
-use seimei_core::workers::Pool;
 use serde_json::Value;
 
 const COMMANDS: [&str; 8] =
@@ -217,22 +216,33 @@ fn main() {
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../seimei/web"));
     let approvals = cfg.get("approvals").and_then(|s| s.as_table()).cloned().unwrap_or_default();
-    let pool =
-        Pool::new(&state, &configured(&approvals, "shikigami")).unwrap_or_else(|e| die(&format!("workers: {e}")));
     let mut disp = cfg.get("dispatcher").and_then(|s| s.as_table()).cloned().unwrap_or_default();
     if let Some(m) = &a.model {
         disp.insert("model".into(), toml::Value::String(m.clone()));
     }
     let about = cfg.get("host").and_then(|h| h.get("about")).and_then(|v| v.as_str()).unwrap_or("computer");
     let disp = dispatcher::Config::new(&disp, &configured(&approvals, "dispatcher"), about, a.dev);
-    let app = Arc::new(seimei_server::App::new(events.clone(), auth, origins, &web, &state, push.clone(), pool, disp));
+    let setup = seimei_server::Setup {
+        events: events.clone(),
+        auth,
+        origins,
+        web,
+        state: state.clone(),
+        push: push.clone(),
+        dispatcher: disp,
+        shikigami: configured(&approvals, "shikigami"),
+    };
+    let app = Arc::new(seimei_server::App::new(setup).unwrap_or_else(|e| die(&format!("workers: {e}"))));
     wire(&app);
 
     let rt = tokio::runtime::Runtime::new().expect("a runtime");
     rt.block_on(async move {
         app.approvals.startup();
         events.close_open_tools("Interrupted by a seimei restart.");
+        app.pool.startup();
+        tokio::spawn(deploy_note(state.clone(), app.dispatcher.clone()));
         tokio::spawn(app.dispatcher.clone().run());
+        tokio::spawn(app.pool.clone().sweep());
         // `systemctl --user kill -s USR1 seimei` from a key binding: end the turn.
         let (ev, d) = (events.clone(), app.dispatcher.clone());
         tokio::spawn(async move {
@@ -281,29 +291,42 @@ fn wire(app: &Arc<seimei_server::App>) {
     let _ = app.dispatcher.drift.set(Box::new(move || {
         let board = a.board.lock().unwrap();
         // Archived shikigami are out of the picture, unless a task still points at one.
-        let workers: Vec<(String, String, String)> = (a.pool.workers.iter())
-            .filter(|w| !a.pool.archive.worker(&w.rec) || board.current(w.id()).is_some())
-            .map(|w| {
-                let s = |k: &str| w.rec[k].as_str().unwrap_or("").to_string();
-                (w.id().to_string(), s("name"), s("state"))
+        let workers: Vec<(String, String, String)> = (a.pool.all().iter())
+            .map(|w| (w.id.clone(), w.rec()))
+            .filter(|(id, rec)| !a.pool.archive.worker(rec) || board.current(id).is_some())
+            .map(|(id, rec)| {
+                let s = |k: &str| rec[k].as_str().unwrap_or("").to_string();
+                (id, s("name"), s("state"))
             })
             .collect();
         board.drift(&workers, seimei_core::util::now())
     }));
     let a = app.clone();
     let _ = app.dispatcher.recall.set(Box::new(move || {
-        let live: Vec<String> = (a.pool.workers.iter())
-            .filter(|w| matches!(w.rec["state"].as_str(), Some("running" | "asking" | "laptop")))
-            .map(|w| {
-                let s = |k: &str| w.rec[k].as_str().unwrap_or("").to_string();
+        let live: Vec<String> = (a.pool.all().iter())
+            .map(|w| w.rec())
+            .filter(|rec| matches!(rec["state"].as_str(), Some("running" | "asking" | "laptop")))
+            .map(|rec| {
+                let s = |k: &str| rec[k].as_str().unwrap_or("").to_string();
                 let task = s("board_task");
                 let task = if task.is_empty() { String::new() } else { format!(", task {task}") };
                 let first =
                     s("task").trim().lines().next().map(|l| seimei_core::util::chars(l, 200)).unwrap_or_default();
-                format!("- {} ({}) {} in {}{task}: {first}", s("name"), w.id(), s("state"), s("cwd"))
+                format!("- {} ({}) {} in {}{task}: {first}", s("name"), s("id"), s("state"), s("cwd"))
             })
             .collect();
         let live = if live.is_empty() { "(none)".to_string() } else { live.join("\n") };
         Some(format!("## Open board items\n{}\n\n## Shikigami at work\n{live}", a.board.lock().unwrap().text(false)))
     }));
+}
+
+/// seimei hears how the deploy that restarted it went (only one that just ended).
+async fn deploy_note(state: std::path::PathBuf, dispatcher: Arc<dispatcher::Dispatcher>) {
+    use seimei_core::deploys;
+    deploys::settled(&state, std::time::Duration::from_secs(30)).await;
+    let Some(d) = deploys::last(&state) else { return };
+    let finished = d["finished"].as_f64().or_else(|| d["finished"].as_str().and_then(|s| s.parse().ok()));
+    if d["state"] != "running" && seimei_core::util::now() - finished.unwrap_or(0.0) < 120.0 {
+        dispatcher.note(&deploys::note(&state), Some("deploy"));
+    }
 }

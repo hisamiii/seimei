@@ -131,6 +131,39 @@ pub fn cut(s: &str, n: usize) -> &str {
     &s[..end]
 }
 
+/// JSON the way Python's json.dumps writes it by default: ", " and ": " between items, non-ASCII as \\u escapes.
+/// Tool call summaries show it on the page.
+pub fn py_json(v: &Value) -> String {
+    struct Py;
+    impl serde_json::ser::Formatter for Py {
+        fn begin_array_value<W: ?Sized + std::io::Write>(&mut self, w: &mut W, first: bool) -> std::io::Result<()> {
+            if first { Ok(()) } else { w.write_all(b", ") }
+        }
+        fn begin_object_key<W: ?Sized + std::io::Write>(&mut self, w: &mut W, first: bool) -> std::io::Result<()> {
+            if first { Ok(()) } else { w.write_all(b", ") }
+        }
+        fn begin_object_value<W: ?Sized + std::io::Write>(&mut self, w: &mut W) -> std::io::Result<()> {
+            w.write_all(b": ")
+        }
+        fn write_string_fragment<W: ?Sized + std::io::Write>(&mut self, w: &mut W, s: &str) -> std::io::Result<()> {
+            for c in s.chars() {
+                if c.is_ascii() {
+                    w.write_all(&[c as u8])?;
+                } else {
+                    for unit in c.encode_utf16(&mut [0; 2]) {
+                        write!(w, "\\u{unit:04x}")?;
+                    }
+                }
+            }
+            Ok(())
+        }
+    }
+    let mut out = vec![];
+    let mut ser = serde_json::Serializer::with_formatter(&mut out, Py);
+    v.serialize(&mut ser).expect("JSON to memory");
+    String::from_utf8(out).expect("ASCII")
+}
+
 /// At most `n` characters.
 pub fn chars(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
@@ -139,6 +172,13 @@ pub fn chars(s: &str, n: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn json_like_python() {
+        let v = serde_json::json!({"a": [1, "ü😀", 2.5], "b": {"c": null, "d": true}, "e": "q\"\\\n"});
+        let want = r#"{"a": [1, "\u00fc\ud83d\ude00", 2.5], "b": {"c": null, "d": true}, "e": "q\"\\\n"}"#;
+        assert_eq!(py_json(&v), want);
+    }
 
     #[test]
     fn writes_private_json() {

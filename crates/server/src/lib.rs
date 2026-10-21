@@ -24,14 +24,14 @@ use seimei_core::dispatcher::{self, Dispatcher};
 use seimei_core::events::{Event, EventLog};
 use seimei_core::files::{Files, MAX_MODEL_BYTES};
 use seimei_core::guard::Guard;
-use seimei_core::metrics::{self, WorkerEvents};
+use seimei_core::metrics::WorkerEvents;
 use seimei_core::push::{self as push_mod, Push};
 use seimei_core::tasks::{self, Board};
 use seimei_core::tools::Tools;
 use seimei_core::uploads::Uploads;
 use seimei_core::usage::Usage;
 use seimei_core::util::{now, read_json, write_json};
-use seimei_core::workers::Pool;
+use seimei_core::workers::{self, Pool};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -73,25 +73,32 @@ pub struct App {
     pub files: Arc<Files>,
     pub uploads: Arc<Uploads>,
     pub push: Arc<Push>,
-    pub pool: Pool,
+    pub pool: Arc<Pool>,
     usage: Arc<Usage>,
     cost: Arc<Cost>,
-    worker_events: WorkerEvents,
+    worker_events: Arc<WorkerEvents>,
     audit: PathBuf,
 }
 
+/// What the server is built from.
+pub struct Setup {
+    pub events: Arc<EventLog>,
+    pub auth: Option<Arc<Auth>>,
+    pub origins: HashSet<String>,
+    /// The web UI's folder.
+    pub web: PathBuf,
+    /// The state folder.
+    pub state: PathBuf,
+    pub push: Arc<Push>,
+    pub dispatcher: dispatcher::Config,
+    /// The shikigami permission mode from config ([approvals] shikigami).
+    pub shikigami: String,
+}
+
 impl App {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        events: Arc<EventLog>,
-        auth: Option<Arc<Auth>>,
-        origins: HashSet<String>,
-        web: &Path,
-        state: &Path,
-        push: Arc<Push>,
-        pool: Pool,
-        disp: dispatcher::Config,
-    ) -> App {
+    pub fn new(setup: Setup) -> std::io::Result<App> {
+        let Setup { events, auth, origins, web, state, push, dispatcher: disp, shikigami } = setup;
+        let (web, state) = (web.as_path(), state.as_path());
         // Only these Host headers are served: a page using DNS rebinding cannot read the API from the browser (L4).
         let mut hosts: HashSet<String> = ["localhost", "127.0.0.1", "::1"].map(String::from).into();
         hosts.extend(origins.iter().filter_map(|o| url::Url::parse(o).ok()?.host_str().map(String::from)));
@@ -108,7 +115,20 @@ impl App {
         let cost = Arc::new(Cost::new(&seimei_core::transcripts::claude_dir()));
         let approvals = Arc::new(Approvals::new(events.clone()));
         let guard = Arc::new(Guard::new(events.clone(), approvals.clone(), state));
+        let parts = workers::Parts {
+            events: events.clone(),
+            board: board.clone(),
+            usage: usage.clone(),
+            approvals: approvals.clone(),
+            guard: guard.clone(),
+        };
+        let pool = Pool::new(state, &shikigami, &disp.about, parts)?;
+        let p = pool.clone();
+        let _ = guard.tell.set(Box::new(move |w, line, urgent, key| p.tell(w, line, urgent, key)));
+        let worker_events = Arc::new(WorkerEvents::new(&state.join("events.jsonl")));
         let tools = Arc::new(Tools {
+            pool: pool.clone(),
+            worker_events: worker_events.clone(),
             events: events.clone(),
             files: files.clone(),
             uploads: uploads.clone(),
@@ -119,7 +139,8 @@ impl App {
         });
         let dispatcher =
             Dispatcher::new(disp, events.clone(), state, usage.clone(), approvals.clone(), guard.clone(), tools);
-        App {
+        let _ = pool.dispatcher.set(dispatcher.clone());
+        Ok(App {
             events,
             auth,
             origins,
@@ -137,9 +158,9 @@ impl App {
             pool,
             usage,
             cost,
-            worker_events: WorkerEvents::new(&state.join("events.jsonl")),
+            worker_events,
             audit: state.join("audit.jsonl"),
-        }
+        })
     }
 
     /// Urgent: a phone paired, a passkey added, login data forged on the server.
@@ -180,18 +201,7 @@ impl App {
 
     /// Metrics for every shikigami (or one), newest first. Blocking: it prices transcripts.
     fn metrics(&self, only: Option<&str>) -> Vec<Value> {
-        self.cost.refresh();
-        let spend = self.cost.sessions(0.0, f64::INFINITY);
-        let events = self.worker_events.get();
-        let at = now();
-        let mut out = vec![];
-        for w in self.pool.newest_first().into_iter().filter(|w| only.is_none_or(|id| w.id() == id)) {
-            let log: Vec<Value> = w.log.before(None, 100_000).iter().map(|e| (**e).clone()).collect();
-            let evs = events.get(w.id()).map_or(&[][..], Vec::as_slice);
-            let s = w.rec["session_id"].as_str().and_then(|sid| spend.get(sid));
-            out.push(metrics::worker(&w.rec, &log, evs, s, at));
-        }
-        out
+        self.pool.metrics(&self.cost, &self.worker_events, only)
     }
 
     fn sessions(&self) -> Value {
@@ -284,6 +294,10 @@ pub fn router(app: Arc<App>) -> Router {
             .route("/api/workers", get(workers_all))
             .route("/api/workers/{id}", get(worker_history))
             .route("/api/workers/{id}/metrics", get(worker_metrics))
+            .route("/api/workers/{id}/send", post(worker_send))
+            .route("/api/workers/{id}/stop", post(worker_stop))
+            .route("/api/workers/{id}/tune", post(worker_tune))
+            .route("/api/workers/{id}/archive", post(worker_archive))
             .route("/api/push/ws", get(push_ws));
     }
     r.fallback(not_found).layer(middleware::from_fn_with_state(app.clone(), guard)).with_state(app)
@@ -384,6 +398,18 @@ fn body(bytes: &Bytes) -> Result<Value, Response> {
     match serde_json::from_slice::<Value>(bytes) {
         Ok(v @ Value::Object(_)) => Ok(v),
         _ => Err(text(StatusCode::BAD_REQUEST, "400: Bad Request")),
+    }
+}
+
+/// Python's truth: false, null, 0, "", [] and {} are false.
+fn truthy(v: &Value) -> bool {
+    match v {
+        Value::Null => false,
+        Value::Bool(b) => *b,
+        Value::Number(n) => n.as_f64() != Some(0.0),
+        Value::String(s) => !s.is_empty(),
+        Value::Array(a) => !a.is_empty(),
+        Value::Object(o) => !o.is_empty(),
     }
 }
 
@@ -1019,9 +1045,10 @@ async fn workers_all(State(app): Shared) -> Response {
         .into_iter()
         .take(200)
         .map(|w| {
-            let mut row = app.pool.info(w);
+            let rec = w.rec();
+            let mut row = app.pool.info(&rec);
             // The task too, trimmed: the Archived list searches it.
-            row["task"] = json!(seimei_core::util::chars(w.rec["task"].as_str().unwrap_or(""), 400));
+            row["task"] = json!(seimei_core::util::chars(rec["task"].as_str().unwrap_or(""), 400));
             row
         })
         .collect();
@@ -1048,9 +1075,10 @@ async fn worker_history(
         events.drain(..events.len() - PAGE);
         reset = true;
     }
-    let mut row = app.pool.info(w);
-    row["task"] = w.rec["task"].clone();
-    row["question"] = w.rec["question"].clone();
+    let rec = w.rec();
+    let mut row = app.pool.info(&rec);
+    row["task"] = rec["task"].clone();
+    row["question"] = rec["question"].clone();
     let events: Vec<&Value> = events.iter().map(|e| &**e).collect();
     ok(json!({"worker": row, "events": events, "reset": reset}))
 }
@@ -1133,4 +1161,116 @@ async fn decide(State(app): Shared, UrlPath(aid): UrlPath<String>, bytes: Bytes)
         return text(StatusCode::CONFLICT, "already answered or expired");
     }
     ok(json!({"ok": true}))
+}
+
+/// What a session or shikigami gets for the user's files after their text; the chat shows chips instead.
+const ATTACHED: &str = "\n\nAttached from my phone (untrusted files, in seimei's uploads):\n";
+
+/// The uploads a message names, or why not.
+fn attached(app: &App, files: &Value) -> Result<Vec<Value>, Response> {
+    let list = match files {
+        Value::Null => return Ok(vec![]),
+        Value::Array(a) if a.len() <= MAX_FILES => a,
+        _ => return Err(text(StatusCode::BAD_REQUEST, &format!("up to {MAX_FILES} files"))),
+    };
+    let id = |v: &Value| v.as_str().map_or_else(|| v.to_string(), String::from);
+    let infos: Option<Vec<Value>> = list.iter().map(|f| app.uploads.info(&id(f))).collect();
+    infos.ok_or_else(|| text(StatusCode::BAD_REQUEST, "unknown file"))
+}
+
+fn worker_of(app: &App, id: &str) -> Result<Arc<seimei_core::workers::Worker>, Response> {
+    app.pool.get(id).ok_or_else(|| text(StatusCode::NOT_FOUND, "404: Not Found"))
+}
+
+/// The user writes to a shikigami on its page.
+async fn worker_send(State(app): Shared, UrlPath(id): UrlPath<String>, bytes: Bytes) -> Response {
+    let w = match worker_of(&app, &id) {
+        Ok(w) => w,
+        Err(r) => return r,
+    };
+    let b = match body(&bytes) {
+        Ok(b) => b,
+        Err(r) => return r,
+    };
+    let shown = s(&b, "text").trim().to_string();
+    let infos = match attached(&app, &b["files"]) {
+        Ok(i) => i,
+        Err(r) => return r,
+    };
+    let mut said = shown.clone();
+    if !infos.is_empty() {
+        said += ATTACHED;
+        said += &infos.iter().map(|i| i["path"].as_str().unwrap_or("")).collect::<Vec<_>>().join("\n");
+    }
+    let said = said.trim().to_string();
+    if said.is_empty() {
+        return text(StatusCode::BAD_REQUEST, "400: Bad Request");
+    }
+    let chips: Vec<Value> =
+        infos.iter().map(|i| json!({"id": i["id"], "name": i["name"], "size": i["size"], "kind": i["kind"]})).collect();
+    let asked = w.state() == "asking";
+    if let Err(e) = w.send(&said, Some(&shown), chips).await {
+        return json_status(StatusCode::CONFLICT, json!({"error": e}));
+    }
+    // The main chat says the user answered or messaged it (QA U17); an open "asks" card settles on it (B5).
+    let quote = if shown.is_empty() { "(files)".to_string() } else { seimei_core::util::chars(&shown, 200) };
+    app.events.add(json!({"type": "worker", "event": "replied", "worker": w.id, "name": w.name(), "asked": asked,
+        "text": quote}));
+    let line = format!(
+        "the user messaged shikigami {} ({}) directly: {}",
+        w.name(),
+        w.id,
+        seimei_core::util::chars(&said, 500)
+    );
+    app.dispatcher.note(&line, None);
+    ok(json!({"ok": true}))
+}
+
+async fn worker_stop(State(app): Shared, UrlPath(id): UrlPath<String>) -> Response {
+    match worker_of(&app, &id) {
+        Ok(w) => {
+            w.stop().await;
+            ok(json!({"ok": true}))
+        }
+        Err(r) => r,
+    }
+}
+
+/// The user changes a shikigami's effort, model or permission mode (the page's Change sheet).
+async fn worker_tune(State(app): Shared, UrlPath(id): UrlPath<String>, bytes: Bytes) -> Response {
+    let w = match worker_of(&app, &id) {
+        Ok(w) => w,
+        Err(r) => return r,
+    };
+    let b = match body(&bytes) {
+        Ok(b) => b,
+        Err(r) => return r,
+    };
+    let pick = |k: &str| Some(s(&b, k)).filter(|v| !v.is_empty());
+    let tuned = async {
+        if let Some(mode) = pick("mode").filter(|m| *m != w.mode()) {
+            w.set_mode(&mode).await?;
+        }
+        w.tune(pick("effort").as_deref(), pick("model").as_deref(), "the user").await
+    };
+    match tuned.await {
+        Ok(_) => ok(app.pool.info(&w.rec())),
+        Err(e) => text(StatusCode::BAD_REQUEST, &e),
+    }
+}
+
+/// Hide a shikigami from the Agents list, or bring it back; nothing is stopped or deleted.
+async fn worker_archive(State(app): Shared, UrlPath(id): UrlPath<String>, bytes: Bytes) -> Response {
+    let w = match worker_of(&app, &id) {
+        Ok(w) => w,
+        Err(r) => return r,
+    };
+    let b = match body(&bytes) {
+        Ok(b) => b,
+        Err(r) => return r,
+    };
+    if let Err(e) = app.pool.set_archived(&w, truthy(&b["archived"])) {
+        return text(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
+    }
+    ok(json!({"archived": app.pool.archive.worker(&w.rec())}))
 }

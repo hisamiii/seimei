@@ -615,5 +615,60 @@
    },
    "name": "tasks"
   }
- ]
+ ],
+ "shikigami": {
+  "initialize": {
+   "capabilities": {
+    "tools": {
+     "listChanged": false
+    }
+   },
+   "protocolVersion": "2025-06-18",
+   "serverInfo": {
+    "name": "shikigami",
+    "version": "1.0.0"
+   }
+  },
+  "tools": [
+   {
+    "description": "Ask the user a question through seimei when only they can decide. End your turn afterwards.",
+    "inputSchema": {
+     "properties": {
+      "question": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "question"
+     ],
+     "type": "object"
+    },
+    "name": "ask"
+   },
+   {
+    "description": "Your own items on the user's task board. start: you move on to one of your queued items (it runs and follows you; what you worked on before goes back to the queue unless you shipped it). ship: it is deployed or delivered and waits for seimei's check (seimei marks it done).",
+    "inputSchema": {
+     "properties": {
+      "action": {
+       "type": "string",
+       "enum": [
+        "start",
+        "ship"
+       ]
+      },
+      "id": {
+       "type": "string",
+       "description": "#79 or 79"
+      }
+     },
+     "required": [
+      "action",
+      "id"
+     ],
+     "type": "object"
+    },
+    "name": "board"
+   }
+  ]
+ }
 }

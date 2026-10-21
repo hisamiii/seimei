@@ -122,8 +122,16 @@ impl Options {
             SystemPrompt::Preset { append: Some(t) } => push("--append-system-prompt", t.clone()),
             SystemPrompt::Preset { append: None } => {}
         }
-        if !self.allowed_tools.is_empty() {
-            push("--allowedTools", self.allowed_tools.join(","));
+        // The skills a session sees are also allowed without a prompt.
+        let mut allowed = self.allowed_tools.clone();
+        for name in self.skills.iter().flatten() {
+            let rule = format!("Skill({name})");
+            if !allowed.contains(&rule) {
+                allowed.push(rule);
+            }
+        }
+        if !allowed.is_empty() {
+            push("--allowedTools", allowed.join(","));
         }
         if !self.disallowed_tools.is_empty() {
             push("--disallowedTools", self.disallowed_tools.join(","));
@@ -157,8 +165,14 @@ impl Options {
         if self.include_partial_messages {
             a.push("--include-partial-messages".into());
         }
-        if let Some(s) = &self.setting_sources {
-            a.push(format!("--setting-sources={}", s.join(",")));
+        // Listed skills are found in the user's and the project's settings unless the sources are given.
+        let sources = match (&self.setting_sources, &self.skills) {
+            (Some(s), _) => Some(s.join(",")),
+            (None, Some(_)) => Some("user,project".into()),
+            (None, None) => None,
+        };
+        if let Some(s) = sources {
+            a.push(format!("--setting-sources={s}"));
         }
         for (k, v) in &self.extra_args {
             a.push(format!("--{k}"));

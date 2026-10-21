@@ -194,7 +194,7 @@ pub fn summarize(inp: &Value) -> String {
             return chars(v.trim().lines().next().unwrap_or(""), 200);
         }
     }
-    chars(&inp.to_string(), 200)
+    chars(&crate::util::py_json(inp), 200)
 }
 
 /// A tool result's text, cut at RESULT_CHARS.
@@ -229,9 +229,18 @@ pub enum Source {
 }
 
 enum Cmd {
-    Deliver { text: String, images: Vec<(String, String)>, src: Option<Source> },
-    Note { text: String, key: Option<String> },
+    Deliver {
+        text: String,
+        images: Vec<(String, String)>,
+        src: Option<Source>,
+    },
+    Note {
+        text: String,
+        key: Option<String>,
+    },
     Interrupt,
+    /// A shikigami's rate limit event: limits are shared by the dispatcher and every worker (one account).
+    RateLimit(Value),
 }
 
 /// The dispatcher's settings from config.toml ([dispatcher], [approvals] dispatcher, [host] about).
@@ -438,6 +447,10 @@ impl Dispatcher {
 
     pub fn interrupt(&self) {
         let _ = self.tx.send(Cmd::Interrupt);
+    }
+
+    pub fn rate_limit(&self, info: &Value) {
+        let _ = self.tx.send(Cmd::RateLimit(info.clone()));
     }
 
     fn options(&self) -> Options {
@@ -753,6 +766,10 @@ impl Turns {
                 None
             }
             Cmd::Interrupt => None,
+            Cmd::RateLimit(info) => {
+                self.rate_limit(&info);
+                None
+            }
         }
     }
 

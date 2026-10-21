@@ -1,5 +1,5 @@
-"""tests/cases/tools.json against the Python server: initialize and tools/list, as Claude Code gets them over the SDK's
-in-process bridge (no plugins)."""
+"""tests/cases/tools.json against the Python servers (seimei's and a shikigami's): initialize and tools/list, as Claude
+Code gets them over the SDK's in-process bridge (no plugins)."""
 import asyncio, json, tempfile
 from pathlib import Path
 from claude_agent_sdk._internal.sdk_mcp_bridge import SdkMcpBridge
@@ -8,6 +8,8 @@ from seimei.push import make_push_tools
 from seimei.tasks import Board, make_task_tools
 from seimei.tools import make_tools
 from seimei.watches import Watches, make_watch_tools
+from seimei.events import EventLog
+from seimei.workers import Pool, Worker
 
 CASES = json.loads((Path(__file__).resolve().parents[1] / "cases/tools.json").read_text())
 res = []
@@ -32,6 +34,16 @@ async def main():
     check("the same tools, in order", [t["name"] for t in got] == [t["name"] for t in CASES["tools"]], [t["name"] for t in got])
     for g, w in zip(got, CASES["tools"]):
         check(f"tool {w['name']}", g == w, g)
+    await bridge.aclose()
+    # A shikigami's own server (ask, board).
+    pool = Pool(EventLog(d / "events.jsonl"), d)
+    w = Worker(pool, {"id": "w9", "name": "x", "state": "running", "cwd": "/", "session_id": "s", "created": 0})
+    bridge = SdkMcpBridge("shikigami", w._tools()["instance"])
+    init = await bridge.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}})
+    check("shikigami initialize", init["result"] == CASES["shikigami"]["initialize"], init)
+    got = (await bridge.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}))["result"]["tools"]
+    check("shikigami tools", got == CASES["shikigami"]["tools"], got)
     await bridge.aclose()
 
 asyncio.run(main())

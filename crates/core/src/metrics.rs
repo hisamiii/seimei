@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
 
+use chrono::TimeZone;
 use regex::Regex;
 use serde_json::{Value, json};
 
@@ -86,7 +87,12 @@ pub fn worker(rec: &Value, log: &[Value], events: &[Value], spend: Option<&Spend
     json!({
         "id": rec["id"], "name": rec["name"], "model": rec["model"], "effort": rec["effort"],
         "context": rec["context_cap"], "cwd": rec["cwd"], "state": rec["state"],
-        "adopted": rec["adopted"].as_bool().unwrap_or(false), "created": created,
+        // The session it was adopted from (its name), or nothing.
+        "adopted": match &rec["adopted"] {
+            Value::Null | Value::Bool(false) => false,
+            Value::String(s) => !s.is_empty(),
+            _ => true,
+        }, "created": created,
         "wall": (end - created).max(0.0), "busy": busy, "first_done": dones.first(),
         "tokens": {"input": s.input, "cache_read": s.cache_read, "cache_write": s.cache_write, "output": s.output},
         "calls": s.calls, "usd": (s.usd * 1e4).round() / 1e4, "asks": of("asking").count(),
@@ -95,6 +101,95 @@ pub fn worker(rec: &Value, log: &[Value], events: &[Value], spend: Option<&Spend
         // Changes of effort, model or permissions on the way (tune): when, by whom, what.
         "tunes": rec["tunes"].as_array().cloned().unwrap_or_default(),
     })
+}
+
+/// A duration: "1 h 05 min", "12 min", "40 s".
+fn span(sec: f64) -> String {
+    let sec = sec as i64;
+    if sec >= 3600 {
+        format!("{} h {:02} min", sec / 3600, sec % 3600 / 60)
+    } else if sec >= 60 {
+        format!("{} min", sec / 60)
+    } else {
+        format!("{sec} s")
+    }
+}
+
+fn k(n: f64) -> String {
+    if n >= 1e6 {
+        format!("{:.1}M", n / 1e6)
+    } else if n >= 1e3 {
+        format!("{:.0}k", n / 1e3)
+    } else {
+        format!("{}", n.round() as i64)
+    }
+}
+
+/// For the dispatcher's workers tool.
+pub fn text(rows: &[Value]) -> String {
+    if rows.is_empty() {
+        return "No shikigami yet.".into();
+    }
+    let mut lines = vec![
+        "name (id): model / effort / context, folder | tokens in / cache read / cache write / out, $ at API prices | \
+         wall time (busy), end state | asks, follow-ups after first done (seimei+user), reopened"
+            .to_string(),
+    ];
+    let s = |v: &Value| match v {
+        Value::String(s) => s.clone(),
+        Value::Null => "None".into(),
+        v => v.to_string(),
+    };
+    let or = |v: &Value, d: &str| if v.as_str().is_some_and(|x| !x.is_empty()) { s(v) } else { d.to_string() };
+    let f = |v: &Value| v.as_f64().unwrap_or(0.0);
+    for m in rows {
+        let t = &m["tokens"];
+        let mut line = format!(
+            "{} ({}): {} / {} / {}, {}",
+            s(&m["name"]),
+            s(&m["id"]),
+            s(&m["model"]),
+            or(&m["effort"], "default"),
+            or(&m["context"], "?"),
+            s(&m["cwd"])
+        );
+        if m["adopted"] == true {
+            line += " (adopted)";
+        }
+        line += &format!(
+            " | {} / {} / {} / {}, ${:.2}",
+            k(f(&t["input"])),
+            k(f(&t["cache_read"])),
+            k(f(&t["cache_write"])),
+            k(f(&t["output"])),
+            f(&m["usd"])
+        );
+        line += &format!(
+            " | {} (busy {}), {} | {} asks, {} follow-ups ({}+{}), {}",
+            span(f(&m["wall"])),
+            span(f(&m["busy"])),
+            s(&m["state"]),
+            m["asks"],
+            m["followups"],
+            m["followups_by"]["seimei"],
+            m["followups_by"]["user"],
+            if m["reopened"] == true { "reopened" } else { "not reopened" }
+        );
+        for x in m["tunes"].as_array().into_iter().flatten() {
+            let at = chrono::Local.timestamp_opt(f(&x["t"]) as i64, 0).single();
+            let at = at.map(|t| t.format("%H:%M").to_string()).unwrap_or_default();
+            line += &format!(" | {} by {} at {at}", s(&x["what"]), s(&x["by"]));
+        }
+        lines.push(line);
+    }
+    let total: f64 = rows.iter().map(|m| f(&m["usd"])).sum();
+    let reopened = rows.iter().filter(|m| m["reopened"] == true).count();
+    let finished = rows.iter().filter(|m| !m["first_done"].is_null()).count();
+    lines.push(format!(
+        "Total ${total:.2} over {} shikigami; reopened {reopened} of {finished} that finished at least once.",
+        rows.len()
+    ));
+    lines.join("\n")
 }
 
 /// Worker events by worker id.

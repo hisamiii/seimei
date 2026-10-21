@@ -3,7 +3,7 @@
 
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use serde_json::{Map, Value, json};
@@ -20,6 +20,7 @@ const QUEUE: usize = 2000;
 
 pub struct EventLog {
     inner: Mutex<Inner>,
+    path: PathBuf,
 }
 
 struct Inner {
@@ -47,7 +48,12 @@ impl EventLog {
             }
         }
         let file = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
-        Ok(EventLog { inner: Mutex::new(Inner { events, file, subs: vec![], turn: Map::new() }) })
+        let inner = Mutex::new(Inner { events, file, subs: vec![], turn: Map::new() });
+        Ok(EventLog { inner, path: path.into() })
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
     }
 
     pub fn last_id(&self) -> i64 {
