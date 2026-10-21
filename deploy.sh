@@ -97,7 +97,7 @@ service=${SEIMEI_SERVICE:-seimei}
 git -C "$app" checkout -q --detach "$rev"
 step=sync
 status running sync
-(cd "$app" && uv sync -q --frozen)
+(cd "$app" && uv sync -q --frozen --no-dev)
 
 if [ -z "${SEIMEI_DEPLOY_TEST:-}" ]; then
     step=install

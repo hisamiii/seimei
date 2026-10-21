@@ -88,8 +88,22 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
              tool_guard: Guard, watcher: Watcher, auth: Auth | None, origins: set[str],
              app_dir: Path | None = None, cost: Cost | None = None, push: Push | None = None,
              uploads: Uploads | None = None, board=None, adopter=None) -> web.Application:
+    # Only these Host headers are served: a page using DNS rebinding cannot read the API from the browser (L4).
+    hosts = {"localhost", "127.0.0.1", "::1"} | {urllib.parse.urlparse(o).hostname for o in origins}
+
+    def alarm(title: str, text: str):
+        """Urgent: a phone paired, a passkey added, login data forged on the laptop."""
+        events.add({"type": "system", "level": "error", "text": f"{title}. {text}"})
+        if push:
+            push.ping(title, text, level="urgent")
+
+    if auth:
+        auth.alarm = alarm
+
     @web.middleware
     async def guard(request: web.Request, handler):
+        if request.url.host not in hosts:
+            return web.Response(status=421, text="unknown host")
         # Never trust the peer address: cloudflared connects from localhost too.
         public = (request.method, request.path) in PUBLIC or (request.method == "GET" and request.path.startswith("/static/"))
         if auth and not public and not auth.session(request):
@@ -112,6 +126,8 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
             resp.headers["Content-Security-Policy"] = CSP
             resp.headers["X-Content-Type-Options"] = "nosniff"
             resp.headers["Referrer-Policy"] = "no-referrer"
+            if auth and auth.secure:
+                resp.headers["Strict-Transport-Security"] = "max-age=31536000"
         return resp
 
     version, assets = load_web()
@@ -156,24 +172,35 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
             return web.json_response({"ok": False}, status=401)
         return logged_in("passkey", request)
 
+    def fresh_login(request):
+        """Adding a passkey or a phone needs a browser login from the last few minutes (auth audit L2)."""
+        if not auth.recent(request):
+            raise web.HTTPForbidden(text=json.dumps({"error": "Log in again first: adding a passkey or a phone needs a "
+                                                     "fresh login."}), content_type="application/json")
+
     async def register_options(request):
+        fresh_login(request)
         return web.Response(text=auth.register_options(), content_type="application/json")
 
     async def register(request):
+        fresh_login(request)
         body = await request.json()
+        name = str(body.get("name", ""))
         try:
-            auth.register_verify(body["credential"], str(body.get("name", "")))
+            auth.register_verify(body["credential"], name)
         except Exception as e:
             return web.json_response({"ok": False, "error": str(e)[:200]}, status=400)
+        alarm("A passkey was added", f"{name or 'Unnamed'}. If it was not you, run `seimei lockdown` on the laptop.")
         return web.json_response({"ok": True})
 
     async def me(request):
         return web.json_response({"auth": bool(auth), "passkeys": len(auth.data["passkeys"]) if auth else 0})
 
     async def pair(request):
-        # Only a browser login hands out codes: a phone cannot pair further phones.
+        # Only a fresh browser login hands out codes: a phone cannot pair further phones.
         if auth.bearer(request):
             return web.json_response({"error": "pair from the web page"}, status=403)
+        fresh_login(request)
         code, exp = auth.pair_code()
         return web.json_response({"code": code, "expires": exp})
 
@@ -184,7 +211,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
         except Exception as e:
             await asyncio.sleep(1)
             return web.json_response({"error": str(e)[:200]}, status=401)
-        events.add({"type": "system", "text": f"A phone was paired: {auth.device(device)['name']}."})
+        alarm("A phone was paired", f"{auth.device(device)['name']}. If it was not you, run `seimei lockdown` on the laptop.")
         return web.json_response({"device": device})
 
     async def device_challenge(request):
@@ -284,7 +311,8 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     async def logout(request):
         auth.end_session(request)
         resp = web.json_response({"ok": True})
-        resp.del_cookie(auth.cookie, path="/")
+        # The same flags as the cookie: a __Host- cookie is only replaced by a Secure one (I1).
+        resp.del_cookie(auth.cookie, path="/", secure=auth.secure, httponly=True, samesite="Lax")
         return resp
 
     def sized(ev: dict) -> dict:

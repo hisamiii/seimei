@@ -359,6 +359,11 @@ class Push:
 
     async def _send(self, data: dict, ttl: int = 3600, only=None):
         phones = self._phones(only)
+        if self.stream and self.auth:
+            # A phone unpaired from the CLI (`seimei devices --revoke`) still holds its stream: close it (audit I2).
+            paired = {d["id"] for d in self.auth.devices()}
+            for dev in [d for d in self.stream.live if d is not None and d not in paired]:
+                await self.stream.drop(dev)
         log.info("push %s%s to %d phone(s)", data.get("kind"), " cancel" if data.get("cancel") else "", len(phones))
         data = {k: str(v) for k, v in data.items()}
         for dev, rec in phones:

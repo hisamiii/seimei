@@ -37,10 +37,10 @@ from .workers import Pool
 
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "seimei/config.toml"
 STATE = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "seimei"
-MIN_PASSWORD = 8
+MIN_PASSWORD = 12
 
 
-def account(auth: Auth, cmd: str, clear: bool, state: Path, revoke: str | None = None):
+def account(auth: Auth, cmd: str, clear: bool, state: Path, revoke: str | None = None, keep_sessions: bool = False):
     """Recovery lives on the laptop: these never go through the web page."""
     if cmd == "screen-password":
         # The desktop plugin's unlock_screen types it; the command stays here, where recovery lives.
@@ -67,7 +67,16 @@ def account(auth: Auth, cmd: str, clear: bool, state: Path, revoke: str | None =
         if getpass.getpass("Again: ") != pw:
             raise SystemExit("seimei: the two entries differ")
         auth.set_password(pw)
-        print("Password set. Logged-in devices stay logged in; `logout-all` ends them.")
+        # A new password usually means the old one leaked: whoever used it is logged out too (auth audit L1).
+        if keep_sessions:
+            print("Password set. Logged-in devices stay logged in; `logout-all` ends them.")
+        else:
+            auth.end_all_sessions()
+            print("Password set, and every device is logged out (phones and passkeys log back in).")
+    elif cmd == "lockdown":
+        auth.lockdown()
+        print("Locked down: every session ended, every passkey removed, every phone unpaired.\n"
+              "If the password may have leaked, run `seimei passwd` too. Then log in and pair again.")
     elif cmd == "logout-all":
         auth.end_all_sessions()
         print("Every device is logged out.")
@@ -105,11 +114,14 @@ def recall_state(board: Board, pool: Pool) -> str:
 
 def main():
     ap = argparse.ArgumentParser(prog="seimei")
-    ap.add_argument("command", nargs="?", choices=["serve", "passwd", "passkeys", "logout-all", "screen-password", "pair", "devices"],
+    ap.add_argument("command", nargs="?", choices=["serve", "passwd", "passkeys", "logout-all", "lockdown", "screen-password", "pair",
+                                                     "devices"],
                     default="serve")
-    ap.add_argument("--dev", action="store_true", help="local testing: no login, port + 1, separate session")
+    ap.add_argument("--dev", action="store_true", help="local testing: port + 1, separate state and session")
     ap.add_argument("--model", help="override the dispatcher model")
-    ap.add_argument("--login", action="store_true", help="with --dev: keep the login on")
+    ap.add_argument("--login", action="store_true", help=argparse.SUPPRESS)  # the default now; kept for old scripts
+    ap.add_argument("--no-login", action="store_true", help="with --dev: no login (only for local tests)")
+    ap.add_argument("--keep-sessions", action="store_true", help="with passwd: leave logged-in devices logged in")
     ap.add_argument("--clear", action="store_true", help="with passkeys: remove them all")
     ap.add_argument("--revoke", metavar="ID", help="with devices: unpair that phone and end its sessions")
     args = ap.parse_args()
@@ -124,7 +136,7 @@ def main():
     state.mkdir(parents=True, exist_ok=True)
 
     if args.command != "serve":
-        return account(Auth(state, origin), args.command, args.clear, state, args.revoke)
+        return account(Auth(state, origin), args.command, args.clear, state, args.revoke, args.keep_sessions)
 
     disp = dict(cfg.get("dispatcher", {}))
     if args.model:
@@ -136,8 +148,8 @@ def main():
         port += 1
         disp.setdefault("name", "seimei-dev")
         origins = {f"http://localhost:{port}", f"http://127.0.0.1:{port}"}
-        # --login keeps the login on, for testing it and the app's pairing.
-        auth = Auth(state, f"http://localhost:{port}") if args.login else None
+        # The login stays on unless --no-login (auth audit L4: any local process could drive a login-free server).
+        auth = None if args.no_login else Auth(state, f"http://localhost:{port}")
         logging.warning("DEV MODE (%s): http://localhost:%d, state in %s", "login on" if auth else "no login", port, state)
     else:
         origins = {origin}

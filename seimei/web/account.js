@@ -1,6 +1,6 @@
 // The account menu: fingerprint login, the phone app and its pairing, the activity log, and logging out.
 import { deviceName, register, supported } from './passkey.js';
-import { $, el, clock, dayLabel, when, post, getJSON, toLogin } from './util.js';
+import { $, el, clock, dayLabel, when, post, getJSON, toLogin, snack } from './util.js';
 import { main, toBottom } from './chat.js';
 import { sheet, showSheet } from './sheet.js';
 
@@ -23,12 +23,16 @@ export async function account() {
   }
 }
 
+// Adding a passkey or a phone needs a login from the last 10 minutes (auth audit L2).
+const FRESH = 'For safety, this needs a fresh login: log out, log in again, then try once more.';
+
 async function addPasskey() {
   menu.hidden = true;
   const r = await register(deviceName()).catch(() => ({ ok: false }));
   if (r.status === 401) return toLogin();
   if (r.ok) card.hidden = true;
   const text = r.ok ? 'Fingerprint login is set up on this device.'
+    : r.status === 403 ? FRESH
     : r.exists ? 'This device already has a passkey for seimei.'
     : r.cancelled ? null : 'Could not set up the fingerprint login.';
   if (text) {
@@ -128,7 +132,10 @@ async function openPhones() {
   const codeBox = el('div', 'pcode');
   codeBox.hidden = true;
   pairBtn.addEventListener('click', async () => {
-    const r = await post('api/devices/pair', {}).catch(() => null);
+    const r = await post('api/devices/pair', {}).catch((e) => {
+      if (e.message === '403') snack(FRESH);
+      return null;
+    });
     if (!r) return;
     pairBtn.hidden = true;
     const left = el('p', 'usage-note');
