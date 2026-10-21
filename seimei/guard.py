@@ -32,6 +32,8 @@ SECRETS = [
     (".local/share/seimei/dev/unlock", "the screen password", ["seimei/dev/unlock"]),
     (".local/share/seimei/signing", "the app signing key", ["seimei/signing"]),
     (".local/share/seimei/firebase", "the Firebase key", ["seimei/firebase"]),
+    (".local/share/seimei/push-vapid.pem", "seimei's push signing key", ["push-vapid.pem"]),
+    (".local/share/seimei/dev/push-vapid.pem", "seimei's push signing key", ["push-vapid.pem"]),
     (".local/share/seimei/kitty-rc.conf", "the kitty remote-control password", ["kitty-rc.conf"]),
     (".claude/.credentials.json", "the Claude login", [".credentials.json"]),
     (".cloudflared", "the tunnel credentials", [".cloudflared"]),

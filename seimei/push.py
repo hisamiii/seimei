@@ -9,19 +9,33 @@ Pings and approvals skip a phone with the app open; "reply ready" skips only one
 its view (chat, another tab, an agent's page) so the dispatcher can see where the user is.
 
 Messages are data-only, so the app builds every notification itself (channels per level, replace, withdraw).
-Needs the Firebase service account key in FIREBASE (shared by the dev server and the app build); without it nothing is sent.
+Three ways to reach a phone, whichever its app registered:
+- Firebase Cloud Messaging, for builds with Firebase: needs the service account key in FIREBASE.
+- UnifiedPush (Web Push): a push app on the phone (ntfy and the like) gives an endpoint; messages go there encrypted
+  for the phone (RFC 8291), signed with seimei's VAPID key (RFC 8292). Needs nothing set up.
+- The background connection, for phones with neither: the app keeps a websocket open and gets the same messages.
 """
 
 import asyncio
 import base64
+import hashlib
+import hmac
 import json
 import logging
+import os
+import secrets
+import struct
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import aiohttp
+from aiohttp import web
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.asymmetric import ec, padding
+from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from .events import EventLog
 
@@ -35,6 +49,11 @@ FIREBASE = Path.home() / ".local/share/seimei/firebase"
 
 def b64(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+def unb64(text: str) -> bytes:
+    text = "".join(text.split())
+    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
 
 
 class Fcm:
@@ -98,11 +117,181 @@ class Fcm:
             await self.http.close()
 
 
+def _hkdf(salt: bytes, ikm: bytes, info: bytes, length: int) -> bytes:
+    return HKDF(hashes.SHA256(), length, salt, info).derive(ikm)
+
+
+def _point(key: ec.EllipticCurvePublicKey) -> bytes:
+    return key.public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+
+
+def encrypt(data: bytes, ua_public: bytes, auth_secret: bytes, as_private: ec.EllipticCurvePrivateKey | None = None,
+            salt: bytes | None = None) -> bytes:
+    """A Web Push message body (RFC 8291, aes128gcm, one record) only the phone holding ua_public's key can read.
+    The server key and salt are fresh each time unless given (tests use RFC 8291's example)."""
+    as_private = as_private or ec.generate_private_key(ec.SECP256R1())
+    salt = salt or os.urandom(16)
+    as_public = _point(as_private.public_key())
+    ecdh = as_private.exchange(ec.ECDH(), ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), ua_public))
+    ikm = _hkdf(auth_secret, ecdh, b"WebPush: info\0" + ua_public + as_public, 32)
+    cek = _hkdf(salt, ikm, b"Content-Encoding: aes128gcm\0", 16)
+    nonce = _hkdf(salt, ikm, b"Content-Encoding: nonce\0", 12)
+    # 0x02 marks the last (only) record, with no padding after it.
+    sealed = AESGCM(cek).encrypt(nonce, data + b"\x02", None)
+    return salt + struct.pack(">IB", 4096, len(as_public)) + as_public + sealed
+
+
+class WebPush:
+    """UnifiedPush through each phone's push app: Web Push with VAPID. The key is made once and kept in state."""
+    ready = True
+
+    def __init__(self, key_path: Path, contact: str):
+        self.key_path = key_path
+        # VAPID's sub: who to tell if the sends misbehave (the server's own address).
+        self.contact = contact if contact.startswith(("https:", "mailto:")) else "mailto:seimei@localhost"
+        self.http: aiohttp.ClientSession | None = None
+        self._key: ec.EllipticCurvePrivateKey | None = None
+        self.jwts: dict[str, tuple[str, float]] = {}
+
+    def key(self) -> ec.EllipticCurvePrivateKey:
+        if self._key is None:
+            if self.key_path.exists():
+                self._key = serialization.load_pem_private_key(self.key_path.read_bytes(), None)
+            else:
+                self._key = ec.generate_private_key(ec.SECP256R1())
+                self.key_path.parent.mkdir(parents=True, exist_ok=True)
+                fd = os.open(self.key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(fd, "wb") as f:
+                    f.write(self._key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                                    serialization.NoEncryption()))
+        return self._key
+
+    @property
+    def public(self) -> str:
+        """The VAPID public key, as the app hands it to its push app when registering."""
+        return b64(_point(self.key().public_key()))
+
+    def _jwt(self, audience: str) -> str:
+        jwt, exp = self.jwts.get(audience, ("", 0.0))
+        if time.time() < exp - 3600:
+            return jwt
+        exp = int(time.time()) + 12 * 3600
+        head = b64(json.dumps({"typ": "JWT", "alg": "ES256"}).encode())
+        claims = b64(json.dumps({"aud": audience, "exp": exp, "sub": self.contact}).encode())
+        r, s_ = decode_dss_signature(self.key().sign(f"{head}.{claims}".encode(), ec.ECDSA(hashes.SHA256())))
+        jwt = f"{head}.{claims}.{b64(r.to_bytes(32, 'big') + s_.to_bytes(32, 'big'))}"
+        self.jwts[audience] = (jwt, exp)
+        return jwt
+
+    async def send(self, sub: dict, data: dict[str, str], ttl: int) -> str:
+        """'ok', 'gone' when the push app dropped this endpoint, or 'error'."""
+        if self.http is None:
+            self.http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20))
+        try:
+            body = encrypt(fit(data), unb64(sub["p256dh"]), unb64(sub["auth"]))
+            u = urlsplit(sub["up"])
+            headers = {"Content-Encoding": "aes128gcm", "Content-Type": "application/octet-stream", "TTL": str(ttl),
+                       "Urgency": "high" if data.get("kind") in ("approval", "urgent") else "normal",
+                       # A later message on the same topic replaces one still waiting (Topic allows 32 url-safe chars).
+                       "Topic": b64(hashlib.sha256(data["tag"].encode()).digest())[:32],
+                       "Authorization": f"vapid t={self._jwt(f'{u.scheme}://{u.netloc}')}, k={self.public}"}
+            async with self.http.post(sub["up"], data=body, headers=headers) as r:
+                if r.status in (200, 201, 202, 204):
+                    return "ok"
+                if r.status in (404, 410):
+                    return "gone"
+                log.warning("web push: %s %s", r.status, (await r.text())[:300])
+                return "error"
+        except (aiohttp.ClientError, asyncio.TimeoutError, KeyError, ValueError, TypeError) as e:
+            log.warning("web push: %s", e)
+            return "error"
+
+    async def close(self):
+        if self.http:
+            await self.http.close()
+
+
+# Web Push carries at most 4096 bytes; encryption adds 103 (header and tag).
+MAX_PLAIN = 3993
+
+
+def fit(data: dict[str, str]) -> bytes:
+    """The message as UTF-8 JSON, its body shortened when a long one in a wide script would not fit."""
+    out = json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode()
+    while len(out) > MAX_PLAIN and data.get("body"):
+        data = {**data, "body": data["body"][:len(data["body"]) * 4 // 5].rstrip() + "…"}
+        out = json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode()
+    return out
+
+
+def valid_endpoint(url: str) -> bool:
+    """A push app's endpoint: https, or http on this machine (a push server for tests)."""
+    u = urlsplit(url)
+    return u.scheme == "https" and bool(u.netloc) or u.scheme == "http" and u.hostname in ("localhost", "127.0.0.1", "::1")
+
+
+def secret_hash(secret: str) -> str:
+    return hashlib.sha256(secret.encode()).hexdigest()
+
+
+class Stream:
+    """The background connection: phones without a push app keep a websocket open (the app's foreground service) and
+    get the same messages on it. What comes while one is away waits, newest per tag, until its ttl runs out."""
+    ready = True
+
+    def __init__(self):
+        self.live: dict[str, set[web.WebSocketResponse]] = {}
+        self.waiting: dict[str, dict[str, tuple[float, dict]]] = {}
+
+    async def send(self, dev: str, data: dict[str, str], ttl: int) -> str:
+        socks = self.live.get(dev)
+        if not socks:
+            self.waiting.setdefault(dev, {})[data["tag"]] = (time.time() + ttl, data)
+            return "ok"
+        for ws in list(socks):
+            try:
+                await ws.send_json(data)
+            except (ConnectionError, RuntimeError):
+                socks.discard(ws)
+        return "ok"
+
+    async def serve(self, request: web.Request, auth) -> web.WebSocketResponse:
+        """GET /api/push/ws with "Authorization: Push <device> <secret>": the secret only opens this stream."""
+        parts = request.headers.get("Authorization", "").split()
+        dev = parts[1] if len(parts) == 3 and parts[0] == "Push" else ""
+        rec = (auth.device(dev) or {}).get("push") if dev and auth else None
+        if not (isinstance(rec, dict) and "ws" in rec and hmac.compare_digest(rec["ws"], secret_hash(parts[2]))):
+            raise web.HTTPUnauthorized(text="not a push stream")
+        ws = web.WebSocketResponse(heartbeat=45)
+        await ws.prepare(request)
+        self.live.setdefault(dev, set()).add(ws)
+        now = time.time()
+        for exp, data in self.waiting.pop(dev, {}).values():
+            if exp > now:
+                await ws.send_json(data)
+        try:
+            async for _ in ws:
+                pass
+        finally:
+            self.live.get(dev, set()).discard(ws)
+        return ws
+
+    async def drop(self, dev: str):
+        """The phone stopped using the stream (or was unpaired)."""
+        self.waiting.pop(dev, None)
+        for ws in list(self.live.pop(dev, set())):
+            await ws.close()
+
+
 class Push:
-    def __init__(self, events: EventLog, auth, sender, state: Path):
+    def __init__(self, events: EventLog, auth, sender, state: Path, webpush: WebPush | None = None,
+                 stream: Stream | None = None):
         self.events = events
         self.auth = auth
+        # Firebase; the other two ways need no setup.
         self.sender = sender
+        self.webpush = webpush
+        self.stream = stream
         self.path = state / "push.json"
         # Questions pushed before the rules changed: withdrawn once at start (push.json held them).
         self.stale_questions = self.path.exists() and bool(json.loads(self.path.read_text()).get("notified"))
@@ -160,16 +349,37 @@ class Push:
         keep = only or (lambda dev: not self._is_open(dev))
         return [(d["id"], d["push"]) for d in self.auth.push_devices() if keep(d["id"])]
 
+    def way(self, rec) -> str:
+        """How a phone's registration is reached: fcm (a token), up (an endpoint) or ws (the background connection)."""
+        return "fcm" if isinstance(rec, str) else "up" if isinstance(rec, dict) and "up" in rec else "ws"
+
+    def can_send(self, rec) -> bool:
+        sender = {"fcm": self.sender, "up": self.webpush, "ws": self.stream}[self.way(rec)]
+        return bool(sender and sender.ready)
+
     async def _send(self, data: dict, ttl: int = 3600, only=None):
         phones = self._phones(only)
         log.info("push %s%s to %d phone(s)", data.get("kind"), " cancel" if data.get("cancel") else "", len(phones))
-        for dev, token in phones:
+        data = {k: str(v) for k, v in data.items()}
+        for dev, rec in phones:
             # The last few pushes, for tests and a look from the laptop.
             self.sent = [*self.sent[-49:], (dev, data)]
-            if not self.sender or not self.sender.ready:
+            if not self.can_send(rec):
                 continue
-            if await self.sender.send(token, {k: str(v) for k, v in data.items()}, ttl) == "gone":
+            way = self.way(rec)
+            if way == "fcm":
+                out = await self.sender.send(rec, data, ttl)
+            elif way == "up":
+                out = await self.webpush.send(rec, data, ttl)
+            else:
+                out = await self.stream.send(dev, data, ttl)
+            if out == "gone":
                 self.auth.set_push(dev, None)
+
+    def test(self, device: str):
+        """A test notification to one phone, shown even with the app open."""
+        self._fire({"kind": "ping", "tag": "test", "title": "seimei", "body": "Notifications work.", "alert": 1,
+                    "test": 1, "tab": "chat"}, ttl=300, only=lambda dev: dev == device)
 
     def _fire(self, data: dict, **kw):
         asyncio.ensure_future(self._send(data, **kw))

@@ -22,7 +22,7 @@ from .cost import Cost
 from .uploads import Uploads
 from . import deploys
 from .plugins import Host, Plugins
-from .push import FIREBASE, Fcm, Push, make_push_tools
+from .push import FIREBASE, Fcm, Push, Stream, WebPush, make_push_tools
 from .watches import Watches, make_watch_tools
 from .tasks import Board, make_task_tools
 from .files import Files
@@ -161,7 +161,7 @@ def main():
     pool.plugins = Dispatcher.plugins = plugins
     pool.about = Dispatcher.about = host.get("about") or "computer"
     pool.terminal = cfg.get("sessions", {}).get("terminal") or pool.terminal
-    push = Push(events, auth, Fcm(FIREBASE / "service-account.json"), state)
+    push = Push(events, auth, Fcm(FIREBASE / "service-account.json"), state, WebPush(state / "push-vapid.pem", origin), Stream())
     push.watches = Watches(state / "watches.json", push, lambda line: pool.notify(line), plugins)
     dispatcher = Dispatcher(disp, events, state, make_tools(pool, files, events, make_adopt_tools(adopter) + make_push_tools(push)
                                                             + make_watch_tools(push.watches) + make_task_tools(board), uploads,
@@ -227,6 +227,7 @@ def main():
             t.cancel()
         await plugins.close()
         await push.sender.close()
+        await push.webpush.close()
         await pool.close()
 
     app.on_startup.append(start)

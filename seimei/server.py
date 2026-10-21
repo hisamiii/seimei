@@ -8,6 +8,7 @@ import hashlib
 import json
 import logging
 import mimetypes
+import secrets
 import urllib.parse
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from . import kitty, sessions
 from .approvals import Approvals
 from .auth import Auth
 from .cost import Cost
+from . import push as push_mod
 from .push import Push
 from .uploads import TooLarge, Uploads
 from .dispatcher import Dispatcher, quoted
@@ -51,6 +53,8 @@ PUBLIC = {("GET", "/"), ("POST", "/api/auth/password"), ("POST", "/api/auth/pass
 # The app's own login calls: it sends no Origin, and a code or a keystore signature is the proof.
 DEVICE_PUBLIC = {("POST", "/api/devices/claim"), ("POST", "/api/devices/challenge"), ("POST", "/api/devices/login")}
 PUBLIC |= DEVICE_PUBLIC
+# The first-run check, and the background connection, which carries its own secret.
+PUBLIC |= {("GET", "/api/hello"), ("GET", "/api/push/ws")}
 
 
 async def write_event(resp: web.StreamResponse, ev: dict):
@@ -193,18 +197,63 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
         mine = (auth.current(request) or {}).get("device")
         return web.json_response({"devices": [{**d, "this": d["id"] == mine} for d in auth.devices()]})
 
-    async def push_token(request):
-        """The app hands over its Firebase token after each login; an empty one turns notifications off."""
+    def this_phone(request) -> str:
         device = (auth.current(request) or {}).get("device")
         if not device:
             raise web.HTTPForbidden(text="only the phone app registers for notifications")
-        token = str((await request.json()).get("token") or "")[:4096]
-        auth.set_push(device, token or None)
-        return web.json_response({"ok": True, "sending": bool(push and push.sender and push.sender.ready)})
+        return device
+
+    async def push_info(request):
+        """What the app needs to register (the VAPID key) and how this phone is reached now."""
+        rec = (auth.device(this_phone(request)) or {}).get("push")
+        return web.json_response({"vapid": push.webpush.public if push and push.webpush else None,
+                                  "way": push.way(rec) if push and rec else None,
+                                  "sending": bool(push and rec and push.can_send(rec))})
+
+    async def push_token(request):
+        """The app registers after each login: {"token"} from Firebase, {"up": {endpoint, p256dh, auth}} from a
+        UnifiedPush app, or {"ws": true} for the background connection (the answer carries its secret). Nothing turns
+        notifications off."""
+        device = this_phone(request)
+        body = await request.json()
+        out = {"ok": True}
+        if up := body.get("up"):
+            rec = {"up": str(up.get("endpoint") or "")[:2048], "p256dh": str(up.get("p256dh") or "")[:200],
+                   "auth": str(up.get("auth") or "")[:100]}
+            if not push_mod.valid_endpoint(rec["up"]) or not rec["p256dh"] or not rec["auth"]:
+                raise web.HTTPBadRequest(text="not a push endpoint")
+        elif body.get("ws"):
+            secret = secrets.token_urlsafe(32)
+            rec, out["ws"] = {"ws": push_mod.secret_hash(secret)}, secret
+        else:
+            rec = str(body.get("token") or "")[:4096] or None
+        if push and push.stream and not (isinstance(rec, dict) and "ws" in rec):
+            await push.stream.drop(device)
+        auth.set_push(device, rec)
+        return web.json_response({**out, "sending": bool(push and rec and push.can_send(rec))})
+
+    async def push_test(request):
+        device = this_phone(request)
+        if not push or not (auth.device(device) or {}).get("push"):
+            raise web.HTTPConflict(text="this phone has no notifications registered")
+        push.test(device)
+        return web.json_response({"ok": True})
+
+    async def push_ws(request):
+        if not push or not push.stream:
+            raise web.HTTPNotFound()
+        return await push.stream.serve(request, auth)
+
+    async def hello(request):
+        """Public: tells the app's first-run check that this address is seimei. Nothing about the machine."""
+        return web.json_response({"seimei": 1})
 
     async def revoke(request):
-        if not auth.revoke(request.match_info["id"]):
+        dev = request.match_info["id"]
+        if not auth.revoke(dev):
             raise web.HTTPNotFound()
+        if push and push.stream:
+            await push.stream.drop(dev)
         return web.json_response({"ok": True})
 
     async def app_info(request):
@@ -613,6 +662,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
 
     app = web.Application(middlewares=[guard], client_max_size=40 << 20)
     app.router.add_get("/", index)
+    app.router.add_get("/api/hello", hello)
     app.router.add_get("/api/history", history)
     app.router.add_get("/api/stream", stream)
     app.router.add_post("/api/send", send)
@@ -658,5 +708,8 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
         app.router.add_get("/api/devices", devices)
         app.router.add_post("/api/devices/{id}/revoke", revoke)
         app.router.add_post("/api/devices/push", push_token)
+        app.router.add_get("/api/devices/push", push_info)
+        app.router.add_post("/api/devices/push/test", push_test)
+        app.router.add_get("/api/push/ws", push_ws)
     app.router.add_get("/static/{version}/{path:.+}", static)
     return app
