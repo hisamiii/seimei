@@ -321,6 +321,9 @@ class QueueWatcher:
         self.notify = notify
         self.flash = flash  # transient app events: {"type": "queue", "snap": cqd's snapshot}
         self.flashed = 0.0
+        # At most one snapshot a second; one that comes sooner waits for the end of the second (newest wins).
+        self.pending: dict | None = None
+        self.later: asyncio.TimerHandle | None = None
         self.told: set[tuple] = set()
 
     def check(self) -> list[tuple[str, str]]:
@@ -352,12 +355,24 @@ class QueueWatcher:
                             f"queue:{':'.join(key)}"))
         return out
 
+    def _flash_pending(self):
+        self.later = None
+        if self.pending is not None:
+            self.flashed = time.monotonic()
+            snap, self.pending = self.pending, None
+            self.flash({"type": "queue", "snap": snap})
+
     def relay(self, ev: dict):
         """One cqd event. Events are keyed per job, so a repeat replaces the earlier note."""
         if ev.get("type") == "snap":
-            if self.flash and time.monotonic() - self.flashed >= 1:
-                self.flashed = time.monotonic()
-                self.flash({"type": "queue", "snap": ev["snap"]})
+            if not self.flash:
+                return
+            self.pending = ev["snap"]
+            wait = 1 - (time.monotonic() - self.flashed)
+            if wait <= 0:
+                self._flash_pending()
+            elif not self.later:
+                self.later = asyncio.get_running_loop().call_later(wait, self._flash_pending)
             return
         if ev.get("type") != "event" or ev.get("event") == "cqd_restart":
             return
