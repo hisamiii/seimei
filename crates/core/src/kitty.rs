@@ -329,6 +329,16 @@ async fn type_text(w: &Window, text: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Press one key in the window (escape stops a turn, like the user at the keyboard).
+pub async fn key(w: &Window, key: &str) -> Result<(), String> {
+    rc(w, "send-key", &[key], None).await.map(|_| ())
+}
+
+/// Send text to the window as it is, no Enter added.
+pub async fn text(w: &Window, data: &str) -> Result<(), String> {
+    rc(w, "send-text", &[], Some(data)).await.map(|_| ())
+}
+
 /// Paste the text at the session's prompt and press Enter, like the user at the keyboard.
 pub async fn type_message(pid: i64, text: &str) -> Result<(), String> {
     let w = window(pid)?;

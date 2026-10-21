@@ -63,7 +63,7 @@ fn s(v: &Value) -> String {
 }
 
 /// The pid runs and is the same process (pids get reused).
-fn alive(rec: &Value) -> bool {
+pub fn alive(rec: &Value) -> bool {
     let Some(pid) = rec["pid"].as_i64() else { return false };
     let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else { return false };
     let Some(start) = stat.rsplit_once(')').and_then(|(_, rest)| rest.split_whitespace().nth(19)) else {

@@ -30,6 +30,8 @@ const GRACE: Duration = Duration::from_secs(5);
 pub enum Error {
     /// The executable could not be started.
     Spawn(std::io::Error),
+    /// The session's folder is not there.
+    NoFolder(std::path::PathBuf),
     /// The process is gone (or its stdin is closed).
     Closed,
     /// A control request got no answer in time (its subtype).
@@ -42,6 +44,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::Spawn(e) => write!(f, "could not start claude: {e}"),
+            Error::NoFolder(cwd) => write!(f, "Working directory does not exist: {}", cwd.display()),
             Error::Closed => write!(f, "Claude Code exited"),
             Error::Timeout(s) => write!(f, "control request timeout: {s}"),
             Error::Refused(e) => write!(f, "Claude Code refused: {e}"),
@@ -163,6 +166,9 @@ impl Client {
             // What the Python SDK sets: the session registers as an SDK session, as seimei's always have.
             .env("CLAUDE_CODE_ENTRYPOINT", "sdk-py");
         if let Some(cwd) = &opts.cwd {
+            if !cwd.is_dir() {
+                return Err(Error::NoFolder(cwd.clone()));
+            }
             cmd.current_dir(cwd).env("PWD", cwd);
         }
         for (k, v) in &opts.env {

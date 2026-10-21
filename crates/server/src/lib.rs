@@ -17,6 +17,7 @@ use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
+use seimei_core::adopt::{Adopter, Wish};
 use seimei_core::approvals::Approvals;
 use seimei_core::auth::Auth;
 use seimei_core::cost::Cost;
@@ -33,7 +34,7 @@ use seimei_core::tools::Tools;
 use seimei_core::transcripts::brief;
 use seimei_core::uploads::Uploads;
 use seimei_core::usage::Usage;
-use seimei_core::util::{now, read_json, write_json};
+use seimei_core::util::{now, read_json, truthy, write_json};
 use seimei_core::workers::{self, Pool};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
@@ -79,6 +80,8 @@ pub struct App {
     pub pool: Arc<Pool>,
     /// The user's own sessions, for the page and the dispatcher.
     pub watcher: Arc<Watcher>,
+    /// Hand to seimei, Give to me.
+    pub adopter: Arc<Adopter>,
     usage: Arc<Usage>,
     cost: Arc<Cost>,
     worker_events: Arc<WorkerEvents>,
@@ -98,11 +101,15 @@ pub struct Setup {
     pub dispatcher: dispatcher::Config,
     /// The shikigami permission mode from config ([approvals] shikigami).
     pub shikigami: String,
+    /// The terminal a released or lent session opens in (config [sessions] terminal).
+    pub terminal: String,
+    /// The plugins enabled in config.
+    pub plugins: Vec<String>,
 }
 
 impl App {
     pub fn new(setup: Setup) -> std::io::Result<App> {
-        let Setup { events, auth, origins, web, state, push, dispatcher: disp, shikigami } = setup;
+        let Setup { events, auth, origins, web, state, push, dispatcher: disp, shikigami, terminal, plugins } = setup;
         let (web, state) = (web.as_path(), state.as_path());
         // Only these Host headers are served: a page using DNS rebinding cannot read the API from the browser (L4).
         let mut hosts: HashSet<String> = ["localhost", "127.0.0.1", "::1"].map(String::from).into();
@@ -126,12 +133,16 @@ impl App {
             usage: usage.clone(),
             approvals: approvals.clone(),
             guard: guard.clone(),
+            terminal,
+            plugins,
         };
         let pool = Pool::new(state, &shikigami, &disp.about, parts)?;
         let p = pool.clone();
         let _ = guard.tell.set(Box::new(move |w, line, urgent, key| p.tell(w, line, urgent, key)));
         let worker_events = Arc::new(WorkerEvents::new(&state.join("events.jsonl")));
+        let adopter = Adopter::new(pool.clone(), approvals.clone(), state);
         let tools = Arc::new(Tools {
+            adopter: adopter.clone(),
             pool: pool.clone(),
             worker_events: worker_events.clone(),
             events: events.clone(),
@@ -163,6 +174,7 @@ impl App {
             push,
             pool,
             watcher,
+            adopter,
             usage,
             cost,
             worker_events,
@@ -305,6 +317,9 @@ pub fn router(app: Arc<App>) -> Router {
             .route("/api/workers/{id}/stop", post(worker_stop))
             .route("/api/workers/{id}/tune", post(worker_tune))
             .route("/api/workers/{id}/archive", post(worker_archive))
+            .route("/api/workers/{id}/laptop", post(worker_laptop))
+            .route("/api/workers/{id}/release", post(worker_release))
+            .route("/api/sessions/{pid}/adopt", post(session_adopt))
             .route("/api/sessions/{pid}", get(session))
             .route("/api/sessions/{pid}/send", post(session_send))
             .route("/api/sessions/{pid}/archive", post(session_archive))
@@ -409,18 +424,6 @@ fn body(bytes: &Bytes) -> Result<Value, Response> {
     match serde_json::from_slice::<Value>(bytes) {
         Ok(v @ Value::Object(_)) => Ok(v),
         _ => Err(text(StatusCode::BAD_REQUEST, "400: Bad Request")),
-    }
-}
-
-/// Python's truth: false, null, 0, "", [] and {} are false.
-fn truthy(v: &Value) -> bool {
-    match v {
-        Value::Null => false,
-        Value::Bool(b) => *b,
-        Value::Number(n) => n.as_f64() != Some(0.0),
-        Value::String(s) => !s.is_empty(),
-        Value::Array(a) => !a.is_empty(),
-        Value::Object(o) => !o.is_empty(),
     }
 }
 
@@ -1481,4 +1484,63 @@ async fn session_answer(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes
         Ok(()) => ok(json!({"ok": true})),
         Err(e) => json_status(StatusCode::CONFLICT, json!({"error": e})),
     }
+}
+
+/// Open on server: the shikigami's session opens in a terminal there, and stays a shikigami.
+async fn worker_laptop(State(app): Shared, UrlPath(id): UrlPath<String>) -> Response {
+    let w = match worker_of(&app, &id) {
+        Ok(w) => w,
+        Err(r) => return r,
+    };
+    let win = match w.hand_over().await {
+        Ok(win) => win,
+        Err(e) => return json_status(StatusCode::CONFLICT, json!({"error": e})),
+    };
+    app.events.add(json!({"type": "system", "text": format!("shikigami {} is open on the server.", w.name())}));
+    let line = format!(
+        "the user opened shikigami {} ({}) on the server: its session now runs in a terminal window there, so message \
+         it only after that window is closed.",
+        w.name(),
+        w.id
+    );
+    app.dispatcher.note(&line, None);
+    ok(json!({"ok": true, "window": win.map(|w| w["id"].clone())}))
+}
+
+/// Give to me: the shikigami becomes one of the user's sessions (their tap is the OK).
+async fn worker_release(State(app): Shared, UrlPath(id): UrlPath<String>) -> Response {
+    let w = match worker_of(&app, &id) {
+        Ok(w) => w,
+        Err(r) => return r,
+    };
+    if w.state() == "released" {
+        return json_status(StatusCode::CONFLICT, json!({"error": format!("{} is your session already.", w.name())}));
+    }
+    let said = match app.adopter.release(&w, false).await {
+        Ok(said) => said,
+        Err(e) => return json_status(StatusCode::CONFLICT, json!({"error": e})),
+    };
+    if w.state() != "released" {
+        return json_status(StatusCode::CONFLICT, json!({"error": said}));
+    }
+    app.dispatcher.note(&format!("the user took it themselves: {said}"), None);
+    ok(json!({"ok": true}))
+}
+
+/// Hand to seimei: adopt this session as a shikigami, through the same card as seimei's adopt.
+async fn session_adopt(State(app): Shared, UrlPath(pid): UrlPath<String>) -> Response {
+    let (sess, _) = match user_session(&app, &pid).await {
+        Ok(found) => found,
+        Err(r) => return r,
+    };
+    let app = app.clone();
+    tokio::spawn(async move {
+        let said = match app.adopter.request(&sess.pid.to_string(), "idle", Wish::default()).await {
+            Ok(said) => said,
+            Err(e) => format!("handing session \"{}\" to seimei failed: {e}", sess.name),
+        };
+        let line = format!("the user tapped Hand to seimei on their session \"{}\": {said}", sess.name);
+        app.dispatcher.note(&line, None);
+    });
+    ok(json!({"ok": true}))
 }

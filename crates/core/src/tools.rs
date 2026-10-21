@@ -9,6 +9,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 
 use serde_json::{Value, json};
 
+use crate::adopt::{Adopter, Wish};
 use crate::cost::Cost;
 use crate::events::EventLog;
 use crate::files::{Files, MAX_BYTES};
@@ -20,7 +21,7 @@ use crate::tasks::Board;
 use crate::transcripts::{project_of, transcript};
 use crate::uploads::Uploads;
 use crate::usage::Usage;
-use crate::util::{chars, now, py_repr};
+use crate::util::{chars, now, py_repr, truthy};
 use crate::workers::{ACTIVE, CONTEXTS, EFFORTS, MODELS, Pool, Summon, Worker};
 
 static SERVER: LazyLock<Value> =
@@ -48,6 +49,7 @@ pub struct Tools {
     pub push: Arc<Push>,
     pub pool: Arc<Pool>,
     pub worker_events: Arc<WorkerEvents>,
+    pub adopter: Arc<Adopter>,
 }
 
 pub fn text(t: &str, error: bool) -> Value {
@@ -214,6 +216,12 @@ fn writers(pool: &Pool, w: &Worker) -> Option<String> {
     ))
 }
 
+/// The first letter upper case, the rest as it is.
+fn upper_first(s: &str) -> String {
+    let mut it = s.chars();
+    it.next().map(|c| c.to_uppercase().chain(it).collect()).unwrap_or_default()
+}
+
 /// Where SendMessage reaches a session, whatever its name.
 fn address(s: &Live) -> String {
     let sock = s.rec["messagingSocketPath"].as_str().filter(|p| !p.is_empty()).map(String::from);
@@ -245,6 +253,31 @@ impl Tools {
                 }
                 w.stop().await;
                 text(&format!("Stopping {}.", w.name()), false)
+            }
+            "adopt" => {
+                let when = Some(arg(a, "when")).filter(|w| !w.is_empty()).unwrap_or_else(|| "idle".into());
+                let wish = Wish {
+                    name: arg(a, "name"),
+                    model: arg(a, "model"),
+                    effort: arg(a, "effort"),
+                    context: arg(a, "context"),
+                    close_window: truthy(&a["close_window"]),
+                    project: arg(a, "project"),
+                    task_id: arg(a, "task_id"),
+                };
+                match self.adopter.request(&arg(a, "session"), &when, wish).await {
+                    Ok(said) => text(&upper_first(&said), false),
+                    Err(e) => text(&format!("Adopting failed: {e}"), true),
+                }
+            }
+            "release" => {
+                let Some(w) = self.pool.find(&arg(a, "worker")) else {
+                    return text(&format!("No shikigami {}.", py_repr(&arg(a, "worker"))), true);
+                };
+                match self.adopter.release(&w, true).await {
+                    Ok(said) => text(&upper_first(&said), false),
+                    Err(e) => text(&format!("Releasing failed: {e}"), true),
+                }
             }
             "tune" => {
                 let Some(w) = self.pool.find(&arg(a, "worker")) else { return text("No such shikigami.", true) };

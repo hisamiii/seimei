@@ -231,6 +231,16 @@ fn main() {
         push: push.clone(),
         dispatcher: disp,
         shikigami: configured(&approvals, "shikigami"),
+        terminal: cfg
+            .get("sessions")
+            .and_then(|s| s.get("terminal"))
+            .and_then(|t| t.as_str())
+            .filter(|t| !t.is_empty())
+            .unwrap_or("kitty -d {cwd} --title {title}")
+            .into(),
+        plugins: (cfg.get("plugins").and_then(|p| p.get("enabled")).and_then(|e| e.as_array()).into_iter().flatten())
+            .filter_map(|p| p.as_str().map(String::from))
+            .collect(),
     };
     let app = Arc::new(seimei_server::App::new(setup).unwrap_or_else(|e| die(&format!("workers: {e}"))));
     wire(&app);
@@ -240,6 +250,7 @@ fn main() {
         app.approvals.startup();
         events.close_open_tools("Interrupted by a seimei restart.");
         app.pool.startup();
+        app.adopter.startup();
         tokio::spawn(deploy_note(state.clone(), app.dispatcher.clone()));
         tokio::spawn(app.dispatcher.clone().run());
         tokio::spawn(app.pool.clone().sweep());

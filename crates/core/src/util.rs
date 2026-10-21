@@ -169,6 +169,31 @@ pub fn chars(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
 }
 
+/// Python's truth: false, null, 0, "", [] and {} are false.
+pub fn truthy(v: &serde_json::Value) -> bool {
+    use serde_json::Value;
+    match v {
+        Value::Null => false,
+        Value::Bool(b) => *b,
+        Value::Number(n) => n.as_f64() != Some(0.0),
+        Value::String(s) => !s.is_empty(),
+        Value::Array(a) => !a.is_empty(),
+        Value::Object(o) => !o.is_empty(),
+    }
+}
+
+/// A shell word as Python's shlex.quote writes it: as it is when only safe characters, else single-quoted.
+pub fn sh_quote(s: &str) -> String {
+    let safe = |c: char| c.is_ascii_alphanumeric() || "_@%+=:,./-".contains(c);
+    if s.is_empty() {
+        "''".into()
+    } else if s.chars().all(safe) {
+        s.into()
+    } else {
+        format!("'{}'", s.replace('\'', "'\"'\"'"))
+    }
+}
+
 /// A string as Python's repr() shows it: single quotes, unless only double quotes avoid escaping.
 pub fn py_repr(s: &str) -> String {
     let q = if s.contains('\'') && !s.contains('"') { '"' } else { '\'' };
@@ -216,6 +241,15 @@ pub fn splitlines(s: &str) -> Vec<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quote_like_python() {
+        assert_eq!(sh_quote(""), "''");
+        assert_eq!(sh_quote("app-tester"), "app-tester");
+        assert_eq!(sh_quote("/home/me/src"), "/home/me/src");
+        assert_eq!(sh_quote("shikigami x"), "'shikigami x'");
+        assert_eq!(sh_quote("it's"), "'it'\"'\"'s'");
+    }
 
     #[test]
     fn repr_like_python() {
