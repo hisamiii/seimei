@@ -6,6 +6,7 @@ ended with the process (background shells, dev servers) goes into the report; th
 (kitty's remote control may only type, so the shell left behind gets `exit`)."""
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -21,6 +22,12 @@ SHELLS = {"bash", "zsh", "fish", "sh", "dash"}
 WRAPPER = re.compile(r"^\S*\b(ba|z|fi|da)?sh -c .*shell-snapshots/")
 WAIT_IDLE = 12 * 3600
 SETTLE = 60
+# Claude Code's status "shell": its turn is over but a background shell still runs. Claude Code shows that as working,
+# and the session may be waiting on the job, so adopting at idle waits too; past this, seimei hears what holds it.
+SHELL_NOTE = 600
+# Language servers Claude Code's LSP tool starts: they end with the session too, but are not worth a mention.
+LSP = re.compile(r"(^|/)(clangd|pyright|pyright-langserver|pylsp|basedpyright|rust-analyzer|gopls|tsserver|"
+                 r"typescript-language-server|jdtls|lua-language-server|\S*-language-server|\S*-lsp)(\s|$)")
 
 
 def _comm(pid: int) -> str:
@@ -44,6 +51,40 @@ def _ppid(pid: int) -> int:
         return 0
 
 
+def job(cmd: str) -> str:
+    """What a background shell runs: the command inside Claude Code's snapshot wrapper."""
+    m = re.search(r"eval '(.*)' < /dev/null", cmd, re.S)
+    return m.group(1).replace("'\\''", "'") if m and WRAPPER.match(cmd) else cmd
+
+
+def jobs(pid: int) -> list[str]:
+    """The background jobs a session runs (its Bash calls and what they started), language servers left out."""
+    out = []
+    for f in Path(f"/proc/{pid}/task").glob("*/children"):
+        try:
+            kids = [int(c) for c in f.read_text().split()]
+        except OSError:
+            continue
+        out += [job(c) for c in map(_cmd, kids) if c and not LSP.search(c)]
+    return out
+
+
+async def end_left(kids: dict[int, str]):
+    """SIGTERM, then SIGKILL after 5 s, the processes of kids still running (the same command line: pids get reused)."""
+    left = [p for p, c in kids.items() if alive(p) and _cmd(p) == c]
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        for p in left:
+            try:
+                os.kill(p, sig)
+            except ProcessLookupError:
+                pass
+        for _ in range(10):
+            left = [p for p in left if alive(p)]
+            if not left:
+                return
+            await asyncio.sleep(0.5)
+
+
 def descendants(pid: int) -> dict[int, str]:
     """Every process below pid, with its command line."""
     out, todo = {}, [pid]
@@ -61,7 +102,11 @@ def descendants(pid: int) -> dict[int, str]:
 
 
 def alive(pid: int) -> bool:
-    return Path(f"/proc/{pid}").exists() and _comm(pid) != ""
+    """Running: a zombie has ended, it only waits for its parent to read its exit."""
+    try:
+        return Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0] != "Z"
+    except (OSError, IndexError):
+        return False
 
 
 def find(rows: list[dict], key: str) -> dict | None:
@@ -81,6 +126,33 @@ class Adopter:
         self.approvals = approvals
         self.rows = rows or (lambda: sessions.listing(pool.own_sessions()))
         self.waiting: dict[int, asyncio.Task] = {}
+        # Approved adoptions waiting for an idle, kept across seimei restarts: {pid: {"s": row, "args": ..., "until": t}}.
+        path = getattr(pool, "path", None)
+        self.state = Path(path).parent / "adopt-pending.json" if path else None
+
+    def _save(self, pending: dict):
+        if self.state:
+            tmp = self.state.with_suffix(".tmp")
+            tmp.write_text(json.dumps({str(k): v for k, v in pending.items()}))
+            tmp.replace(self.state)
+
+    def _pending(self) -> dict:
+        try:
+            return {int(k): v for k, v in json.loads(self.state.read_text()).items()} if self.state else {}
+        except (OSError, ValueError):
+            return {}
+
+    def startup(self):
+        """Pick up the adoptions that were waiting when seimei stopped, for the sessions still running."""
+        pending = self._pending()
+        for pid, p in list(pending.items()):
+            s = p["s"]
+            start = {"procStart": s["proc_start"]} if s.get("proc_start") else {}
+            if not sessions._alive({"pid": pid, **start}) or time.time() > p["until"]:
+                pending.pop(pid)
+                continue
+            self.waiting[pid] = asyncio.get_running_loop().create_task(self._at_idle(s, p["args"], p["until"]))
+        self._save(pending)
 
     async def request(self, key: str, when: str = "idle", name: str = "", model: str = "", effort: str = "",
                       context: str = "", close_window: bool = False) -> str:
@@ -95,21 +167,36 @@ class Adopter:
             return f"No session of the user's is named {key!r}."
         if s["kind"] != "interactive":
             return f"{s['name']} is a {s['kind']} session; only interactive ones can be adopted."
-        if s["pid"] in self.waiting:
-            return f"{s['name']} is already waiting to be adopted."
+        pending = s["pid"] in self.waiting
+        if pending and when != "now":
+            return f"{s['name']} is already waiting to be adopted at its next idle; when=now adopts it now instead."
+        bg = await asyncio.to_thread(jobs, s["pid"])
         moment = "now, interrupting it if it works" if when == "now" else "when it next goes idle"
         outcome = await self.approvals.hold({
-            "action": "command", "target": f"adopt your session \"{s['name']}\" as a shikigami",
+            "action": "command", "target": f"adopt your session \"{s['name']}\" as a shikigami" + (" now" if pending else ""),
             "detail": f"{moment.capitalize()}: its Claude Code (pid {s['pid']}) ends and the conversation goes on in the "
-                      f"background as a shikigami. Background processes it started end with it. The window is "
-                      f"{'closed' if close_window else 'kept'}."}, "seimei", None)
+                      f"background as a shikigami. "
+                      + (f"Background jobs that end with it: {'; '.join(j[:120] for j in bg[:5])}. " if bg
+                         else "Background processes it started end with it. ")
+                      + f"The window is {'closed' if close_window else 'kept'}."}, "seimei", None)
         if outcome != "approved":
-            return f"The user {outcome} it; nothing changed."
+            return f"The user {outcome} it; nothing changed" + (" (it still waits for its idle)." if pending else ".")
         args = dict(name=name, model=model, effort=effort, context=context, close_window=close_window)
+        if pending:
+            self.waiting.pop(s["pid"]).cancel()
+            self._forget(s["pid"])
         if when == "now" or self._idle(s):
             return await self.adopt(s, interrupt=when == "now", **args)
-        self.waiting[s["pid"]] = asyncio.get_running_loop().create_task(self._at_idle(s, args))
+        until = time.time() + WAIT_IDLE
+        s = {k: v for k, v in s.items() if k != "rec"} | {"proc_start": s.get("rec", {}).get("procStart")}
+        self._save(self._pending() | {s["pid"]: {"s": s, "args": args, "until": until}})
+        self.waiting[s["pid"]] = asyncio.get_running_loop().create_task(self._at_idle(s, args, until))
         return f"Approved. {s['name']} is busy; it gets adopted when it next goes idle, and you hear when it does."
+
+    def _forget(self, pid: int):
+        pending = self._pending()
+        if pending.pop(pid, None) is not None:
+            self._save(pending)
 
     @staticmethod
     def _idle(s: dict) -> bool:
@@ -118,9 +205,9 @@ class Adopter:
     def _now(self, pid: int) -> dict | None:
         return next((x for x in self.rows() if x["pid"] == pid), None)
 
-    async def _at_idle(self, s: dict, args: dict):
+    async def _at_idle(self, s: dict, args: dict, end: float):
+        shell, told, done = None, False, True
         try:
-            end = time.time() + WAIT_IDLE
             while time.time() < end:
                 await asyncio.sleep(4)
                 now = await asyncio.to_thread(self._now, s["pid"])
@@ -130,12 +217,26 @@ class Adopter:
                 if self._idle(now):
                     self.pool.notify(await self.adopt(now, interrupt=False, **args), urgent=True)
                     return
+                shell = (shell or time.time()) if now["status"] == "shell" else None
+                if shell and not told and time.time() - shell > SHELL_NOTE:
+                    told = True
+                    bg = await asyncio.to_thread(jobs, s["pid"])
+                    self.pool.notify(f"session \"{s['name']}\" finished its turn, but a background shell keeps it from "
+                                     f"going idle ({'; '.join(j[:160] for j in bg[:3]) or 'no job found'}); its adoption "
+                                     f"waits for that to end. adopt with when=now ends the job with the session.")
             self.pool.notify(f"session \"{s['name']}\" stayed busy for 12 h; adopting it was dropped.")
+        except asyncio.CancelledError:
+            # Replaced by an adoption now, or seimei is stopping: the saved entry stays for the next start.
+            done = False
+            raise
         except Exception as e:
             log.exception("adopt at idle failed")
             self.pool.notify(f"adopting session \"{s['name']}\" failed: {e}", urgent=True)
         finally:
-            self.waiting.pop(s["pid"], None)
+            if self.waiting.get(s["pid"]) is asyncio.current_task():
+                self.waiting.pop(s["pid"], None)
+            if done:
+                self._forget(s["pid"])
 
     async def adopt(self, s: dict, interrupt: bool, name: str = "", model: str = "", effort: str = "", context: str = "",
                     close_window: bool = False) -> str:
@@ -173,7 +274,11 @@ class Adopter:
         else:
             os.kill(pid, signal.SIGKILL)
             await asyncio.sleep(1)
-        died = [c for p, c in kids.items() if not alive(p) and c and not WRAPPER.match(c)]
+        # What the old process left running (a language server, a job that outlived it) ends too, as the card said.
+        await end_left(kids)
+        # A background job shows once: its wrapper gives the command, the processes below it repeat it.
+        died = list(dict.fromkeys(job(c) for p, c in kids.items() if not alive(p) and c and not LSP.search(c)
+                                  and (not WRAPPER.match(c) or job(c) != c)))
         window = "kept"
         if close_window and shell and win:
             # The shell the session ran in is at its prompt now: exit closes the window.
