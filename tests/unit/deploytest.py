@@ -34,7 +34,7 @@ env = {"SEIMEI_STATE": str(S), "SEIMEI_APP": str(APP), "SEIMEI_SERVICE": UNIT, "
        "DEPLOY_REV": subprocess.run(["git", "-C", str(R), "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()}
 subprocess.run(["env", "-u", "LD_PRELOAD", "systemd-run", "--user", "--quiet", "--unit", UNIT, "-p", "Restart=no",
                 *[f"--setenv={k}={v}" for k, v in env.items()], f"--setenv=PATH={os.environ['PATH']}",
-                str(R / ".venv/bin/python"), str(R / "tmp/deployfake.py")], check=True)
+                str(R / ".venv/bin/python"), str(R / "tests/fakes/deployfake.py")], check=True)
 try:
     caller = int(wait(lambda: (S / "caller.pid").exists() and (S / "caller.pid").read_text(), 15))
     check("the shikigami's deploy started", caller)

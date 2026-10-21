@@ -5,7 +5,7 @@ from seimei.guard import Guard
 from seimei.events import EventLog
 
 async def main():
-    d = Path(tempfile.mkdtemp(dir="tmp/work"))
+    d = Path(tempfile.mkdtemp(prefix="expire-"))
     ev = EventLog(d / "events.jsonl")
     ap = A.Approvals(ev)
     A.WAIT = 0.5
