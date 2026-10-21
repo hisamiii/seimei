@@ -29,6 +29,8 @@ from .util import NO_CONNECTORS, STREAM_BUFFER, queue_env, result_text, summariz
 log = logging.getLogger("seimei")
 
 # Built-in tools the dispatcher has no use for. It keeps SendMessage/ListAgents, Monitor, ToolSearch and auto-memory.
+# style.md is appended to every message the dispatcher gets, for the model only; past this it is cut.
+STYLE_MAX = 500
 # A reply in an event turn that starts with this goes to the chat, not the trajectory.
 CHAT = "chat:"
 OFF_TOOLS = ["Agent", "Task", "Workflow", "NotebookEdit", "CronCreate", "CronDelete", "CronList", "RemoteTrigger",
@@ -114,6 +116,8 @@ class Dispatcher:
         self.events = events
         self.sid_file = state_dir / "session_id"
         self.notes = state_dir / "notes.md"
+        self.style_file = state_dir / "style.md"
+        self.style_seen: tuple[tuple, str] = ((), "")
         self.client: ClaudeSDKClient | None = None
         self.connected = False
         self.busy = False
@@ -242,11 +246,32 @@ class Dispatcher:
         """Something the dispatcher should act on now."""
         asyncio.ensure_future(self._deliver(f"[seimei] {text}", src=("event", why(text))))
 
+    def style(self) -> str:
+        """style.md as it is now (read again when it changes); "" when missing or empty."""
+        try:
+            st = self.style_file.stat()
+            key = (st.st_mtime_ns, st.st_size)
+        except OSError:
+            return ""
+        if key != self.style_seen[0]:
+            try:
+                style = self.style_file.read_text(errors="replace").strip()
+            except OSError:
+                return ""
+            if len(style) > STYLE_MAX:
+                log.warning("style.md is %d chars; only the first %d are sent", len(style), STYLE_MAX)
+                style = style[:STYLE_MAX]
+            self.style_seen = (key, style)
+        return self.style_seen[1]
+
     async def _deliver(self, text: str, images=(), src: tuple[str, object] | None = None):
         if self.notes_queue:
             notes = "\n".join(f"- {n.rsplit(chr(0), 1)[-1]}" for n in self.notes_queue)
             self.notes_queue.clear()
             text = f"[seimei] Since your last turn:\n{notes}\n\n{text}"
+        # The user's style reminder rides on every message; the event log already has what the user saw.
+        if style := self.style():
+            text = f"{text}\n\n[style]\n{style}"
         content = text
         if images:
             content = [{"type": "image", "source": {"type": "base64", "media_type": kind, "data": data}}
