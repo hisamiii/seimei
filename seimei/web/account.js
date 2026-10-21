@@ -85,7 +85,7 @@ async function openAudit() {
     }
     const row = el('div', `arow ${AUDIT_TONE[c.decision] || ''}`);
     const top = el('div', 'atop');
-    top.append(el('time', null, clock(c.t)), el('b', null, c.who), el('span', 'tool', c.tool.replace(/^mcp__seimei__/, '')));
+    top.append(el('time', null, clock(c.t)), el('b', null, c.who), el('span', 'tool', c.tool.replace(/^mcp__.+?__/, '')));
     if (c.decision !== 'allowed') top.append(el('span', 'tag', c.why ? `${c.decision}: ${c.why}` : c.decision));
     if (c.failed) top.append(el('span', 'tag', 'failed'));
     row.append(top, el('code', null, auditWhat(c)));

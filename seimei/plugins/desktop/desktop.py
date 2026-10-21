@@ -12,7 +12,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from .events import EventLog
+from ...events import EventLog
 from .uinput import Keyboard, Pointer
 
 log = logging.getLogger("seimei.desktop")
@@ -29,7 +29,7 @@ DOWN_GRACE = 8
 OURS: dict[int, dict] = {}
 
 
-class NoDesktop(Exception):
+class NoDesktop(RuntimeError):
     pass
 
 

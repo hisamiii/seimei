@@ -4,7 +4,6 @@ import asyncio
 import base64
 import json
 import subprocess
-import sys
 import time
 from pathlib import Path
 
@@ -12,8 +11,8 @@ from claude_agent_sdk import tool
 
 from . import desktop
 from .desktop import Desktop, NoDesktop
-from .events import EventLog
-from .files import Files
+from ...events import EventLog
+from ...files import Files
 
 
 HELPER = Path(__file__).with_name("a11y_helper.py")
@@ -66,7 +65,7 @@ def shot_file(folder: Path, data: bytes, mime: str) -> Path:
     return path
 
 
-def make_desktop_tools(desk: Desktop, files: Files, events: EventLog, layout=None) -> list:
+def make_desktop_tools(desk: Desktop, files: Files, events: EventLog, layout=None, who: str = "seimei", worker: str | None = None) -> list:
     @tool("desktop", "The laptop's niri desktop: outputs, workspaces with their windows (id, app, title; focused, urgent, "
           "opened by seimei), the keyboard layout and whether the screen is locked (input tools refuse while it is). Start here before acting.", {})
     async def overview(args):
@@ -247,27 +246,6 @@ def make_desktop_tools(desk: Desktop, files: Files, events: EventLog, layout=Non
             return text("Give action or set_text.", error=True)
         return text(r["error"], error=True) if "error" in r else text(json.dumps(r, ensure_ascii=False))
 
-    @tool("media", "Music and media players over MPRIS (Quod Libet, browsers, Vesktop): status shows every player and "
-          "what it plays; the rest control one player (default: the active one). For Quod Libet's library, "
-          "queue, playlists, ratings and tags use the music tool.", {
-              "type": "object",
-              "properties": {"action": {"type": "string", "enum": ["status", "play", "pause", "play-pause", "next",
-                                                                 "previous", "stop", "volume"]},
-                             "player": {"type": "string"},
-                             "volume": {"type": "number", "description": "0.0 to 1.0, for action volume"}},
-              "required": ["action"]})
-    async def media(args):
-        act = args["action"]
-        if act == "status":
-            code, out, err = await run("playerctl", "-a", "metadata", "--format",
-                                       "{{playerName}}: {{status}} {{artist}} - {{title}} ({{album}}) "
-                                       "{{duration(position)}}/{{duration(mpris:length)}} volume {{volume}}")
-            return text(out.strip() or "No media players are running.")
-        argv = ["playerctl"] + (["-p", str(args["player"])] if args.get("player") else [])
-        argv += ["volume", f"{float(args.get('volume', 0.5)):.2f}"] if act == "volume" else [act]
-        code, out, err = await run(*argv)
-        return text(err.strip() or "Failed.", error=True) if code else text(out.strip() or "Done.")
-
     @tool("notifications", "Recent desktop notifications from mako: what is showing now and the history, newest first.", {
         "type": "object", "properties": {"limit": {"type": "integer", "default": 20}}})
     async def notifications(args):
@@ -310,10 +288,10 @@ def make_desktop_tools(desk: Desktop, files: Files, events: EventLog, layout=Non
         if not args.get("go"):
             return text(layout.describe(plan))
         outcome = await layout.approvals.hold({"action": "desktop", "target": f"bring back your desktop ({len(plan)} windows)",
-                                               "detail": layout.describe(plan)}, "seimei", None)
+                                               "detail": layout.describe(plan)}, who, worker)
         if outcome != "approved":
             return text(f"The user {outcome} the restore." if outcome != "expired" else "No answer in 10 minutes; not restored.")
         return text("\n".join(await layout.restore(plan)))
 
-    return [overview, screenshot, niri, niri_query, open_app, type_text, press_keys, click, scroll, ui_tree, ui_action, media,
+    return [overview, screenshot, niri, niri_query, open_app, type_text, press_keys, click, scroll, ui_tree, ui_action,
             notifications, unlock_screen, restore_desktop]

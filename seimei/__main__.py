@@ -18,21 +18,16 @@ from .approvals import Approvals
 from .auth import Auth
 from .dispatcher import Dispatcher
 from .events import EventLog
-from .desktop import UNLOCK, Desktop
-from .layout import Layout
-from .desktop_tools import make_desktop_tools
-from .music import make_music_tools
 from .cost import Cost
 from .uploads import Uploads
-from . import deploys, discord as discord_link
-from .browser import Browser, make_browser_tools, socket_path
+from . import deploys
+from .plugins import Host, Plugins
 from .push import FIREBASE, Fcm, Push, make_push_tools
 from .watches import Watches, make_watch_tools
 from .tasks import Board, make_task_tools
 from .files import Files
 from .guard import Guard
 from .server import make_app
-from .queue import QueueWatcher, make_queue_tools
 from .adopt import Adopter, make_adopt_tools
 from .sessions import Watcher
 from .tools import make_tools
@@ -48,6 +43,8 @@ MIN_PASSWORD = 8
 def account(auth: Auth, cmd: str, clear: bool, state: Path, revoke: str | None = None):
     """Recovery lives on the laptop: these never go through the web page."""
     if cmd == "screen-password":
+        # The desktop plugin's unlock_screen types it; the command stays here, where recovery lives.
+        from .plugins.desktop.desktop import UNLOCK
         path = state / UNLOCK
         if clear:
             path.unlink(missing_ok=True)
@@ -121,7 +118,8 @@ def main():
     cfg = tomllib.loads(CONFIG.read_text()) if CONFIG.exists() else {}
     server = cfg.get("server", {})
     port = server.get("port", 8417)
-    origin = server.get("origin", "https://seimei.example.org")
+    # The address phones and browsers use (also the passkey domain): set it when seimei sits behind a tunnel.
+    origin = server.get("origin", f"http://localhost:{port}")
     state = STATE / "dev" if args.dev else STATE
     state.mkdir(parents=True, exist_ok=True)
 
@@ -151,24 +149,23 @@ def main():
     pool = Pool(events, state)
     files = Files(state)
     uploads = Uploads(state)
-    browser = Browser(socket_path(args.dev))
-    discord = discord_link.Discord(discord_link.socket_path(args.dev))
     approvals = Approvals(events)
     guard = Guard(events, approvals, state)
     cost = Cost()
     adopter = Adopter(pool, approvals)
     usage = Usage(events, state, cost, STATE / "ratelog/rates.jsonl")
-    desk = Desktop(events, lambda t: dispatcher.note(t), state / UNLOCK)
-    adopter.desk = desk
     board = Board(state / "tasks.json", events)
-    layout = Layout(desk, approvals, events, state)
+    host = cfg.get("host", {})
+    plugins = Plugins(Host(events, pool, files, uploads, approvals, state, args.dev, lambda t: dispatcher.note(t), cfg),
+                      cfg.get("plugins", {}))
+    pool.plugins = Dispatcher.plugins = plugins
+    pool.about = Dispatcher.about = host.get("about") or "computer"
+    pool.terminal = cfg.get("sessions", {}).get("terminal") or pool.terminal
     push = Push(events, auth, Fcm(FIREBASE / "service-account.json"), state)
-    push.watches = Watches(state / "watches.json", push, lambda line: pool.notify(line), pool.queue_names)
-    dispatcher = Dispatcher(disp, events, state, make_tools(pool, files, events, make_desktop_tools(desk, files, events, layout)
-                                                                 + make_music_tools(approvals) + make_queue_tools(approvals) + make_adopt_tools(adopter) + make_push_tools(push) + make_watch_tools(push.watches) + make_task_tools(board)
-                                                                 + make_browser_tools(browser, approvals)
-                                                                 + discord_link.make_discord_tools(discord, approvals, uploads), uploads),
-                            guard, usage)
+    push.watches = Watches(state / "watches.json", push, lambda line: pool.notify(line), plugins)
+    dispatcher = Dispatcher(disp, events, state, make_tools(pool, files, events, make_adopt_tools(adopter) + make_push_tools(push)
+                                                            + make_watch_tools(push.watches) + make_task_tools(board), uploads,
+                                                            plugins.names), guard, usage)
     pool.dispatcher, pool.guard, pool.board = dispatcher, guard, board
     # Archived shikigami are out of the picture, unless a task still points at one.
     dispatcher.drift = lambda: board.drift({w.id: (w.name, w.rec["state"]) for w in pool.workers.values()
@@ -176,7 +173,8 @@ def main():
     dispatcher.recall = lambda: recall_state(board, pool)
     guard.tell = pool.tell
     watcher = Watcher(events, pool.own_sessions, pool.notify, pool.archive)
-    app = make_app(events, dispatcher, pool, files, approvals, guard, watcher, desk, auth, origins, state / "app", cost, push, uploads, board, adopter)
+    app = make_app(events, dispatcher, pool, files, approvals, guard, watcher, auth, origins, state / "app", cost, push, uploads, board, adopter)
+    plugins.routes(app)
 
     async def deploy_note():
         """seimei hears how the deploy that restarted it went (only one that just ended)."""
@@ -196,23 +194,18 @@ def main():
         app["dispatcher"] = asyncio.create_task(dispatcher.run())
         app["watcher"] = asyncio.create_task(watcher.run())
         app["archive"] = asyncio.create_task(pool.sweep())
-        app["queue"] = asyncio.create_task(QueueWatcher(pool.queue_names, pool.notify, events.flash).run())
         app["wake"] = asyncio.create_task(WakeWatch(events, pool).run())
-        app["desktop"] = asyncio.create_task(desk.run())
-        app["layout"] = asyncio.create_task(layout.run())
         app["push"] = asyncio.create_task(push.run())
         app["watches"] = asyncio.create_task(push.watches.run())
         app["uploads"] = asyncio.create_task(uploads.run())
-        app["browser"] = asyncio.create_task(browser.run())
-        app["discord"] = asyncio.create_task(discord.run())
+        app["plugins"] = [asyncio.create_task(t) for t in plugins.tasks()]
 
         def stop_key():
-            # `systemctl --user kill -s USR1 seimei` from a niri bind: stop driving and end the turn.
-            desk.halt()
+            # `systemctl --user kill -s USR1 seimei` from a key binding: end the turn, and the plugins stop driving.
+            halted = plugins.halt()
             asyncio.ensure_future(dispatcher.interrupt())
-            events.add({"type": "system", "level": "warn", "text": "Stopped from the laptop with the stop key."})
-            dispatcher.note("The user pressed the stop key on the laptop: your turn was interrupted and desktop input "
-                            "is blocked for a minute. Do not drive the desktop again until they say so.")
+            events.add({"type": "system", "level": "warn", "text": "Stopped with the stop key."})
+            dispatcher.note("The user pressed the stop key: your turn was interrupted." + (f" {halted}" if halted else ""))
 
         asyncio.get_running_loop().add_signal_handler(signal.SIGUSR1, stop_key)
 
@@ -226,15 +219,13 @@ def main():
         app["dispatcher"].cancel()
         app["watcher"].cancel()
         app["archive"].cancel()
-        app["queue"].cancel()
         app["wake"].cancel()
-        app["desktop"].cancel()
-        app["layout"].cancel()
         app["push"].cancel()
         app["watches"].cancel()
         app["uploads"].cancel()
-        app["browser"].cancel()
-        app["discord"].cancel()
+        for t in app["plugins"]:
+            t.cancel()
+        await plugins.close()
         await push.sender.close()
         await pool.close()
 

@@ -2,10 +2,8 @@
 
 import json
 import os
-import re
 from pathlib import Path
 
-QUEUE_LIB = Path.home() / ".local/lib/claude-queue"
 RESULT_CHARS = 4000
 
 
@@ -27,19 +25,26 @@ def result_text(content) -> str:
     return text if len(text) <= RESULT_CHARS else text[:RESULT_CHARS] + "\n[...]"
 
 
-def queue_env(name: str) -> dict:
-    """Run a session's commands through claude-queue, like `claude-queue <name>`, so benches freeze it."""
-    if not (QUEUE_LIB / "queue-prefix").exists():
-        return {}
-    qdir = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/claude-queue-{os.getuid()}") / "claude-queue"
-    qdir.mkdir(parents=True, exist_ok=True)
-    return {
-        # Same rule as the claude-queue script: a dash would nest slices.
-        "CLAUDE_QUEUE": re.sub(r"[^A-Za-z0-9_]", "_", name),
-        "CLAUDE_QUEUE_DIR": str(qdir),
-        "CLAUDE_QUEUE_LIB": str(QUEUE_LIB / "devgate.so"),
-        "CLAUDE_CODE_SHELL_PREFIX": str(QUEUE_LIB / "queue-prefix"),
-    }
+def mins(s: float) -> str:
+    s = int(s)
+    return f"{s}s" if s < 60 else f"{s // 60} min" if s < 3600 else f"{s // 3600} h {s % 3600 // 60} min"
+
+
+def always_load(server: dict, deferred: set[str]) -> dict:
+    """Mark a server's tools, except the deferred ones, with the MCP _meta flag Claude Code reads to keep a tool in
+    the prompt instead of behind tool search. The SDK's tool() has no field for it, so the listing is wrapped."""
+    srv = server["instance"]
+    entry = srv.get_request_handler("tools/list")
+
+    async def listed(ctx, params):
+        res = await entry.handler(ctx, params)
+        for t in res.tools:
+            if t.name not in deferred:
+                t.meta = {**(t.meta or {}), "anthropic/alwaysLoad": True}
+        return res
+
+    srv.add_request_handler("tools/list", entry.params_type, listed)
+    return server
 
 
 def read_json(path: Path):

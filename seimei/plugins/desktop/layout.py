@@ -2,7 +2,6 @@
 workspaces, kitty windows in their folders, and Claude sessions resumed."""
 
 import asyncio
-import json
 import logging
 import os
 import shlex
@@ -10,8 +9,8 @@ import time
 from pathlib import Path
 
 from . import desktop
-from .sessions import transcript
-from .util import read_json, write_json
+from ...sessions import transcript
+from ...util import read_json, write_json
 
 log = logging.getLogger("seimei.layout")
 

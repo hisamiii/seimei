@@ -11,7 +11,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import queue as cq
+from .util import mins
 
 log = logging.getLogger("seimei.watches")
 
@@ -22,8 +22,6 @@ TRIGGERS = {
     "shikigami_ends": "a shikigami ends in any way: done, failed, stopped, interrupted",
     "session_asks": "one of the user's sessions (target: its name, or *) asks a question or waits on a prompt",
     "session_idle": "a session finishes its turn (busy -> idle)",
-    "queue_free": "nothing holds or waits for the GPU/NPU turn (target unused)",
-    "queue_wait": "a GPU/NPU wait passes N minutes (target: N, default 10)",
 }
 DEFAULT_HOURS = 24
 MAX_HOURS = 7 * 24
@@ -31,18 +29,20 @@ TICK = 15
 
 
 class Watches:
-    def __init__(self, path: Path, push, tell, names=lambda: {}):
+    def __init__(self, path: Path, push, tell, plugins=None):
         self.path = path
         self.push = push
         self.tell = tell  # (line) -> the dispatcher
-        self.names = names
+        self.plugins = plugins  # their triggers (the queue's) come on top of TRIGGERS
         try:
             self.rules: list[dict] = json.loads(path.read_text())
         except (OSError, ValueError):
             self.rules = []
         self.workers: dict[str, str] = {}
         self.sessions: dict[str, tuple[str, str]] = {}
-        self.queue_told: set[str] = set()
+
+    def triggers(self) -> dict[str, str]:
+        return {**TRIGGERS, **(self.plugins.triggers if self.plugins else {})}
 
     def _save(self):
         tmp = self.path.with_suffix(".tmp")
@@ -51,10 +51,10 @@ class Watches:
 
     def add(self, trigger: str, target: str, title: str, body: str = "", level: str = "normal", key: str | None = None,
             reply: bool = False, hours: float = DEFAULT_HOURS, repeat: bool = False) -> dict:
-        if trigger not in TRIGGERS:
-            raise ValueError(f"unknown trigger {trigger!r}; one of {', '.join(TRIGGERS)}")
-        if trigger == "queue_wait":
-            float(target or 10)
+        if trigger not in self.triggers():
+            raise ValueError(f"unknown trigger {trigger!r}; one of {', '.join(self.triggers())}")
+        if self.plugins:
+            self.plugins.check_trigger(trigger, (target or "*").strip())
         rule = {"id": "w" + uuid.uuid4().hex[:5], "trigger": trigger, "target": (target or "*").strip(),
                 "title": title[:120], "body": body[:600], "level": level, "key": key, "reply": reply,
                 "repeat": repeat, "created": time.time(),
@@ -75,7 +75,7 @@ class Watches:
         now = time.time()
         return "\n".join(f"{r['id']}: {r['trigger']} {r['target']} -> {r['level']} ping \"{r['title']}\""
                          + (f" (key {r['key']})" if r.get("key") else "") + (", reply" if r.get("reply") else "")
-                         + (", repeats" if r.get("repeat") else "") + f", expires in {cq.mins(r['expires'] - now)}"
+                         + (", repeats" if r.get("repeat") else "") + f", expires in {mins(r['expires'] - now)}"
                          for r in self.rules)
 
     @staticmethod
@@ -131,19 +131,9 @@ class Watches:
             self.rules.remove(r)
             self._save()
             self.tell(f"watch {r['id']} ({r['trigger']} {r['target']}) expired without firing")
-        if not any(r["trigger"].startswith("queue_") for r in self.rules):
-            return
-        snap = await asyncio.to_thread(cq.snapshot, self.names())
-        if not snap["holders"] and not snap["waits"]:
-            self.fire("queue_free", "the queue", "nothing holds or waits for the GPU/NPU turn")
-        for r in [r for r in self.rules if r["trigger"] == "queue_wait"]:
-            limit = float(r["target"] if r["target"] not in ("", "*") else 10) * 60
-            for w in snap["waits"]:
-                tag = f"{r['id']}:{w['pid']}:{w['since']}"
-                if w["waited"] >= limit and tag not in self.queue_told and r in self.rules:
-                    self.queue_told.add(tag)
-                    self.fire("queue_wait", w["who"], f"pid {w['pid']} waited {cq.mins(w['waited'])} for "
-                              f"{cq.blocker_text(w, snap)}", rules=[r])
+        used = {r["trigger"] for r in self.rules} - set(TRIGGERS)
+        if used and self.plugins:
+            await self.plugins.watch(self, used)
 
     async def run(self):
         while True:
@@ -162,14 +152,15 @@ def make_watch_tools(watches: Watches) -> list:
 
     @tool("watch", "Watch rules: ping the user when something happens, without you waiting for it. action add "
           "(trigger, target, title, body, level, key, reply, hours, repeat), list, or remove (id). Triggers: "
-          + "; ".join(f"{k}: {v}" for k, v in TRIGGERS.items()) + ". {name} and {detail} in title/body are filled "
+          + "; ".join(f"{k}: {v}" for k, v in watches.triggers().items()) + ". {name} and {detail} in title/body are filled "
           f"in. A rule fires once unless repeat, expires after hours (default {DEFAULT_HOURS}, max {MAX_HOURS}), and "
           "you hear when it fires or expires.", {
               "type": "object",
               "properties": {
                   "action": {"type": "string", "enum": ["add", "list", "remove"]},
-                  "trigger": {"type": "string", "enum": list(TRIGGERS)},
-                  "target": {"type": "string", "description": "shikigami or session name, * for any; minutes for queue_wait"},
+                  "trigger": {"type": "string", "enum": list(watches.triggers())},
+                  "target": {"type": "string", "description": "shikigami or session name, * for any"
+                             + ("; minutes for queue_wait" if "queue_wait" in watches.triggers() else "")},
                   "title": {"type": "string"}, "body": {"type": "string"},
                   "level": {"type": "string", "enum": ["silent", "normal", "urgent"], "default": "normal"},
                   "key": {"type": "string", "description": "collapse key"},
@@ -196,7 +187,7 @@ def make_watch_tools(watches: Watches) -> list:
             if not r["title"]:
                 watches.remove(r["id"])
                 return text("A rule needs a title for its ping.", error=True)
-            return text(f"Added {r['id']}: {r['trigger']} {r['target']}, expires in {cq.mins(r['expires'] - time.time())}.")
+            return text(f"Added {r['id']}: {r['trigger']} {r['target']}, expires in {mins(r['expires'] - time.time())}.")
         return text("action is add, list or remove.", error=True)
 
     return [watch]

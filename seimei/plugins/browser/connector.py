@@ -10,8 +10,8 @@ from pathlib import Path
 
 from claude_agent_sdk import tool
 
-from .approvals import Approvals
-from .link import Link, NotConnected, runtime_path
+from ...approvals import Approvals
+from ...link import Link, NotConnected, runtime_path
 
 READ_LIMIT = 20000
 # A read is kept this long so paging through a page does not reload it.
@@ -59,7 +59,7 @@ def _filename(name: str) -> str:
     return "/".join(parts)
 
 
-def make_browser_tools(browser: Browser, approvals: Approvals) -> list:
+def make_browser_tools(browser: Browser, approvals: Approvals, who: str = "seimei", worker: str | None = None) -> list:
     async def guarded(fn):
         try:
             return await fn()
@@ -145,7 +145,7 @@ def make_browser_tools(browser: Browser, approvals: Approvals) -> list:
                 target = (f"close the tab \"{ts[0]['title'] or ts[0]['url']}\"" if len(ts) == 1
                           else f"close {len(ts)} of your tabs")
                 detail = "\n".join(f"{t['title'] or '(no title)'}\n{t['url']}" for t in ts)
-                outcome = await approvals.hold({"action": "desktop", "target": target, "detail": detail}, "seimei", None)
+                outcome = await approvals.hold({"action": "desktop", "target": target, "detail": detail}, who, worker)
                 if outcome != "approved":
                     return _text(f"The user {outcome} it; no tabs closed.", error=True)
             n = await browser.call("close", tabs=ids)

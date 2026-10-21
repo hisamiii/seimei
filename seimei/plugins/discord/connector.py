@@ -16,10 +16,10 @@ from pathlib import Path
 
 from claude_agent_sdk import tool
 
-from .approvals import Approvals
-from .guard import _secret_path
-from .link import Link, NotConnected, runtime_path
-from .uploads import ID as UPLOAD_ID, Uploads
+from ...approvals import Approvals
+from ...guard import _secret_path
+from ...link import Link, NotConnected, runtime_path
+from ...uploads import ID as UPLOAD_ID, Uploads
 
 MAX_READ = 100
 MAX_DMS = 100
@@ -134,7 +134,8 @@ def resolve_file(ref: str, uploads: Uploads | None) -> Path:
     return real
 
 
-def make_discord_tools(discord: Discord, approvals: Approvals, uploads: Uploads | None = None) -> list:
+def make_discord_tools(discord: Discord, approvals: Approvals, uploads: Uploads | None = None, who: str = "seimei",
+                       worker: str | None = None) -> list:
     async def guarded(fn):
         try:
             return await fn()
@@ -143,7 +144,7 @@ def make_discord_tools(discord: Discord, approvals: Approvals, uploads: Uploads 
 
     async def ask(target: str, detail: str) -> str | None:
         """None when approved, else the reason nothing happened."""
-        outcome = await approvals.hold({"action": "discord", "target": target, "detail": detail}, "seimei", None)
+        outcome = await approvals.hold({"action": "discord", "target": target, "detail": detail}, who, worker)
         return None if outcome == "approved" else f"The user {outcome} it; nothing was done on Discord."
 
     async def own(channel: str, message: str) -> tuple[str, dict]:
