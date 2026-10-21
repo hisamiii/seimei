@@ -192,7 +192,6 @@ fun icon(vararg d: String, stroke: Float = 2f): ImageVector = ImageVector.Builde
 object Icons {
     val chat = icon("M6 4.5h12A2.5 2.5 0 0 1 20.5 7v8a2.5 2.5 0 0 1-2.5 2.5h-7L6.5 21v-3.5H6A2.5 2.5 0 0 1 3.5 15V7A2.5 2.5 0 0 1 6 4.5z", stroke = 1.8f)
     val agents = icon("M12 3 13.9 8.6 19.5 10.5 13.9 12.4 12 18 10.1 12.4 4.5 10.5 10.1 8.6ZM18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z", stroke = 1.8f)
-    val screen = icon("M5.5 4h13A2.5 2.5 0 0 1 21 6.5v7.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 14V6.5A2.5 2.5 0 0 1 5.5 4zM9 20.5h6M12 16.5v4", stroke = 1.8f)
     val usage = icon("M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 1 0 0-17z", stroke = 1.8f)
     val star = icon("M12 2 17.88 20.09 2.49 8.91h19.02L6.12 20.09Z", stroke = 1.6f)
     val check = icon("M5 12.5l4.5 4.5L19 7.5")
@@ -227,7 +226,6 @@ object Icons {
     val tool = icon("M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-2.4z")
     val laptop = icon("M5 6.5A1.5 1.5 0 0 1 6.5 5h11A1.5 1.5 0 0 1 19 6.5V15H5zM3 18h18")
     val list = icon("M8 7h11M8 12h11M8 17h7M4.5 7h.01M4.5 12h.01M4.5 17h.01")
-    val full = icon("M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5")
     val alert = icon("M12 7v6M12 17v.01")
     val dash = icon("M7 12h10")
     val back = icon("M15 5l-7 7 7 7")
@@ -416,8 +414,8 @@ fun status(vm: Seimei): Status = when {
     else -> Status("idle", "idle")
 }
 
-val TABS = listOf("chat", "agents", "screen", "usage")
-val TITLES = mapOf("chat" to "seimei", "agents" to "Agents", "screen" to "Screen", "usage" to "Usage")
+val TABS = listOf("chat", "agents", "usage")
+val TITLES = mapOf("chat" to "seimei", "agents" to "Agents", "usage" to "Usage")
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
@@ -455,7 +453,6 @@ fun AppScreen(vm: Seimei) {
             when (vm.tab) {
                 "chat" -> ChatTab(vm)
                 "agents" -> AgentsTab(vm)
-                "screen" -> ScreenTab(vm)
                 "usage" -> UsageTab(vm)
             }
         }
@@ -560,7 +557,7 @@ fun NavBar(vm: Seimei) {
                 onClick = { vm.show(tab) },
                 label = { Text(TITLES[tab]!!.replaceFirstChar { it.uppercase() }.let { if (tab == "chat") "Chat" else it }) },
                 icon = {
-                    val ic = mapOf("chat" to Icons.chat, "agents" to Icons.agents, "screen" to Icons.screen, "usage" to Icons.usage)[tab]!!
+                    val ic = mapOf("chat" to Icons.chat, "agents" to Icons.agents, "usage" to Icons.usage)[tab]!!
                     BadgedBox(badge = {
                         when {
                             // What needs the user counts first, in orange; otherwise how many work.

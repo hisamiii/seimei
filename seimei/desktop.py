@@ -1,7 +1,6 @@
 """The niri desktop. Its socket is looked up on every call, so seimei outlives niri restarts."""
 
 import asyncio
-import fcntl
 import json
 import logging
 import os
@@ -107,22 +106,6 @@ def locked() -> bool:
             except OSError:
                 pass
     return False
-
-
-def bench_running() -> bool:
-    """A claude-queue bench holds its lock: screen grabs would touch the GPU it is timing."""
-    path = RUN / "claude-queue" / "bench.lock"
-    try:
-        fd = os.open(path, os.O_RDONLY)
-    except OSError:
-        return False
-    try:
-        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
-        return False
-    except BlockingIOError:
-        return True
-    finally:
-        os.close(fd)
 
 
 def _ancestors(pid: int):
@@ -289,21 +272,6 @@ class Desktop:
         lines.append("Screen locked" if locked() else "Screen unlocked")
         return "\n".join(lines)
 
-    def state(self) -> dict:
-        """The desktop for the Screen view: outputs and workspaces with their windows."""
-        wins, spaces, outs = ipc("Windows"), ipc("Workspaces"), ipc("Outputs")
-        out = []
-        for ws in sorted(spaces, key=lambda s: (s["output"] or "", s["idx"])):
-            here = sorted((w for w in wins if w["workspace_id"] == ws["id"]),
-                          key=lambda w: w["layout"].get("pos_in_scrolling_layout") or [99, 99])
-            out.append({"idx": ws["idx"], "name": ws["name"], "output": ws["output"], "active": ws["is_active"],
-                        "windows": [{"id": w["id"], "app": w["app_id"], "title": w["title"], "focused": w["is_focused"],
-                                     "urgent": w["is_urgent"], "ours": w["id"] in OURS} for w in here]})
-        return {"up": True, "locked": locked(), "workspaces": out,
-                "outputs": [{"name": n, "transform": (o.get("logical") or {}).get("transform"),
-                             **({k: o["modes"][o["current_mode"]][k] for k in ("width", "height")}
-                                if o.get("current_mode") is not None else {})} for n, o in outs.items()]}
-
     def urgent(self) -> list[dict]:
         return [w for w in self.windows.values() if w.get("is_urgent")]
 
@@ -352,9 +320,6 @@ class Desktop:
             if len(out) <= REGION_MAX:
                 return out, f"image/{kind}", geo
         return out, "image/jpeg", geo
-
-    async def frame(self, scale: float = 0.5, quality: int = 60) -> bytes:
-        return await self._grim(scale, quality)
 
     async def _grim(self, scale: float, quality: int) -> bytes:
         proc = await asyncio.create_subprocess_exec("grim", "-s", f"{scale:.3f}", "-t", "jpeg", "-q", str(quality), "-",

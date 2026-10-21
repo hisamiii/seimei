@@ -1,8 +1,7 @@
-// The page: the stream from the laptop, the four tabs, and the header and navigation bar around them.
+// The page: the stream from the laptop, the three tabs, and the header and navigation bar around them.
 import { $, S, hooks, clock, finePointer, viewing, closeView } from './util.js';
 import { render, onDelta, clearLive, addEvent, loadHistory, autosize, waitingApprovals, toBottom, showLane } from './chat.js';
 import { setWorkers, setSessions, sheetEvent, agentCounts, showAgents, pageOpen, closePage, archOpen, closeArch } from './agents.js';
-import { showScreen, hideScreen } from './screen.js';
 import { setUsage, renderUsage, tone } from './usage.js';
 import { account } from './account.js';
 import { sheet, closeSheet } from './sheet.js';
@@ -11,9 +10,9 @@ let lastId = 0;
 
 // ---------- tabs ----------
 
-const TABS = ['chat', 'agents', 'screen', 'usage'];
-const TITLES = { chat: 'seimei', agents: 'Agents', screen: 'Screen', usage: 'Usage' };
-const pages = { chat: $('log'), agents: $('agents'), screen: $('screen'), usage: $('usage') };
+const TABS = ['chat', 'agents', 'usage'];
+const TITLES = { chat: 'seimei', agents: 'Agents', usage: 'Usage' };
+const pages = { chat: $('log'), agents: $('agents'), usage: $('usage') };
 
 function show(tab) {
   if (!TABS.includes(tab)) tab = 'chat';
@@ -27,13 +26,11 @@ function show(tab) {
     if (on) b.setAttribute('aria-current', 'page');
     else b.removeAttribute('aria-current');
   }
-  if (was === 'screen' && tab !== 'screen') hideScreen();
   if (tab === 'chat') {
     S.unread = false;
     if (was !== 'chat') requestAnimationFrame(toBottom);
     if (S.lane === 't') showLane('t');
   } else if (tab === 'agents') showAgents();
-  else if (tab === 'screen') showScreen();
   else if (tab === 'usage') renderUsage();
   chrome();
 }

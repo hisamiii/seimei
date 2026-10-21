@@ -133,15 +133,8 @@ function zoomAt(f, px, py) {
 }
 
 /** src: shown at once; full: the original, swapped in once loaded; save: its download link. */
-// What the open viewer shows when it follows a live source (the Screen tab), so new frames can replace it.
-let liveTag = null;
-export function viewLive(tag, src) {
-  if (!viewer.hidden && liveTag === tag) vimg.src = src;
-}
-
-export function view(src, { full = null, save = null, live = null } = {}) {
+export function view(src, { full = null, save = null } = {}) {
   const mine = ++token;
-  liveTag = live;
   zoom = { s: 1, x: 0, y: 0 };
   place();
   vimg.src = src;

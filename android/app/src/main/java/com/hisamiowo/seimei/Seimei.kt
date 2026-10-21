@@ -81,12 +81,6 @@ class Page(val kind: String, val id: String) {
     internal var poll: Job? = null
 }
 
-/** What the Screen tab got back: a frame, or why there is none. */
-sealed interface Frame {
-    data class Image(val bmp: ImageBitmap) : Frame
-    data class Problem(val text: String) : Frame
-}
-
 class Seimei(app: Application) : AndroidViewModel(app) {
     val prefs = Prefs(app)
     var api = Api(prefs.server)
@@ -816,7 +810,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         "no answer"
     }
 
-    // ---------- usage and the screen ----------
+    // ---------- usage ----------
 
     fun refreshCost() {
         val now = System.currentTimeMillis()
@@ -830,28 +824,6 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             } catch (e: IOException) {
             }
         }
-    }
-
-    suspend fun desktop(): JSONObject? = try {
-        api.get("api/desktop")
-    } catch (e: IOException) {
-        null
-    }
-
-    suspend fun frame(query: String): Frame = try {
-        val bytes = api.bytes("api/screen?$query")
-        Frame.Image(withContext(Dispatchers.Default) { ImageDecoder.decodeBitmap(ImageDecoder.createSource(bytes)).asImageBitmap() })
-    } catch (e: HttpError) {
-        val body = try { JSONObject(e.body) } catch (x: JSONException) { JSONObject() }
-        Frame.Problem(when {
-            body.str("paused") == "bench" -> "Paused while a benchmark runs"
-            body.optBoolean("down") -> "The desktop is not running"
-            else -> body.str("error").ifEmpty { "Could not reach the laptop" }
-        })
-    } catch (e: IOException) {
-        Frame.Problem("Could not reach the laptop")
-    } catch (e: Exception) {
-        Frame.Problem("Could not read the picture")
     }
 
     // ---------- actions ----------

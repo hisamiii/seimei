@@ -562,45 +562,6 @@ body.login { display: grid; place-items: center; grid-template-rows: 1fr; paddin
 .arow.ok .tag { background: #2b3b33; color: var(--ok); }
 .arow code { font: 12px/1.45 var(--mono); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* Screen */
-.screen-frame .live-chip { position: absolute; top: 12px; right: 12px; }
-.live-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; padding: 6px 10px; border-radius: 8px; background: #364142; color: #c8f3c3; }
-.live-chip i { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); animation: pulse 2s ease-in-out infinite; }
-.live-chip.off { background: var(--container-high); color: var(--text-3); }
-.live-chip.off i { background: var(--text-3); animation: none; }
-.screen-frame { position: relative; border-radius: 20px; overflow: hidden; background: var(--surface-lowest); min-height: 160px; display: flex; align-items: center; justify-content: center; }
-.screen-frame img { display: block; width: 100%; max-height: 62vh; object-fit: contain; cursor: zoom-in; }
-.screen-frame img:not([src]) { visibility: hidden; height: 160px; }
-.screen-frame canvas { display: block; width: 100%; max-height: 62vh; object-fit: contain; cursor: zoom-in; }
-.screen-frame canvas:not([width]) { visibility: hidden; height: 160px; }
-.screen-frame:fullscreen { border-radius: 0; background: #000; }
-.screen-frame:fullscreen canvas { max-height: 100vh; height: 100vh; cursor: default; }
-button.screen-label { background: none; border: 0; padding: 0; text-align: left; font: inherit; cursor: pointer; }
-.screen-msg { position: absolute; left: 12px; bottom: 12px; font-size: 12px; font-weight: 500; padding: 6px 10px; border-radius: 8px; background: rgb(17 17 27 / .85); color: var(--text-2); }
-.screen-ctl { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
-.screen-label { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
-.screen-label b, .screen-label small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.screen-label b { font-size: 14px; font-weight: 500; color: var(--text); }
-.screen-label small { font-size: 12px; color: var(--text-3); }
-.screen-label small:empty { display: none; }
-.screen-ctl .btn { min-height: 44px; padding: 0 18px; border-radius: 999px; }
-.icon-btn.tonal { background: var(--tonal); color: var(--on-tonal); width: 44px; height: 44px; }
-.seg { display: flex; margin-top: 12px; height: 40px; border: 1px solid var(--outline); border-radius: 20px; overflow: hidden; }
-.seg-btn { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; gap: 6px; border: 0; background: transparent; color: var(--text); font: 500 14px var(--sans); cursor: pointer; }
-.seg-btn + .seg-btn { border-left: 1px solid var(--outline); }
-.seg-btn.on { background: var(--tonal); color: var(--on-tonal); }
-.wsgroup { margin-top: 12px; }
-.wslabel { display: flex; align-items: center; gap: 8px; padding: 8px 4px; font-size: 14px; font-weight: 500; color: var(--primary); }
-.wsbadge { font-size: 12px; font-weight: 400; color: var(--text-3); }
-.wslist { display: flex; flex-direction: column; border-radius: 20px; overflow: hidden; background: var(--container); }
-.wsrow { display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 8px 16px; border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; font: inherit; }
-.wsrow.on { background: var(--container-high); }
-.wsrow > svg { flex: none; color: var(--text-3); }
-.wsletter { flex: none; width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font: 500 15px var(--mono); color: var(--tone); background: color-mix(in srgb, var(--tone) 16%, var(--container-high)); }
-.wstext { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.wstitle { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.wsapp { font-size: 13px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
 /* Tabs: an M3 short navigation bar, sharing one bottom block with the composer */
 .log { padding-bottom: 40px; }
 .page {
@@ -609,8 +570,7 @@ button.screen-label { background: none; border: 0; padding: 0; text-align: left;
 }
 .page > * { flex: none; width: 100%; max-width: 720px; margin-left: auto; margin-right: auto; }
 .page > .older { width: auto; margin-top: 14px; }
-#screen, #usage { padding-top: 12px; gap: 14px; }
-#screen .seg, #screen .screen-ctl, #screen .wsgroup { margin-top: 0; }
+#usage { padding-top: 12px; gap: 14px; }
 .bottom { position: relative; z-index: 1; margin-top: -24px; background: var(--container); border-radius: 24px 24px 0 0; padding-bottom: env(safe-area-inset-bottom); }
 body:not([data-tab="chat"]) .composer { display: none; }
 body.typing .navbar { display: none; }

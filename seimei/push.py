@@ -278,7 +278,7 @@ def make_push_tools(push: Push) -> list:
                              "Not sent: no paired phone with notifications, or the app is in front of the user."}]}
 
     @tool("presence", "Where the user is in the app on each phone: open or not, which view (chat, agents, usage, "
-          "screen, page = an agent's page), and when they last left.", {})
+          "page = an agent's page), and when they last left.", {})
     async def presence(args):
         rows = push.presence()
         if not rows:
