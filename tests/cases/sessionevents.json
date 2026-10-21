@@ -1,0 +1,748 @@
+{
+ "about": "What the user's sessions run into, as the dispatcher hears it (seimei/sessions.py SessionEvents, crates/core/src/sessions.rs); generated from Python. Each step appends transcript rows (in projects/-qa-proj under the config dir), then scans these rows.",
+ "steps": [
+  {
+   "write": {
+    "aaaaaaaa-0000-4000-8000-000000000001": [
+     {
+      "type": "user",
+      "message": {
+       "content": "start"
+      }
+     }
+    ],
+    "bbbbbbbb-0000-4000-8000-000000000002": [
+     {
+      "type": "user",
+      "message": {
+       "content": "hi"
+      }
+     }
+    ]
+   },
+   "rows": [
+    {
+     "pid": 999999001,
+     "name": "alpha",
+     "session_id": "aaaaaaaa-0000-4000-8000-000000000001",
+     "cwd": "/qa/proj",
+     "status": "busy",
+     "ask_detail": null,
+     "doing": null,
+     "waiting_for": null,
+     "line": ""
+    },
+    {
+     "pid": 999999002,
+     "name": "beta",
+     "session_id": "bbbbbbbb-0000-4000-8000-000000000002",
+     "cwd": "/qa/proj",
+     "status": "idle",
+     "ask_detail": null,
+     "doing": null,
+     "waiting_for": null,
+     "line": ""
+    },
+    {
+     "pid": 999999003,
+     "name": "fixture",
+     "session_id": "cccccccc-0000-4000-8000-000000000003",
+     "cwd": "{claude}/jobs/abc",
+     "status": "busy",
+     "ask_detail": null,
+     "doing": null,
+     "waiting_for": null,
+     "line": ""
+    }
+   ],
+   "lines": []
+  },
+  {
+   "write": {
+    "aaaaaaaa-0000-4000-8000-000000000001": [
+     {
+      "type": "assistant",
+      "message": {
+       "content": [
+        {
+         "type": "tool_use",
+         "id": "t1",
+         "name": "Bash",
+         "input": {
+          "command": "rm x"
+         }
+        }
+       ]
+      }
+     },
+     {
+      "type": "user",
+      "message": {
+       "content": [
+        {
+         "type": "tool_result",
+         "tool_use_id": "t1",
+         "is_error": true,
+         "content": [
+          {
+           "type": "text",
+           "text": "PreToolUse:Bash hook blocked: no"
+          }
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "rows": [
+    {
+     "pid": 999999001,
+     "name": "alpha",
+     "session_id": "aaaaaaaa-0000-4000-8000-000000000001",
+     "cwd": "/qa/proj",
+     "status": "busy",
+     "ask_detail": null,
+     "doing": null,
+     "waiting_for": null,
+     "line": ""
+    },
+    {
+     "pid": 999999002,
+     "name": "beta",
+     "session_id": "bbbbbbbb-0000-4000-8000-000000000002",
+     "cwd": "/qa/proj",
+     "status": "waiting",
+     "ask_detail": {
+      "tool_id": "q1",
+      "answerable": true,
+      "questions": [
+       {
+        "question": "Which one?",
+        "options": [
+         {
+          "label": "Left"
+         },
+         {
+          "label": "Right"
+         }
+        ]
+       }
+      ]
+     },
+     "doing": null,
+     "waiting_for": null,
+     "line": ""
+    },
+    {
+     "pid": 999999003,
+     "name": "fixture",
+     "session_id": "cccccccc-0000-4000-8000-000000000003",
+     "cwd": "{claude}/jobs/abc",
+     "status": "waiting",
+     "ask_detail": {
+      "tool_id": "q1",
+      "answerable": true,
+      "questions": [
+       {
+        "question": "Which one?",
+        "options": [
+         {
+          "label": "Left"
+         },
+         {
+          "label": "Right"
+         }
+        ]
+       }
+      ]
+     },
+     "doing": null,
+     "waiting_for": null,
+     "line": ""
+    }
+   ],
+   "lines": [
+    [
+     "session \"alpha\": a Bash call was blocked: PreToolUse:Bash hook blocked: no",
+     false,
+     null
+    ],
+    [
+     "session \"beta\" asks: Which one? Options: Left | Right.",
+     true,
+     "ask:999999002"
+    ]
+   ]
+  },
+  {
+   "write": {
+    "aaaaaaaa-0000-4000-8000-000000000001": [
+     {
+      "type": "assistant",
+      "message": {
+       "content": [
+        {
+         "type": "tool_use",
+         "id": "t2",
+         "name": "Read",
+         "input": {}
+        }
+       ]
+      }
+     },
+     {
+      "type": "user",
+      "message": {
+       "content": [
+        {
+         "type": "tool_result",
+         "tool_use_id": "t2",
+         "is_error": true,
+         "content": [
+          {
+           "type": "text",
+           "text": "File   does not\nexist"
+          }
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "type": "assistant",
+      "message": {
+       "content": [
+        {
+         "type": "tool_use",
+         "id": "t3",
+         "name": "Read",
+         "input": {}
+        }
+       ]
+      }
+     },
+     {
+      "type": "user",
+      "message": {
+       "content": [
+        {
+         "type": "tool_result",
+         "tool_use_id": "t3",
+         "is_error": true,
+         "content": [
+          {
+           "type": "text",
+           "text": "nope"
+          }
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "type": "assistant",
+      "message": {
+       "content": [
+        {
+         "type": "tool_use",
+         "id": "t4",
+         "name": "Read",
+         "input": {}
+        }
+       ]
+      }
+     },
+     {
+      "type": "user",
+      "message": {
+       "content": [
+        {
+         "type": "tool_result",
+         "tool_use_id": "t4",
+         "is_error": true,
+         "content": [
+          {
+           "type": "text",
+           "text": "still\tnope"
+          }
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "type": "assistant",
+      "message": {
+       "content": [
+        {
+         "type": "tool_use",
+         "id": "t5",
+         "name": "Read",
+         "input": {}
+        }
+       ]
+      }
+     },
+     {
+      "type": "user",
+      "message": {
+       "content": [
+        {
+         "type": "tool_result",
+         "tool_use_id": "t5",
+         "is_error": true,
+         "content": [
+          {
+           "type": "text",
+           "text": "again"
+          }
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "rows": [
+    {
+     "pid": 999999001,
+     "name": "alpha",
+     "session_id": "aaaaaaaa-0000-4000-8000-000000000001",
+     "cwd": "/qa/proj",
+     "status": "busy",
+     "ask_detail": null,
+     "doing": null,
+     "waiting_for": null,
+     "line": ""
+    },
+    {
+     "pid": 999999002,
+     "name": "beta",
+     "session_id": "bbbbbbbb-0000-4000-8000-000000000002",
+     "cwd": "/qa/proj",
+     "status": "waiting",
+     "ask_detail": {
+      "tool_id": "q1",
+      "answerable": true,
+      "questions": [
+       {
+        "question": "Which one?",
+        "options": [
+         {
+          "label": "Left"
+         },
+         {
+          "label": "Right"
+         }
+        ]
+       }
+      ]
+     },
+     "doing": null,
+     "waiting_for": null,
+     "line": ""
+    }
+   ],
+   "lines": [
+    [
+     "session \"alpha\": Read failed 3 times in a row, last: still nope",
+     false,
+     null
+    ]
+   ]
+  },
+  {
+   "write": {
+    "aaaaaaaa-0000-4000-8000-000000000001": [
+     {
+      "type": "assistant",
+      "message": {
+       "content": [
+        {
+         "type": "tool_use",
+         "id": "t6",
+         "name": "Read",
+         "input": {}
+        }
+       ]
+      }
+     },
+     {
+      "type": "user",
+      "message": {
+       "content": [
+        {
+         "type": "tool_result",
+         "tool_use_id": "t6",
+         "is_error": false,
+         "content": [
+          {
+           "type": "text",
+           "text": "ok"
+          }
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "type": "assistant",
+      "message": {
+       "content": [
+        {
+         "type": "tool_use",
+         "id": "t7",
+         "name": "Read",
+         "input": {}
+        }
+       ]
+      }
+     },
+     {
+      "type": "user",
+      "message": {
+       "content": [
+        {
+         "type": "tool_result",
+         "tool_use_id": "t7",
+         "is_error": true,
+         "content": [
+          {
+           "type": "text",
+           "text": "x"
+          }
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "rows": [
+    {
+     "pid": 999999001,
+     "name": "alpha",
+     "session_id": "aaaaaaaa-0000-4000-8000-000000000001",
+     "cwd": "/qa/proj",
+     "status": "idle",
+     "ask_detail": null,
+     "doing": null,
+     "waiting_for": null,
+     "line": "All done. xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    {
+     "pid": 999999002,
+     "name": "beta",
+     "session_id": "bbbbbbbb-0000-4000-8000-000000000002",
+     "cwd": "/qa/proj",
+     "status": "waiting",
+     "ask_detail": null,
+     "doing": {
+      "tool_id": "t9",
+      "tool": "Bash",
+      "what": "rm -rf build"
+     },
+     "waiting_for": "permission",
+     "line": ""
+    }
+   ],
+   "lines": [
+    [
+     "session \"alpha\" finished a turn: All done. xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+     false,
+     "finished:999999001"
+    ],
+    [
+     "session \"beta\" waits on the server for a permission prompt: Bash rm -rf build",
+     true,
+     "perm:999999002"
+    ]
+   ]
+  },
+  {
+   "write": {
+    "aaaaaaaa-0000-4000-8000-000000000001": [
+     {
+      "type": "user",
+      "message": {
+       "content": "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n<summary>Background command \"make\" finished</summary>\n</task-notification>"
+      }
+     }
+    ]
+   },
+   "rows": [
+    {
+     "pid": 999999001,
+     "name": "alpha",
+     "session_id": "aaaaaaaa-0000-4000-8000-000000000001",
+     "cwd": "/qa/proj",
+     "status": "idle",
+     "ask_detail": null,
+     "doing": null,
+     "waiting_for": null,
+     "line": ""
+    },
+    {
+     "pid": 999999002,
+     "name": "beta",
+     "session_id": "bbbbbbbb-0000-4000-8000-000000000002",
+     "cwd": "/qa/proj",
+     "status": "waiting",
+     "ask_detail": null,
+     "doing": {
+      "tool_id": "t9",
+      "tool": "Bash",
+      "what": "rm -rf build"
+     },
+     "waiting_for": "permission",
+     "line": ""
+    }
+   ],
+   "lines": [
+    [
+     "session \"alpha\": a background task ended (completed): Background command \"make\" finished",
+     false,
+     null
+    ]
+   ]
+  },
+  {
+   "write": {
+    "bbbbbbbb-0000-4000-8000-000000000002": [
+     {
+      "type": "user",
+      "message": {
+       "content": "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n<summary>Background command \"make\" finished</summary>\n</task-notification>"
+      }
+     }
+    ],
+    "dddddddd-0000-4000-8000-000000000004": [
+     {
+      "type": "user",
+      "message": {
+       "content": "x"
+      }
+     }
+    ]
+   },
+   "rows": [
+    {
+     "pid": 999999001,
+     "name": "alpha",
+     "session_id": "aaaaaaaa-0000-4000-8000-000000000001",
+     "cwd": "/qa/proj",
+     "status": "busy",
+     "ask_detail": null,
+     "doing": null,
+     "waiting_for": null,
+     "line": ""
+    },
+    {
+     "pid": 999999002,
+     "name": "beta",
+     "session_id": "bbbbbbbb-0000-4000-8000-000000000002",
+     "cwd": "/qa/proj",
+     "status": "waiting",
+     "ask_detail": null,
+     "doing": null,
+     "waiting_for": "dialog open",
+     "line": ""
+    },
+    {
+     "pid": 999999004,
+     "name": "delta",
+     "session_id": "dddddddd-0000-4000-8000-000000000004",
+     "cwd": "/qa/proj",
+     "status": "idle",
+     "ask_detail": null,
+     "doing": null,
+     "waiting_for": null,
+     "line": ""
+    }
+   ],
+   "lines": [
+    [
+     "session \"beta\": a background task ended (completed): Background command \"make\" finished",
+     false,
+     null
+    ],
+    [
+     "session \"beta\" waits on the server for a permission prompt: dialog open",
+     true,
+     "perm:999999002"
+    ]
+   ]
+  },
+  {
+   "write": {
+    "aaaaaaaa-0000-4000-8000-000000000001": [
+     {
+      "type": "continued-in",
+      "continuedInSessionId": "aaaaaaaa-0000-4000-8000-0000000000a2"
+     }
+    ],
+    "aaaaaaaa-0000-4000-8000-0000000000a2": [
+     {
+      "type": "user",
+      "message": {
+       "content": "go on"
+      }
+     }
+    ]
+   },
+   "rows": [
+    {
+     "pid": 999999001,
+     "name": "alpha",
+     "session_id": "aaaaaaaa-0000-4000-8000-000000000001",
+     "cwd": "/qa/proj",
+     "status": "busy",
+     "ask_detail": null,
+     "doing": null,
+     "waiting_for": null,
+     "line": ""
+    },
+    {
+     "pid": 999999002,
+     "name": "beta",
+     "session_id": "bbbbbbbb-0000-4000-8000-000000000002",
+     "cwd": "/qa/proj",
+     "status": "busy",
+     "ask_detail": null,
+     "doing": null,
+     "waiting_for": null,
+     "line": ""
+    },
+    {
+     "pid": 999999004,
+     "name": "delta",
+     "session_id": "dddddddd-0000-4000-8000-000000000004",
+     "cwd": "/qa/proj",
+     "status": "waiting",
+     "ask_detail": {
+      "tool_id": "q2",
+      "answerable": false,
+      "questions": [
+       {
+        "question": "Pick some",
+        "multiSelect": true
+       }
+      ]
+     },
+     "doing": null,
+     "waiting_for": null,
+     "line": ""
+    }
+   ],
+   "lines": [
+    [
+     "session \"delta\" asks: Pick some (several questions or multi-select: in its terminal only)",
+     true,
+     "ask:999999004"
+    ]
+   ]
+  },
+  {
+   "write": {
+    "aaaaaaaa-0000-4000-8000-0000000000a2": [
+     {
+      "type": "assistant",
+      "message": {
+       "content": [
+        {
+         "type": "tool_use",
+         "id": "u1",
+         "name": "Edit",
+         "input": {}
+        }
+       ]
+      }
+     },
+     {
+      "type": "user",
+      "message": {
+       "content": [
+        {
+         "type": "tool_result",
+         "tool_use_id": "u1",
+         "is_error": true,
+         "content": [
+          {
+           "type": "text",
+           "text": "The user doesn't want to proceed with this tool use."
+          }
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "rows": [
+    {
+     "pid": 999999001,
+     "name": "alpha",
+     "session_id": "aaaaaaaa-0000-4000-8000-000000000001",
+     "cwd": "/qa/proj",
+     "status": "busy",
+     "ask_detail": null,
+     "doing": null,
+     "waiting_for": null,
+     "line": ""
+    },
+    {
+     "pid": 999999004,
+     "name": "delta",
+     "session_id": "dddddddd-0000-4000-8000-000000000004",
+     "cwd": "/qa/proj",
+     "status": "busy",
+     "ask_detail": null,
+     "doing": null,
+     "waiting_for": null,
+     "line": ""
+    }
+   ],
+   "lines": [
+    [
+     "session \"alpha\": a Edit call was blocked: The user doesn't want to proceed with this tool use.",
+     false,
+     null
+    ],
+    [
+     "session \"beta\" (pid 999999002) was closed",
+     false,
+     "end:999999002"
+    ]
+   ]
+  },
+  {
+   "write": {},
+   "rows": [
+    {
+     "pid": 999999004,
+     "name": "delta",
+     "session_id": "dddddddd-0000-4000-8000-000000000004",
+     "cwd": "/qa/proj",
+     "status": "idle",
+     "ask_detail": null,
+     "doing": null,
+     "waiting_for": null,
+     "line": "Finished"
+    }
+   ],
+   "lines": [
+    [
+     "session \"delta\" finished a turn: Finished",
+     false,
+     "finished:999999004"
+    ],
+    [
+     "session \"alpha\" (pid 999999001) was closed",
+     false,
+     "end:999999001"
+    ]
+   ]
+  }
+ ]
+}

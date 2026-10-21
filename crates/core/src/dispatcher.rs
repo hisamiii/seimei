@@ -449,6 +449,12 @@ impl Dispatcher {
         let _ = self.tx.send(Cmd::Interrupt);
     }
 
+    /// Its session id, once it has one.
+    pub fn session_id(&self) -> Option<String> {
+        let sid = std::fs::read_to_string(self.state.join("session_id")).ok()?;
+        Some(sid.trim().to_string()).filter(|s| !s.is_empty())
+    }
+
     pub fn rate_limit(&self, info: &Value) {
         let _ = self.tx.send(Cmd::RateLimit(info.clone()));
     }

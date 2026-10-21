@@ -1551,6 +1551,7 @@ dependencies = [
  "http",
  "image",
  "imagesize",
+ "libc",
  "openssl",
  "regex",
  "reqwest",

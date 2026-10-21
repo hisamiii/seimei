@@ -22,6 +22,7 @@ use serde_json::{Map, Value, json};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, sleep_until};
 
+use crate::aliases::Aliases;
 use crate::approvals::Approvals;
 use crate::archive::Archive;
 use crate::cost::Cost;
@@ -30,6 +31,7 @@ use crate::events::EventLog;
 use crate::guard::{Guard, HOOK_TIMEOUT};
 use crate::metrics::{self, WorkerEvents};
 use crate::paths::{expand, home};
+use crate::sessions::Own;
 use crate::tasks::Board;
 use crate::transcripts::{brief, project_of, transcript};
 use crate::usage::Usage;
@@ -1048,6 +1050,8 @@ pub struct Pool {
     /// In workers.json's order.
     workers: Mutex<Vec<Arc<Worker>>>,
     pub archive: Archive,
+    /// The dispatcher's own names for sessions.
+    pub aliases: Aliases,
     /// The shikigami permission mode from config ([approvals] shikigami): their default and ceiling.
     pub mode: String,
     /// The machine, for the shikigami prompt ("their <about>"); config [host] about.
@@ -1095,6 +1099,7 @@ impl Pool {
                 me: me.clone(),
                 workers: Mutex::new(workers),
                 archive: Archive::new(&state.join("archive.json")),
+                aliases: Aliases::new(&state.join("aliases.json")),
                 mode: mode.into(),
                 about: about.into(),
                 dir,
@@ -1228,6 +1233,25 @@ impl Pool {
     /// One event line for the dispatcher about a shikigami. Lines that come close together go as one message;
     /// repeats collapse. Urgent ones go now (into a running turn, or as a turn of their own); the rest wait for its
     /// next turn (Dispatcher::note, at most HOLD).
+    /// seimei's own sessions by session id, so listings can tell them from the user's. A released one is the
+    /// user's: it shows with their sessions.
+    pub fn own_sessions(&self) -> Own {
+        let mut labels: Own = (self.all().iter())
+            .map(|w| w.rec())
+            .filter(|r| r["state"] != "released")
+            .map(|r| {
+                (
+                    r["session_id"].as_str().unwrap_or("").to_string(),
+                    format!("shikigami {}", r["name"].as_str().unwrap_or("")),
+                )
+            })
+            .collect();
+        if let Some(sid) = self.dispatcher.get().and_then(|d| d.session_id()) {
+            labels.insert(sid, "seimei (you)".into());
+        }
+        labels
+    }
+
     pub fn tell(&self, worker: &str, line: &str, urgent: bool, key: Option<&str>) {
         let line = match self.get(worker) {
             Some(w) => format!("shikigami {} ({}) {line}", w.name(), w.id),

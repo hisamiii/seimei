@@ -1,5 +1,6 @@
 //! seimei's state: events, login, files, push, and the checks in front of every tool call.
 
+pub mod aliases;
 pub mod approvals;
 pub mod archive;
 pub mod auth;
@@ -9,11 +10,13 @@ pub mod dispatcher;
 pub mod events;
 pub mod files;
 pub mod guard;
+pub mod kitty;
 pub mod metrics;
 pub mod paths;
 pub mod permissions;
 pub mod push;
 pub mod recall;
+pub mod sessions;
 pub mod shell;
 pub mod tasks;
 pub mod tools;

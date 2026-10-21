@@ -169,9 +169,66 @@ pub fn chars(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
 }
 
+/// A string as Python's repr() shows it: single quotes, unless only double quotes avoid escaping.
+pub fn py_repr(s: &str) -> String {
+    let q = if s.contains('\'') && !s.contains('"') { '"' } else { '\'' };
+    let mut out = String::from(q);
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c == q => {
+                out.push('\\');
+                out.push(c);
+            }
+            c if (c as u32) < 0x20 || c as u32 == 0x7f => out.push_str(&format!("\\x{:02x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push(q);
+    out
+}
+
+/// Lines split like Python's str.splitlines: at \n, \r\n, a lone \r and the other Unicode line breaks.
+pub fn splitlines(s: &str) -> Vec<&str> {
+    let breaks =
+        |c: char| matches!(c, '\n' | '\r' | '\x0b' | '\x0c' | '\x1c'..='\x1e' | '\u{85}' | '\u{2028}' | '\u{2029}');
+    let mut out = vec![];
+    let (mut start, mut it) = (0, s.char_indices().peekable());
+    while let Some((i, c)) = it.next() {
+        if breaks(c) {
+            out.push(&s[start..i]);
+            start = i + c.len_utf8();
+            if c == '\r' && it.peek().is_some_and(|&(_, n)| n == '\n') {
+                it.next();
+                start += 1;
+            }
+        }
+    }
+    if start < s.len() {
+        out.push(&s[start..]);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repr_like_python() {
+        assert_eq!(py_repr("dev"), "'dev'");
+        assert_eq!(py_repr("it's"), "\"it's\"");
+        assert_eq!(py_repr("a'b\"c\\\n"), "'a\\'b\"c\\\\\\n'");
+    }
+
+    #[test]
+    fn lines_like_python() {
+        assert_eq!(splitlines("a\r\nb\rc\n\nd\n"), ["a", "b", "c", "", "d"]);
+        assert!(splitlines("").is_empty());
+    }
 
     #[test]
     fn json_like_python() {

@@ -24,10 +24,13 @@ use seimei_core::dispatcher::{self, Dispatcher};
 use seimei_core::events::{Event, EventLog};
 use seimei_core::files::{Files, MAX_MODEL_BYTES};
 use seimei_core::guard::Guard;
+use seimei_core::kitty;
 use seimei_core::metrics::WorkerEvents;
 use seimei_core::push::{self as push_mod, Push};
+use seimei_core::sessions::{self, Live, Watcher};
 use seimei_core::tasks::{self, Board};
 use seimei_core::tools::Tools;
+use seimei_core::transcripts::brief;
 use seimei_core::uploads::Uploads;
 use seimei_core::usage::Usage;
 use seimei_core::util::{now, read_json, write_json};
@@ -74,6 +77,8 @@ pub struct App {
     pub uploads: Arc<Uploads>,
     pub push: Arc<Push>,
     pub pool: Arc<Pool>,
+    /// The user's own sessions, for the page and the dispatcher.
+    pub watcher: Arc<Watcher>,
     usage: Arc<Usage>,
     cost: Arc<Cost>,
     worker_events: Arc<WorkerEvents>,
@@ -140,6 +145,7 @@ impl App {
         let dispatcher =
             Dispatcher::new(disp, events.clone(), state, usage.clone(), approvals.clone(), guard.clone(), tools);
         let _ = pool.dispatcher.set(dispatcher.clone());
+        let watcher = Arc::new(Watcher::new(events.clone(), pool.clone()));
         Ok(App {
             events,
             auth,
@@ -156,6 +162,7 @@ impl App {
             uploads,
             push,
             pool,
+            watcher,
             usage,
             cost,
             worker_events,
@@ -205,7 +212,7 @@ impl App {
     }
 
     fn sessions(&self) -> Value {
-        json!({"type": "sessions", "list": []})
+        self.watcher.snapshot()
     }
 }
 
@@ -298,6 +305,10 @@ pub fn router(app: Arc<App>) -> Router {
             .route("/api/workers/{id}/stop", post(worker_stop))
             .route("/api/workers/{id}/tune", post(worker_tune))
             .route("/api/workers/{id}/archive", post(worker_archive))
+            .route("/api/sessions/{pid}", get(session))
+            .route("/api/sessions/{pid}/send", post(session_send))
+            .route("/api/sessions/{pid}/archive", post(session_archive))
+            .route("/api/sessions/{pid}/answer", post(session_answer))
             .route("/api/push/ws", get(push_ws));
     }
     r.fallback(not_found).layer(middleware::from_fn_with_state(app.clone(), guard)).with_state(app)
@@ -1273,4 +1284,201 @@ async fn worker_archive(State(app): Shared, UrlPath(id): UrlPath<String>, bytes:
         return text(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
     }
     ok(json!({"archived": app.pool.archive.worker(&w.rec())}))
+}
+
+/// Session transcripts hold the typed paths: show them as file chips, like the main chat.
+fn unattach(app: &App, events: &mut Value) {
+    let mark = ATTACHED.trim();
+    for ev in events.as_array_mut().into_iter().flatten() {
+        let Some(said) = ev["text"].as_str().filter(|t| ev["type"] == "user" && t.contains(mark)) else { continue };
+        let (head, paths) = said.split_once(mark).expect("the mark");
+        let infos: Vec<Value> = (paths.lines())
+            .filter(|l| !l.trim().is_empty())
+            .filter_map(|l| {
+                let dir = Path::new(l.trim()).parent()?.file_name()?.to_string_lossy().into_owned();
+                app.uploads.info(&dir)
+            })
+            .map(|i| json!({"id": i["id"], "name": i["name"], "size": i["size"], "kind": i["kind"]}))
+            .collect();
+        ev["text"] = json!(head.trim());
+        if !infos.is_empty() {
+            ev["files"] = json!(infos);
+        }
+    }
+}
+
+/// The paths a session gets for the user's files; the chat shows chips instead.
+fn attachment_lines(app: &App, files: &Value) -> Result<String, Response> {
+    let infos = attached(app, files)?;
+    if infos.is_empty() {
+        return Ok(String::new());
+    }
+    let paths: Vec<&str> = infos.iter().map(|i| i["path"].as_str().unwrap_or("")).collect();
+    Ok(format!("{ATTACHED}{}", paths.join("\n")))
+}
+
+/// One of the user's own sessions (never seimei, a dev seimei or a shikigami), and its transcript.
+async fn user_session(app: &App, pid: &str) -> Result<(Live, Option<PathBuf>), Response> {
+    let missing = || text(StatusCode::NOT_FOUND, "404: Not Found");
+    let pid: i64 = pid.parse().ok().filter(|_| pid.bytes().all(|b| b.is_ascii_digit())).ok_or_else(missing)?;
+    let pool = app.pool.clone();
+    let found = tokio::task::spawn_blocking(move || {
+        let own = pool.own_sessions();
+        let s = sessions::live(&own).into_iter().find(|x| x.pid == pid)?;
+        if !sessions::listing(&own).iter().any(|x| x["pid"] == json!(pid)) {
+            return None;
+        }
+        // A session gets its transcript with its first message.
+        let path = sessions::transcript_of(&s.rec);
+        Some((s, path))
+    })
+    .await;
+    found.ok().flatten().ok_or_else(missing)
+}
+
+/// One of the user's sessions: its row and its timeline (from byte ?from= on, else the latest events).
+async fn session(
+    State(app): Shared,
+    UrlPath(pid): UrlPath<String>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Response {
+    let (sess, path) = match user_session(&app, &pid).await {
+        Ok(found) => found,
+        Err(r) => return r,
+    };
+    let start =
+        q.get("from").filter(|f| !f.is_empty() && f.bytes().all(|b| b.is_ascii_digit())).and_then(|f| f.parse().ok());
+    let info = app.watcher.row(sess.pid).unwrap_or_else(|| {
+        json!({"pid": sess.pid, "name": sess.name, "status": sess.status, "since": sess.since, "active": sess.active,
+            "cwd": sess.cwd, "session_id": sess.session_id})
+    });
+    let (rec, spid) = (sess.rec.clone(), sess.pid);
+    let read = tokio::task::spawn_blocking(move || {
+        let (tl, b) = match &path {
+            Some(p) => (sessions::timeline(p, start, 400), brief(p).map_err(|e| e.to_string())?),
+            None => (json!({"events": [], "next": 0}), json!({"ask": null, "doing": null})),
+        };
+        let ask = if b["ask"].is_null() { sessions::screen_ask(&rec) } else { Some(b["ask"].clone()) };
+        let live = (b["doing"]["tool"] == "Bash")
+            .then(|| json!({"tool_id": b["doing"]["tool_id"], "output": sessions::running_output(spid, 4)}));
+        Ok::<_, String>((tl, b, ask, live, kitty::reachable(spid)))
+    })
+    .await;
+    let (mut tl, b, ask, live, reach) = match read {
+        Ok(Ok(got)) => got,
+        Ok(Err(e)) => return text(StatusCode::INTERNAL_SERVER_ERROR, &e),
+        Err(e) => return text(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    };
+    unattach(&app, &mut tl["events"]);
+    let mut out = json!({"session": info});
+    for (k, v) in tl.as_object().into_iter().flatten() {
+        out[k] = v.clone();
+    }
+    out["ask"] = json!(ask);
+    out["doing"] = b["doing"].clone();
+    out["live"] = json!(live);
+    out["reach"] = json!(reach);
+    ok(out)
+}
+
+/// Hide one of the user's sessions from the list, or bring it back. The session keeps running.
+async fn session_archive(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes: Bytes) -> Response {
+    let (sess, _) = match user_session(&app, &pid).await {
+        Ok(found) => found,
+        Err(r) => return r,
+    };
+    let b = match body(&bytes) {
+        Ok(b) => b,
+        Err(r) => return r,
+    };
+    let on = truthy(&b["archived"]);
+    if let Err(e) = app.watcher.set_archived(&sess.session_id, on) {
+        return text(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
+    }
+    ok(json!({"archived": on}))
+}
+
+/// Type the user's message into the session's own kitty window, on their tap in the app.
+async fn session_send(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes: Bytes) -> Response {
+    let (sess, _) = match user_session(&app, &pid).await {
+        Ok(found) => found,
+        Err(r) => return r,
+    };
+    let b = match body(&bytes) {
+        Ok(b) => b,
+        Err(r) => return r,
+    };
+    let lines = match attachment_lines(&app, &b["files"]) {
+        Ok(l) => l,
+        Err(r) => return r,
+    };
+    let said = format!("{}{lines}", s(&b, "text").trim());
+    if said.trim().is_empty() || said.chars().count() > 20000 {
+        return text(StatusCode::BAD_REQUEST, "text, up to 20000 characters");
+    }
+    match kitty::type_message(sess.pid, said.trim()).await {
+        Ok(()) => ok(json!({"ok": true})),
+        Err(e) => json_status(StatusCode::CONFLICT, json!({"error": e})),
+    }
+}
+
+/// Press an option of the session's open question, or answer it in the user's words.
+async fn session_answer(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes: Bytes) -> Response {
+    let (sess, path) = match user_session(&app, &pid).await {
+        Ok(found) => found,
+        Err(r) => return r,
+    };
+    let b = match body(&bytes) {
+        Ok(b) => b,
+        Err(r) => return r,
+    };
+    let rec = sess.rec.clone();
+    let ask = tokio::task::spawn_blocking(move || {
+        let ask = path.and_then(|p| brief(&p).ok()).map(|b| b["ask"].clone()).filter(|a| !a.is_null());
+        ask.or_else(|| {
+            // Read the screen fresh: the cached one may predate this question.
+            sessions::forget_screen(rec["pid"].as_i64().unwrap_or(0));
+            sessions::screen_ask(&rec)
+        })
+    })
+    .await
+    .ok()
+    .flatten();
+    let Some(ask) = ask.filter(|a| a["tool_id"] == b["tool_id"]) else {
+        return json_status(StatusCode::CONFLICT, json!({"error": "That question was already answered."}));
+    };
+    if !truthy(&ask["answerable"]) {
+        return json_status(StatusCode::CONFLICT, json!({"error": "Answer this one on the server."}));
+    }
+    let q = &ask["questions"][0];
+    let question = s(q, "question");
+    let options: Vec<String> =
+        q["options"].as_array().into_iter().flatten().filter(|o| o.is_object()).map(|o| s(o, "label")).collect();
+    let done = if b.get("text").is_some() {
+        let lines = match attachment_lines(&app, &b["files"]) {
+            Ok(l) => l,
+            Err(r) => return r,
+        };
+        let said = format!("{}{lines}", s(&b, "text").trim());
+        if said.trim().is_empty() {
+            return text(StatusCode::BAD_REQUEST, "text");
+        }
+        let other = ask["other"].as_i64().filter(|&o| o != 0).unwrap_or(options.len() as i64 + 1);
+        kitty::answer_text(sess.pid, &question, other, said.trim()).await
+    } else {
+        let n = match &b["option"] {
+            Value::Null => Some(0),
+            Value::Number(n) => n.as_i64(),
+            Value::String(x) => x.trim().parse().ok(),
+            _ => None,
+        };
+        let Some(n) = n.filter(|&n| n >= 1 && n <= options.len() as i64) else {
+            return text(StatusCode::BAD_REQUEST, "option");
+        };
+        kitty::answer(sess.pid, &question, n, &options[n as usize - 1]).await
+    };
+    match done {
+        Ok(()) => ok(json!({"ok": true})),
+        Err(e) => json_status(StatusCode::CONFLICT, json!({"error": e})),
+    }
 }

@@ -85,13 +85,19 @@ fn votes(inp: &Value) -> Vec<String> {
 
 /// The user and assistant rows of the main thread from byte `start` on (a start mid-line skips to the next line).
 fn rows(path: &Path, start: u64) -> Vec<Value> {
-    let Ok(data) = read_from(path, start) else { return vec![] };
+    rows_from(path, start).0
+}
+
+/// Whole transcript rows (user and assistant, no sidechains or compaction summaries) from byte start on (a start
+/// mid-line skips to the next line), and where they end.
+pub(crate) fn rows_from(path: &Path, start: u64) -> (Vec<Value>, u64) {
+    let Ok(data) = read_from(path, start) else { return (vec![], start) };
     let end = data.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
     let mut lines: Vec<&[u8]> = data[..end].split(|&b| b == b'\n').collect();
     if start > 0 && !data.starts_with(b"{") && !lines.is_empty() {
         lines.remove(0);
     }
-    lines
+    let rows = lines
         .into_iter()
         .filter_map(|l| serde_json::from_slice::<Value>(l).ok())
         .filter(|r| {
@@ -99,10 +105,11 @@ fn rows(path: &Path, start: u64) -> Vec<Value> {
                 && r["isSidechain"] != true
                 && r["isCompactSummary"] != true
         })
-        .collect()
+        .collect();
+    (rows, start + end as u64)
 }
 
-fn time_of(row: &Value) -> f64 {
+pub(crate) fn time_of(row: &Value) -> f64 {
     let s = row["timestamp"].as_str().unwrap_or("");
     chrono::NaiveDateTime::parse_from_str(s.get(..19).unwrap_or(""), "%Y-%m-%dT%H:%M:%S")
         .map_or(0.0, |t| t.and_utc().timestamp() as f64)
@@ -123,7 +130,7 @@ pub fn text_of(content: &Value) -> String {
 }
 
 /// One line saying what a tool call does.
-fn summary(inp: &Value) -> String {
+pub(crate) fn summary(inp: &Value) -> String {
     let first = |s: &str| s.trim().lines().next().unwrap_or("").chars().take(200).collect::<String>();
     if let Some(q) = inp["questions"][0]["question"].as_str().filter(|q| !q.is_empty()) {
         return first(q);
@@ -133,10 +140,10 @@ fn summary(inp: &Value) -> String {
             return first(v);
         }
     }
-    inp.to_string().chars().take(200).collect()
+    crate::util::py_json(inp).chars().take(200).collect()
 }
 
-fn question(inp: &Value) -> Value {
+pub(crate) fn question(inp: &Value) -> Value {
     let qs: Vec<&Value> = inp["questions"].as_array().into_iter().flatten().filter(|q| q.is_object()).collect();
     json!({"questions": qs, "answerable": qs.len() == 1 && qs[0]["multiSelect"] != true})
 }

@@ -1,0 +1,563 @@
+{
+ "about": "Claude Code screens and what seimei reads from them before it types into a session (seimei/kitty.py, crates/core/src/kitty.rs); generated from Python.",
+ "screens": [
+  {
+   "name": "fake idle",
+   "screen": "\n────────────────────────────────────────\n> \n────────────────────────────────────────\n  ? for shortcuts",
+   "dialog": false,
+   "survey": false,
+   "draft": "",
+   "question": null,
+   "permission": null
+  },
+  {
+   "name": "idle",
+   "screen": "● Done. The build passes.\n\n────────────────────────────────────────────────────────────\n❯ \n────────────────────────────────────────────────────────────\n  ? for shortcuts",
+   "dialog": false,
+   "survey": false,
+   "draft": "",
+   "question": null,
+   "permission": null
+  },
+  {
+   "name": "draft",
+   "screen": "● Done.\n────────────────────────────────────────────────────────────\n❯ fix the build please\n────────────────────────────────────────────────────────────\n  ? for shortcuts",
+   "dialog": false,
+   "survey": false,
+   "draft": "fix the build please",
+   "question": null,
+   "permission": null
+  },
+  {
+   "name": "draft two rows",
+   "screen": "● Done.\n────────────────────────────────────────────────────────────\n❯ first line of it\n  and the second row\n────────────────────────────────────────────────────────────\n  ? for shortcuts",
+   "dialog": false,
+   "survey": false,
+   "draft": "first line of it and the second row",
+   "question": null,
+   "permission": null
+  },
+  {
+   "name": "faint 2m",
+   "screen": "● Done.\n────────────────────────────────────────────────────────────\n❯ \u001b[2mTry \"refactor foo\"\u001b[22m\n────────────────────────────────────────────────────────────\n  ? for shortcuts",
+   "dialog": false,
+   "survey": false,
+   "draft": "",
+   "question": null,
+   "permission": null
+  },
+  {
+   "name": "faint 90",
+   "screen": "● Done.\n────────────────────────────────────────────────────────────\n❯ \u001b[90mTry \"write a test\"\u001b[39m\n────────────────────────────────────────────────────────────\n  ? for shortcuts",
+   "dialog": false,
+   "survey": false,
+   "draft": "",
+   "question": null,
+   "permission": null
+  },
+  {
+   "name": "faint 38;5;8",
+   "screen": "● Done.\n────────────────────────────────────────────────────────────\n❯ \u001b[38;5;8mTry something\u001b[0m\n────────────────────────────────────────────────────────────\n  ? for shortcuts",
+   "dialog": false,
+   "survey": false,
+   "draft": "",
+   "question": null,
+   "permission": null
+  },
+  {
+   "name": "faint 38;5;244",
+   "screen": "● Done.\n────────────────────────────────────────────────────────────\n❯ \u001b[38;5;244mTry something\u001b[0m\n────────────────────────────────────────────────────────────\n  ? for shortcuts",
+   "dialog": false,
+   "survey": false,
+   "draft": "",
+   "question": null,
+   "permission": null
+  },
+  {
+   "name": "not faint 38;5;250",
+   "screen": "● Done.\n────────────────────────────────────────────────────────────\n❯ \u001b[38;5;250mreal words\u001b[0m\n────────────────────────────────────────────────────────────\n  ? for shortcuts",
+   "dialog": false,
+   "survey": false,
+   "draft": "real words",
+   "question": null,
+   "permission": null
+  },
+  {
+   "name": "typed then faint",
+   "screen": "● Done.\n────────────────────────────────────────────────────────────\n❯ hello\u001b[2m world hint\u001b[22m\n────────────────────────────────────────────────────────────\n  ? for shortcuts",
+   "dialog": false,
+   "survey": false,
+   "draft": "hello",
+   "question": null,
+   "permission": null
+  },
+  {
+   "name": "faint then typed",
+   "screen": "● Done.\n────────────────────────────────────────────────────────────\n❯ \u001b[2mhint\u001b[0m typed after\n────────────────────────────────────────────────────────────\n  ? for shortcuts",
+   "dialog": false,
+   "survey": false,
+   "draft": "typed after",
+   "question": null,
+   "permission": null
+  },
+  {
+   "name": "colon codes",
+   "screen": "● Done.\n────────────────────────────────────────────────────────────\n❯ \u001b[38:5:8mhint\u001b[m\n────────────────────────────────────────────────────────────\n  ? for shortcuts",
+   "dialog": false,
+   "survey": false,
+   "draft": "",
+   "question": null,
+   "permission": null
+  },
+  {
+   "name": "survey",
+   "screen": "● Done.\n\n● How is Claude doing this session? (optional)\n  1: Bad    2: Fine   3: Good   0: Dismiss\n────────────────────────────────────────────────────────────\n❯ \n────────────────────────────────────────────────────────────\n  ? for shortcuts",
+   "dialog": false,
+   "survey": true,
+   "draft": "",
+   "question": null,
+   "permission": null
+  },
+  {
+   "name": "bash prompt",
+   "screen": "● I will create the file.\n────────────────────────────────────────────────────────────\n Bash command\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n   touch /tmp/x\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n   Create a file\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. Yes, and don't ask again for touch commands\n   3. No, and tell Claude what to do differently (esc)\n\n Esc to cancel",
+   "dialog": true,
+   "survey": false,
+   "draft": "",
+   "question": null,
+   "permission": "Bash command: touch /tmp/x"
+  },
+  {
+   "name": "bash prompt no box",
+   "screen": "● Run it.\n────────────────────────────────────────────────────────────\n Bash command\n\n   ls -la /home\n   List the folder\n\n Tip: you can say no\n Do you want to proceed?\n ❯ 1. Yes\n   2. No",
+   "dialog": true,
+   "survey": false,
+   "draft": "",
+   "question": null,
+   "permission": "Bash command: ls -la /home List the folder"
+  },
+  {
+   "name": "edit prompt",
+   "screen": "● Edit.\n────────────────────────────────────────────────────────────\n Edit file\n src/main.rs\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n  1 -old line\n  1 +new line\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n Do you want to make this edit to main.rs?\n ❯ 1. Yes\n   2. Yes, allow all edits during this session\n   3. No",
+   "dialog": true,
+   "survey": false,
+   "draft": "",
+   "question": null,
+   "permission": "Edit file: src/main.rs"
+  },
+  {
+   "name": "create prompt",
+   "screen": "● New file.\n────────────────────────────────────────────────────────────\n Create file\n notes/todo.md\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n  hello\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n Do you want to create todo.md?\n ❯ 1. Yes\n   2. No",
+   "dialog": true,
+   "survey": false,
+   "draft": "",
+   "question": null,
+   "permission": "Create file: notes/todo.md"
+  },
+  {
+   "name": "question",
+   "screen": "● Let me ask.\n────────────────────────────────────────────────────────────\n ☐ Approach\n\n Which approach should we take?\n\n \u001b[36m❯ 1. Rewrite\u001b[39m\n      Start over from scratch\n   2. Patch\n      Keep the old code\n      and fix bugs\n   3. C++ (fast) [x]\n   4. Type something.\n\n Enter to select · ↑/↓ to navigate · Esc to cancel",
+   "dialog": true,
+   "survey": false,
+   "draft": "",
+   "question": {
+    "since": null,
+    "answerable": true,
+    "other": 4,
+    "questions": [
+     {
+      "question": "Which approach should we take?",
+      "header": "Approach",
+      "multiSelect": false,
+      "options": [
+       {
+        "label": "Rewrite",
+        "description": "Start over from scratch"
+       },
+       {
+        "label": "Patch",
+        "description": "Keep the old code and fix bugs"
+       },
+       {
+        "label": "C++ (fast) [x]",
+        "description": ""
+       }
+      ]
+     }
+    ]
+   },
+   "permission": null
+  },
+  {
+   "name": "question two rows",
+   "screen": "────────────────────────────────────────────────────────────\n ✔ Plan\n Should I go on with the plan as\n written above?\n ❯ 1. Yes\n   2. No\n Enter to select · ↑/↓ to navigate · Esc to cancel",
+   "dialog": true,
+   "survey": false,
+   "draft": "",
+   "question": {
+    "since": null,
+    "answerable": true,
+    "other": null,
+    "questions": [
+     {
+      "question": "Should I go on with the plan as written above?",
+      "header": "Plan",
+      "multiSelect": false,
+      "options": [
+       {
+        "label": "Yes",
+        "description": ""
+       },
+       {
+        "label": "No",
+        "description": ""
+       }
+      ]
+     }
+    ]
+   },
+   "permission": null
+  },
+  {
+   "name": "question no options",
+   "screen": "────────────────────────────────────────────────────────────\n ☐ Empty\n A question without options\n Enter to select · ↑/↓ to navigate · Esc to cancel",
+   "dialog": true,
+   "survey": false,
+   "draft": "",
+   "question": null,
+   "permission": null
+  },
+  {
+   "name": "question hint far up",
+   "screen": "────────────────────────────────────────────────────────────\n ☐ Far\n Pick one\n ❯ 1. A\n Enter to select · ↑/↓ to navigate\n   2. B\n   3. C\n   4. D\n   5. E",
+   "dialog": true,
+   "survey": false,
+   "draft": "",
+   "question": null,
+   "permission": null
+  },
+  {
+   "name": "lone cr",
+   "screen": "● Done.\nprogress 10%\rprogress 100%\n────────────────────────────────────────────────────────────\n❯ \rtyped\n────────────────────────────────────────────────────────────\n  ? for shortcuts",
+   "dialog": false,
+   "survey": false,
+   "draft": "typed",
+   "question": null,
+   "permission": null
+  },
+  {
+   "name": "cr in question",
+   "screen": "────────────────────────────────────────────────────────────\n ☐ Head\n Pick\r one\n ❯ 1. A\r\n   2. B\n Enter to select · ↑/↓ to navigate · Esc to cancel",
+   "dialog": true,
+   "survey": false,
+   "draft": "",
+   "question": {
+    "since": null,
+    "answerable": true,
+    "other": null,
+    "questions": [
+     {
+      "question": "Pick one",
+      "header": "Head",
+      "multiSelect": false,
+      "options": [
+       {
+        "label": "A",
+        "description": ""
+       },
+       {
+        "label": "B",
+        "description": ""
+       }
+      ]
+     }
+    ]
+   },
+   "permission": null
+  },
+  {
+   "name": "dialog scrolled away",
+   "screen": " Do you want to proceed?\nline 0\nline 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nline 13\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\nline 20\nline 21\nline 22\nline 23\nline 24\nline 25\nline 26\nline 27\nline 28\nline 29\nline 30\nline 31\nline 32\nline 33\nline 34\nline 35\nline 36\nline 37\nline 38\nline 39\n────────────────────────────────────────────────────────────\n❯ \n────────────────────────────────────────────────────────────",
+   "dialog": false,
+   "survey": false,
+   "draft": "",
+   "question": null,
+   "permission": null
+  },
+  {
+   "name": "dialog in view",
+   "screen": " Esc to cancel\nline 0\nline 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nline 13\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\n────────────────────────────────────────────────────────────\n❯ \n────────────────────────────────────────────────────────────",
+   "dialog": true,
+   "survey": false,
+   "draft": "",
+   "question": null,
+   "permission": null
+  },
+  {
+   "name": "blank rows",
+   "screen": "● Done.\n\n\n   \n────────────────────────────────────────────────────────────\n\n❯ hi\n\n────────────────────────────────────────────────────────────\n\n  ? for shortcuts\n\n",
+   "dialog": false,
+   "survey": false,
+   "draft": "hi",
+   "question": null,
+   "permission": null
+  },
+  {
+   "name": "osc and charset",
+   "screen": "\u001b]0;title\u0007● Done.\n────────────────────────────────────────────────────────────\n\u001b(B❯ \u001b[1mbold words\u001b[22m\n────────────────────────────────────────────────────────────",
+   "dialog": false,
+   "survey": false,
+   "draft": "bold words",
+   "question": null,
+   "permission": null
+  },
+  {
+   "name": "empty",
+   "screen": "",
+   "dialog": false,
+   "survey": false,
+   "draft": "",
+   "question": null,
+   "permission": null
+  },
+  {
+   "name": "cc faint",
+   "screen": "\u001b[m\u001b[37m──────────────────────────────────────── Claude -p ─\n\u001b[m❯ \u001b[22;2mTry \"fix lint errors\"\n\u001b[m\u001b[37m────────────────────────────────────────\n\u001b[m  \u001b[37mHaiku 5.5\n\n\n",
+   "dialog": false,
+   "survey": false,
+   "draft": "",
+   "question": null,
+   "permission": null
+  },
+  {
+   "name": "cc typed",
+   "screen": "\u001b[m\u001b[37m──────────────────────────────────────── Claude -p ─\n\u001b[m❯ half typed\n\u001b[m\u001b[37m────────────────────────────────────────\n\u001b[m  \u001b[37mHaiku 5.5\n\n\n",
+   "dialog": false,
+   "survey": false,
+   "draft": "half typed",
+   "question": null,
+   "permission": null
+  },
+  {
+   "name": "cc empty",
+   "screen": "\u001b[m\u001b[37m──────────────────────────────────────── Claude -p ─\n\u001b[m❯ \n\u001b[m\u001b[37m────────────────────────────────────────\n\u001b[m  \u001b[37mHaiku 5.5\n\n\n",
+   "dialog": false,
+   "survey": false,
+   "draft": "",
+   "question": null,
+   "permission": null
+  },
+  {
+   "name": "cc survey",
+   "screen": "● How is Claude doing this session? (optional)\n  1: Bad    2: Fine   3: Good   0: Dismiss\n\u001b[m\u001b[37m──────────────────────────────────────── Claude -p ─\n\u001b[m❯ \n\u001b[m\u001b[37m────────────────────────────────────────\n\u001b[m  \u001b[37mHaiku 5.5\n\n\n",
+   "dialog": false,
+   "survey": true,
+   "draft": "",
+   "question": null,
+   "permission": null
+  },
+  {
+   "name": "cc question",
+   "screen": " ☐ Fruit \nWhich fruit do you want?\n❯ 1. Apple\n     Apple\n  2. Pear\n     Pear\n  3. Type something.\n────────────────────────────────────────\n  4. Chat about this\nEnter to select · ↑/↓ to navigate · Esc to cancel\n\n\n\n──────────────────────────────────────── Claude -p ─\n\n\n",
+   "dialog": true,
+   "survey": false,
+   "draft": "",
+   "question": {
+    "since": null,
+    "answerable": true,
+    "other": 3,
+    "questions": [
+     {
+      "question": "Which fruit do you want?",
+      "header": "Fruit",
+      "multiSelect": false,
+      "options": [
+       {
+        "label": "Apple",
+        "description": "Apple"
+       },
+       {
+        "label": "Pear",
+        "description": "Pear"
+       }
+      ]
+     }
+    ]
+   },
+   "permission": null
+  },
+  {
+   "name": "cc stale question",
+   "screen": "Which fruit do you want?\n  2. Pear\n\u001b[m\u001b[37m──────────────────────────────────────── Claude -p ─\n\u001b[m❯ \n\u001b[m\u001b[37m────────────────────────────────────────\n\u001b[m  \u001b[37mHaiku 5.5\n\n\n",
+   "dialog": false,
+   "survey": false,
+   "draft": "",
+   "question": null,
+   "permission": null
+  },
+  {
+   "name": "cc permission",
+   "screen": "Do you want to proceed?\n❯ 1. Yes\n  2. No\nEsc to cancel\n\u001b[m\u001b[37m──────────────────────────────────────── Claude -p ─\n\u001b[m❯ \n\u001b[m\u001b[37m────────────────────────────────────────\n\u001b[m  \u001b[37mHaiku 5.5\n\n\n",
+   "dialog": true,
+   "survey": false,
+   "draft": "",
+   "question": null,
+   "permission": "Haiku 5.5"
+  },
+  {
+   "name": "cc multi-question",
+   "screen": "←  ☐ Toppings  ✔ Submit  →\nWhich fruit do you want?\n❯ 1. Apple\n     Apple\n  2. Pear\n     Pear\n  3. Type something.\n────────────────────────────────────────\n  4. Chat about this\nEnter to select · ↑/↓ to navigate · Esc to cancel\n\n\n\n──────────────────────────────────────── Claude -p ─\n\n\n",
+   "dialog": true,
+   "survey": false,
+   "draft": "",
+   "question": null,
+   "permission": null
+  },
+  {
+   "name": "captured perm-bash",
+   "screen": " ▐▛███▛█   Claude Code v2.1.296\n▝▜██████▀  Haiku 5.5 · Claude Max\n ▝▝   ▝▝   ~/.claude/jobs/da57169b/tmp/kt/work\n❯ Run this exact Bash command: touch /tmp/permtest-sessev             \n● Creating empty file /tmp/permtest-sessev\n  ⎿  $ touch /tmp/permtest-sessev\n──────────────────────────────────────────────────────────────────────\n Bash command\n Tip: auto mode handles these prompts for you — choose \"switch to \n auto mode\" below\n Create empty file /tmp/permtest-sessev\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n touch /tmp/permtest-sessev\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n Do you want to proceed?\n ❯ 1. Yes\n   2. Yes, and always allow access to /tmp from this project\n   3. Yes, and switch to auto mode · auto mode handles these prompts \n      for you\n   4. No\n Esc to cancel · Tab to amend\n",
+   "dialog": true,
+   "survey": false,
+   "draft": "",
+   "question": null,
+   "permission": "Bash command: touch /tmp/permtest-sessev"
+  },
+  {
+   "name": "captured perm-write",
+   "screen": " ▐▛███▛█   Claude Code v2.1.296\n▝▜██████▀  Haiku 5.5 · Claude Max\n ▝▝   ▝▝   ~/.claude/jobs/da57169b/tmp/kt/work\n❯ Run this exact Bash command: touch /tmp/permtest-sessev             \n  Ran 1 shell command \n  ⎿  Interrupted · What should Claude do instead?\n✻ Cogitated for 1s · done 20:35Z\n❯ Use the Write tool to create                                        \n  /home/me/work/perm-note.txt containing                           \n  the single word hi.                                                 \n● Write(perm-note.txt)\n──────────────────────────────────────────────────────────────────────\n Create file\n perm-note.txt\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n  1 hi\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n Do you want to create perm-note.txt?\n ❯ 1. Yes\n   2. Yes, and allow Claude to edit files in its ~/.claude folder for\n      this session\n   3. No\n Esc to cancel · Tab to amend\n",
+   "dialog": true,
+   "survey": false,
+   "draft": "",
+   "question": null,
+   "permission": "Create file: perm-note.txt"
+  }
+ ],
+ "visible": [
+  {
+   "screen": "question",
+   "question": "Which approach should we take?",
+   "n": 1,
+   "label": "Rewrite",
+   "visible": true
+  },
+  {
+   "screen": "question",
+   "question": "Which approach should we take?",
+   "n": 2,
+   "label": "Rewrite",
+   "visible": false
+  },
+  {
+   "screen": "question",
+   "question": "Which approach should we take?",
+   "n": 2,
+   "label": "Patch",
+   "visible": true
+  },
+  {
+   "screen": "question",
+   "question": "Which approach should we take?",
+   "n": 3,
+   "label": "C++ (fast) [x]",
+   "visible": true
+  },
+  {
+   "screen": "question",
+   "question": "Which approach should we take?",
+   "n": 4,
+   "label": "Type something",
+   "visible": true
+  },
+  {
+   "screen": "question",
+   "question": "Which   approach\nshould we take?",
+   "n": 1,
+   "label": "Rewrite",
+   "visible": true
+  },
+  {
+   "screen": "question",
+   "question": "Some other question",
+   "n": 1,
+   "label": "Rewrite",
+   "visible": false
+  },
+  {
+   "screen": "question two rows",
+   "question": "Should I go on with the plan as written above?",
+   "n": 1,
+   "label": "Yes",
+   "visible": true
+  },
+  {
+   "screen": "question two rows",
+   "question": "Should I go on",
+   "n": 2,
+   "label": "No",
+   "visible": true
+  },
+  {
+   "screen": "idle",
+   "question": "Which approach should we take?",
+   "n": 1,
+   "label": "Rewrite",
+   "visible": false
+  },
+  {
+   "screen": "cr in question",
+   "question": "Pick one",
+   "n": 1,
+   "label": "A",
+   "visible": true
+  },
+  {
+   "screen": "cc question",
+   "question": "Which fruit do you want?",
+   "n": 2,
+   "label": "Pear",
+   "visible": true
+  },
+  {
+   "screen": "cc question",
+   "question": "Which fruit do you want?",
+   "n": 2,
+   "label": "Apple",
+   "visible": false
+  },
+  {
+   "screen": "cc question",
+   "question": "Which drink?",
+   "n": 2,
+   "label": "Pear",
+   "visible": false
+  },
+  {
+   "screen": "cc question",
+   "question": "Which fruit do you want?",
+   "n": 3,
+   "label": "Type something",
+   "visible": true
+  },
+  {
+   "screen": "cc stale question",
+   "question": "Which fruit do you want?",
+   "n": 2,
+   "label": "Pear",
+   "visible": false
+  },
+  {
+   "screen": "cc permission",
+   "question": "Do you want to proceed?",
+   "n": 1,
+   "label": "Yes",
+   "visible": false
+  },
+  {
+   "screen": "cc multi-question",
+   "question": "Which fruit do you want?",
+   "n": 2,
+   "label": "Pear",
+   "visible": false
+  }
+ ]
+}

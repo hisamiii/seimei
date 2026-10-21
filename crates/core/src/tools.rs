@@ -15,11 +15,12 @@ use crate::files::{Files, MAX_BYTES};
 use crate::metrics::WorkerEvents;
 use crate::paths::home;
 use crate::push::Push;
+use crate::sessions::{self, Live};
 use crate::tasks::Board;
-use crate::transcripts::transcript;
+use crate::transcripts::{project_of, transcript};
 use crate::uploads::Uploads;
 use crate::usage::Usage;
-use crate::util::{chars, now};
+use crate::util::{chars, now, py_repr};
 use crate::workers::{ACTIVE, CONTEXTS, EFFORTS, MODELS, Pool, Summon, Worker};
 
 static SERVER: LazyLock<Value> =
@@ -170,8 +171,8 @@ fn repo_of(path: &str) -> String {
     }
 }
 
-/// A heads-up when someone else already works in the new worker's checkout: an active shikigami there. Home is no
-/// checkout, so a worker in ~ gets none. (The user's busy sessions there join this with the sessions watcher.)
+/// A heads-up when someone else already works in the new worker's checkout: an active shikigami there, or a busy
+/// session of the user's in that project. Home is no checkout, so a worker in ~ gets none.
 fn writers(pool: &Pool, w: &Worker) -> Option<String> {
     let home = home().display().to_string();
     let cwd = w.get("cwd").as_str().unwrap_or("").to_string();
@@ -179,7 +180,7 @@ fn writers(pool: &Pool, w: &Worker) -> Option<String> {
         return None;
     }
     let root = repo_of(&cwd);
-    let busy: Vec<String> = (pool.all().iter())
+    let mut busy: Vec<String> = (pool.all().iter())
         .filter(|x| x.id != w.id)
         .map(|x| x.rec())
         .filter(|x| {
@@ -188,6 +189,17 @@ fn writers(pool: &Pool, w: &Worker) -> Option<String> {
         })
         .map(|x| format!("{} (shikigami, {})", x["name"].as_str().unwrap_or(""), x["state"].as_str().unwrap_or("")))
         .collect();
+    let project = project_of(&format!("{root}/x"));
+    busy.extend(
+        sessions::listing(&pool.own_sessions())
+            .iter()
+            .filter(|s| {
+                let sc = s["cwd"].as_str().unwrap_or("");
+                let same = project.is_some() && s["project"].as_str() == project.as_deref();
+                s["status"] == "busy" && (sc == root || sc.starts_with(&format!("{root}/")) || same)
+            })
+            .map(|s| format!("{} (the user's session, busy)", s["name"].as_str().unwrap_or(""))),
+    );
     if busy.is_empty() {
         return None;
     }
@@ -200,6 +212,13 @@ fn writers(pool: &Pool, w: &Worker) -> Option<String> {
         if busy.len() == 1 { "works" } else { "work" },
         w.name()
     ))
+}
+
+/// Where SendMessage reaches a session, whatever its name.
+fn address(s: &Live) -> String {
+    let sock = s.rec["messagingSocketPath"].as_str().filter(|p| !p.is_empty()).map(String::from);
+    let uid = unsafe { libc::getuid() };
+    format!("uds:{}", sock.unwrap_or_else(|| format!("/run/user/{uid}/cc-socks/{}.sock", s.pid)))
 }
 
 impl Tools {
@@ -409,11 +428,140 @@ impl Tools {
                     .collect();
                 text(&lines.join("\n"), false)
             }
+            "sessions" => {
+                let rows = sessions::live(&self.pool.own_sessions());
+                if rows.is_empty() {
+                    return text("No running sessions.", false);
+                }
+                let home = home().display().to_string();
+                let lines: Vec<String> = (rows.iter())
+                    .map(|s| {
+                        let head = match self.pool.aliases.of(s) {
+                            Some(a) => format!("{a} = \"{}\" [pid {}, to {}]", s.name, s.pid, address(s)),
+                            None => format!("{} [pid {}]", s.name, s.pid),
+                        };
+                        format!(
+                            "{head}: {} since {}, last activity {}, {}, in {}",
+                            s.status,
+                            sessions::ago(s.since),
+                            sessions::ago(s.active),
+                            s.kind,
+                            s.cwd.replacen(&home, "~", 1)
+                        )
+                    })
+                    .collect();
+                text(&lines.join("\n"), false)
+            }
+            "alias" => self.alias(a),
+            "session_peek" => self.session_peek(a),
             _ if SERVER["tools"].as_array().into_iter().flatten().any(|t| t["name"] == name) => {
                 text(&format!("{name} is not in the Rust server yet."), true)
             }
             _ => text(&format!("Tool '{name}' not found"), true),
         }
+    }
+
+    /// Name a session, drop a name, or list the names.
+    fn alias(&self, a: &Value) -> Value {
+        static NAME: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"^[\w.-]{1,32}$").unwrap());
+        let (name, key) = (arg(a, "alias").trim().to_string(), arg(a, "session").trim().to_string());
+        let aliases = &self.pool.aliases;
+        let own = self.pool.own_sessions();
+        let rows = sessions::live(&own);
+        if key.is_empty() && name.is_empty() {
+            let all = aliases.all();
+            if all.is_empty() {
+                return text("No aliases yet.", false);
+            }
+            let lines: Vec<String> = (all.iter())
+                .map(|al| match aliases.resolve(al, &rows) {
+                    Some(s) => format!("{al} = \"{}\" [pid {}, to {}]", s.name, s.pid, address(s)),
+                    None => format!("{al} = (not running)"),
+                })
+                .collect();
+            return text(&lines.join("\n"), false);
+        }
+        if key.is_empty() {
+            let said = if aliases.remove(&name) { format!("Removed {name}.") } else { format!("No alias {name}.") };
+            return text(&said, false);
+        }
+        let Some(s) = sessions::find(&key, &own, Some(aliases)) else {
+            return text(&format!("No single running session matches {}.", py_repr(&key)), true);
+        };
+        if name.is_empty() {
+            return match aliases.of(&s) {
+                Some(al) if aliases.remove(&al) => text(&format!("Removed {al}."), false),
+                _ => text(&format!("{} has no alias.", s.name), false),
+            };
+        }
+        if !NAME.is_match(&name) {
+            return text("An alias is up to 32 letters, digits, dots, dashes or underscores.", true);
+        }
+        aliases.set(&name, &s);
+        text(&format!("{name} = \"{}\" [pid {}], SendMessage to {}.", s.name, s.pid, address(&s)), false)
+    }
+
+    /// A running session's last messages, open question and running calls.
+    fn session_peek(&self, a: &Value) -> Value {
+        let own = self.pool.own_sessions();
+        let Some(s) = sessions::find(&arg(a, "session"), &own, Some(&self.pool.aliases)) else {
+            let names: Vec<String> = sessions::live(&own).into_iter().map(|x| x.name).collect();
+            return text(&format!("No single running session matches. Running: {}", names.join(", ")), true);
+        };
+        let Some(path) = sessions::transcript_of(&s.rec) else {
+            return text(&format!("{} has no transcript yet.", s.name), false);
+        };
+        let count = a.get("count").map_or(Some(3), |c| c.as_i64().or_else(|| arg(a, "count").trim().parse().ok()));
+        let Some(count) = count else { return text("count is a number", true) };
+        let p = sessions::peek(&path, count.clamp(1, 20) as usize);
+        let py = |v: &Value| match v {
+            Value::String(x) => x.clone(),
+            Value::Null => "None".into(),
+            v => v.to_string(),
+        };
+        let ts = |v: &Value| chars(v.as_str().unwrap_or(""), 19);
+        let mut lines = vec![format!(
+            "{} [pid {}, {}]: {} since {}, last activity {}, in {}; SendMessage to {}",
+            s.name,
+            s.pid,
+            s.kind,
+            s.status,
+            sessions::ago(s.since),
+            sessions::ago(s.active),
+            s.cwd,
+            address(&s)
+        )];
+        for q in p["questions"].as_array().into_iter().flatten() {
+            lines.push(format!(
+                "\nOPEN AskUserQuestion (asked {}Z), waiting for an answer in the terminal:",
+                ts(&q["asked"])
+            ));
+            for item in q["questions"].as_array().into_iter().flatten() {
+                let multi = if item["multiSelect"].as_bool().unwrap_or(false) { " (multi-select)" } else { "" };
+                lines.push(format!("- {}{multi}", py(&item["question"])));
+                for (i, o) in item["options"].as_array().into_iter().flatten().enumerate() {
+                    let d = if o.get("description").is_some() { py(&o["description"]) } else { String::new() };
+                    lines.push(format!("    {}. {}: {d}", i + 1, py(&o["label"])));
+                }
+            }
+        }
+        for c in p["open_calls"].as_array().into_iter().flatten() {
+            lines.push(format!("\nStill running: {} since {}Z: {}", py(&c["tool"]), ts(&c["since"]), py(&c["what"])));
+        }
+        let mut merged: Vec<(String, &str, String)> = vec![];
+        for who in ["user", "assistant"] {
+            for m in p[who].as_array().into_iter().flatten() {
+                merged.push((py(&m[0]), who, py(&m[1])));
+            }
+        }
+        merged.sort();
+        let mut recent: Vec<String> = (merged.iter())
+            .map(|(t, who, x)| format!("[{who} {}] {x}", t.chars().skip(11).take(8).collect::<String>()))
+            .collect();
+        if let Some(first) = recent.first_mut() {
+            *first = format!("\nRecent messages, oldest first:\n{first}");
+        }
+        text(&capped(&lines.join("\n"), &recent, &format!("the transcript: {}", path.display())), false)
     }
 
     /// Shikigami from the last day, the archived ones, or every one's task metrics.

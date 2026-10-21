@@ -243,6 +243,7 @@ fn main() {
         tokio::spawn(deploy_note(state.clone(), app.dispatcher.clone()));
         tokio::spawn(app.dispatcher.clone().run());
         tokio::spawn(app.pool.clone().sweep());
+        tokio::spawn(app.watcher.clone().run());
         // `systemctl --user kill -s USR1 seimei` from a key binding: end the turn.
         let (ev, d) = (events.clone(), app.dispatcher.clone());
         tokio::spawn(async move {

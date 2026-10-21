@@ -357,6 +357,12 @@ async def dispatcher(self: Fake, text: str, images: int):
                        ("photo.jpg", "photo with a caption that is fairly long and descriptive")):
             await self.tool("mcp__seimei__show_image", {"path": str(QA / "img" / f), **({"caption": cap} if cap else {})})
         await self.say("Here they are.")
+    elif t == "call":
+        # !call <tool> <json>: one call to a seimei tool, its result as the reply (diffing the tools across servers).
+        line = next(ln for ln in text.splitlines() if ln.startswith("!"))
+        _, name, *rest = line.split(" ", 2)
+        error, out = await self.tool(f"mcp__seimei__{name}", json.loads(rest[0]) if rest else {})
+        await self.say(("ERROR " if error else "") + out)
     elif t == "file":
         for f in ("notes.txt", "photo.jpg"):
             await self.tool("mcp__seimei__send_file", {"path": str(QA / "img" / f), "caption": "here you go"})
