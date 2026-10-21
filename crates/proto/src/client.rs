@@ -151,7 +151,12 @@ impl Client {
             .stderr(Stdio::inherit())
             .kill_on_drop(true)
             // Its own process group: a stop reaches the tools it runs (Bash commands are its children).
-            .process_group(0)
+            .process_group(0);
+        // A parent session's variables go first, so the fixed ones below always hold.
+        for k in &opts.env_remove {
+            cmd.env_remove(k);
+        }
+        cmd
             // Bill the user's subscription login, never an API key that happens to be in the environment.
             .env_remove("ANTHROPIC_API_KEY")
             .env_remove("CLAUDECODE")
@@ -159,9 +164,6 @@ impl Client {
             .env("CLAUDE_CODE_ENTRYPOINT", "sdk-py");
         if let Some(cwd) = &opts.cwd {
             cmd.current_dir(cwd).env("PWD", cwd);
-        }
-        for k in &opts.env_remove {
-            cmd.env_remove(k);
         }
         for (k, v) in &opts.env {
             cmd.env(k, v);
