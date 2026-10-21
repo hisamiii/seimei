@@ -45,6 +45,7 @@ Before reporting done, run the checks that prove it (tests, build, a command, a 
 If you are blocked on a decision only the user can make, call mcp__shikigami__ask with the question and end your turn.
 Subagents are fine for searches and lookups; they run on {subagents}. No big parallel fan-outs.
 Start every task with a short step list (3-8 steps, TaskCreate) and keep it current as you go (TaskUpdate: in_progress when you start a step, completed when it is done; add or delete steps when the plan changes). It shows live as your task's steps on the user's board. Skip it only for a one-step job.
+When you switch to a queued board item, start it (mcp__shikigami__board); when it is deployed or delivered, ship it.
 """
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 MODELS = ("opus", "sonnet", "haiku")
@@ -324,7 +325,28 @@ class Worker:
             self.pool.report(self, "asking", q)
             return {"content": [{"type": "text", "text": "Asked. The answer arrives as your next message; end your turn now."}]}
 
-        return create_sdk_mcp_server("shikigami", tools=[ask])
+        @tool("board", "Your own items on the user's task board. start: you move on to one of your queued items (it runs "
+              "and follows you; what you worked on before goes back to the queue unless you shipped it). ship: it is "
+              "deployed or delivered and waits for seimei's check (seimei marks it done).",
+              {"type": "object", "properties": {"action": {"type": "string", "enum": ["start", "ship"]},
+                                                "id": {"type": "string", "description": "#79 or 79"}},
+               "required": ["action", "id"]})
+        async def board(args):
+            b, r = self.pool.board, self.rec
+            try:
+                if not b:
+                    raise ValueError("there is no task board")
+                if args.get("action") == "start":
+                    t = b.start(self.id, r["name"], r["state"], args["id"])
+                elif args.get("action") == "ship":
+                    t = b.ship(self.id, r["name"], args["id"])
+                else:
+                    raise ValueError("action is start or ship")
+            except (KeyError, ValueError) as e:
+                return {"content": [{"type": "text", "text": str(e).strip("'")}], "is_error": True}
+            return {"content": [{"type": "text", "text": f"{t['id']} {t['title']}: {t['state']}."}]}
+
+        return create_sdk_mcp_server("shikigami", tools=[ask, board])
 
     def on_laptop(self) -> bool:
         """The session is open on the laptop (after On laptop): its kitty window is still there, or a running

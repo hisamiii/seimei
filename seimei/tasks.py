@@ -132,6 +132,8 @@ class Board:
         t["done_at"] = time.time() if state == "done" else None
         t["state"] = state
         t["since"] = time.time()
+        if state != "review":
+            t.pop("shipped", None)
 
     def update(self, tid: str, **fields) -> dict:
         t = self.find(tid)
@@ -205,9 +207,10 @@ class Board:
 
     def current(self, worker: str) -> dict | None:
         """The task a shikigami works on: of those linked to it and not done, the one it is followed on (seimei may queue
-        its next task on it early: that one takes over once this one is done), else the one linked last."""
+        its next task on it early: that one takes over once this one is done or shipped), else the one linked last."""
         mine = [t for t in self.data["tasks"] if t.get("worker") == worker and t["state"] != "done"]
-        return max(mine, key=lambda t: (t.get("wstate") is not None, t.get("linked") or t["created"]), default=None)
+        return max(mine, key=lambda t: (not t.get("shipped"), t.get("wstate") is not None, t.get("linked") or t["created"]),
+                   default=None)
 
     def attach(self, worker: str, owner: str, task: str, project: str, title: str, link: str | None = None) -> dict:
         """A new shikigami's task: the one [link] names, or one of its own (seimei's #NN when [task] starts with one).
@@ -235,10 +238,45 @@ class Board:
         if not t or t.get("wstate") == wstate:
             return
         t["wstate"] = wstate
-        if (state := FOLLOW.get(wstate)) and state != t["state"]:
+        # A shipped item waits for seimei's check: whatever its shikigami does after, it stays in review.
+        if (state := FOLLOW.get(wstate)) and state != t["state"] and not t.get("shipped"):
             self._state(t, state)
             t["updated"] = time.time()
         self._changed()
+
+    def _own(self, name: str, tid: str) -> dict:
+        t = self.find(tid)
+        if not t:
+            raise KeyError(f"no task {tid}")
+        if t["owner"] != name:
+            raise ValueError(f"{t['id']} is {t['owner']}'s, not yours: ask seimei to give it to you")
+        if t["state"] == "done":
+            raise ValueError(f"{t['id']} is done already")
+        return t
+
+    def start(self, worker: str, name: str, wstate: str, tid: str) -> dict:
+        """A shikigami moves on to one of its own queued items (#79): that one runs and follows it; what it worked on
+        before goes back to the queue, unless it was shipped."""
+        t = self._own(name, tid)
+        now = time.time()
+        for o in self.data["tasks"]:
+            if o is not t and o.get("worker") == worker and o["state"] not in ("done", "review"):
+                o.update(worker=None, linked=None, wstate=None, updated=now)
+                self._state(o, "open")
+        t.update(worker=worker, linked=now, wstate=wstate, updated=now)
+        self._state(t, FOLLOW.get(wstate) or "running")
+        self._changed()
+        return t
+
+    def ship(self, worker: str, name: str, tid: str) -> dict:
+        """A shikigami deployed or delivered one of its items (#79): it waits in review for seimei's check."""
+        t = self._own(name, tid)
+        if not t.get("worker"):
+            t.update(worker=worker, linked=time.time())
+        self._state(t, "review")
+        t.update(shipped=True, updated=time.time())
+        self._changed()
+        return t
 
     def step(self, worker: str, sid: str, title: str | None = None, state: str | None = None):
         """The shikigami's todo list changed: a step was added (TaskCreate), moved on, renamed or dropped (TaskUpdate)."""
@@ -332,7 +370,9 @@ def make_task_tools(board: Board) -> list:
     @tool("tasks", "The user's task board (the Tasks tab next to Chat | Trajectory), yours to keep current. summon and "
           "adopt file a task for each new shikigami by themselves (or link the one you name), and a linked task follows "
           "its shikigami: running while it works, asks while it waits on a question, review once it reports (finished or "
-          "failed), paused when stopped or interrupted. You mark it done after checking the report; the shikigami's own "
+          "failed), paused when stopped or interrupted. A shikigami moves along its own queue itself: it starts an item "
+          "(running; its previous one goes back to open unless shipped) and ships it (review, and it stays there). "
+          "You mark it done after checking the report; the shikigami's own "
           "todo list shows live as the task's steps. The user's own to-dos are owner 'you' (they tick those off "
           "themselves). Each owner's items form a queue: the first open one shows as next. "
           "action: list | add | update | done | remove | order | project. "

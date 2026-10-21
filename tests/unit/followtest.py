@@ -174,6 +174,39 @@ async def main():
     wc = await pool.adopt("third", "sid-3", str(proj), "opus", None, "400k", "x", "go on", link="#999")
     check("adopt with a bad task_id still files one", board.current(wc.id) and board.current(wc.id)["title"] == "x")
 
+    # #79: a shikigami starts and ships its own items through its board tool.
+    ws_ = await pool.summon("walker", "#70 First item", str(proj), "opus", "high", "400k")
+    keep = W.create_sdk_mcp_server
+    W.create_sdk_mcp_server = lambda name, tools: tools
+    tool = next(x for x in ws_._tools() if x.name == "board")
+    W.create_sdk_mcp_server = keep
+    call = lambda act, tid: tool.handler({"action": act, "id": tid})
+    first, second = board.find("#70"), board.add("Second item", "demo", "walker")
+    third, theirs = board.add("Third item", "demo", "walker"), board.add("Not yours", "demo", "seimei")
+    r = await call("start", "#999")
+    check("start: an unknown id is an error", r.get("is_error") and "no task #999" in r["content"][0]["text"], r)
+    r = await call("start", theirs["id"])
+    check("start: only its own items", r.get("is_error") and theirs["state"] == "open" and not theirs.get("worker"), r)
+    r = await call("start", str(second["id"][1:]))
+    check("start: the new item runs and follows it", not r.get("is_error") and second["state"] == "running"
+          and second["worker"] == ws_.id and board.current(ws_.id) is second, r)
+    check("start: the old item goes back to the queue", first["state"] == "open" and not first.get("worker"), first)
+    r = await call("ship", second["id"])
+    check("ship: review", second["state"] == "review" and second.get("shipped"), second)
+    ws_._set("asking", question="?"); ws_._set("running", question=None)
+    check("ship: a shipped item stays in review while it works on", second["state"] == "review", second["state"])
+    r = await call("start", third["id"])
+    check("start after ship: the shipped one stays in review", second["state"] == "review" and second["worker"] == ws_.id
+          and third["state"] == "running" and board.current(ws_.id) is third, (second, third))
+    ws_._set("done", summary="x")
+    check("its finish moves the started one to review", third["state"] == "review" and second["state"] == "review")
+    check("no drift for it", "walker" not in (board.drift({ws_.id: ("walker", "done")}) or ""), board.drift({ws_.id: ("walker", "done")}))
+    r = await call("ship", theirs["id"])
+    check("ship: only its own items", r.get("is_error") and theirs["state"] == "open", r)
+    board.update(second["id"], state="done")
+    check("seimei marks it done, the flag goes", second["state"] == "done" and "shipped" not in second)
+    check("the prompt tells it to", "start it (mcp__shikigami__board)" in ws_.prompt())
+
     # A board from before #58 gets queue places.
     old = d / "old.json"
     old.write_text('{"next": 5, "other": 1, "tasks": [{"id": "#1", "title": "a", "project": "p", "owner": "x", "state": "open", "done_at": null, "worker": null, "created": 1, "updated": 1}, {"id": "#2", "title": "b", "project": "p", "owner": "x", "state": "open", "done_at": null, "worker": null, "created": 2, "updated": 2}], "projects": [{"name": "p", "color": null, "paused": false}]}')
