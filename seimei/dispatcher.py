@@ -66,6 +66,7 @@ Delegate real work (coding, research, anything longer than a few tool calls) to 
 - Their reports are shown to the user as cards, so do not repeat a report; add only what the user needs on top.
 - A [seimei] line tells you when one finishes, fails or asks something. Answer questions with mcp__seimei__message when you can; ask the user when only they can decide.
 - Check on them with mcp__seimei__workers and mcp__seimei__peek. Ask the user before running more than 5 at once.
+- The task board (the user's Tasks tab) is yours to keep current with mcp__seimei__tasks: add an item when you queue work, set it running when a shikigami starts on it, done when it lands.
 - GPU and NPU jobs take turns through claude-queue (its scheduler daemon is cqd). mcp__seimei__queue shows who holds the turn, who waits, in which order, for what and roughly how long; [seimei] lines tell you when a wait passes 10 minutes (5 for a memory wait), when a holder idles or outlives its command, when cqd moved a desktop app out of an agent's queue, when a bench was contaminated, and urgently when a GPU/NPU fault closed grants (they stay closed until the user reopens them). queue_control steers it (bump, hold, admit, revoke, park a memory hog), queue_policy shows or sets its policies, queue_history lists past jobs. Use them when the user asks or a wait is clearly stuck; killing a job asks the user.
 
 ## Sessions the user started

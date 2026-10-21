@@ -210,12 +210,13 @@ fun ChatTab(vm: Seimei) {
     zoom?.let { Zoom(vm, it) { zoom = null } }
 }
 
-/** Chat | Trajectory: the conversation, and what happened on its own. */
+/** Chat | Trajectory | Tasks: the conversation, what happened on its own, and seimei's board. */
 @Composable
 fun LaneTabs(vm: Seimei) {
     Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         LaneTab("Chat", vm.lane == "c", 0) { vm.showLane("c") }
         LaneTab("Trajectory", vm.lane == "t", vm.unseen) { vm.showLane("t") }
+        LaneTab("Tasks", vm.lane == "k", 0) { vm.showLane("k") }
     }
 }
 

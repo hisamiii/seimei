@@ -3,6 +3,7 @@ import { $, S, hooks, clock, finePointer, viewing, closeView, keep } from './uti
 import { render, onDelta, clearLive, addEvent, loadHistory, autosize, waitingApprovals, toBottom, showLane } from './chat.js';
 import { setWorkers, setSessions, sheetEvent, agentCounts, showAgents, pageOpen, closePage, archOpen, closeArch } from './agents.js';
 import { setUsage, renderUsage, tone } from './usage.js';
+import { setTasks, loadTasks } from './tasks.js';
 import { account } from './account.js';
 import { sheet, closeSheet } from './sheet.js';
 
@@ -148,6 +149,8 @@ function handle(ev) {
     setUsage(ev);
   } else if (ev.type === 'sessions') {
     setSessions(ev.list);
+  } else if (ev.type === 'tasks') {
+    setTasks(ev);
   }
 }
 
@@ -175,6 +178,8 @@ function connect() {
   lastSeen = Date.now();
   source = new EventSource(`api/stream?after=${lastId}`);
   source.onopen = () => {
+    // The board's changes while away went by on the stream: fetch it whole.
+    loadTasks();
     S.online = true;
     S.awaySince = null;
     lastSeen = Date.now();

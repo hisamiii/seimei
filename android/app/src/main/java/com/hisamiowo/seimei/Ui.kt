@@ -284,7 +284,10 @@ class MainActivity : ComponentActivity() {
     private fun openTab(intent: Intent?) {
         intent?.getStringExtra("tab")?.takeIf { it in TABS }?.let { vm.show(it) }
         // "Reply ready": the chat opens at that message.
-        intent?.getStringExtra("event")?.toLongOrNull()?.let { vm.focus = it }
+        intent?.getStringExtra("event")?.toLongOrNull()?.let {
+            if (vm.lane == "k") vm.showLane("c")
+            vm.focus = it
+        }
         intent?.removeExtra("tab")
         intent?.removeExtra("event")
     }
@@ -451,17 +454,17 @@ fun AppScreen(vm: Seimei) {
         Header(vm)
         Box(Modifier.weight(1f)) {
             when (vm.tab) {
-                "chat" -> ChatTab(vm)
+                "chat" -> if (vm.lane == "k") TasksTab(vm) else ChatTab(vm)
                 "agents" -> AgentsTab(vm)
                 "usage" -> UsageTab(vm)
             }
         }
-        if (vm.tab == "chat") Composer(vm)
+        if (vm.tab == "chat" && vm.lane != "k") Composer(vm)
         // The keyboard covers the bottom of the screen: while typing, the navigation bar steps aside.
         if (!WindowInsets.isImeVisible) NavBar(vm)
     }
     // Above the composer (chat) and the navigation bar (hidden while typing).
-    val above = (if (vm.tab == "chat") 76 else 0) + (if (WindowInsets.isImeVisible) 0 else 80) + 8
+    val above = (if (vm.tab == "chat" && vm.lane != "k") 76 else 0) + (if (WindowInsets.isImeVisible) 0 else 80) + 8
     SnackbarHost(snacks, Modifier.align(Alignment.BottomCenter).imePadding().padding(bottom = above.dp))
     }
     vm.page?.let { AgentPage(vm, it) }

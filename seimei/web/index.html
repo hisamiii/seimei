@@ -27,9 +27,10 @@
   </div>
 </header>
 
-<nav class="ltabs" id="ltabs" role="tablist" aria-label="Chat or trajectory">
+<nav class="ltabs" id="ltabs" role="tablist" aria-label="Chat, trajectory or tasks">
   <button class="ltab sl on" type="button" role="tab" id="lt-chat" aria-selected="true">Chat</button>
   <button class="ltab sl" type="button" role="tab" id="lt-traj" aria-selected="false">Trajectory<span class="cnt" id="traj-count" hidden></span></button>
+  <button class="ltab sl" type="button" role="tab" id="lt-tasks" aria-selected="false">Tasks</button>
 </nav>
 
 <main class="log" id="log" aria-label="Chat">
@@ -40,6 +41,7 @@
     <button class="older sl" id="older-t" hidden>Load earlier</button>
     <p class="traj-empty" id="traj-empty">Shikigami reports, restarts and what seimei did about them show here.</p>
   </div>
+  <div class="tasks" id="tasks" aria-live="polite" hidden></div>
   <div class="hello" id="hello" hidden>
     <img src="static/icon.svg" alt="" width="56" height="56">
     <b>Ask seimei anything</b>

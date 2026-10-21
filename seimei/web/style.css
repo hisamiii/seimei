@@ -126,7 +126,7 @@ body:not([data-tab="chat"]) .ltabs { display: none; }
   border: 0; border-radius: 12px; background: none; color: var(--text-3); font: 500 14px var(--sans);
 }
 .ltab.on { color: var(--text); }
-.ltab.on::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: 0; height: 3px; border-radius: 3px 3px 0 0; background: var(--primary); }
+.ltab.on::after { content: ""; position: absolute; top: auto; left: 12px; right: 12px; bottom: 0; height: 3px; border-radius: 3px 3px 0 0; background: var(--primary); opacity: 1; }
 .ltab .cnt {
   min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--primary); color: var(--on-primary);
   font: 600 11px/18px var(--sans); text-align: center; font-variant-numeric: tabular-nums;
@@ -561,6 +561,45 @@ body.login { display: grid; place-items: center; grid-template-rows: 1fr; paddin
 .arow.bad .tag { background: #45293a; color: var(--error); }
 .arow.ok .tag { background: #2b3b33; color: var(--ok); }
 .arow code { font: 12px/1.45 var(--mono); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Tasks: seimei's board by project. A thin rule in the project's Agents-tab tint; done folds into one line per
+   project; paused projects stay shut until opened. */
+.tasks { max-width: 720px; margin: 0 auto; padding: 16px 4px 24px; }
+body[data-lane="k"] .composer, body[data-lane="k"] #working, body[data-lane="k"] #hello, body[data-lane="k"] #fp-card { display: none; }
+.pj { position: relative; padding-left: 14px; margin-top: 14px; }
+.pj:first-child { margin-top: 2px; }
+.pj::before { content: ""; position: absolute; left: 0; top: 12px; bottom: 8px; width: 2px; border-radius: 1px; background: var(--c); opacity: .55; }
+.pj.shut { margin-top: 2px; }
+.pj.shut::before { opacity: .25; top: 10px; bottom: 10px; }
+.ph { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 4px 0 0; border: 0; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.ph .cv { flex: none; width: 18px; display: grid; place-items: center; color: var(--text-3); }
+.ph b { font-size: 15px; font-weight: 500; }
+.pj.held .ph b { color: var(--text-3); }
+.ph small { margin-left: auto; font-size: 12.5px; color: var(--text-3); opacity: .8; }
+.ph small.you { color: var(--warn); opacity: .7; }
+.ln { display: flex; align-items: center; width: 100%; min-height: 42px; padding: 0 0 0 32px; border: 0; background: none; color: var(--text); font: 15.5px var(--sans); text-align: left; }
+button.ln { cursor: pointer; }
+.ln .g, .fold3 .g { flex: none; width: 18px; height: 18px; margin: 0 14px 0 -32px; display: grid; place-items: center; }
+.g svg { display: block; }
+.g.s-open { color: var(--outline); }
+.g.s-running { color: var(--primary); }
+.g.s-paused { color: var(--outline); }
+.g.s-done { color: var(--ok); opacity: .55; }
+button.g { position: relative; padding: 0; border: 0; background: none; cursor: pointer; }
+button.g::after { content: ""; position: absolute; inset: -13px; }
+.ln .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ln .id { color: var(--text-3); margin-right: 6px; font-variant-numeric: tabular-nums; }
+.ln .o { flex: none; margin-left: 14px; font-size: 13px; color: var(--text-3); opacity: .75; }
+.ln .o.you { color: var(--warn); opacity: .7; }
+.ln.s-running .t { font-weight: 500; }
+.ln.s-paused .t { color: var(--text-3); }
+.ln.s-done { min-height: 32px; font-size: 14px; }
+.ln.s-done .g svg { width: 15px; height: 15px; }
+.ln.s-done .t { color: var(--text-3); opacity: .7; text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--text-3) 50%, transparent); }
+.ln.s-done .o { opacity: .45; }
+.fold3 { display: flex; align-items: center; min-height: 34px; padding: 0 0 0 32px; border: 0; background: none; font: 13px var(--sans); color: var(--text-3); cursor: pointer; }
+.fold3 .g { opacity: .7; }
+.tasks-empty { margin: 48px 32px; text-align: center; font-size: 14px; color: var(--text-3); }
 
 /* Tabs: an M3 short navigation bar, sharing one bottom block with the composer */
 .log { padding-bottom: 40px; }

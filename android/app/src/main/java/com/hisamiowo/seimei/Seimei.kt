@@ -101,6 +101,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     /** The chat as last seen, read from the phone while the app starts and unlocks. */
     private val stored = viewModelScope.async(Dispatchers.IO) { if (prefs.device != null) store.read(Store.CHAT) else null }
     private var restored = false
+    private val storedBoard = viewModelScope.async(Dispatchers.IO) { if (prefs.device != null) store.read(Store.TASKS) else null }
     private var chatSave: Job? = null
     /** Counts page opens, so a slow answer for a page no longer wanted is dropped. */
     private var opening = 0
@@ -131,6 +132,10 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         private set
     /** Which of the two the chat tab shows: "c" (chat) or "t" (trajectory). */
     var lane by mutableStateOf("c")
+    /** The task board (tasks.py): {"tasks": [...], "projects": [...]}, the kept copy until the laptop sends it. */
+    var board by mutableStateOf<JSONObject?>(null)
+    /** Board sections opened or shut by hand (project name -> open); the rest follow their default. */
+    var boardOpen by mutableStateOf(try { JSONObject(prefs.boardOpen) } catch (e: JSONException) { JSONObject() })
         private set
     /** Trajectory events the user has not seen yet. */
     var unseen by mutableStateOf(0)
@@ -325,6 +330,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         lastId = 0
         firstId = 0
         hasOlder = false
+        board = null
         rebuild()
         viewModelScope.launch(Dispatchers.IO) { store.clear() }
     }
@@ -435,6 +441,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     private suspend fun restore() {
         if (restored) return
         restored = true
+        if (board == null) board = storedBoard.await()
         val c = stored.await() ?: return
         if (events.isNotEmpty()) return
         val evs = c.optJSONArray("events").objects()
@@ -568,6 +575,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             online = true
             awaySince = null
             presence()
+            loadBoard()
             return
         }
         val type = ev.str("type")
@@ -596,7 +604,49 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             "sessions" -> takeSessions(ev.optJSONArray("list").objects())
             "w" -> workerEvent(ev)
             "usage" -> usage = ev
+            "tasks" -> takeBoard(ev)
         }
+    }
+
+    // ---------- the task board ----------
+
+    private fun takeBoard(b: JSONObject) {
+        board = b
+        val data = b.toString()
+        viewModelScope.launch(Dispatchers.IO + NonCancellable) { store.write(Store.TASKS, data) }
+    }
+
+    /** The whole board, on each connect: changes made while away went by on the stream. */
+    private fun loadBoard() {
+        viewModelScope.launch {
+            try {
+                takeBoard(api.get("api/tasks"))
+            } catch (e: IOException) {
+            }
+        }
+    }
+
+    /** The user ticks one of their own items off, or back on; shown at once, confirmed by the board that follows. */
+    fun tick(id: String, done: Boolean) {
+        val b = board ?: return
+        val shown = JSONObject(b.toString())
+        shown.optJSONArray("tasks").objects().firstOrNull { it.str("id") == id }?.let {
+            it.put("state", if (done) "done" else "open").put("done_at", if (done) System.currentTimeMillis() / 1000.0 else JSONObject.NULL)
+        }
+        board = shown
+        viewModelScope.launch {
+            try {
+                api.post("api/tasks/${id.removePrefix("#")}/tick", JSONObject().put("done", done))
+            } catch (e: IOException) {
+                snack = errorOf(e)
+                loadBoard()
+            }
+        }
+    }
+
+    fun toggleProject(name: String, open: Boolean) {
+        boardOpen = JSONObject(boardOpen.toString()).put(name, open)
+        prefs.boardOpen = boardOpen.toString()
     }
 
     // ---------- tabs ----------

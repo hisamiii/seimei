@@ -2,6 +2,7 @@
 import { md } from './md.js';
 import { $, S, hooks, el, svg, clock, dayKey, dayLabel, home, plural, post, view, snack, finePointer, toLogin, ICON } from './util.js';
 import { openWorker } from './agents.js';
+import { renderTasks } from './tasks.js';
 
 export const log = $('log');
 export const thread = $('thread');
@@ -692,7 +693,7 @@ export function addEvent(ev) {
 // An empty chat greets instead of showing a blank sheet (QA U14); an empty trajectory says what will show.
 function hello() {
   const empty = (t) => ![...t.children].some((c) => !c.matches('.older, .note.day, .traj-empty, [hidden]'));
-  $('hello').hidden = S.lane === 't' || !empty(thread);
+  $('hello').hidden = S.lane !== 'c' || !empty(thread);
   $('traj-empty').hidden = !empty(traj);
 }
 
@@ -703,7 +704,7 @@ const SEEN = 'seimei.trajSeen';
 let seen = 0, unseen = 0, lastTraj = 0;
 try { seen = +localStorage.getItem(SEEN) || 0; } catch {}
 // Where each lane was left; null: at the bottom.
-const scrolls = { c: null, t: null };
+const scrolls = { c: null, t: null, k: 0 };
 
 // What counts toward the Trajectory badge: reports, notes and seimei's own words, not its tool calls.
 const worth = (ev) => inTraj(ev) && /^(assistant|worker|system|rate_limit)$/.test(ev.type);
@@ -737,11 +738,14 @@ export function showLane(lane, goto = null) {
     S.lane = lane;
     thread.hidden = lane !== 'c';
     traj.hidden = lane !== 't';
-    for (const [id, l] of [['lt-chat', 'c'], ['lt-traj', 't']]) {
+    $('tasks').hidden = lane !== 'k';
+    document.body.dataset.lane = lane;
+    for (const [id, l] of [['lt-chat', 'c'], ['lt-traj', 't'], ['lt-tasks', 'k']]) {
       $(id).classList.toggle('on', l === lane);
       $(id).setAttribute('aria-selected', String(l === lane));
     }
-    log.setAttribute('aria-label', lane === 't' ? 'Trajectory' : 'Chat');
+    log.setAttribute('aria-label', { c: 'Chat', t: 'Trajectory', k: 'Tasks' }[lane]);
+    if (lane === 'k') renderTasks();
     if (live && live.parentNode !== (lane === 't' ? traj : thread)) live.hidden = true;
     else if (live) live.hidden = false;
     hello();
@@ -763,6 +767,7 @@ export function showLane(lane, goto = null) {
 }
 $('lt-chat').addEventListener('click', () => showLane('c'));
 $('lt-traj').addEventListener('click', () => showLane('t'));
+$('lt-tasks').addEventListener('click', () => showLane('k'));
 document.addEventListener('visibilitychange', () => { if (!document.hidden && S.lane === 't' && S.tab === 'chat') markSeen(); });
 
 // ---------- history ----------

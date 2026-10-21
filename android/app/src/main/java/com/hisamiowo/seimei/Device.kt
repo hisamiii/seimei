@@ -56,6 +56,10 @@ class Prefs(ctx: Context) {
     var seen: String
         get() = p.getString("seen", "{}") ?: "{}"
         set(v) = p.edit().putString("seen", v).apply()
+    /** Task board sections opened or shut by hand: project name -> open. */
+    var boardOpen: String
+        get() = p.getString("boardOpen", "{}") ?: "{}"
+        set(v) = p.edit().putString("boardOpen", v).apply()
 }
 
 val b64url: Base64.Encoder = Base64.getUrlEncoder().withoutPadding()

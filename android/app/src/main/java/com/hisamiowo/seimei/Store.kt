@@ -32,8 +32,8 @@ class Store(dir: File) {
         } catch (e: IOException) {
             return
         }
-        if (key != CHAT) {
-            val pages = root.listFiles { f -> f.name.endsWith(".json") && f.name != "$CHAT.json" }.orEmpty()
+        if (key != CHAT && key != TASKS) {
+            val pages = root.listFiles { f -> f.name.endsWith(".json") && f.name != "$CHAT.json" && f.name != "$TASKS.json" }.orEmpty()
             pages.sortedByDescending { it.lastModified() }.drop(PAGES).forEach { it.delete() }
         }
     }
@@ -48,6 +48,8 @@ class Store(dir: File) {
 
     companion object {
         const val CHAT = "chat"
+        /** The task board, whole, as the laptop last sent it. */
+        const val TASKS = "tasks"
         /** Events the chat keeps; older ones load from the laptop when scrolled to, as before. */
         const val CHAT_KEEP = 300
         /** Events a page keeps: what the laptop sends for a page at most. */

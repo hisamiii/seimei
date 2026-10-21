@@ -28,6 +28,7 @@ from . import deploys, discord as discord_link
 from .browser import Browser, make_browser_tools, socket_path
 from .push import FIREBASE, Fcm, Push, make_push_tools
 from .watches import Watches, make_watch_tools
+from .tasks import Board, make_task_tools
 from .files import Files
 from .guard import Guard
 from .server import make_app
@@ -149,18 +150,19 @@ def main():
     adopter = Adopter(pool, approvals)
     usage = Usage(events, state, cost, STATE / "ratelog/rates.jsonl")
     desk = Desktop(events, lambda t: dispatcher.note(t), state / UNLOCK)
+    board = Board(state / "tasks.json", events)
     layout = Layout(desk, approvals, events, state)
     push = Push(events, auth, Fcm(FIREBASE / "service-account.json"), state)
     push.watches = Watches(state / "watches.json", push, lambda line: pool.notify(line), pool.queue_names)
     dispatcher = Dispatcher(disp, events, state, make_tools(pool, files, events, make_desktop_tools(desk, files, events, layout)
-                                                                 + make_music_tools(approvals) + make_queue_tools(approvals) + make_adopt_tools(adopter) + make_push_tools(push) + make_watch_tools(push.watches)
+                                                                 + make_music_tools(approvals) + make_queue_tools(approvals) + make_adopt_tools(adopter) + make_push_tools(push) + make_watch_tools(push.watches) + make_task_tools(board)
                                                                  + make_browser_tools(browser, approvals)
                                                                  + discord_link.make_discord_tools(discord, approvals, uploads), uploads),
                             guard, usage)
     pool.dispatcher, pool.guard = dispatcher, guard
     guard.tell = pool.tell
     watcher = Watcher(events, pool.own_sessions, pool.notify, pool.archive)
-    app = make_app(events, dispatcher, pool, files, approvals, guard, watcher, desk, auth, origins, state / "app", cost, push, uploads)
+    app = make_app(events, dispatcher, pool, files, approvals, guard, watcher, desk, auth, origins, state / "app", cost, push, uploads, board)
 
     async def deploy_note():
         """seimei hears how the deploy that restarted it went (only one that just ended)."""

@@ -78,7 +78,7 @@ def unattach(events: list[dict], uploads) -> list[dict]:
 def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files, approvals: Approvals,
              tool_guard: Guard, watcher: Watcher, desk: Desktop, auth: Auth | None, origins: set[str],
              app_dir: Path | None = None, cost: Cost | None = None, push: Push | None = None,
-             uploads: Uploads | None = None) -> web.Application:
+             uploads: Uploads | None = None, board=None) -> web.Application:
     @web.middleware
     async def guard(request: web.Request, handler):
         # Never trust the peer address: cloudflared connects from localhost too.
@@ -449,6 +449,24 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
             return web.json_response({"error": str(e)}, status=409)
         return web.json_response({"ok": True})
 
+    async def tasks_view(request):
+        return web.json_response(board.snapshot() if board else {"type": "tasks", "tasks": [], "projects": []})
+
+    async def task_tick(request):
+        """The user ticks one of their own items off (or back on); seimei hears it with its next turn."""
+        if not board:
+            raise web.HTTPNotFound()
+        done = bool((await request.json()).get("done"))
+        try:
+            t = board.tick(request.match_info["tid"], done)
+        except KeyError:
+            raise web.HTTPNotFound(text="no such task")
+        except PermissionError as e:
+            return web.json_response({"error": str(e)}, status=403)
+        dispatcher.note(f"the user {'ticked off' if done else 'reopened'} their task {t['id']} {t['title']} ({t['project']}) on the board",
+                        key=f"tick:{t['id']}")
+        return web.json_response({"ok": True, "task": t})
+
     async def queue_view(request):
         """claude-queue's state: cqd's snapshot, or the /proc fallback when cqd is down."""
         snap = await asyncio.to_thread(cq.cqd, {"op": "status"})
@@ -601,6 +619,8 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     app.router.add_get("/api/metrics", metrics_view)
     app.router.add_get("/api/audit", audit)
     app.router.add_get("/api/queue", queue_view)
+    app.router.add_get("/api/tasks", tasks_view)
+    app.router.add_post("/api/tasks/{tid}/tick", task_tick)
     app.router.add_post("/api/queue/action", queue_action)
     app.router.add_get("/api/sessions/{pid:[0-9]+}", session)
     app.router.add_post("/api/sessions/{pid:[0-9]+}/send", session_send)
