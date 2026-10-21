@@ -212,6 +212,14 @@ Python stays installed for a week as the way back (same state files).
 | 5 | ACP harness (#69) against a fake ACP agent, then dsh and Codex | ACP cases; one live run each |
 | 6 | `setup`, `update`, release signing, static builds, docs | install on a clean user account; switch the live service |
 
+**Progress (2026-10-21).** Phases 0 to 2 are done.
+- **Phase 2 server.** `SEIMEI_SERVER=target/debug/seimei uv run pytest -m web -k "tauth or tpush63 or tthemes"` runs the gate against it.
+- **Auth.** `tauth` is new: the login scenarios over HTTP, so both servers run them. A passkey registered on Python logs in on Rust: webauthn-rs reads py_webauthn's stored COSE keys.
+- **Push.** The rules, FCM and Web Push are Rust integration tests against local fakes (`crates/server/tests/push.rs`).
+- **Waiting for phase 3.**
+  - Until then the Rust server reports the dispatcher as disconnected, with no workers or sessions, and serves the task board read-only.
+  - `tnoscreen` opens the Agents and Usage tabs, so it moves to phase 3's gate.
+
 **Size:** today's 7.8k lines of core Python and 4.3k of plugins should come to roughly 12 to 15k lines of Rust.
 The web UI (4.7k lines) and the Android app carry over unchanged. So do the Discord (Vencord, TypeScript) and
 browser (WebExtension) halves of those connectors.
