@@ -295,6 +295,21 @@ pub struct Dispatcher {
     pub recall: OnceLock<Text>,
 }
 
+impl crate::workers::Listener for Dispatcher {
+    fn wake(&self, text: &str) {
+        Dispatcher::wake(self, text)
+    }
+    fn note(&self, text: &str, key: Option<&str>) {
+        Dispatcher::note(self, text, key)
+    }
+    fn session_id(&self) -> Option<String> {
+        Dispatcher::session_id(self)
+    }
+    fn rate_limit(&self, info: &Value) {
+        Dispatcher::rate_limit(self, info)
+    }
+}
+
 impl Dispatcher {
     pub fn new(
         cfg: Config,

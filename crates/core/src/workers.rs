@@ -27,7 +27,7 @@ use crate::aliases::Aliases;
 use crate::approvals::Approvals;
 use crate::archive::Archive;
 use crate::cost::Cost;
-use crate::dispatcher::{Dispatcher, NO_CONNECTORS, result_text, summarize};
+use crate::dispatcher::{NO_CONNECTORS, result_text, summarize};
 use crate::events::EventLog;
 use crate::guard::{Guard, HOOK_TIMEOUT};
 use crate::metrics::{self, WorkerEvents};
@@ -1197,6 +1197,18 @@ fn spawn_detached(command: &str) -> Result<Value, String> {
     Ok(json!({"id": null, "pid": pid}))
 }
 
+/// What the pool and the watchers tell the dispatcher: the Dispatcher, or a test's stand-in.
+pub trait Listener: Send + Sync {
+    /// Something to act on now.
+    fn wake(&self, text: &str);
+    /// Something for its next message; a note with a key replaces the earlier one with the same key.
+    fn note(&self, text: &str, key: Option<&str>);
+    /// Its session id, once it has one.
+    fn session_id(&self) -> Option<String>;
+    /// A shikigami ran into a rate limit.
+    fn rate_limit(&self, info: &Value);
+}
+
 pub struct Pool {
     me: Weak<Pool>,
     /// In workers.json's order.
@@ -1216,7 +1228,7 @@ pub struct Pool {
     usage: Arc<Usage>,
     approvals: Arc<Approvals>,
     guard: Arc<Guard>,
-    pub dispatcher: OnceLock<Arc<Dispatcher>>,
+    pub dispatcher: OnceLock<Arc<dyn Listener>>,
     terminal: String,
     plugins: Vec<String>,
     batch: Mutex<Batch>,
