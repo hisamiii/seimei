@@ -221,7 +221,12 @@ mod tests {
         let s = a.join(" ");
         assert!(s.starts_with("--output-format stream-json --verbose --append-system-prompt # You are seimei"));
         assert!(s.contains("--permission-prompt-tool stdio --permission-mode default --session-id=s1"));
-        assert!(s.contains(r#"--mcp-config {"mcpServers":{"seimei":{"name":"seimei","type":"sdk"}}}"#));
+        // Key order follows serde_json's preserve_order, which other crates in a build may switch on.
+        let mcp = &a[a.iter().position(|x| x == "--mcp-config").unwrap() + 1];
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(mcp).unwrap(),
+            serde_json::json!({"mcpServers": {"seimei": {"name": "seimei", "type": "sdk"}}})
+        );
         assert!(s.ends_with("--setting-sources=user,project --name seimei --input-format stream-json"));
     }
 

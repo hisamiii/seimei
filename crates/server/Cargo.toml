@@ -1,0 +1,14 @@
+[package]
+name = "seimei-server"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+axum = "0.8.9"
+openssl = "0.10.81"
+seimei-core = { path = "../core" }
+serde_json.workspace = true
+tokio = { workspace = true, features = ["full"] }
+tokio-stream = "0.1.19"
+url = "2.5.8"

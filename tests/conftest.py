@@ -3,7 +3,8 @@ so nothing can open a window even if a stub rots), no job variables of the sessi
 Claude config dir of its own, so test sessions never show up in the user's session list or seimei's events.
 
 Groups: unit (offline, the default), web (the QA server on :8431 plus headless Chrome, `-m web`), live (headless
-claude sessions on haiku, `-m live`; log the test config dir in once: `CLAUDE_CONFIG_DIR=<dir> claude /login`)."""
+claude sessions on haiku, `-m live`; log the test config dir in once: `CLAUDE_CONFIG_DIR=<dir> claude /login`).
+SEIMEI_SERVER=target/debug/seimei runs the web group against the Rust server."""
 import os
 import subprocess
 import sys
@@ -21,6 +22,9 @@ DESKTOP = ("DISPLAY", "WAYLAND_DISPLAY", "NIRI_SOCKET", "SWAYSOCK", "HYPRLAND_IN
 def clean_env(**extra) -> dict:
     env = {k: v for k, v in os.environ.items()
            if k not in DESKTOP and not (k.startswith("CLAUDE") or k.startswith("SEIMEI_") or k == "LD_PRELOAD")}
+    # Which server the QA scripts start (tests/qa/start.sh): the Python one unless this names another.
+    if os.environ.get("SEIMEI_SERVER"):
+        env["SEIMEI_SERVER"] = os.environ["SEIMEI_SERVER"]
     env.update(PYTHONPATH=str(ROOT), CLAUDE_CODE_DISABLE_AUTO_MEMORY="1", CLAUDE_CONFIG_DIR=str(CLAUDE_DIR))
     env.update(extra)
     return env
