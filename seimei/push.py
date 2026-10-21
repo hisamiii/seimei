@@ -435,9 +435,13 @@ class Push:
             a = next(iter(self.approvals.values()))
             target = f"message {a.get('target', '')}" if a.get("action") == "message" else a.get("target", "")
             title, body = f"{a.get('who', 'seimei')} wants to {target}"[:120], a.get("detail", "")[:300]
+            # The app puts Allow/Deny on the notification for a lone card; they settle only this card (audit P2).
+            one = {"aid": a["aid"], **({"perm": 1} if a.get("options") is not None else {})}
         else:
             title, body = f"{len(self.approvals)} approvals waiting", ", ".join(a.get("who", "") for a in self.approvals.values())
-        self._fire({"kind": "approval", "tag": "approval", "title": title, "body": body, "alert": int(alert), "tab": "chat"}, ttl=600)
+            one = {}
+        self._fire({"kind": "approval", "tag": "approval", "title": title, "body": body, "alert": int(alert), "tab": "chat", **one},
+                   ttl=600)
 
     def ping(self, title: str, body: str, level: str = "normal", key: str | None = None, reply: bool = False) -> int:
         """A ping the dispatcher chose to send. Returns how many phones it goes to."""

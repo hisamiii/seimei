@@ -173,9 +173,9 @@ class Worker:
             max_buffer_size=STREAM_BUFFER,
             model=r["model"],
             permission_mode=self.mode,
-            # Whatever Claude Code would ask in a terminal becomes a card (never asked in bypass).
+            # Whatever Claude Code would ask in a terminal becomes a card (in bypass only its safety checks ask: blocked).
             **({"can_use_tool": permissions.callback(self.pool.guard.approvals, r["name"], self, lambda: self.pool.mode,
-                                                     self._mode_chosen)} if self.pool.guard else {}),
+                                                     self._mode_chosen, lambda: self.mode)} if self.pool.guard else {}),
             # Its own tools and seimei's plugins carry their own cards; external MCP servers ask like the rest.
             allowed_tools=["mcp__shikigami", *(f"mcp__{g}" for g in self.granted() if self.pool.plugins.own(g))],
             setting_sources=["user", "project", "local"],

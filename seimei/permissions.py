@@ -127,13 +127,21 @@ def options(tool: str, suggestions: list[PermissionUpdate], ceiling: str) -> tup
     return opts, updates
 
 
-def callback(approvals, who: str, worker, ceiling, on_mode=None):
+def callback(approvals, who: str, worker, ceiling, on_mode=None, mode=None):
     """A can_use_tool for one session. worker is the Worker (None for seimei): its card waits with a reminder and
     its board shows the ask; seimei's card counts as denied after DISPATCHER_WAIT. ceiling() gives the current
-    ceiling (for the plan card); on_mode(mode) hears a mode the user chose on a card."""
+    ceiling (for the plan card); on_mode(mode) hears a mode the user chose on a card; mode() is the session's own
+    mode now (the ceiling when not given)."""
     async def can_use(tool, inp, ctx):
         if tool == "AskUserQuestion":
             return PermissionResultDeny(message="Ask the user through seimei instead (your ask tool, or the chat).")
+        if (mode or ceiling)() == "bypassPermissions":
+            # Claude Code still asks in bypass for its own safety checks (spike 2026-10-21: "This shell -c script runs
+            # rm and could not be checked"). Without a handler it blocked those calls; bypass stays card-free and
+            # blocks them as before.
+            return PermissionResultDeny(message=f"Claude Code blocked this even in bypass mode: {ctx.decision_reason or 'a safety check'}. "
+                                        "Nobody was asked. Write the command so it can be checked (for example, no rm inside a "
+                                        "shell -c script).")
         what = describe(tool, inp, ctx.decision_reason)
         opts, updates = options(tool, ctx.suggestions or [], ceiling())
         card = {**what, "tool": tool, "options": opts,
