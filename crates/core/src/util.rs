@@ -1,4 +1,4 @@
-//! Small helpers: JSON state files in the format the Python seimei writes, time, tokens and encodings.
+//! Small helpers: JSON state files, time, tokens and encodings.
 
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
@@ -34,12 +34,10 @@ pub fn read_json(path: &Path) -> Option<Value> {
     serde_json::from_slice(&std::fs::read(path).ok()?).ok()
 }
 
-/// Atomic write, indented by one space like Python's `json.dump(indent=1)`; private files are created 600.
+/// Atomic write; private files are created 600.
 pub fn write_json(path: &Path, data: &impl Serialize, private: bool) -> std::io::Result<()> {
     let tmp = path.with_extension("tmp");
-    let mut buf = Vec::new();
-    let mut ser = serde_json::Serializer::with_formatter(&mut buf, serde_json::ser::PrettyFormatter::with_indent(b" "));
-    data.serialize(&mut ser)?;
+    let buf = serde_json::to_vec_pretty(data)?;
     let mut f = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
@@ -57,7 +55,7 @@ pub fn random_bytes(n: usize) -> Vec<u8> {
     b
 }
 
-/// Python's `secrets.token_urlsafe(n)`.
+/// `n` random bytes as unpadded base64url.
 pub fn token_urlsafe(n: usize) -> String {
     URL_SAFE_NO_PAD.encode(random_bytes(n))
 }
@@ -80,7 +78,7 @@ pub fn b64url(data: &[u8]) -> String {
     URL_SAFE_NO_PAD.encode(data)
 }
 
-/// Accepts it with or without padding, like py_webauthn's base64url_to_bytes.
+/// Accepts it with or without padding.
 pub fn b64url_decode(s: &str) -> Option<Vec<u8>> {
     URL_SAFE_NO_PAD.decode(s.trim_end_matches('=')).ok()
 }
@@ -114,7 +112,7 @@ pub fn cut(s: &str, n: usize) -> &str {
     &s[..end]
 }
 
-/// At most `n` characters, like Python's `s[:n]`.
+/// At most `n` characters.
 pub fn chars(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
 }
@@ -124,13 +122,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn writes_like_python() {
+    fn writes_private_json() {
         let dir = std::env::temp_dir().join(format!("seimei-util-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("x.json");
         write_json(&p, &serde_json::json!({"b": [1, 2], "a": {}}), true).unwrap();
-        // json.dump({"b": [1, 2], "a": {}}, f, indent=1)
-        assert_eq!(std::fs::read_to_string(&p).unwrap(), "{\n \"b\": [\n  1,\n  2\n ],\n \"a\": {}\n}");
+        assert_eq!(read_json(&p).unwrap(), serde_json::json!({"b": [1, 2], "a": {}}));
         use std::os::unix::fs::PermissionsExt;
         assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
         std::fs::remove_dir_all(&dir).unwrap();

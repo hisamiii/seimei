@@ -847,19 +847,6 @@ async fn file(
     r
 }
 
-/// Python's urllib.parse.quote: everything but letters, digits, "_.-~" and "/" percent-encoded.
-fn quote(s: &str) -> String {
-    s.bytes()
-        .map(|b| {
-            if b.is_ascii_alphanumeric() || b"_.-~/".contains(&b) {
-                (b as char).to_string()
-            } else {
-                format!("%{b:02X}")
-            }
-        })
-        .collect()
-}
-
 async fn upload(State(app): Shared, Query(q): Query<HashMap<String, String>>, req: Request) -> Response {
     use futures_util::StreamExt;
     let name = q.get("name").cloned().unwrap_or("file".into());
@@ -890,7 +877,13 @@ async fn uploaded(State(app): Shared, UrlPath(id): UrlPath<String>) -> Response 
         [
             (header::CONTENT_TYPE, "application/octet-stream".to_string()),
             (header::CACHE_CONTROL, "private, no-store".to_string()),
-            (header::CONTENT_DISPOSITION, format!("attachment; filename*=UTF-8''{}", quote(&name))),
+            (
+                header::CONTENT_DISPOSITION,
+                format!(
+                    "attachment; filename*=UTF-8''{}",
+                    percent_encoding::utf8_percent_encode(&name, percent_encoding::NON_ALPHANUMERIC)
+                ),
+            ),
         ],
         data,
     )

@@ -8,6 +8,7 @@ publish = false
 axum = { version = "0.8.9", features = ["ws"] }
 futures-util = "0.3.34"
 openssl = "0.10.81"
+percent-encoding = "2.3.2"
 seimei-core = { path = "../core" }
 serde_json.workspace = true
 tokio = { workspace = true, features = ["full"] }
