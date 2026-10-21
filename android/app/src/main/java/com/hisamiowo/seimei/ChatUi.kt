@@ -274,16 +274,17 @@ fun AnchorChip(a: Anchor, vm: Seimei, onUser: Boolean = false) {
     }
 }
 
-/** Swipe right to reply: the row follows the finger, the reply icon shows behind it, and past the mark it replies. */
+/** Swipe left to reply: the row follows the finger, the reply icon shows behind it, and past the mark it replies. */
 @Composable
 fun SwipeReply(onReply: () -> Unit, content: @Composable () -> Unit) {
+    // How far the row has moved left.
     var dx by remember { mutableFloatStateOf(0f) }
     val mark = with(LocalDensity.current) { 64.dp.toPx() }
     val haptic = LocalHapticFeedback.current
     Box(Modifier.fillMaxWidth().draggable(
         rememberDraggableState { d ->
             val was = dx
-            dx = (dx + d).coerceIn(0f, mark * 1.3f)
+            dx = (dx - d).coerceIn(0f, mark * 1.3f)
             if (was < mark && dx >= mark) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
         },
         Orientation.Horizontal,
@@ -292,9 +293,9 @@ fun SwipeReply(onReply: () -> Unit, content: @Composable () -> Unit) {
             animate(dx, 0f) { v, _ -> dx = v }
         },
     )) {
-        Icon(Icons.reply, "Reply", Modifier.align(Alignment.CenterStart).padding(start = 4.dp).size(22.dp)
+        Icon(Icons.reply, "Reply", Modifier.align(Alignment.CenterEnd).padding(end = 4.dp).size(22.dp)
             .alpha((dx / mark).coerceIn(0f, 1f)), tint = MaterialTheme.colorScheme.primary)
-        Box(Modifier.offset { IntOffset(dx.roundToInt(), 0) }) { content() }
+        Box(Modifier.offset { IntOffset(-dx.roundToInt(), 0) }) { content() }
     }
 }
 
