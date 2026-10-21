@@ -1,0 +1,252 @@
+//! Claude Code's transcripts, read for the lists: where a session's transcript is, and a brief of it (project, last
+//! line, context, the call or question open right now).
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
+
+use regex::Regex;
+use serde_json::{Value, json};
+
+use crate::paths::home;
+use crate::util::read_from;
+
+/// What a brief reads from the end of a transcript.
+const TAIL: u64 = 512 << 10;
+/// The context window the ring of a user's session fills toward.
+const CONTEXT: f64 = 1_000_000.0;
+static PATHS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?:~|\$HOME|/home/[a-z_][\w-]*)/[\w.@+-]+(?:/[\w.@+-]+)*").unwrap());
+
+/// Claude Code's config dir: CLAUDE_CONFIG_DIR, else ~/.claude.
+pub fn claude_dir() -> PathBuf {
+    std::env::var_os("CLAUDE_CONFIG_DIR")
+        .filter(|d| !d.is_empty())
+        .map_or_else(|| home().join(".claude"), PathBuf::from)
+}
+
+/// The session's current transcript; a session can continue into a new one.
+pub fn transcript(session: &str, cwd: &str) -> Option<PathBuf> {
+    let projects = claude_dir().join("projects");
+    let folder: String = cwd.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+    let mut sid = session.to_string();
+    for _ in 0..8 {
+        let mut path = projects.join(&folder).join(format!("{sid}.jsonl"));
+        if !path.exists() {
+            let name = format!("{sid}.jsonl");
+            path = std::fs::read_dir(&projects).ok()?.flatten().map(|d| d.path().join(&name)).find(|p| p.exists())?;
+        }
+        let tail = read_tail(&path, 4096).ok()?;
+        let next = tail.split(|&b| b == b'\n').rev().take(3).find_map(|line| {
+            let row: Value = serde_json::from_slice(line).ok()?;
+            (row["type"] == "continued-in").then(|| row["continuedInSessionId"].as_str().map(String::from)).flatten()
+        });
+        match next {
+            Some(n) => sid = n,
+            None => return Some(path),
+        }
+    }
+    None
+}
+
+fn read_tail(path: &Path, n: u64) -> std::io::Result<Vec<u8>> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path)?;
+    let len = f.metadata()?.len();
+    f.seek(SeekFrom::Start(len.saturating_sub(n)))?;
+    let mut data = vec![];
+    f.read_to_end(&mut data)?;
+    Ok(data)
+}
+
+/// The project a path belongs to: its folder under ~/src or ~/.config, else its top folder under home.
+pub fn project_of(path: &str) -> Option<String> {
+    let path = crate::paths::expand(path);
+    let rest = path.strip_prefix(&format!("{}/", home().display()))?;
+    let parts: Vec<&str> = rest.split('/').collect();
+    if parts.len() < 2 {
+        return None;
+    }
+    let top = match parts[0] {
+        "src" | ".config" => parts[1],
+        p if p.starts_with('.') => return None,
+        p => p,
+    };
+    Some(top.strip_suffix("-scratch").or_else(|| top.strip_suffix("-wt")).unwrap_or(top).to_string())
+}
+
+fn votes(inp: &Value) -> Vec<String> {
+    let mut paths: Vec<&str> = ["file_path", "notebook_path", "path"].iter().filter_map(|k| inp[k].as_str()).collect();
+    if let Some(cmd) = inp["command"].as_str() {
+        paths.extend(PATHS.find_iter(cmd).map(|m| m.as_str()));
+    }
+    paths.into_iter().filter_map(project_of).collect()
+}
+
+/// The user and assistant rows of the main thread from byte `start` on (a start mid-line skips to the next line).
+fn rows(path: &Path, start: u64) -> Vec<Value> {
+    let Ok(data) = read_from(path, start) else { return vec![] };
+    let end = data.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
+    let mut lines: Vec<&[u8]> = data[..end].split(|&b| b == b'\n').collect();
+    if start > 0 && !data.starts_with(b"{") && !lines.is_empty() {
+        lines.remove(0);
+    }
+    lines
+        .into_iter()
+        .filter_map(|l| serde_json::from_slice::<Value>(l).ok())
+        .filter(|r| {
+            matches!(r["type"].as_str(), Some("user" | "assistant"))
+                && r["isSidechain"] != true
+                && r["isCompactSummary"] != true
+        })
+        .collect()
+}
+
+fn time_of(row: &Value) -> f64 {
+    let s = row["timestamp"].as_str().unwrap_or("");
+    chrono::NaiveDateTime::parse_from_str(s.get(..19).unwrap_or(""), "%Y-%m-%dT%H:%M:%S")
+        .map_or(0.0, |t| t.and_utc().timestamp() as f64)
+}
+
+/// The text blocks of a message's content.
+pub fn text_of(content: &Value) -> String {
+    match content {
+        Value::String(s) => s.clone(),
+        Value::Array(blocks) => blocks
+            .iter()
+            .filter(|b| b["type"] == "text")
+            .map(|b| b["text"].as_str().unwrap_or(""))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
+}
+
+/// One line saying what a tool call does.
+fn summary(inp: &Value) -> String {
+    let first = |s: &str| s.trim().lines().next().unwrap_or("").chars().take(200).collect::<String>();
+    if let Some(q) = inp["questions"][0]["question"].as_str().filter(|q| !q.is_empty()) {
+        return first(q);
+    }
+    for k in ["command", "file_path", "pattern", "url", "query", "description", "prompt"] {
+        if let Some(v) = inp[k].as_str().filter(|v| !v.trim().is_empty()) {
+            return first(v);
+        }
+    }
+    inp.to_string().chars().take(200).collect()
+}
+
+fn question(inp: &Value) -> Value {
+    let qs: Vec<&Value> = inp["questions"].as_array().into_iter().flatten().filter(|q| q.is_object()).collect();
+    json!({"questions": qs, "answerable": qs.len() == 1 && qs[0]["multiSelect"] != true})
+}
+
+static BRIEFS: LazyLock<Mutex<HashMap<PathBuf, (std::time::SystemTime, Value)>>> = LazyLock::new(Default::default);
+
+/// What the lists show for a session: project, the open call or question, last line, context; cached by mtime.
+pub fn brief(path: &Path) -> std::io::Result<Value> {
+    let meta = std::fs::metadata(path)?;
+    let mtime = meta.modified()?;
+    if let Some((t, b)) = BRIEFS.lock().unwrap().get(path)
+        && *t == mtime
+    {
+        return Ok(b.clone());
+    }
+    let (mut votes_seen, mut last, mut used, mut model, mut effort) =
+        (vec![], String::new(), 0u64, Value::from(""), Value::Null);
+    // Open tool calls by id, in the order they were made.
+    let mut pending: Vec<(String, f64, String, Value)> = vec![];
+    for row in rows(path, meta.len().saturating_sub(TAIL)) {
+        if !row["effort"].is_null() && row["effort"] != "" {
+            effort = row["effort"].clone();
+        }
+        let content = &row["message"]["content"];
+        let blocks = content.as_array().cloned().unwrap_or_default();
+        if row["type"] == "user" {
+            let results: Vec<&Value> = blocks.iter().filter(|b| b["type"] == "tool_result").collect();
+            for b in &results {
+                pending.retain(|p| b["tool_use_id"] != p.0.as_str());
+            }
+            let text = text_of(content);
+            let text = text.trim();
+            if !text.is_empty()
+                && results.is_empty()
+                && row["isMeta"] != true
+                && !text.starts_with("<command-")
+                && !text.starts_with("<local-command")
+            {
+                pending.clear();
+            }
+            continue;
+        }
+        let msg = &row["message"];
+        if let Some(u) = msg["usage"].as_object().filter(|u| !u.is_empty()) {
+            used = ["input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens", "output_tokens"]
+                .iter()
+                .map(|k| u.get(*k).and_then(Value::as_u64).unwrap_or(0))
+                .sum();
+            if let Some(m) = msg.get("model") {
+                model = m.clone();
+            }
+        }
+        for b in &blocks {
+            if b["type"] == "text" && b["text"].as_str().is_some_and(|t| !t.trim().is_empty()) {
+                last = b["text"].as_str().unwrap_or("").trim().to_string();
+            } else if b["type"] == "tool_use" {
+                let inp = if b["input"].is_object() { b["input"].clone() } else { json!({}) };
+                votes_seen.extend(votes(&inp));
+                let id = b["id"].as_str().unwrap_or("").to_string();
+                pending.retain(|p| p.0 != id);
+                pending.push((id, time_of(&row), b["name"].as_str().unwrap_or("").to_string(), inp));
+            }
+        }
+    }
+    let line: String = last.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("").chars().take(200).collect();
+    let mut out = json!({
+        "project": most_common(&votes_seen[votes_seen.len().saturating_sub(60)..]),
+        "line": line.trim_start_matches(['#', '*', ' ']),
+        "context": (used > 0).then(|| (100.0 * used as f64 / CONTEXT).round()),
+        "tokens": used, "model": model, "effort": effort, "ask": null, "doing": null,
+    });
+    for (id, t, name, inp) in pending {
+        if name == "AskUserQuestion" {
+            let mut ask = question(&inp);
+            ask["tool_id"] = json!(id);
+            ask["since"] = json!(t);
+            out["ask"] = ask;
+        } else if out["doing"].is_null() {
+            out["doing"] = json!({"tool_id": id, "since": t, "tool": name, "what": summary(&inp)});
+        }
+    }
+    let mut cache = BRIEFS.lock().unwrap();
+    if cache.len() >= 200 {
+        cache.clear();
+    }
+    cache.insert(path.to_path_buf(), (mtime, out.clone()));
+    Ok(out)
+}
+
+/// The most frequent item; on a tie, the latest of them.
+fn most_common(items: &[String]) -> Option<&String> {
+    let mut counts: HashMap<&String, usize> = HashMap::new();
+    for i in items {
+        *counts.entry(i).or_default() += 1;
+    }
+    items.iter().max_by_key(|i| counts[i])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn projects() {
+        let h = home().display().to_string();
+        assert_eq!(project_of(&format!("{h}/src/seimei/x.rs")).as_deref(), Some("seimei"));
+        assert_eq!(project_of("~/yah-scratch/t/a").as_deref(), Some("yah"));
+        assert_eq!(project_of(&format!("{h}/.local/x")), None);
+        assert_eq!(project_of("/tmp/x/y"), None);
+        let v = |s: &str| s.to_string();
+        assert_eq!(most_common(&[v("a"), v("b"), v("b"), v("a")]).map(String::as_str), Some("a"));
+    }
+}

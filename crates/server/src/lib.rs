@@ -18,11 +18,15 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use seimei_core::auth::Auth;
+use seimei_core::cost::Cost;
 use seimei_core::events::{Event, EventLog};
 use seimei_core::files::Files;
+use seimei_core::metrics::{self, WorkerEvents};
 use seimei_core::push::{self as push_mod, Push};
 use seimei_core::uploads::Uploads;
+use seimei_core::usage::Usage;
 use seimei_core::util::{now, read_json, write_json};
+use seimei_core::workers::Pool;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -62,6 +66,11 @@ pub struct App {
     pub files: Arc<Files>,
     pub uploads: Arc<Uploads>,
     pub push: Arc<Push>,
+    pub pool: Pool,
+    usage: Usage,
+    cost: Arc<Cost>,
+    worker_events: WorkerEvents,
+    audit: PathBuf,
 }
 
 impl App {
@@ -72,6 +81,7 @@ impl App {
         web: &Path,
         state: &Path,
         push: Arc<Push>,
+        pool: Pool,
     ) -> App {
         // Only these Host headers are served: a page using DNS rebinding cannot read the API from the browser (L4).
         let mut hosts: HashSet<String> = ["localhost", "127.0.0.1", "::1"].map(String::from).into();
@@ -95,6 +105,11 @@ impl App {
             files: Arc::new(Files::new(state)),
             uploads: Arc::new(Uploads::new(state)),
             push,
+            pool,
+            usage: Usage::new(state),
+            cost: Arc::new(Cost::new(&seimei_core::transcripts::claude_dir())),
+            worker_events: WorkerEvents::new(&state.join("events.jsonl")),
+            audit: state.join("audit.jsonl"),
         }
     }
 
@@ -131,7 +146,23 @@ impl App {
     }
 
     fn workers(&self) -> Value {
-        json!({"type": "workers", "list": [], "total": 0})
+        self.pool.listing()
+    }
+
+    /// Metrics for every shikigami (or one), newest first. Blocking: it prices transcripts.
+    fn metrics(&self, only: Option<&str>) -> Vec<Value> {
+        self.cost.refresh();
+        let spend = self.cost.sessions(0.0, f64::INFINITY);
+        let events = self.worker_events.get();
+        let at = now();
+        let mut out = vec![];
+        for w in self.pool.newest_first().into_iter().filter(|w| only.is_none_or(|id| w.id() == id)) {
+            let log: Vec<Value> = w.log.before(None, 100_000).iter().map(|e| (**e).clone()).collect();
+            let evs = events.get(w.id()).map_or(&[][..], Vec::as_slice);
+            let s = w.rec["session_id"].as_str().and_then(|sid| spend.get(sid));
+            out.push(metrics::worker(&w.rec, &log, evs, s, at));
+        }
+        out
     }
 
     fn sessions(&self) -> Value {
@@ -213,6 +244,13 @@ pub fn router(app: Arc<App>) -> Router {
             .route("/api/devices/{id}/revoke", post(revoke))
             .route("/api/devices/push", get(push_info).post(push_token))
             .route("/api/devices/push/test", post(push_test))
+            .route("/api/usage", get(usage))
+            .route("/api/cost", get(cost_view))
+            .route("/api/metrics", get(metrics_view))
+            .route("/api/audit", get(audit))
+            .route("/api/workers", get(workers_all))
+            .route("/api/workers/{id}", get(worker_history))
+            .route("/api/workers/{id}/metrics", get(worker_metrics))
             .route("/api/push/ws", get(push_ws));
     }
     r.fallback(not_found).layer(middleware::from_fn_with_state(app.clone(), guard)).with_state(app)
@@ -661,7 +699,7 @@ async fn stream_events(
             }
             last = ev["id"].as_i64().unwrap_or(last);
         }
-        for snap in [app.state(), app.workers(), app.sessions()] {
+        for snap in [app.state(), app.workers(), app.usage.snapshot(), app.sessions()] {
             if !send(sse(&snap)).await {
                 return;
             }
@@ -888,4 +926,82 @@ async fn uploaded(State(app): Shared, UrlPath(id): UrlPath<String>) -> Response 
         data,
     )
         .into_response()
+}
+
+async fn usage(State(app): Shared) -> Response {
+    ok(app.usage.snapshot())
+}
+
+async fn cost_view(State(app): Shared) -> Response {
+    let me = app.clone();
+    let summary = tokio::task::spawn_blocking(move || {
+        me.cost.refresh();
+        me.cost.summary(me.usage.week_resets())
+    });
+    ok(summary.await.unwrap_or_else(|_| json!({})))
+}
+
+async fn metrics_view(State(app): Shared) -> Response {
+    let rows = tokio::task::spawn_blocking(move || app.metrics(None)).await.unwrap_or_default();
+    ok(json!({"workers": rows}))
+}
+
+/// One shikigami's run so far, for the details sheet: kept off the page's own load, since pricing takes a while.
+async fn worker_metrics(State(app): Shared, UrlPath(id): UrlPath<String>) -> Response {
+    if app.pool.get(&id).is_none() {
+        return text(StatusCode::NOT_FOUND, "404: Not Found");
+    }
+    let rows = tokio::task::spawn_blocking(move || app.metrics(Some(&id))).await.unwrap_or_default();
+    ok(json!({"metrics": rows.into_iter().next()}))
+}
+
+async fn audit(State(app): Shared, Query(q): Query<HashMap<String, String>>) -> Response {
+    let limit = q.get("limit").and_then(|l| l.parse::<usize>().ok()).unwrap_or(200).clamp(1, 1000);
+    let path = app.audit.clone();
+    let calls =
+        tokio::task::spawn_blocking(move || seimei_core::guard::audit_tail(&path, limit)).await.unwrap_or_default();
+    ok(json!({"calls": calls}))
+}
+
+async fn workers_all(State(app): Shared) -> Response {
+    let rows: Vec<Value> = app
+        .pool
+        .newest_first()
+        .into_iter()
+        .take(200)
+        .map(|w| {
+            let mut row = app.pool.info(w);
+            // The task too, trimmed: the Archived list searches it.
+            row["task"] = json!(seimei_core::util::chars(w.rec["task"].as_str().unwrap_or(""), 400));
+            row
+        })
+        .collect();
+    ok(json!({"workers": rows}))
+}
+
+/// Events a worker's page loads at most at once.
+const PAGE: usize = 400;
+
+/// A shikigami's row and its log: the last PAGE events, or those after ?after= (a page's cached copy). When more than
+/// PAGE came since, only the last PAGE come, with "reset": the copy is too old to extend.
+async fn worker_history(
+    State(app): Shared,
+    UrlPath(id): UrlPath<String>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Response {
+    let Some(w) = app.pool.get(&id) else { return text(StatusCode::NOT_FOUND, "404: Not Found") };
+    let after = q.get("after").filter(|a| !a.is_empty() && a.bytes().all(|b| b.is_ascii_digit()));
+    let (mut events, mut reset) = match after.and_then(|a| a.parse().ok()) {
+        Some(a) => (w.log.after(a), false),
+        None => (w.log.before(None, PAGE), true),
+    };
+    if events.len() > PAGE {
+        events.drain(..events.len() - PAGE);
+        reset = true;
+    }
+    let mut row = app.pool.info(w);
+    row["task"] = w.rec["task"].clone();
+    row["question"] = w.rec["question"].clone();
+    let events: Vec<&Value> = events.iter().map(|e| &**e).collect();
+    ok(json!({"worker": row, "events": events, "reset": reset}))
 }

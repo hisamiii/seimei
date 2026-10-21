@@ -8,8 +8,10 @@ use std::time::Duration;
 
 use seimei_core::auth::Auth;
 use seimei_core::events::EventLog;
+use seimei_core::permissions::configured;
 use seimei_core::push::{Fcm, Push, WebPush};
 use seimei_core::util::{config_file, data_dir};
+use seimei_core::workers::Pool;
 use serde_json::Value;
 
 const COMMANDS: [&str; 8] =
@@ -207,7 +209,10 @@ fn main() {
     let web = std::env::var_os("SEIMEI_WEB")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../seimei/web"));
-    let app = Arc::new(seimei_server::App::new(events.clone(), auth, origins, &web, &state, push.clone()));
+    let approvals = cfg.get("approvals").and_then(|s| s.as_table()).cloned().unwrap_or_default();
+    let pool =
+        Pool::new(&state, &configured(&approvals, "shikigami")).unwrap_or_else(|e| die(&format!("workers: {e}")));
+    let app = Arc::new(seimei_server::App::new(events.clone(), auth, origins, &web, &state, push.clone(), pool));
 
     let rt = tokio::runtime::Runtime::new().expect("a runtime");
     rt.block_on(async move {

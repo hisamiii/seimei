@@ -297,3 +297,30 @@ pub fn blocked(tool: &str, inp: &Value, cwd: &str) -> Option<String> {
     }
     None
 }
+
+/// Recent tool calls from the audit log, newest first, each with its outcome folded in.
+pub fn audit_tail(path: &Path, limit: usize) -> Vec<Value> {
+    let Ok(len) = std::fs::metadata(path).map(|m| m.len()) else { return vec![] };
+    let start = len.saturating_sub(2 << 20);
+    let data = crate::util::read_from(path, start).unwrap_or_default();
+    // A read that starts mid-file starts mid-line.
+    let rows = data
+        .split(|&b| b == b'\n')
+        .skip(usize::from(start > 0))
+        .filter_map(|l| serde_json::from_slice::<Value>(l).ok());
+    let (mut calls, mut failed) = (vec![], std::collections::HashSet::new());
+    for r in rows {
+        match r["event"].as_str() {
+            Some("failed") => _ = failed.insert(r["id"].to_string()),
+            Some("call") => calls.push(r),
+            _ => {}
+        }
+    }
+    let mut out: Vec<Value> = calls.into_iter().rev().take(limit).collect();
+    for c in &mut out {
+        if failed.contains(&c["id"].to_string()) {
+            c["failed"] = true.into();
+        }
+    }
+    out
+}

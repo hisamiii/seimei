@@ -49,6 +49,16 @@ pub fn write_json(path: &Path, data: &impl Serialize, private: bool) -> std::io:
     std::fs::rename(&tmp, path)
 }
 
+/// A file's bytes from `off` to its end.
+pub fn read_from(path: &Path, off: u64) -> std::io::Result<Vec<u8>> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path)?;
+    f.seek(SeekFrom::Start(off))?;
+    let mut data = vec![];
+    f.read_to_end(&mut data)?;
+    Ok(data)
+}
+
 pub fn random_bytes(n: usize) -> Vec<u8> {
     let mut b = vec![0; n];
     openssl::rand::rand_bytes(&mut b).expect("the system's random source");
