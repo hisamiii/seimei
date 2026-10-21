@@ -97,6 +97,15 @@ def account(auth: Auth, cmd: str, clear: bool, state: Path, revoke: str | None =
             print("No paired phones.")
 
 
+def recall_state(board: Board, pool: Pool) -> str:
+    """For the block after a compaction: the open board items and the shikigami still at work."""
+    live = [w for w in pool.workers.values() if w.rec["state"] in ("running", "asking", "laptop")]
+    rows = [f"- {w.name} ({w.id}) {w.rec['state']} in {w.rec['cwd']}" + (f", task {w.rec['board_task']}" if w.rec.get("board_task") else "")
+            + f": {w.rec['task'].strip().splitlines()[0][:200] if w.rec['task'].strip() else ''}" for w in live]
+    return (f"## Open board items\n{board.text(done_too=False)}\n\n## Shikigami at work\n"
+            + ("\n".join(rows) or "(none)"))
+
+
 def main():
     ap = argparse.ArgumentParser(prog="seimei")
     ap.add_argument("command", nargs="?", choices=["serve", "passwd", "passkeys", "logout-all", "screen-password", "pair", "devices"],
@@ -164,6 +173,7 @@ def main():
     # Archived shikigami are out of the picture, unless a task still points at one.
     dispatcher.drift = lambda: board.drift({w.id: (w.name, w.rec["state"]) for w in pool.workers.values()
                                             if not pool.archive.worker(w.rec) or board.current(w.id)})
+    dispatcher.recall = lambda: recall_state(board, pool)
     guard.tell = pool.tell
     watcher = Watcher(events, pool.own_sessions, pool.notify, pool.archive)
     app = make_app(events, dispatcher, pool, files, approvals, guard, watcher, desk, auth, origins, state / "app", cost, push, uploads, board, adopter)

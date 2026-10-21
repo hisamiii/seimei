@@ -302,22 +302,24 @@ class Board:
                 out.setdefault(t["owner"], t["id"])
         return set(out.values())
 
-    def text(self) -> str:
+    def text(self, done_too: bool = True) -> str:
         """The board for the dispatcher: per project, live work in queue order, then the last few done."""
         nexts = self.nexts()
         out = []
         for p in self.data["projects"]:
             ts = [t for t in self.data["tasks"] if t["project"] == p["name"]]
             live = [t for t in ts if t["state"] != "done"]
-            done = sorted((t for t in ts if t["state"] == "done"), key=lambda t: -(t["done_at"] or 0))
+            if not live and not done_too:
+                continue
+            ended = sorted((t for t in ts if t["state"] == "done"), key=lambda t: -(t["done_at"] or 0))
             out.append(f"{p['name']}" + (" (paused)" if p["paused"] else "") + (f" [color {p['color']}]" if p["color"] else ""))
             for t in sorted(live, key=lambda t: (ORDER[t["state"]], t.get("pos", 0))):
                 steps = t.get("steps") or []
                 out.append(f"  {t['id']} {t['state']}{' (next)' if t['id'] in nexts else ''}: {t['title']} ({t['owner']} #{t.get('pos')}"
                            + (f", shikigami {t['worker']}" if t.get("worker") else "")
                            + (f", {sum(s['state'] == 'completed' for s in steps)}/{len(steps)} steps" if steps else "") + ")")
-            if done:
-                out.append("  done: " + "; ".join(f"{t['id']} {t['title']}" for t in done[:5]) + (f" (+{len(done) - 5})" if len(done) > 5 else ""))
+            if ended and done_too:
+                out.append("  done: " + "; ".join(f"{t['id']} {t['title']}" for t in ended[:5]) + (f" (+{len(ended) - 5})" if len(ended) > 5 else ""))
         return "\n".join(out) or "The board is empty."
 
 

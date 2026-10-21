@@ -86,6 +86,24 @@ def always_load(server: dict, deferred: set[str]) -> dict:
     return server
 
 
+# A peek's text, at most: it lands in the dispatcher's context and stays there until a compaction.
+PEEK_MAX = 6000
+
+
+def capped(head: str, lines: list[str], full: str) -> str:
+    """head, then as many of the newest lines as fit in PEEK_MAX, saying where the rest is when some are left out."""
+    out, size, cut = [], len(head), False
+    for ln in reversed(lines):
+        if size + len(ln) + 1 > PEEK_MAX:
+            cut, room = True, PEEK_MAX - size - 5
+            if not out and room > 200:
+                out.append("... " + ln[-room:])
+            break
+        out.append(ln)
+        size += len(ln) + 1
+    return "\n".join([head] + ([f"[... older lines left out; all of it is in {full}]"] if cut else []) + out[::-1])
+
+
 def address(s: dict) -> str:
     """Where SendMessage reaches a session, whatever its name."""
     return "uds:" + (s["rec"].get("messagingSocketPath") or f"/run/user/{os.getuid()}/cc-socks/{s['pid']}.sock")
@@ -194,7 +212,7 @@ def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), upl
         w = pool.find(args["worker"])
         if not w:
             return text("No such shikigami.", error=True)
-        lines = [f"{w.name} ({w.id}) is {w.rec['state']}. Task: {w.rec['task'][:500]}"]
+        lines = []
         for ev in w.log.before(None, int(args.get("count", 30))):
             kind = ev["type"]
             if kind in ("user", "assistant"):
@@ -203,7 +221,9 @@ def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), upl
                 lines.append(f"[tool] {ev['name']}: {ev['summary']}")
             elif kind == "tool_result" and ev["error"]:
                 lines.append(f"[tool error] {ev['text'][:300]}")
-        return text("\n".join(lines))
+        path = sess.transcript({"sessionId": w.rec["session_id"], "cwd": w.rec["cwd"]}) if w.rec.get("started") else None
+        return text(capped(f"{w.name} ({w.id}) is {w.rec['state']}. Task: {w.rec['task'][:500]}", lines,
+                           f"its transcript: {path}" if path else f"its log: {w.log.path}"))
 
     @tool("message", "Send a shikigami a message: an answer to its question, new instructions, or 'continue'. "
           "It folds into a running turn or wakes a finished worker with its full context.", {
@@ -343,10 +363,10 @@ def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), upl
         for c in p["open_calls"]:
             lines.append(f"\nStill running: {c['tool']} since {c['since'][:19]}Z: {c['what']}")
         merged = sorted([(t, "user", x) for t, x in p["user"]] + [(t, "assistant", x) for t, x in p["assistant"]])
-        if merged:
-            lines.append("\nRecent messages, oldest first:")
-            lines += [f"[{who} {t[11:19]}] {x}" for t, who, x in merged]
-        return text("\n".join(lines))
+        recent = [f"[{who} {t[11:19]}] {x}" for t, who, x in merged]
+        if recent:
+            recent[0] = "\nRecent messages, oldest first:\n" + recent[0]
+        return text(capped("\n".join(lines), recent, f"the transcript: {path}"))
 
     @tool("usage", "The account's plan usage: the 5-hour and weekly windows (share used, reset time), today's "
           "tokens per seimei session, and at API prices: what this and earlier 5-hour windows cost and the price of "

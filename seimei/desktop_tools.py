@@ -5,6 +5,7 @@ import base64
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from claude_agent_sdk import tool
@@ -52,6 +53,19 @@ def failed(e: Exception) -> dict:
     return text(str(e) if isinstance(e, (NoDesktop, ValueError, RuntimeError)) else f"{type(e).__name__}: {e}", error=True)
 
 
+SHOTS_KEPT = 30
+
+
+def shot_file(folder: Path, data: bytes, mime: str) -> Path:
+    """Save a screenshot for a later Read; only the newest SHOTS_KEPT stay."""
+    folder.mkdir(mode=0o700, exist_ok=True)
+    path = folder / f"{time.strftime('%Y%m%d-%H%M%S')}-{time.time_ns() % 1000000:06d}{'.png' if mime == 'image/png' else '.jpg'}"
+    path.write_bytes(data)
+    for old in sorted(folder.iterdir())[:-SHOTS_KEPT]:
+        old.unlink(missing_ok=True)
+    return path
+
+
 def make_desktop_tools(desk: Desktop, files: Files, events: EventLog, layout=None) -> list:
     @tool("desktop", "The laptop's niri desktop: outputs, workspaces with their windows (id, app, title; focused, urgent, "
           "opened by seimei), the keyboard layout and whether the screen is locked (input tools refuse while it is). Start here before acting.", {})
@@ -65,7 +79,9 @@ def make_desktop_tools(desk: Desktop, files: Files, events: EventLog, layout=Non
           "coordinates from this image. With a window id: that window alone at full resolution, even on another "
           "workspace, for reading (not for click coordinates). region [x, y, w, h] (pixels of the whole-screen image) "
           "or target (bar: the status bar; top or bottom: half the screen): that part at full resolution, under "
-          "800 KB, for reading small text. show=true also puts the image in the chat.", {
+          "800 KB, for reading small text. It returns the image's path: Read it to see the image (only when you need "
+          "to look; the path stays valid for the last 30 shots). show=true puts the image in the chat and returns the "
+          "image itself.", {
               "type": "object",
               "properties": {"window": {"type": "integer"}, "show": {"type": "boolean", "default": False},
                              "region": {"type": "array", "items": {"type": "number"}},
@@ -86,8 +102,10 @@ def make_desktop_tools(desk: Desktop, files: Files, events: EventLog, layout=Non
             name, _ = files.save(data)
             events.add({"type": "image", "file": name, "caption": str(args.get("caption") or "")[:300]})
             note += " Shown to the user."
-        return {"content": [{"type": "image", "data": base64.b64encode(data).decode(), "mimeType": mime},
-                            {"type": "text", "text": note}]}
+            return {"content": [{"type": "image", "data": base64.b64encode(data).decode(), "mimeType": mime},
+                                {"type": "text", "text": note}]}
+        # A path, not the pixels: an image in every result was 8% of the dispatcher's context growth.
+        return text(f"{await asyncio.to_thread(shot_file, files.dir.parent / 'shots', data, mime)}\n{note}")
 
     @tool("niri", "Run a niri action, as `niri msg action <action> <args>` takes it. Common ones: focus-window --id N, "
           "focus-workspace <idx|name>, move-window-to-workspace --window-id N <idx|name>, close-window --id N, "

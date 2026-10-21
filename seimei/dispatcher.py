@@ -23,6 +23,7 @@ from claude_agent_sdk import (
     get_session_info,
 )
 
+from . import recall
 from .events import EventLog
 from .util import NO_CONNECTORS, STREAM_BUFFER, queue_env, result_text, summarize
 
@@ -41,6 +42,10 @@ RE_SEARCH = 50  # the user's messages a re: quote is looked for in
 # An event turn that ends on an unmarked reply is asked once where it goes (rules.md: the routing rule is enforced).
 # Info-only notes wait for the next turn; after this long without one, they start a turn of their own.
 HOLD = 30 * 60
+# Idle this long after a turn (the 1 h prompt cache still warm) with this much context: compact now, at a natural
+# break, instead of mid-task at the window's edge.
+IDLE_COMPACT = float(os.environ.get("SEIMEI_IDLE_COMPACT", 40 * 60))
+IDLE_COMPACT_MIN = int(os.environ.get("SEIMEI_IDLE_COMPACT_MIN", 150_000))
 BOUNCE = "[seimei] mark this reply chat: or trajectory: (answer with just the marker; the reply is moved for you)"
 OFF_TOOLS = ["Agent", "Task", "Workflow", "NotebookEdit", "CronCreate", "CronDelete", "CronList", "RemoteTrigger",
              "PushNotification", "DesignSync", "EnterWorktree", "ExitWorktree", "ScheduleWakeup", "LSP"]
@@ -50,7 +55,7 @@ PROMPT = """\
 You are seimei, the user's permanent assistant on their laptop (Arch, niri).
 They talk to you through a web page, usually from their phone.
 - This is one conversation that never resets; older turns get compacted.
-  Keep durable notes (ongoing tasks, decisions, open questions) in {notes} and re-read them after a compaction or restart.
+  Keep durable notes (ongoing tasks, decisions, open questions) in {notes}. After a compaction, seimei puts them back on your next message, with the open board items, the running shikigami and the user's last messages; re-read them yourself after a restart.
 - Replies are read on a phone: lead with the answer, keep it short, avoid wide tables.
 - Phone notifications are yours to decide: only approval cards push on their own. Use notify (level, collapse key, reply=true when they asked something and left the app), presence to see where they are, and watch rules to ping them when a shikigami or session finishes or asks, or the GPU queue frees.
 - Messages starting with [seimei] are events from the server, not typed by the user. Ones that need you (a shikigami finishing, failing or asking, a session's question or permission prompt, a card, a queue fault) start a turn at once; the rest wait as "Since your last turn" lines on your next turn, at most 30 minutes.
@@ -82,6 +87,7 @@ When the user wants one of their sessions to go on without its terminal, mcp__se
 Drive the laptop with your desktop tools (start with desktop), not `niri msg`, grim or ydotool in Bash: niri can restart, and your shell keeps the old socket.
 - Focus stealing is fine and you may use the user's workspaces, but apps you open for a task go to the "seimei" workspace (open_app does that).
 - Closing a window you did not open, quitting niri and editing ~/.config/niri wait for the user's OK on their phone; ask in chat first when the reason is not obvious.
+- screenshot returns the image's path: Read it when you need to look (show=true puts it in the chat and returns the image).
 - Never type into a window you have not just looked at. Prefer keyboard shortcuts and typing over clicks.
 - The user has a stop key on the laptop. When they press it, your turn ends and desktop input is blocked for a minute: do not resume driving until they say so.
 - A shikigami the user opened on the laptop runs in a kitty window there; you cannot message it until that window is closed.
@@ -148,6 +154,8 @@ def human(n: int) -> str:
 class Dispatcher:
     # Where the task board and the shikigami disagree (a line, or None); set in __main__.
     drift = None
+    # The open board items and running shikigami, for the block after a compaction; set in __main__.
+    recall = None
 
     def __init__(self, cfg: dict, events: EventLog, state_dir: Path, tools=None, guard=None, usage=None):
         self.cfg = cfg
@@ -161,6 +169,12 @@ class Dispatcher:
         self.notes = state_dir / "notes.md"
         self.style_file = state_dir / "style.md"
         self.style_seen: tuple[tuple, str] = ((), "")
+        # Set at a compact_boundary, cleared when the next message carries the After compaction block (a file, so a
+        # restart in between keeps it).
+        self.compacted = state_dir / "compacted"
+        self.checklist = state_dir / "compact-checklist.md"
+        self.prompt_file = state_dir / "prompt.md"
+        self.idle_timer: asyncio.TimerHandle | None = None
         self.client: ClaudeSDKClient | None = None
         self.connected = False
         self.busy = False
@@ -175,6 +189,26 @@ class Dispatcher:
         self.inputs: list[tuple[str, object]] = []
         self.write_lock = asyncio.Lock()
         self.rate_limits: dict[str, dict] = {}
+
+    def prompt(self) -> str:
+        return PROMPT.format(notes=self.notes, name=self.cfg.get("name", "seimei"))
+
+    def prompt_news(self):
+        """A resumed session keeps the system prompt it had until its next compaction: when a deploy changed the
+        prompt, the new and changed lines go to the dispatcher once as a note."""
+        now, seen = self.prompt(), self.prompt_file.read_text() if self.prompt_file.exists() else None
+        self.prompt_file.write_text(now)
+        if seen is None or seen == now:
+            return
+        old = set(seen.splitlines())
+        new = [ln for ln in now.splitlines() if ln.strip() and ln not in old]
+        gone = [ln for ln in seen.splitlines() if ln.strip() and ln not in set(now.splitlines())]
+        if not new and not gone:
+            return
+        text = ("this deploy changed your system prompt; your session sees the new one only after its next compaction, "
+                "so until then these lines apply:\n" + "\n".join(new)
+                + (f"\n(and {len(gone)} old line(s) were dropped or reworded)" if gone else ""))
+        self.note(text[:4000] + ("\n[... more in the new prompt]" if len(text) > 4000 else ""), key="prompt")
 
     def session_id(self) -> str | None:
         return self.sid_file.read_text().strip() if self.sid_file.exists() else None
@@ -207,7 +241,7 @@ class Dispatcher:
             permission_mode="bypassPermissions",
             include_partial_messages=True,
             setting_sources=["user", "project", "local"],
-            system_prompt={"type": "preset", "preset": "claude_code", "append": PROMPT.format(notes=self.notes, name=self.cfg.get("name", "seimei"))},
+            system_prompt={"type": "preset", "preset": "claude_code", "append": self.prompt()},
             env={**queue_env("seimei"), **NO_CONNECTORS},
             # Its own tools, minus what it has no use for: it delegates through summon (subagents would be invisible
             # to the user) and pings through notify. Agent is still called Task in some CLI versions.
@@ -215,6 +249,8 @@ class Dispatcher:
             skills=[],
             mcp_servers={"seimei": self.tools} if self.tools else {},
             hooks=self.guard.hooks("seimei") if self.guard else None,
+            # Only the dispatcher's compactions get the checklist: a --settings layer, not ~/.claude.
+            settings=recall.settings(self.checklist),
             # A fixed name is a fixed address: peers reply to "seimei" across restarts.
             extra_args={"name": self.cfg.get("name", "seimei")},
             **where,
@@ -222,6 +258,7 @@ class Dispatcher:
 
     async def run(self):
         delay, failures = 1, 0
+        self.prompt_news()
         while True:
             try:
                 self.client = ClaudeSDKClient(self._options())
@@ -323,6 +360,7 @@ class Dispatcher:
         return self.style_seen[1]
 
     async def _deliver(self, text: str, images=(), src: tuple[str, object] | None = None):
+        self._idle_cancel()
         if self.notes_queue:
             notes = "\n".join(f"- {n.rsplit(chr(0), 1)[-1]}" for n in self.notes_queue)
             self.notes_queue.clear()
@@ -333,6 +371,11 @@ class Dispatcher:
         # A new turn starts with where the task board and the shikigami disagree, if they do.
         if not self.busy and self.drift and (drift := self.drift()):
             text = f"{drift}\n\n{text}" if text else drift
+        # The first message after a compaction puts back what the summary may have lost.
+        if self.compacted.exists():
+            self.compacted.unlink(missing_ok=True)
+            back = recall.block(self.notes, self.events.events[-3000:], self.recall() if self.recall else "")
+            text = f"{back}\n\n{text}" if text else back
         # The user's style reminder rides on every message; the event log already has what the user saw.
         if style := self.style():
             text = f"{text}\n\n[style]\n{style}"
@@ -349,6 +392,42 @@ class Dispatcher:
             await self._write(content)
         else:
             self.pending.append(content)
+
+    def _idle_arm(self):
+        self._idle_cancel()
+        try:
+            self.idle_timer = asyncio.get_running_loop().call_later(IDLE_COMPACT, lambda: asyncio.ensure_future(self.idle_compact()))
+        except RuntimeError:
+            pass
+
+    def _idle_cancel(self):
+        if self.idle_timer:
+            self.idle_timer.cancel()
+            self.idle_timer = None
+
+    async def idle_compact(self, min_tokens: int = IDLE_COMPACT_MIN) -> bool:
+        """Idle with a big context and a warm cache: compact now. The PreCompact hook adds the checklist, as it does
+        for every compaction; the next message gets the After compaction block."""
+        self.idle_timer = None
+        if self.busy or not self.connected or self.pending or self.notes_queue:
+            return False
+        try:
+            used = (await self.client.get_context_usage()).get("totalTokens") or 0
+        except Exception as e:
+            log.warning("context usage failed: %s", e)
+            return False
+        if used < min_tokens or self.busy:
+            return False
+        log.info("idle compaction at %d tokens", used)
+        self.events.add({"type": "system", "lane": "t", "text": f"Compacting older context while idle ({used // 1000}k tokens)."})
+        self._set(busy=True)
+        try:
+            await self._write("/compact")
+        except Exception as e:
+            log.warning("idle compaction failed: %s", e)
+            self._set(busy=False)
+            return False
+        return True
 
     async def interrupt(self):
         if self.connected and self.busy:
@@ -422,6 +501,7 @@ class Dispatcher:
                                      "text": result_text(b.content)})
         elif isinstance(msg, SystemMessage):
             if msg.subtype == "compact_boundary":
+                self.compacted.touch()
                 self.events.add({"type": "system", "text": "Older context was compacted."})
         elif isinstance(msg, ResultMessage):
             if self.usage:
@@ -446,6 +526,7 @@ class Dispatcher:
                 self._route_held("")
             self.bouncing = False
             self._set(busy=False)
+            self._idle_arm()
         elif isinstance(msg, RateLimitEvent):
             self.rate_limit(msg)
 
