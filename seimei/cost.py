@@ -54,6 +54,17 @@ def price_for(model: str):
     return best, PRICES.get(best)
 
 
+def slim(u: dict) -> dict:
+    """The parts of a usage record that pricing and the totals read. Kept whole, 65k records held 200 MB."""
+    s = {k: u[k] for k in ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens",
+                           "speed", "inference_geo") if u.get(k)}
+    if isinstance(cc := u.get("cache_creation"), dict):
+        s["cache_creation"] = {k: cc[k] for k in ("ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens") if k in cc}
+    if web := (u.get("server_tool_use") or {}).get("web_search_requests"):
+        s["server_tool_use"] = {"web_search_requests": web}
+    return s
+
+
 def cost(model: str, u: dict) -> tuple[float, str | None]:
     """(USD, the price key used) for one API message's usage; unknown models cost 0."""
     key, p = price_for(model)
@@ -126,6 +137,9 @@ class Cost:
             self.scanned = time.time()
 
     def _line(self, line: bytes, stem: str = ""):
+        # Most of a transcript is tool output: parse only the lines that can count (seimei's memory, 2026-10-21).
+        if b'"usage"' not in line and b'"custom-title"' not in line and b'"agent-name"' not in line:
+            return
         try:
             d = json.loads(line)
         except ValueError:
@@ -148,7 +162,7 @@ class Cost:
             t = datetime.fromisoformat(d.get("timestamp", "").replace("Z", "+00:00")).timestamp()
         except ValueError:
             t = old[0] if old else 0.0
-        self.messages[mid] = (t, model, u, sid)
+        self.messages[mid] = (t, model, slim(u), sid)
         if d.get("cwd"):
             self.folders.setdefault(sid, d["cwd"])
 
