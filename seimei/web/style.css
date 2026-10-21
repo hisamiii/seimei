@@ -151,7 +151,12 @@ body:not([data-tab="chat"]) .ltabs { display: none; }
 }
 .msg.assistant > .rbtn { top: -6px; right: 0; }
 .replyable:hover > .rbtn, .rbtn:focus-visible { opacity: 1; }
-@media (hover: none) { .rbtn { display: none; } }
+@media (hover: none) {
+  .rbtn { display: none; }
+  /* A long press replies: no text selection racing it, so the lift can bring up the keyboard. Code stays copyable. */
+  .replyable { -webkit-user-select: none; user-select: none; }
+  .replyable pre { -webkit-user-select: text; user-select: text; }
+}
 .traj-empty { align-self: center; max-width: 34ch; margin: 48px 0; text-align: center; color: var(--text-3); font-size: 14px; }
 .re {
   display: flex; align-items: center; gap: 6px; width: fit-content; max-width: 100%; margin: 0 0 6px; padding: 4px 10px 4px 8px;

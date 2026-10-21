@@ -38,6 +38,9 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import kotlinx.coroutines.launch
@@ -898,6 +901,16 @@ fun Composer(vm: Seimei) {
     val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { vm.attachFiles(it) }
     var menu by remember { mutableStateOf(false) }
     val cs = MaterialTheme.colorScheme
+    val focus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    // A reply goes straight to typing.
+    LaunchedEffect(vm.focusComposer) {
+        if (vm.focusComposer) {
+            vm.focusComposer = false
+            focus.requestFocus()
+            keyboard?.show()
+        }
+    }
     Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 8.dp)) {
         vm.replyTo?.let { (_, text) ->
             Row(
@@ -962,7 +975,7 @@ fun Composer(vm: Seimei) {
                     focusedContainerColor = cs.surfaceContainerHigh, unfocusedContainerColor = cs.surfaceContainerHigh,
                     focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
                 ),
-                modifier = Modifier.weight(1f).heightIn(min = 56.dp),
+                modifier = Modifier.weight(1f).heightIn(min = 56.dp).focusRequester(focus),
             )
             Spacer(Modifier.width(8.dp))
             val typing = vm.draft.isNotBlank() || vm.attachments.isNotEmpty()

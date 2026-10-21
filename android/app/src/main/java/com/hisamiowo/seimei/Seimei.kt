@@ -143,6 +143,8 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     /** The message of seimei's or the card that the next send answers (a swipe, or "Reply in chat"). */
     var replyTo by mutableStateOf<ReplyTo?>(null)
         private set
+    /** Set by a reply: the composer takes the focus and opens the keyboard, then clears it. */
+    var focusComposer by mutableStateOf(false)
     /** A row to scroll to and flash, by key, in the lane on screen. */
     var goto by mutableStateOf<String?>(null)
     var live by mutableStateOf("")
@@ -557,6 +559,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     /** A swipe on a message of seimei's or a card, or "Reply in chat" in the trajectory: the next send answers it. */
     fun replyIn(r: ReplyTo) {
         replyTo = r
+        focusComposer = true
         showLane("c")
     }
 

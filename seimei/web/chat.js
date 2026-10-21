@@ -1091,7 +1091,7 @@ const PRESS = 450;
 let press = null;
 function pressStart(e) {
   const node = e.target.closest('.replyable');
-  if (e.pointerType !== 'touch' || !node || e.target.closest('a, button, input, textarea')) return;
+  if (e.pointerType !== 'touch' || !node || e.target.closest('a, button, input, textarea, pre')) return;
   const p = { x: e.clientX, y: e.clientY, fired: false };
   p.timer = setTimeout(() => {
     p.fired = true;
@@ -1113,7 +1113,9 @@ function pressEnd() {
 for (const box of [thread, traj]) {
   box.addEventListener('pointerdown', pressStart);
   box.addEventListener('pointermove', pressMove);
-  box.addEventListener('pointerup', pressEnd);
+  // The press fired from a timer, which mobile browsers do not count as a gesture: focus again on the lift, so the
+  // keyboard comes up.
+  box.addEventListener('pointerup', () => { if (press?.fired) input.focus(); pressEnd(); });
   box.addEventListener('pointercancel', pressEnd);
   box.addEventListener('contextmenu', (e) => { if (press?.fired) e.preventDefault(); });
 }
