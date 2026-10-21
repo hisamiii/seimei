@@ -159,7 +159,8 @@ def main():
                                                                  + make_browser_tools(browser, approvals)
                                                                  + discord_link.make_discord_tools(discord, approvals, uploads), uploads),
                             guard, usage)
-    pool.dispatcher, pool.guard = dispatcher, guard
+    pool.dispatcher, pool.guard, pool.board = dispatcher, guard, board
+    dispatcher.drift = lambda: board.drift({w.id: (w.name, w.rec["state"]) for w in pool.workers.values()})
     guard.tell = pool.tell
     watcher = Watcher(events, pool.own_sessions, pool.notify, pool.archive)
     app = make_app(events, dispatcher, pool, files, approvals, guard, watcher, desk, auth, origins, state / "app", cost, push, uploads, board)

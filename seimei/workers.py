@@ -15,6 +15,7 @@ from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
     ClaudeSDKClient,
+    HookMatcher,
     RateLimitEvent,
     ResultMessage,
     TaskNotificationMessage,
@@ -44,6 +45,7 @@ Before reporting done, run the checks that prove it (tests, build, a command, a 
 If you are blocked on a decision only the user can make, call mcp__shikigami__ask with the question and end your turn.
 Subagents are fine for searches and lookups; they run on {subagents}. No big parallel fan-outs.
 Your commands take GPU/NPU turns through claude-queue. To start or restart a desktop app, run it outside the queue with `env -u LD_PRELOAD systemd-run --user --collect <app>`: started straight from your shell, it holds the GPU turn until it quits and stalls everyone else's GPU jobs.
+Start every task with a short step list (3-8 steps, TaskCreate) and keep it current as you go (TaskUpdate: in_progress when you start a step, completed when it is done; add or delete steps when the plan changes). It shows live as your task's steps on the user's board. Skip it only for a one-step job.
 """
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 # The context a shikigami may fill before it compacts: the user keeps most at 256-400k, 1m only where really needed.
@@ -68,10 +70,27 @@ RESUME_WINDOW = 3600
 # Seconds to gather a burst of events into one message for the dispatcher.
 BATCH = 3
 RECENT = 24 * 3600
+# Tool calls a shikigami may make on a task without a step list before it is reminded, once.
+NUDGE_AFTER = 15
+NUDGE = ("seimei: you have made about 15 tool calls on this task without a step list. Write one now (3-8 steps, "
+         "TaskCreate) and keep it current with TaskUpdate: it shows live on the user's board.")
+STEP = re.compile(r"Task #(\w+)")
 
 
 def slug(name: str) -> str:
     return re.sub(r"[^a-z0-9-]+", "-", name.lower()).strip("-")[:32] or "worker"
+
+
+def title_of(task: str, name: str) -> str:
+    """A board title for a summoned task: its first sentence without seimei's #NN or a leading aside like "(user OK):",
+    cut at a word near 60 chars."""
+    line = re.sub(r"^\s*(#\d+\b|\([^)]*\))[\s:,.;-]*", "", first_line(task, 400))
+    line = re.sub(r"^\s*\([^)]*\)[\s:,.;-]*", "", line)
+    line = re.split(r"(?<=[.!?])\s", line, maxsplit=1)[0].rstrip(".:")
+    line = line[:1].upper() + line[1:]
+    if len(line) > 60:
+        line = line[:60].rsplit(" ", 1)[0].rstrip(",;:-") + "…"
+    return line or name
 
 
 def first_line(text: str, n: int = 160) -> str:
@@ -94,6 +113,8 @@ class Worker:
         self.turn_text = False
         # Subagents still working in the background: the turn may end before they report back.
         self.tasks: dict[str, str] = {}
+        # TaskCreate calls waiting for their result, which names the step's id.
+        self.steps: dict[str, str] = {}
 
     @property
     def id(self) -> str:
@@ -126,6 +147,8 @@ class Worker:
     def _set(self, state: str, **kw):
         self.rec.update(state=state, updated=time.time(), **kw)
         self.pool.changed()
+        if self.pool.board:
+            self.pool.board.follow(self.id, state)
 
     def _add(self, ev: dict):
         ev = self.log.add(ev)
@@ -155,15 +178,36 @@ class Worker:
             env=self._env(),
             **({"effort": r["effort"]} if r.get("effort") else {}),
             extra_args={"name": f"shikigami {r['name']}"},
-            hooks=self.pool.guard.hooks(r["name"], r["id"]) if self.pool.guard else None,
+            hooks=self._hooks(),
             **where,
         )
+
+    def _hooks(self) -> dict:
+        hooks = self.pool.guard.hooks(self.rec["name"], self.rec["id"]) if self.pool.guard else {}
+        hooks.setdefault("PostToolUse", []).append(HookMatcher(hooks=[self._nudge]))
+        return hooks
+
+    async def _nudge(self, inp, tool_use_id, ctx):
+        """About NUDGE_AFTER tool calls into a task with no step list: remind it once (per task)."""
+        board = self.pool.board
+        t = board and board.current(self.id)
+        if not t or inp.get("agent_id") or t.get("steps") or inp.get("tool_name") in ("TaskCreate", "TaskUpdate"):
+            return {}
+        n = self.rec.get("nudge") or {}
+        if n.get("task") != t["id"]:
+            n = {"task": t["id"], "calls": 0}
+        n["calls"] += 1
+        self.rec["nudge"] = n
+        if n["calls"] != NUDGE_AFTER:
+            return {}
+        return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": NUDGE}}
 
     def _env(self) -> dict:
         r = self.rec
         # No auto-memory: a shikigami reports what it learned, and seimei decides what is kept.
+        # The todo tools (TaskCreate, TaskUpdate) are off by default for current models: the board mirrors them.
         env = {**queue_env(r["name"]), **NO_CONNECTORS, "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
-               "CLAUDE_CODE_SUBAGENT_MODEL": r.get("subagents") or "haiku"}
+               "CLAUDE_CODE_SUBAGENT_MODEL": r.get("subagents") or "haiku", "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1"}
         if cap := CONTEXTS.get(r.get("context_cap") or ""):
             env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = str(cap)
         return env
@@ -305,6 +349,7 @@ class Worker:
                     self.turn_text = True
                     self._doing({"text": first_line(b.text)})
                 elif isinstance(b, ToolUseBlock):
+                    self._step(b)
                     summary = summarize(b.input)
                     self._add({"type": "tool", "tool_id": b.id, "name": b.name, "summary": summary})
                     self._doing({"name": b.name, "summary": summary})
@@ -313,12 +358,23 @@ class Worker:
                 return
             for b in msg.content:
                 if isinstance(b, ToolResultBlock):
+                    if (subject := self.steps.pop(b.tool_use_id, None)) is not None and not b.is_error and self.pool.board:
+                        if m := STEP.search(result_text(b.content)):
+                            self.pool.board.step(self.id, m[1], title=subject)
                     self._add({"type": "tool_result", "tool_id": b.tool_use_id, "error": bool(b.is_error),
                                "text": result_text(b.content)})
         elif isinstance(msg, ResultMessage):
             self._finish(msg)
         elif isinstance(msg, RateLimitEvent):
             self.pool.dispatcher.rate_limit(msg)
+
+    def _step(self, b: ToolUseBlock):
+        """Its own todo list, mirrored onto its task: a TaskCreate gets its id from the result; a TaskUpdate applies now."""
+        if b.name == "TaskCreate":
+            self.steps[b.id] = str(b.input.get("subject") or "").strip()
+        elif b.name == "TaskUpdate" and self.pool.board and b.input.get("taskId") is not None:
+            self.pool.board.step(self.id, str(b.input["taskId"]).lstrip("#"), title=b.input.get("subject") or None,
+                                 state=b.input.get("status"))
 
     def _turn_goes_on(self):
         """A new turn after the worker settled (its queued message, a subagent's report): it runs again."""
@@ -387,6 +443,9 @@ class Worker:
 
 
 class Pool:
+    # The task board (tasks.Board), when there is one: summon and adopt file tasks there, and those follow the workers.
+    board = None
+
     def __init__(self, events: EventLog, state_dir: Path):
         self.events = events
         self.dir = state_dir / "workers"
@@ -538,8 +597,16 @@ class Pool:
         named = [w for w in self.workers.values() if w.name == key]
         return max(named, key=lambda w: w.rec["created"]) if named else None
 
+    def _file(self, w: Worker, title: str, project: str | None, link: str | None):
+        """Its task on the board: the one seimei named, or a new one (project from its folder unless given)."""
+        if self.board:
+            cwd = w.rec["cwd"]
+            project = project or sessions.project_of(cwd + "/x") or ("home" if cwd == str(Path.home()) else Path(cwd).name)
+            t = self.board.attach(w.id, w.name, w.rec["task"], project, title, link)
+            w.rec["board_task"] = t["id"]
+
     async def summon(self, name: str, task: str, cwd: str, model: str, effort: str | None = None, context: str = "400k",
-                     subagents: str = "haiku") -> Worker:
+                     subagents: str = "haiku", project: str | None = None, link: str | None = None) -> Worker:
         name = slug(name)
         path = Path(os.path.expanduser(cwd or "~")).resolve()
         if not path.is_dir():
@@ -551,8 +618,11 @@ class Pool:
         now = time.time()
         rec = {"id": uuid.uuid4().hex[:8], "name": name, "task": task, "cwd": str(path), "model": model or "opus",
                "effort": effort or None, "context_cap": context, "subagents": subagents or "haiku", "session_id": str(uuid.uuid4()), "state": "starting", "created": now, "updated": now, "summary": ""}
+        if self.board and link and not self.board.find(link):
+            raise ValueError(f"no task {link} on the board")
         w = Worker(self, rec)
         self.workers[rec["id"]] = w
+        self._file(w, title_of(task, name), project, link)
         self.events.add({"type": "worker", "worker": w.id, "name": name, "event": "summoned", "text": task,
                          "cwd": str(path), "model": rec["model"], "effort": rec["effort"], "context_cap": context,
                          "subagents": rec["subagents"]})
@@ -560,7 +630,7 @@ class Pool:
         return w
 
     async def adopt(self, name: str, session_id: str, cwd: str, model: str, effort: str | None, context: str, origin: str,
-                    first: str) -> Worker:
+                    first: str, project: str | None = None, link: str | None = None) -> Worker:
         """A shikigami that resumes one of the user's sessions (adopt.py ended its process)."""
         now = time.time()
         rec = {"id": uuid.uuid4().hex[:8], "name": slug(name), "task": f"Adopted from your session \"{origin}\".", "cwd": cwd,
@@ -568,6 +638,11 @@ class Pool:
                "state": "starting", "created": now, "updated": now, "summary": "", "started": True, "adopted": origin}
         w = Worker(self, rec)
         self.workers[rec["id"]] = w
+        try:
+            self._file(w, origin, project, link)
+        except KeyError:
+            # The session is adopted already: a wrong task id only costs the link.
+            self._file(w, origin, project, None)
         self.events.add({"type": "worker", "worker": w.id, "name": w.name, "event": "summoned", "text": rec["task"],
                          "cwd": cwd, "model": model, "effort": effort, "context_cap": context, "subagents": "haiku"})
         await w.send(first)

@@ -175,7 +175,7 @@ class Adopter:
         self._save(pending)
 
     async def request(self, key: str, when: str = "idle", name: str = "", model: str = "", effort: str = "",
-                      context: str = "", close_window: bool = False) -> str:
+                      context: str = "", close_window: bool = False, project: str = "", task_id: str = "") -> str:
         """The tool: asks the user, then adopts now or at the next idle. Returns what to tell the dispatcher."""
         rows = await asyncio.to_thread(self.rows)
         s = find(rows, key)
@@ -203,7 +203,10 @@ class Adopter:
                       + ("" if background(s) else f"The window is {'closed' if close_window else 'kept'}.")}, "seimei", None)
         if outcome != "approved":
             return f"The user {outcome} it; nothing changed" + (" (it still waits for its idle)." if pending else ".")
-        args = dict(name=name, model=model, effort=effort, context=context, close_window=close_window)
+        if task_id and getattr(self.pool, "board", None) and not self.pool.board.find(task_id):
+            return f"No task {task_id} on the board; nothing asked."
+        args = dict(name=name, model=model, effort=effort, context=context, close_window=close_window, project=project,
+                    task_id=task_id)
         if pending:
             self.waiting.pop(s["pid"]).cancel()
             self._forget(s["pid"])
@@ -261,7 +264,7 @@ class Adopter:
                 self._forget(s["pid"])
 
     async def adopt(self, s: dict, interrupt: bool, name: str = "", model: str = "", effort: str = "", context: str = "",
-                    close_window: bool = False) -> str:
+                    close_window: bool = False, project: str = "", task_id: str = "") -> str:
         pid = s["pid"]
         bg = background(s)
         try:
@@ -338,11 +341,12 @@ class Adopter:
                  + "Carry on with what you were doing; your final message is your report to the user.")
         w = await self.pool.adopt(name or s["name"], s["session_id"], s["cwd"],
                                   model or (f"claude-{s['model']}" if s.get("model") else "opus"),
-                                  effort or s.get("effort") or None, context or default_context(tokens), s["name"], first)
+                                  effort or s.get("effort") or None, context or default_context(tokens), s["name"], first,
+                                  project or None, task_id or None)
         return (f"adopted session \"{s['name']}\" as shikigami {w.name} ({w.id})"
                 + (", interrupted mid-turn" if interrupted else "") + f"; its Claude Code (pid {pid}) ended"
                 + (f"; ended with it: {'; '.join(d[:120] for d in died[:10])}" if died else "; nothing else ended with it")
-                + f"; window {window}.")
+                + f"; window {window}." + (f" On the board as {w.rec['board_task']}." if w.rec.get("board_task") else ""))
 
 
 def make_adopt_tools(adopter: Adopter) -> list:
@@ -352,20 +356,23 @@ def make_adopt_tools(adopter: Adopter) -> list:
           "(a background one through claude stop) and the same conversation goes on as a shikigami, reporting like any "
           "other. when: idle (default, at its next idle) or now (interrupts it first). Optional name (default: the session's), model, effort and "
           "context (default: the session's model and effort, the smallest of 256k/400k/1m above what it holds). "
-          "close_window closes its terminal afterwards. The user approves first; you hear what ended with it.", {
+          "close_window closes its terminal afterwards. It goes on the task board like a summoned one: a new task "
+          "(project from its folder unless given) or the task_id you name. The user approves first; you hear what ended with it.", {
               "type": "object",
               "properties": {"session": {"type": "string", "description": "the session's name, pid, or background job id"},
                              "when": {"type": "string", "enum": ["idle", "now"], "default": "idle"},
                              "name": {"type": "string"}, "model": {"type": "string"},
                              "effort": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max"]},
                              "context": {"type": "string", "enum": ["256k", "400k", "1m"]},
-                             "close_window": {"type": "boolean", "default": False}},
+                             "close_window": {"type": "boolean", "default": False},
+                             "task_id": {"type": "string", "description": "a board item it works on (#58 or t3)"},
+                             "project": {"type": "string", "description": "the board project for a new task"}},
               "required": ["session"]})
     async def adopt(a):
         try:
             out = await adopter.request(str(a["session"]), str(a.get("when") or "idle"), str(a.get("name") or ""),
                                         str(a.get("model") or ""), str(a.get("effort") or ""), str(a.get("context") or ""),
-                                        bool(a.get("close_window")))
+                                        bool(a.get("close_window")), str(a.get("project") or ""), str(a.get("task_id") or ""))
         except Exception as e:
             log.exception("adopt failed")
             return {"content": [{"type": "text", "text": f"Adopting failed: {e}"}], "is_error": True}

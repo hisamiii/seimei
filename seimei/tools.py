@@ -118,7 +118,8 @@ def summon_problem(args: dict) -> str:
 def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), uploads=None):
     @tool("summon", "Start a shikigami: a worker Claude Code session that works on a task on its own and reports back. "
           "Every call picks name, task, cwd, model, effort and context for this task: there are no defaults. "
-          "Returns at once; the report arrives later.", {
+          "Returns at once; the report arrives later. It goes on the task board as a new task (or as the task_id you "
+          "name), whose state then follows it.", {
               "type": "object",
               "properties": {
                   "name": {"type": "string", "description": "short lowercase name, like npu-dma or readme-fix"},
@@ -131,6 +132,9 @@ def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), upl
                   "subagent_model": {"type": "string", "enum": ["haiku", "sonnet", "opus"], "default": "haiku",
                                      "description": "model for the shikigami's own subagents; haiku unless a rare case needs more"},
                   "confirmed": {"type": "boolean", "description": f"set only after the user OKed more than {MAX_RUNNING} running workers"},
+                  "task_id": {"type": "string", "description": "a board item this works on (#58 or t3); without it the "
+                              "board gets a new task (with the task's #NN when it starts with one)"},
+                  "project": {"type": "string", "description": "the board project for a new task; default: from cwd"},
               },
               "required": ["name", "task", *SUMMON_PICKS]})
     async def summon(args):
@@ -141,13 +145,14 @@ def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), upl
                         "then call again with confirmed=true.", error=True)
         try:
             w = await pool.summon(args["name"], args["task"], args["cwd"], args["model"], args["effort"], args["context"],
-                                  args.get("subagent_model") or "haiku")
+                                  args.get("subagent_model") or "haiku", args.get("project") or None, args.get("task_id") or None)
         except Exception as e:
             return text(f"Could not summon: {e}", error=True)
         r = w.rec
         crowd = await asyncio.to_thread(writers, pool, w, own())
         return text(f"Summoned {w.name} ({w.id}) in {r['cwd']} on {r['model']}, effort {r['effort'] or 'default'}, "
-                    f"context {r['context_cap']}, subagents on {r['subagents']}." + (f"\n\n{crowd}" if crowd else ""))
+                    f"context {r['context_cap']}, subagents on {r['subagents']}."
+                    + (f" On the board as {r['board_task']}." if r.get("board_task") else "") + (f"\n\n{crowd}" if crowd else ""))
 
     worker_events = metrics.Events(events.path)
 

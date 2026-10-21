@@ -585,13 +585,26 @@ button.ln { cursor: pointer; }
 .g.s-running { color: var(--primary); }
 .g.s-paused { color: var(--outline); }
 .g.s-done { color: var(--ok); opacity: .55; }
+.g.s-asks { color: var(--warn); }
+.g.s-review { color: var(--ok); }
 button.g { position: relative; padding: 0; border: 0; background: none; cursor: pointer; }
 button.g::after { content: ""; position: absolute; inset: -13px; }
 .ln .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ln .id { color: var(--text-3); margin-right: 6px; font-variant-numeric: tabular-nums; }
 .ln .o { flex: none; margin-left: 14px; font-size: 13px; color: var(--text-3); opacity: .75; }
 .ln .o.you { color: var(--warn); opacity: .7; }
-.ln.s-running .t { font-weight: 500; }
+.ln.s-running .t, .ln.s-asks .t { font-weight: 500; }
+.ln .nx { flex: none; margin-left: 10px; padding: 0 6px; border-radius: 6px; font-size: 11.5px; line-height: 18px; color: var(--primary); background: color-mix(in srgb, var(--primary) 14%, transparent); }
+.ln .nx + .o { margin-left: 8px; }
+/* A task's steps (its shikigami's own todo list): a count that folds, then one small line per step. */
+.sf { display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 0 0 32px; border: 0; background: none; font: 12.5px var(--sans); color: var(--text-3); cursor: pointer; }
+.sf .cv { display: grid; place-items: center; width: 14px; }
+.sf .cv svg { width: 14px; height: 14px; }
+.st { display: flex; align-items: center; min-height: 26px; padding-left: 32px; font-size: 13.5px; color: var(--text-2); }
+.st .g { flex: none; width: 14px; height: 14px; margin-right: 10px; display: grid; place-items: center; }
+.st .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st.s-in_progress { color: var(--text); }
+.st.s-completed .t { color: var(--text-3); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--text-3) 50%, transparent); }
 .ln.s-paused .t { color: var(--text-3); }
 .ln.s-done { min-height: 32px; font-size: 14px; }
 .ln.s-done .g svg { width: 15px; height: 15px; }

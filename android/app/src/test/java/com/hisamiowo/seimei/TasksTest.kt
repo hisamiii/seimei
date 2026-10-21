@@ -34,6 +34,24 @@ class TasksTest {
     }
 
     @Test
+    fun asksReviewQueueNextAndSteps() {
+        fun t(id: String, owner: String, state: String, pos: Int) = task(id, "p", owner, state).put("pos", pos)
+        val b = JSONObject()
+            .put("projects", JSONArray(listOf(project("p"), project("q"))))
+            .put("tasks", JSONArray(listOf(
+                t("#1", "dev", "open", 3), t("#2", "dev", "open", 2), t("#3", "dev", "review", 1),
+                t("#4", "mc", "asks", 1).put("steps", JSONArray(listOf(JSONObject().put("id", "1").put("title", "a").put("state", "completed")))),
+                task("#5", "q", "dev", "running").put("pos", 4),
+            )))
+        val s = sections(b)
+        assertEquals(listOf("p" to "asks", "q" to "running"), s.map { it.name to it.label })
+        assertEquals(listOf("#4", "#3", "#2", "#1"), s[0].live.map { it.id })
+        assertEquals(listOf("#2"), s.flatMap { it.live }.filter { it.next }.map { it.id })
+        assertEquals(listOf(Step("a", "completed")), s[0].live[0].steps)
+        assertEquals(true, s[0].live[0].working)
+    }
+
+    @Test
     fun runningFirstDoneNewestFirst() {
         val busy = sections(board).first()
         assertEquals(listOf("#5", "#4"), busy.live.map { it.id })

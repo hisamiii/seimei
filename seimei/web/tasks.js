@@ -1,6 +1,8 @@
 // The Tasks lane: seimei's board by project. Each project is a section with a thin rule in its Agents-tab tint;
 // done items fold into one "N done" line, paused projects stay shut until opened. The user ticks their own ("you")
-// items; a task with a shikigami opens its page. Live: the stream sends the whole board on every change.
+// items; a task with a shikigami opens its page. Each owner's first open item is marked next; a task's steps (its
+// shikigami's own todo list) show under it while it works, folded otherwise. Live: the stream sends the whole board
+// on every change.
 import { $, el, post, keep, snack } from './util.js';
 import { openWorker, tint } from './agents.js';
 
@@ -10,6 +12,11 @@ const OPEN = 'seimei.tb.open';
 let opened = {};
 try { opened = JSON.parse(localStorage.getItem(OPEN) || '{}'); } catch {}
 const doneShown = new Set();
+// Tasks whose steps were opened or shut by hand (they show by default while the task runs or asks).
+const stepsFlipped = new Set();
+// How live work sorts within a project, then by its owner's queue.
+const ORDER = { asks: 0, running: 1, review: 2, open: 3, paused: 4 };
+const STEP = { completed: 'done', in_progress: 'running', pending: 'open' };
 const root = () => $('tasks');
 
 export function setTasks(b) {
@@ -24,17 +31,19 @@ export async function loadTasks() {
 }
 
 const NS = 'http://www.w3.org/2000/svg';
-function glyph(state) {
+function glyph(state, size = 18) {
   const s = document.createElementNS(NS, 'svg');
-  s.setAttribute('width', '18');
-  s.setAttribute('height', '18');
+  s.setAttribute('width', String(size));
+  s.setAttribute('height', String(size));
   s.setAttribute('viewBox', '0 0 18 18');
   s.setAttribute('aria-hidden', 'true');
   s.innerHTML = state === 'done'
     ? '<path d="M4 9.5l3.2 3.2L14 5.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>'
     : '<circle cx="9" cy="9" r="6.5" fill="none" stroke="currentColor" stroke-width="1.6"/>'
       + (state === 'running' ? '<path d="M9 4.5a4.5 4.5 0 0 1 0 9z" fill="currentColor"/>' : '')
-      + (state === 'paused' ? '<path d="M7.3 6.5v5M10.7 6.5v5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>' : '');
+      + (state === 'paused' ? '<path d="M7.3 6.5v5M10.7 6.5v5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>' : '')
+      + (state === 'asks' ? '<circle cx="9" cy="9" r="2.3" fill="currentColor"/>' : '')
+      + (state === 'review' ? '<path d="M6.3 9.2l1.9 1.9 3.5-3.7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>' : '');
   return s;
 }
 
@@ -48,17 +57,56 @@ function chevron(open) {
   return s;
 }
 
-// What a project's header says on the right, and where it sorts: running work first, paused last.
+// What a project's header says on the right, and where it sorts: what asks first, then running work, paused last.
 function summary(p, ts) {
   const live = ts.filter((t) => t.state !== 'done');
-  if (p.paused) return ['paused', 4];
-  if (live.some((t) => t.state === 'running')) return ['running', 0];
-  if (live.length && live.every((t) => t.owner === 'you')) return ['you', 2];
-  if (live.length) return ['open', 1];
-  return ['done', 3];
+  if (p.paused) return ['paused', 6];
+  if (live.some((t) => t.state === 'asks')) return ['asks', 0];
+  if (live.some((t) => t.state === 'running')) return ['running', 1];
+  if (live.some((t) => t.state === 'review')) return ['review', 2];
+  if (live.length && live.every((t) => t.owner === 'you')) return ['you', 4];
+  if (live.length) return ['open', 3];
+  return ['done', 5];
 }
 
-function line(t) {
+// Each owner's next item: their first open task in queue order.
+function nexts() {
+  const out = new Map();
+  for (const t of [...board.tasks].sort((a, b) => (a.pos || 0) - (b.pos || 0))) {
+    if (t.state === 'open' && !out.has(t.owner)) out.set(t.owner, t.id);
+  }
+  return new Set(out.values());
+}
+
+// A task's steps: a fold line with the count, then the steps while open.
+function steps(t, sec) {
+  const ss = t.steps || [];
+  if (!ss.length || t.state === 'done') return;
+  const open = ['running', 'asks'].includes(t.state) !== stepsFlipped.has(t.id);
+  const done = ss.filter((s) => s.state === 'completed').length;
+  const f = el('button', 'sf sl');
+  f.type = 'button';
+  f.setAttribute('aria-expanded', String(open));
+  const cv = el('span', 'cv');
+  cv.append(chevron(open));
+  f.append(cv, `${done} of ${ss.length} steps`);
+  f.addEventListener('click', () => {
+    if (stepsFlipped.has(t.id)) stepsFlipped.delete(t.id);
+    else stepsFlipped.add(t.id);
+    renderTasks();
+  });
+  sec.append(f);
+  if (!open) return;
+  for (const s of ss) {
+    const row = el('div', `st s-${s.state}`);
+    const g = el('span', `g s-${STEP[s.state] || 'open'}`);
+    g.append(glyph(STEP[s.state] || 'open', 14));
+    row.append(g, el('span', 't', s.title));
+    sec.append(row);
+  }
+}
+
+function line(t, next) {
   const you = t.owner === 'you';
   const row = el(t.worker ? 'button' : 'div', `ln s-${t.state}`);
   if (t.worker) {
@@ -77,7 +125,9 @@ function line(t) {
   const title = el('span', 't');
   if (t.id.startsWith('#')) title.append(el('span', 'id', t.id));
   title.append(t.title);
-  row.append(g, title, el('span', you ? 'o you' : 'o', t.owner));
+  row.append(g, title);
+  if (next) row.append(el('span', 'nx', 'next'));
+  row.append(el('span', you ? 'o you' : 'o', t.owner));
   return row;
 }
 
@@ -97,7 +147,7 @@ async function tick(t) {
 
 export function renderTasks() {
   const box = root();
-  const order = { running: 0, open: 1, paused: 2 };
+  const next = nexts();
   const projects = board.projects.map((p, i) => {
     const ts = board.tasks.filter((t) => t.project === p.name);
     const [label, rank] = summary(p, ts);
@@ -113,7 +163,7 @@ export function renderTasks() {
     head.setAttribute('aria-expanded', String(open));
     const cv = el('span', 'cv');
     cv.append(chevron(open));
-    head.append(cv, el('b', null, p.name), el('small', label === 'you' ? 'you' : null, label));
+    head.append(cv, el('b', null, p.name), el('small', label === 'you' || label === 'asks' ? 'you' : null, label));
     head.addEventListener('click', () => {
       opened[p.name] = !open;
       try { localStorage.setItem(OPEN, JSON.stringify(opened)); } catch {}
@@ -121,8 +171,11 @@ export function renderTasks() {
     });
     sec.append(head);
     if (open) {
-      const live = ts.filter((t) => t.state !== 'done').sort((a, b) => order[a.state] - order[b.state]);
-      for (const t of live) sec.append(line(t));
+      const live = ts.filter((t) => t.state !== 'done').sort((a, b) => (ORDER[a.state] ?? 3) - (ORDER[b.state] ?? 3) || (a.pos || 0) - (b.pos || 0));
+      for (const t of live) {
+        sec.append(line(t, next.has(t.id)));
+        steps(t, sec);
+      }
       const done = ts.filter((t) => t.state === 'done').sort((a, b) => (b.done_at || 0) - (a.done_at || 0));
       if (done.length) {
         if (doneShown.has(p.name)) for (const t of done) sec.append(line(t));

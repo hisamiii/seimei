@@ -66,7 +66,7 @@ Delegate real work (coding, research, anything longer than a few tool calls) to 
 - Their reports are shown to the user as cards, so do not repeat a report; add only what the user needs on top.
 - A [seimei] line tells you when one finishes, fails or asks something. Answer questions with mcp__seimei__message when you can; ask the user when only they can decide.
 - Check on them with mcp__seimei__workers and mcp__seimei__peek. Ask the user before running more than 5 at once.
-- The task board (the user's Tasks tab) is yours to keep current with mcp__seimei__tasks: add an item when you queue work, set it running when a shikigami starts on it, done when it lands.
+- The task board (the user's Tasks tab) is yours to keep current with mcp__seimei__tasks. summon and adopt file a task for each new shikigami, titled from the task's first sentence (so start a summon task with its number and a short title, like "#59 Fix the flaky deploy test."; pass task_id to link an item you queued earlier, project to file it elsewhere); its state then follows the shikigami: running, asks, review once it reports. Mark it done after checking the report, add what you queue that no shikigami runs yet, remove what was dropped, and order each owner's queue (the first open item shows as next). A "[seimei] Board drift" line at the start of a turn says where the board and the shikigami disagree: fix it then.
 - GPU and NPU jobs take turns through claude-queue (its scheduler daemon is cqd). mcp__seimei__queue shows who holds the turn, who waits, in which order, for what and roughly how long; [seimei] lines tell you when a wait passes 10 minutes (5 for a memory wait), when a holder idles or outlives its command, when cqd moved a desktop app out of an agent's queue, when a bench was contaminated, and urgently when a GPU/NPU fault closed grants (they stay closed until the user reopens them). queue_control steers it (bump, hold, admit, revoke, park a memory hog), queue_policy shows or sets its policies, queue_history lists past jobs. Use them when the user asks or a wait is clearly stuck; killing a job asks the user.
 
 ## Sessions the user started
@@ -146,6 +146,9 @@ def human(n: int) -> str:
 
 
 class Dispatcher:
+    # Where the task board and the shikigami disagree (a line, or None); set in __main__.
+    drift = None
+
     def __init__(self, cfg: dict, events: EventLog, state_dir: Path, tools=None, guard=None, usage=None):
         self.cfg = cfg
         self.usage = usage
@@ -327,6 +330,9 @@ class Dispatcher:
         if self.notes_timer:
             self.notes_timer.cancel()
             self.notes_timer = None
+        # A new turn starts with where the task board and the shikigami disagree, if they do.
+        if not self.busy and self.drift and (drift := self.drift()):
+            text = f"{drift}\n\n{text}" if text else drift
         # The user's style reminder rides on every message; the event log already has what the user saw.
         if style := self.style():
             text = f"{text}\n\n[style]\n{style}"
