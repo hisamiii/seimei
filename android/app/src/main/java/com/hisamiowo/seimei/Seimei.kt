@@ -300,19 +300,18 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Hands this phone's Firebase token to the laptop, which then may push to it. */
+    /** Tells the laptop how to reach this phone (Firebase, a push app, or the background connection). */
     private fun registerPush() {
         viewModelScope.launch {
-            val token = Push.token() ?: prefs.pushToken ?: return@launch
-            prefs.pushToken = token
             try {
-                api.post("api/devices/push", JSONObject().put("token", token))
+                Delivery.register(getApplication(), api, prefs)
             } catch (e: IOException) {
             }
         }
     }
 
     private fun unpaired(why: String?) {
+        Delivery.forget(getApplication(), prefs)
         DeviceKey.delete()
         prefs.device = null
         api.token = null

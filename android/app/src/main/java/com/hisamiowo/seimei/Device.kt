@@ -41,6 +41,18 @@ class Prefs(ctx: Context) {
     var pushToken: String?
         get() = p.getString("pushToken", null)
         set(v) = p.edit().putString("pushToken", v).apply()
+    /** The push app's endpoint and keys (UnifiedPush), as JSON for the laptop; null before it gave one. */
+    var upEndpoint: String?
+        get() = p.getString("upEndpoint", null)
+        set(v) = p.edit().putString("upEndpoint", v).apply()
+    /** The background connection's secret: it opens only the push stream, so it may wait here for a reboot. */
+    var listenSecret: String?
+        get() = p.getString("listenSecret", null)
+        set(v) = p.edit().putString("listenSecret", v).apply()
+    /** Without a push app: keep the background connection (the user may turn it off). */
+    var listen: Boolean
+        get() = p.getBoolean("listen", true)
+        set(v) = p.edit().putBoolean("listen", v).apply()
     /** The newest trajectory event the user has seen; 0 before the first visit. */
     var trajSeen: Long
         get() = p.getLong("trajSeen", 0L)

@@ -321,7 +321,8 @@ fun PairScreen(vm: Seimei, activity: Activity) {
     var server by remember { mutableStateOf(vm.prefs.server) }
     var code by remember { mutableStateOf("") }
     var name by remember { mutableStateOf(Build.MODEL ?: "phone") }
-    var advanced by remember { mutableStateOf(false) }
+    // No server built in (a foss build): the field shows from the start.
+    var advanced by remember { mutableStateOf(vm.prefs.server.isEmpty()) }
     Column(
         Modifier.fillMaxSize().safeDrawingPadding().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -428,7 +429,7 @@ fun AppScreen(vm: Seimei) {
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     val ctx = LocalContext.current
     LaunchedEffect(Unit) {
-        if (Push.configured && !vm.prefs.askedNotifications &&
+        if (Delivery.available && !vm.prefs.askedNotifications &&
             ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             vm.prefs.askedNotifications = true
             ask.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -522,7 +523,7 @@ fun Header(vm: Seimei) {
                         vm.checkUpdate()
                     },
                 )
-                if (Push.configured) DropdownMenuItem(
+                if (Delivery.available) DropdownMenuItem(
                     text = { Text("Notifications") },
                     onClick = {
                         menu = false

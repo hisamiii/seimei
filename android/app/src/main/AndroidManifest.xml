@@ -38,15 +38,5 @@
             </intent-filter>
         </activity>
         <receiver android:name=".InstallResult" android:exported="false" />
-        <service android:name=".Notify" android:exported="false">
-            <intent-filter>
-                <action android:name="com.google.firebase.MESSAGING_EVENT" />
-            </intent-filter>
-        </service>
-        <!-- Firebase starts by hand in SeimeiApp, from build-time config. -->
-        <provider
-            android:name="com.google.firebase.provider.FirebaseInitProvider"
-            android:authorities="${applicationId}.firebaseinitprovider"
-            tools:node="remove" />
     </application>
 </manifest>

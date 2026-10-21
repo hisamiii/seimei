@@ -49,10 +49,20 @@ android {
         targetSdk = 36
         versionCode = (project.findProperty("seimei.versionCode") as String?)?.toInt() ?: 1
         versionName = (project.findProperty("seimei.versionName") as String?) ?: "0.0.0"
-        buildConfigField("String", "SERVER", "\"https://seimei.example.org\"")
+        // The server the first run starts with: -Pseimei.server=https://... (publish.sh passes config.toml's origin).
+        // Without it the app asks for one.
+        buildConfigField("String", "SERVER", "\"${project.findProperty("seimei.server") ?: ""}\"")
         // Debug builds may use a key without the fingerprint when the phone has none (emulators); release never does.
         buildConfigField("boolean", "TEST_KEY", "false")
         firebase("com.hisamiowo.seimei")
+    }
+
+    // How notifications reach the phone: fcm through Firebase (own builds with a google-services.json), foss through
+    // UnifiedPush, or a background connection when the phone has no push app. Same app id, so one replaces the other.
+    flavorDimensions += "push"
+    productFlavors {
+        create("fcm") { dimension = "push" }
+        create("foss") { dimension = "push" }
     }
 
     signingConfigs {
@@ -104,7 +114,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
     implementation("com.squareup.okhttp3:okhttp:5.5.0")
-    implementation("com.google.firebase:firebase-messaging:25.1.3")
+    "fcmImplementation"("com.google.firebase:firebase-messaging:25.1.3")
+    "fossImplementation"("org.unifiedpush.android:connector:3.3.5")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20250517")
 }

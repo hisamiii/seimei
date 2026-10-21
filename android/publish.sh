@@ -2,7 +2,7 @@
 # publish.sh: build a signed release APK and put it where the web page's Phone app sheet offers it.
 # The signing key is made once and kept outside the repo. Back it up: updates only install over the same key.
 # Usage: publish.sh minor | patch | major | X.Y.Z  (minor for features, patch for fix-only releases).
-# The version name is semver; the version code just counts up.
+# The version name is semver; the version code just counts up. SEIMEI_FLAVOR=fcm|foss picks the push flavor.
 set -eu
 case "${1:-}" in
     major|minor|patch) bump=$1 ;;
@@ -36,8 +36,16 @@ case "$bump" in
     set) name=$1 ;;
 esac
 cd "$here"
-nice -n 19 ./gradlew -q --console=plain assembleRelease -Pseimei.versionCode="$code" -Pseimei.versionName="$name"
-apk="$here/app/build/outputs/apk/release/app-release.apk"
+# Firebase when this machine has its config (notifications through Google), else the foss build (UnifiedPush).
+flavor=${SEIMEI_FLAVOR:-$([ -f "$state/firebase/google-services.json" ] && echo fcm || echo foss)}
+# The app starts at this seimei's own address (config.toml [server] origin); without one it asks on first run.
+config="${XDG_CONFIG_HOME:-$HOME/.config}/seimei/config.toml"
+server=$(python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb")).get("server", {}).get("origin", ""))' "$config" 2>/dev/null || true)
+case "$server" in https://*) ;; *) server="" ;; esac
+Flavor=$(echo "$flavor" | cut -c1 | tr a-z A-Z)$(echo "$flavor" | cut -c2-)
+nice -n 19 ./gradlew -q --console=plain "assemble${Flavor}Release" -Pseimei.versionCode="$code" -Pseimei.versionName="$name" \
+    -Pseimei.server="$server"
+apk="$here/app/build/outputs/apk/$flavor/release/app-$flavor-release.apk"
 cp "$apk" "$state/app/seimei.apk.tmp"
 mv "$state/app/seimei.apk.tmp" "$state/app/seimei.apk"
 printf '{"version": "%s", "code": %d, "built": %d}\n' "$name" "$code" "$(date +%s)" > "$state/app/app.json.tmp"

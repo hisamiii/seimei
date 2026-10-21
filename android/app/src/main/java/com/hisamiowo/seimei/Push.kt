@@ -7,15 +7,8 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import com.google.firebase.FirebaseApp
-import com.google.firebase.FirebaseOptions
-import com.google.firebase.messaging.FirebaseMessaging
-import com.google.firebase.messaging.FirebaseMessagingService
-import com.google.firebase.messaging.RemoteMessage
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlin.coroutines.resume
 
-/** Starts Firebase from the build's config (none means no notifications) and sets up the channels. */
+/** Sets up the channels and this build's way of getting notifications (Delivery: Firebase, or UnifiedPush). */
 class SeimeiApp : Application() {
     override fun onCreate() {
         super.onCreate()
@@ -27,6 +20,7 @@ object Push {
     /** One channel per kind, so each can be tuned or muted in the system settings. */
     private val CHANNELS = listOf(
         Triple("approval", "Approvals", NotificationManager.IMPORTANCE_HIGH),
+        Triple("listen", "Background connection", NotificationManager.IMPORTANCE_MIN),
         Triple("quiet", "Quiet pings", NotificationManager.IMPORTANCE_LOW),
         Triple("ping", "Pings", NotificationManager.IMPORTANCE_DEFAULT),
         Triple("urgent", "Urgent", NotificationManager.IMPORTANCE_HIGH),
@@ -36,6 +30,7 @@ object Push {
         "quiet" to "Pings seimei sends without sound.",
         "ping" to "Things seimei tells you about: an APK is up, a run finished, a reply is ready.",
         "urgent" to "Rare emergencies seimei flags itself.",
+        "listen" to "Shown while seimei keeps its own connection open, on phones without a push app.",
     )
 
     /** Whether the app is on screen; the laptop holds pushes then, and this catches any that slip through. */
@@ -46,8 +41,6 @@ object Push {
     @Volatile
     var onChat = true
 
-    val configured get() = BuildConfig.FCM_APP.isNotEmpty()
-
     fun start(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         for ((id, name, importance) in CHANNELS) {
@@ -56,55 +49,35 @@ object Push {
         // Questions and automatic replies no longer notify (rules of 2026-10-20): seimei decides what pings.
         nm.deleteNotificationChannel("question")
         nm.deleteNotificationChannel("reply")
-        if (!configured || FirebaseApp.getApps(ctx).isNotEmpty()) return
-        FirebaseApp.initializeApp(ctx, FirebaseOptions.Builder()
-            .setApplicationId(BuildConfig.FCM_APP).setApiKey(BuildConfig.FCM_KEY)
-            .setProjectId(BuildConfig.FCM_PROJECT).setGcmSenderId(BuildConfig.FCM_SENDER).build())
-    }
-
-    /** This phone's Firebase token, or null without Firebase. */
-    suspend fun token(): String? {
-        if (!configured) return null
-        return suspendCancellableCoroutine { c ->
-            FirebaseMessaging.getInstance().token
-                .addOnSuccessListener { c.resume(it) }
-                .addOnFailureListener { c.resume(null) }
-        }
+        Delivery.start(ctx)
     }
 
     fun clear(ctx: Context) = ctx.getSystemService(NotificationManager::class.java).cancelAll()
 
     fun cancel(ctx: Context, tag: String) = ctx.getSystemService(NotificationManager::class.java).cancel(tag, 0)
-}
 
-/** Turns the laptop's data messages into notifications: one per kind, replaced by later ones, withdrawn on cancel. */
-class Notify : FirebaseMessagingService() {
-    override fun onNewToken(token: String) {
-        // Sent to the laptop at the next login; the token alone opens nothing.
-        Prefs(this).pushToken = token
-    }
-
-    override fun onMessageReceived(msg: RemoteMessage) {
-        val d = msg.data
-        val nm = getSystemService(NotificationManager::class.java)
+    /** Turns one of the laptop's data messages into a notification: one per kind, replaced by later ones, withdrawn on
+     * cancel. Every way of delivery ends here. */
+    fun show(ctx: Context, d: Map<String, String>) {
+        val nm = ctx.getSystemService(NotificationManager::class.java)
         // A kind from a newer laptop than this app knows still shows, on the Pings channel.
-        val kind = (d["kind"] ?: return).let { if (nm.getNotificationChannel(it) != null) it else "ping" }
+        val kind = (d["kind"] ?: return).let { if (nm.getNotificationChannel(it) != null && it != "listen") it else "ping" }
         val tag = d["tag"] ?: kind
         if (d["cancel"] == "1") return nm.cancel(tag, 0)
-        // On screen the laptop holds pushes; "reply ready" still shows when the chat itself is not in front.
-        if (Push.visible && (tag != "reply" || Push.onChat)) return
+        // On screen the laptop holds pushes; "reply ready" still shows when the chat itself is not in front, a test always.
+        if (visible && d["test"] != "1" && (tag != "reply" || onChat)) return
         val open = PendingIntent.getActivity(
-            this, tag.hashCode(),
-            Intent(this, MainActivity::class.java).putExtra("tab", d["tab"] ?: "chat").putExtra("event", d["event"])
+            ctx, tag.hashCode(),
+            Intent(ctx, MainActivity::class.java).putExtra("tab", d["tab"] ?: "chat").putExtra("event", d["event"])
                 .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val title = d["title"].orEmpty()
         val body = d["body"].orEmpty()
         // The lock screen shows only that something came, never the command or the text.
-        val public = Notification.Builder(this, kind).setSmallIcon(R.drawable.ic_notify).setColor(MAUVE)
+        val public = Notification.Builder(ctx, kind).setSmallIcon(R.drawable.ic_notify).setColor(MAUVE)
             .setContentTitle(PUBLIC[kind] ?: "seimei").build()
-        val n = Notification.Builder(this, kind)
+        val n = Notification.Builder(ctx, kind)
             .setSmallIcon(R.drawable.ic_notify).setColor(MAUVE)
             .setContentTitle(title).setContentText(body)
             .setStyle(Notification.BigTextStyle().bigText(body))
@@ -116,9 +89,7 @@ class Notify : FirebaseMessagingService() {
         nm.notify(tag, 0, n)
     }
 
-    companion object {
-        const val MAUVE = 0xFFCBA6F7.toInt()
-        val PUBLIC = mapOf("approval" to "Approval waiting", "quiet" to "Update from seimei", "ping" to "Update from seimei",
-            "urgent" to "seimei: urgent")
-    }
+    const val MAUVE = 0xFFCBA6F7.toInt()
+    val PUBLIC = mapOf("approval" to "Approval waiting", "quiet" to "Update from seimei", "ping" to "Update from seimei",
+        "urgent" to "seimei: urgent")
 }
