@@ -265,7 +265,8 @@ class Board:
         now = now or time.time()
         out = []
         for wid, (name, state) in workers.items():
-            if state in LIVE and not self.current(wid):
+            # One open on the laptop is the user's to drive: it needs no task.
+            if state in LIVE - {"laptop"} and not self.current(wid):
                 out.append(f"shikigami {name} ({wid}) {'asks' if state == 'asking' else 'works'} with no open task")
         for t in self.data["tasks"]:
             w = t.get("worker")

@@ -160,7 +160,9 @@ def main():
                                                                  + discord_link.make_discord_tools(discord, approvals, uploads), uploads),
                             guard, usage)
     pool.dispatcher, pool.guard, pool.board = dispatcher, guard, board
-    dispatcher.drift = lambda: board.drift({w.id: (w.name, w.rec["state"]) for w in pool.workers.values()})
+    # Archived shikigami are out of the picture, unless a task still points at one.
+    dispatcher.drift = lambda: board.drift({w.id: (w.name, w.rec["state"]) for w in pool.workers.values()
+                                            if not pool.archive.worker(w.rec) or board.current(w.id)})
     guard.tell = pool.tell
     watcher = Watcher(events, pool.own_sessions, pool.notify, pool.archive)
     app = make_app(events, dispatcher, pool, files, approvals, guard, watcher, desk, auth, origins, state / "app", cost, push, uploads, board)
