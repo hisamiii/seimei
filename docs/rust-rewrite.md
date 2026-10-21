@@ -37,7 +37,7 @@ Parsing every line, tool output included, peaked at 630 MB; the allocator keeps 
 
 **Fixed in Python already (96f9c1f).** The scan now keeps only the fields pricing reads and skips lines without
 usage. The standalone process drops from 532 to 242 MB, with identical totals: 182 sessions, the same USD to the
-cent. The live server should settle near 250 to 300 MB after the next deploy.
+cent. Deployed, the live server sits at 395 MB PSS (369 MB anonymous) 90 seconds after start, down from 547.
 
 A Rust server would hold the same data in about 4 MB (65k records of a few integers, parsed by serde straight into
 a struct that ignores the rest of each line). The whole process should sit at 20 to 40 MB.
