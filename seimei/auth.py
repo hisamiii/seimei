@@ -57,6 +57,9 @@ class Auth:
         self.challenges: dict[str, tuple[str, float]] = {}
         self.failures = 0
         self.locked_until = 0.0
+        # One password check at a time: guesses sent in parallel would all pass the lock check before any of them
+        # counted as a failure (auth audit H1).
+        self.password_lock = asyncio.Lock()
         self.claim_failures = 0
         self.nonces: dict[str, tuple[str, float]] = {}
 
@@ -92,6 +95,10 @@ class Auth:
 
     async def check_password(self, password: str) -> tuple[bool, int]:
         """(ok, seconds to wait before the next try)."""
+        async with self.password_lock:
+            return await self._check_password(password)
+
+    async def _check_password(self, password: str) -> tuple[bool, int]:
         self.load()
         now = time.time()
         if now < self.locked_until:

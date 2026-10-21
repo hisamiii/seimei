@@ -34,6 +34,10 @@ CSP = ("default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script
        "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 HEARTBEAT = 15
 MAX_IMAGES = 6
+# Request body caps: before login, for a message with pictures (MAX_IMAGES base64 ones), and for the rest.
+PUBLIC_BODY = 64 << 10
+SEND_BODY = 40 << 20
+BODY = 1 << 20
 MAX_FILES = 10
 PAGE = 400  # events an agent's page loads at most at once
 
@@ -90,8 +94,12 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
         public = (request.method, request.path) in PUBLIC or (request.method == "GET" and request.path.startswith("/static/"))
         if auth and not public and not auth.session(request):
             return web.Response(status=401, text="log in first")
-        if public and request.method == "POST" and (request.content_length or 0) > 64 << 10:
+        if public and request.method == "POST" and (request.content_length or 0) > PUBLIC_BODY:
             return web.Response(status=413, text="too large")
+        # Body caps that also hold for chunked bodies (no Content-Length): a public POST reads at most PUBLIC_BODY
+        # (auth audit M2), a message with pictures up to SEND_BODY, anything else BODY.
+        if request.method == "POST":
+            request = request.clone(client_max_size=PUBLIC_BODY if public else SEND_BODY if request.path == "/api/send" else BODY)
         # A bearer token is never sent on its own, so the app's calls need no Origin; cookies do.
         app_call = (request.method, request.path) in DEVICE_PUBLIC or (auth and auth.bearer(request))
         # Uploads stream raw bytes; the Origin check is what keeps other sites out (no type is required there).
@@ -142,6 +150,8 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     async def passkey_login(request):
         try:
             auth.login_verify(await request.json())
+        except web.HTTPException:
+            raise
         except Exception:
             return web.json_response({"ok": False}, status=401)
         return logged_in("passkey", request)
@@ -672,7 +682,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
         await dispatcher.interrupt()
         return web.json_response({"ok": True})
 
-    app = web.Application(middlewares=[guard], client_max_size=40 << 20)
+    app = web.Application(middlewares=[guard], client_max_size=BODY)
     app.router.add_get("/", index)
     app.router.add_get("/api/hello", hello)
     app.router.add_get("/api/history", history)
