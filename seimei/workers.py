@@ -47,6 +47,9 @@ Subagents are fine for searches and lookups; they run on {subagents}. No big par
 Start every task with a short step list (3-8 steps, TaskCreate) and keep it current as you go (TaskUpdate: in_progress when you start a step, completed when it is done; add or delete steps when the plan changes). It shows live as your task's steps on the user's board. Skip it only for a one-step job.
 """
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
+MODELS = ("opus", "sonnet", "haiku")
+# What Claude Code's /effort command answers (no model turn): not part of the task.
+EFFORT_SET = ("Set effort level", "Effort level")
 # The context a shikigami may fill before it compacts: the user keeps most at 256-400k, 1m only where really needed.
 CONTEXTS = {"256k": 256_000, "400k": 400_000, "1m": 1_000_000}
 ACTIVE = {"running", "asking"}
@@ -112,6 +115,8 @@ class Worker:
         self.turn_text = False
         # Subagents still working in the background: the turn may end before they report back.
         self.tasks: dict[str, str] = {}
+        # /effort commands sent to the session whose own result (no model turn) is not a turn of the task.
+        self.quiet = 0
         # TaskCreate calls waiting for their result, which names the step's id.
         self.steps: dict[str, str] = {}
 
@@ -126,7 +131,7 @@ class Worker:
     def info(self) -> dict:
         r = self.rec
         return {**{k: r.get(k) for k in ("id", "name", "state", "cwd", "model", "effort", "context_cap", "subagents", "created",
-                                         "updated", "summary", "question", "doing", "card")},
+                                         "updated", "summary", "question", "doing", "card", "tunes", "effort_next")},
                 "mode": self.mode,
                 "started": bool(r.get("started")), "archived": self.pool.archive.worker(r)}
 
@@ -202,9 +207,58 @@ class Worker:
         """The user changed its mode on the Agents page; a running session switches at once."""
         if mode not in permissions.MODES:
             raise ValueError(f"mode is one of {', '.join(permissions.MODES)}")
+        old = self.mode
         if self.client:
             await self.client.set_permission_mode(mode)
+        if mode != old:
+            label = permissions.LABELS
+            self.rec.setdefault("tunes", []).append({"t": time.time(), "by": "the user",
+                                                     "what": f"permissions {label[old]} → {label[mode]}"})
+            self._add({"type": "system", "text": f"Permissions {label[old]} → {label[mode]} (by the user)."})
         self._mode_chosen(mode)
+
+    async def tune(self, effort: str | None = None, model: str | None = None, by: str = "the user") -> list[str]:
+        """Change its effort and model without restarting the task. The model switches through the SDK (its next
+        request); the effort through Claude Code's /effort at the next turn boundary (sent mid-turn it would reach the
+        model as text). Its log and its record keep what changed."""
+        if effort and effort not in EFFORTS:
+            raise ValueError(f"effort is one of {', '.join(EFFORTS)}")
+        if model and model not in MODELS:
+            raise ValueError(f"model is one of {', '.join(MODELS)}")
+        if self.rec["state"] == "released":
+            raise ValueError(f"{self.name} is the user's own session now")
+        r, changed = self.rec, []
+        if model and model != r["model"]:
+            if self.client:
+                await self.client.set_model(model)
+            changed.append(f"model {r['model']} → {model}")
+            r["model"] = model
+        if effort and effort != (r.get("effort_next") or r.get("effort")):
+            changed.append(f"effort {r.get('effort_next') or r.get('effort') or 'default'} → {effort}")
+            if self.client:
+                r["effort_next"] = effort
+            else:
+                # Not running: the next start picks it up from the record.
+                r["effort"] = effort
+        if changed:
+            r.setdefault("tunes", []).append({"t": time.time(), "by": by, "what": ", ".join(changed)})
+            self._add({"type": "system", "text": f"{', '.join(changed).capitalize()} (by {by})."})
+            self.pool.changed()
+            if r.get("effort_next") and r["state"] != "running":
+                await self._apply_effort()
+        return changed
+
+    async def _apply_effort(self):
+        """A pending effort change, sent while no turn runs."""
+        async with self.lock:
+            effort = self.rec.pop("effort_next", None)
+            if not effort:
+                return
+            if self.client:
+                self.quiet += 1
+                await self.client.query(f"/effort {effort}")
+            self.rec["effort"] = effort
+            self.pool.changed()
 
     def waiting_card(self, text: str | None):
         """A permission card of its is open (what it wants) or settled (None): the Agents page and its board task
@@ -410,6 +464,8 @@ class Worker:
         elif isinstance(msg, AssistantMessage):
             if msg.parent_tool_use_id:
                 return
+            if self.quiet and any(isinstance(b, TextBlock) and b.text.startswith(EFFORT_SET) for b in msg.content):
+                return
             if any(isinstance(b, ToolUseBlock) or isinstance(b, TextBlock) and b.text.strip() not in TRIVIAL for b in msg.content):
                 self._turn_goes_on()
             for b in msg.content:
@@ -436,7 +492,12 @@ class Worker:
                     self._add({"type": "tool_result", "tool_id": b.tool_use_id, "error": bool(b.is_error),
                                "text": result_text(b.content)})
         elif isinstance(msg, ResultMessage):
+            if self.quiet and isinstance(msg.result, str) and msg.result.startswith(EFFORT_SET):
+                self.quiet -= 1
+                return
             self._finish(msg)
+            if self.rec.get("effort_next") and self.rec["state"] != "running":
+                asyncio.ensure_future(self._apply_effort())
         elif isinstance(msg, RateLimitEvent):
             self.pool.dispatcher.rate_limit(msg)
 

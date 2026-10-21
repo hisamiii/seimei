@@ -97,6 +97,8 @@ def worker(rec: dict, log: list[dict], events: list[dict], spend: dict | None, n
         "calls": s.get("calls", 0), "usd": round(s.get("usd", 0.0), 4), "asks": asks,
         "followups": len(follow), "followups_by": {b: sum(1 for f in follow if f["by"] == b) for b in ("seimei", "user")},
         "reopened": reopened,
+        # Changes of effort, model or permissions on the way (tune): when, by whom, what.
+        "tunes": list(rec.get("tunes") or []),
     }
 
 
@@ -136,7 +138,8 @@ def text(rows: list[dict]) -> str:
             + (" (adopted)" if m["adopted"] else "")
             + f" | {k(t['input'])} / {k(t['cache_read'])} / {k(t['cache_write'])} / {k(t['output'])}, ${m['usd']:.2f}"
             + f" | {ago(m['wall'])} (busy {ago(m['busy'])}), {m['state']} | {m['asks']} asks, {m['followups']} follow-ups "
-            + f"({m['followups_by']['seimei']}+{m['followups_by']['user']}), {'reopened' if m['reopened'] else 'not reopened'}")
+            + f"({m['followups_by']['seimei']}+{m['followups_by']['user']}), {'reopened' if m['reopened'] else 'not reopened'}"
+            + "".join(f" | {x['what']} by {x['by']} at {time.strftime('%H:%M', time.localtime(x['t']))}" for x in m["tunes"]))
     tot = sum(m["usd"] for m in rows)
     lines.append(f"Total ${tot:.2f} over {len(rows)} shikigami; reopened {sum(m['reopened'] for m in rows)} of "
                  f"{sum(1 for m in rows if m['first_done'])} that finished at least once.")

@@ -88,6 +88,33 @@ def _command_hit(cmd: str) -> str | None:
     return None
 
 
+# Claude Code's settings hold its allow rules and default mode: an agent writing them could grant itself what the
+# cards would ask for (auth audit P3). Any write to one takes a card, in every mode.
+CC_SETTINGS = re.compile(r"(^|/)\.claude/settings(\.local)?\.json$")
+WRITERS = {"tee", "cp", "mv", "rm", "install", "ln", "truncate", "dd", "rsync"}
+
+
+def _cc_settings_hit(tool: str, inp: dict) -> str | None:
+    if tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
+        path = str(inp.get("file_path") or inp.get("notebook_path") or "")
+        return path if CC_SETTINGS.search(path) else None
+    if tool != "Bash":
+        return None
+    cmd = str(inp.get("command", ""))
+    if ".claude/settings" not in cmd:
+        return None
+    for m in REDIRECT.finditer(HEREDOC.sub(lambda m: m.group(3), cmd)):
+        if CC_SETTINGS.search(m.group(1).strip("'\"")):
+            return m.group(1)
+    for argv in commands(cmd):
+        if argv is None:
+            return "a nested command"
+        hits = [a for a in argv[1:] if CC_SETTINGS.search(a)]
+        if hits and (argv[0] in WRITERS or argv[0] == "sed" and any(a.startswith("-i") or a == "--in-place" for a in argv)):
+            return hits[0]
+    return None
+
+
 # The enabled plugins' own checks (plugins.Plugins sets them): each takes (tool, input) and returns what needs a card.
 CHECKS: list = []
 
@@ -98,6 +125,10 @@ def check(tool: str, inp: dict) -> dict | None:
         cmd = str(inp.get("command", ""))
         if hit := _command_hit(cmd):
             return {"action": "command", "target": hit, "detail": cmd}
+    if path := _cc_settings_hit(tool, inp):
+        detail = str(inp.get("command") or inp.get("content") or inp.get("new_string") or "")
+        return {"action": "edit" if tool != "Bash" else "command", "target": "change Claude Code's permission settings",
+                "detail": detail if tool == "Bash" else f"{path}\n\n{detail}"}
     for more in CHECKS:
         if what := more(tool, inp):
             return what

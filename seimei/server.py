@@ -625,13 +625,16 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
         await worker(request).stop()
         return web.json_response({"ok": True})
 
-    async def worker_mode(request):
-        """The user sets a shikigami's permission mode (agents cannot: this needs the user's login)."""
+    async def worker_tune(request):
+        """The user changes a shikigami's effort, model or permission mode (the page's Change sheet)."""
+        w, body = worker(request), await request.json()
         try:
-            await worker(request).set_mode(str((await request.json()).get("mode", "")))
+            if body.get("mode") and body["mode"] != w.mode:
+                await w.set_mode(str(body["mode"]))
+            await w.tune(str(body.get("effort") or "") or None, str(body.get("model") or "") or None)
         except ValueError as e:
             raise web.HTTPBadRequest(text=str(e))
-        return web.json_response({"ok": True})
+        return web.json_response(w.info())
 
     async def worker_archive(request):
         """Hide a shikigami from the Agents list, or bring it back; nothing is stopped or deleted."""
@@ -713,7 +716,7 @@ def make_app(events: EventLog, dispatcher: Dispatcher, pool: Pool, files: Files,
     app.router.add_post("/api/workers/{id}/send", worker_send)
     app.router.add_post("/api/workers/{id}/stop", worker_stop)
     app.router.add_post("/api/workers/{id}/archive", worker_archive)
-    app.router.add_post("/api/workers/{id}/mode", worker_mode)
+    app.router.add_post("/api/workers/{id}/tune", worker_tune)
     app.router.add_post("/api/workers/{id}/laptop", worker_laptop)
     app.router.add_post("/api/workers/{id}/release", worker_release)
     app.router.add_post("/api/sessions/{pid:[0-9]+}/adopt", session_adopt)

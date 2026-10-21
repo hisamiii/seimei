@@ -76,31 +76,52 @@ def describe(tool: str, inp: dict, reason: str | None) -> dict:
     return {"action": "tool", "target": f"use {tool}", "detail": json.dumps(inp, ensure_ascii=False, indent=1)}
 
 
+# A rule for one of these as a whole ("python3:*", "uv run:*") lets the agent run any code: the card says so.
+RUNNERS = {"python", "python3", "node", "bash", "sh", "zsh", "fish", "dash", "perl", "ruby", "php", "deno", "bun", "lua",
+           "env", "sudo", "doas", "eval", "exec", "xargs", "curl", "wget", "npx", "bunx", "uvx", "pipx", "uv", "npm",
+           "pnpm", "yarn", "make", "just", "cargo", "go", "docker", "podman", "git", "find", "awk", "sed"}
+
+
 def _rule(r) -> str:
+    """How the card shows a rule: a Bash rule as its command pattern, the rest as Tool(pattern)."""
+    if r.tool_name == "Bash" and r.rule_content:
+        return r.rule_content
     return f"{r.tool_name}({r.rule_content})" if r.rule_content else r.tool_name
 
 
+def broad(r) -> bool:
+    if not r.rule_content or r.rule_content.strip() in ("*", ":*"):
+        return True
+    if r.tool_name != "Bash" or not r.rule_content.endswith(":*"):
+        return False
+    words = r.rule_content[:-2].split()
+    return bool(words) and words[0] in RUNNERS and (len(words) == 1 or len(words) == 2 and words[1] in ("run", "exec", "x", "-c", "-e"))
+
+
 def options(tool: str, suggestions: list[PermissionUpdate], ceiling: str) -> tuple[list[dict], dict]:
-    """The card's buttons, and what each one answers with (by option id)."""
+    """The card's buttons, and what each one answers with (by option id). Every option has a plain label; rule
+    options also carry the rule and where it applies, for the cards to show the rule as code."""
     if tool == "ExitPlanMode":
         go = ceiling if ceiling != "plan" else "default"
-        return ([{"id": "once", "label": "Go ahead"}, {"id": "deny", "label": "Keep planning"}],
+        return ([{"id": "once", "label": "Go ahead", "kind": "once"}, {"id": "deny", "label": "Keep planning", "kind": "deny"}],
                 {"once": [PermissionUpdate(type="setMode", mode=go, destination="session")]})
-    opts, updates = [{"id": "once", "label": "Allow"}], {}
+    opts, updates = [{"id": "once", "label": "Allow", "kind": "once"}], {}
     for i, s in enumerate(suggestions):
         where = WHERE.get(s.destination or "session", "")
         if s.type == "addRules" and s.behavior == "allow" and s.rules:
             rules = ", ".join(_rule(r) for r in s.rules)
+            wide = any(broad(r) for r in s.rules)
+            extra = {"rule": rules, **({"broad": True} if wide else {})}
             label = f"Always allow {rules} {where}" if s.destination != "session" else f"Allow {rules} {where}"
+            opts.append({"id": f"s{i}", "label": label, "kind": "rule", "where": where, **extra})
         elif s.type == "addDirectories" and s.directories:
-            label = f"Allow {', '.join(s.directories)} {where}"
+            opts.append({"id": f"s{i}", "label": f"Allow {', '.join(s.directories)} {where}", "kind": "dir", "where": where})
         elif s.type == "setMode" and s.mode in MODES:
-            label = f"{LABELS[s.mode]} {where}"
+            opts.append({"id": f"s{i}", "label": f"{LABELS[s.mode]} {where}", "kind": "mode", "where": where})
         else:
             continue
-        opts.append({"id": f"s{i}", "label": label})
         updates[f"s{i}"] = [s]
-    opts.append({"id": "deny", "label": "Deny"})
+    opts.append({"id": "deny", "label": "Deny", "kind": "deny"})
     return opts, updates
 
 

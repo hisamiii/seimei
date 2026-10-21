@@ -14,7 +14,7 @@ from . import sessions as sess
 from .events import EventLog
 from .files import MAX_BYTES, Files
 from .util import always_load
-from .workers import ACTIVE, Pool
+from .workers import ACTIVE, EFFORTS, MODELS, Pool
 
 MAX_RUNNING = 5
 
@@ -90,8 +90,6 @@ def address(s: dict) -> str:
     return "uds:" + (s["rec"].get("messagingSocketPath") or f"/run/user/{os.getuid()}/cc-socks/{s['pid']}.sock")
 
 
-MODELS = ("opus", "sonnet", "haiku")
-EFFORTS = ("low", "medium", "high", "xhigh", "max")
 CONTEXTS = ("256k", "400k", "1m")
 # What summon must be told each time (rules.md: the sizing rule lives in the schema, not in memory).
 SUMMON_PICKS = ("cwd", "model", "effort", "context")
@@ -239,6 +237,27 @@ def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), upl
         await w.stop()
         return text(f"Stopping {w.name}.")
 
+    @tool("tune", "Change a shikigami's effort and/or model without restarting its task: the model from its next "
+          "request, the effort from its next turn (a running turn finishes first). A new effort keeps the prompt "
+          "cache; a new model rebuilds it once. Its permission mode is the user's to change, not yours.", {
+              "type": "object",
+              "properties": {"worker": {"type": "string", "description": "its id or name"},
+                             "effort": {"type": "string", "enum": list(EFFORTS)},
+                             "model": {"type": "string", "enum": list(MODELS)}},
+              "required": ["worker"]})
+    async def tune(args):
+        w = pool.find(str(args.get("worker", "")))
+        if not w:
+            return text("No such shikigami.", error=True)
+        try:
+            changed = await w.tune(args.get("effort") or None, args.get("model") or None, by="seimei")
+        except ValueError as e:
+            return text(str(e), error=True)
+        if not changed:
+            return text(f"{w.name} already runs like that.")
+        later = " (the effort from its next turn)" if w.rec.get("effort_next") else ""
+        return text(f"{w.name}: {', '.join(changed)}{later}.")
+
     @tool("show_image", "Show the user an image inline in the chat: a screenshot, render or chart saved as PNG, JPEG, "
           "WebP or GIF (not SVG).", {
               "type": "object",
@@ -357,5 +376,5 @@ def make_tools(pool: Pool, files: Files, events: EventLog, extra: list = (), upl
         names.update(own())
         return text(await asyncio.to_thread(pool.dispatcher.usage.report, names))
 
-    return always_load(create_sdk_mcp_server("seimei", tools=[summon, workers, peek, message, stop, show_image, send_file,
+    return always_load(create_sdk_mcp_server("seimei", tools=[summon, workers, peek, message, stop, tune, show_image, send_file,
                                                               sessions, session_peek, alias, usage, *extra]), DEFERRED)
