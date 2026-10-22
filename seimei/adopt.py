@@ -286,6 +286,28 @@ class Adopter:
                 + (" in a terminal window on the server" if win else " in the window it was already open in")
                 + "; it no longer reports to you, and adopting that session makes it this shikigami again.")
 
+    @staticmethod
+    async def _end(s: dict, pid: int, bg: bool):
+        """End the user's Claude Code: a background job through claude stop, else SIGTERM (SIGKILL after 15 s)."""
+        if bg:
+            if err := await asyncio.to_thread(stop_job, s["job"]):
+                raise RuntimeError(f"claude stop {s['job']} failed: {err}")
+            for _ in range(60):
+                if not alive(pid):
+                    break
+                await asyncio.sleep(0.5)
+            else:
+                raise RuntimeError(f"claude stop {s['job']} returned but pid {pid} still runs; nothing adopted")
+        else:
+            os.kill(pid, signal.SIGTERM)
+            for _ in range(30):
+                if not alive(pid):
+                    break
+                await asyncio.sleep(0.5)
+            else:
+                os.kill(pid, signal.SIGKILL)
+                await asyncio.sleep(1)
+
     async def adopt(self, s: dict, interrupt: bool, name: str = "", model: str = "", effort: str = "", context: str = "",
                     close_window: bool = False, project: str = "", task_id: str = "") -> str:
         pid = s["pid"]
@@ -317,25 +339,22 @@ class Adopter:
             b = await asyncio.to_thread(sessions.brief, path) if path else {}
         except OSError:
             b = {}
+        tokens = b.get("tokens") or 0
         kids = descendants(pid)
-        if bg:
-            if err := await asyncio.to_thread(stop_job, s["job"]):
-                raise RuntimeError(f"claude stop {s['job']} failed: {err}")
-            for _ in range(60):
-                if not alive(pid):
-                    break
-                await asyncio.sleep(0.5)
-            else:
-                raise RuntimeError(f"claude stop {s['job']} returned but pid {pid} still runs; nothing adopted")
-        else:
-            os.kill(pid, signal.SIGTERM)
-            for _ in range(30):
-                if not alive(pid):
-                    break
-                await asyncio.sleep(0.5)
-            else:
-                os.kill(pid, signal.SIGKILL)
-                await asyncio.sleep(1)
+        model = model or (f"claude-{s['model']}" if s.get("model") else "opus")
+        # The shikigami starts first: if it cannot, the user's session goes on untouched.
+        try:
+            w, before = await self.pool.adopt_start(name or s["name"], s["session_id"], s["cwd"], model,
+                                                    effort or s.get("effort") or None, context or default_context(tokens),
+                                                    s["name"])
+        except Exception as e:
+            raise RuntimeError(f"{e}; nothing ended, session \"{s['name']}\" still runs"
+                               + (" (interrupted mid-turn)" if interrupted else "")) from e
+        try:
+            await self._end(s, pid, bg)
+        except BaseException:
+            await self.pool.adopt_undo(w, before)
+            raise
         # What the old process left running (a language server, a job that outlived it) ends too, as the card said.
         await end_left(kids)
         # A background job shows once: its wrapper gives the command, the processes below it repeat it.
@@ -354,7 +373,6 @@ class Adopter:
             window = "closed"
         elif close_window:
             window = "closed with the session" if not shell else "kept (not reachable)"
-        tokens = b.get("tokens") or 0
         where = "in the background under Claude Code's daemon" if bg else "in a terminal on the server"
         first = (f"seimei adopted you: you were the user's own session \"{s['name']}\" {where}, and "
                  f"now you go on in the background as a shikigami. "
@@ -362,10 +380,11 @@ class Adopter:
                  + ("Background processes that ended with the old session: " + "; ".join(d[:150] for d in died[:10]) + ". "
                     if died else "")
                  + "Carry on with what you were doing; your final message is your report to the user.")
-        w = await self.pool.adopt(name or s["name"], s["session_id"], s["cwd"],
-                                  model or (f"claude-{s['model']}" if s.get("model") else "opus"),
-                                  effort or s.get("effort") or None, context or default_context(tokens), s["name"], first,
-                                  project or None, task_id or None)
+        try:
+            await self.pool.adopt_go(w, before, s["name"], first, project or None, task_id or None)
+        except Exception as e:
+            raise RuntimeError(f"session \"{s['name']}\" ended and shikigami {w.name} ({w.id}) holds it, but its first "
+                               f"message failed ({e}); its conversation is intact: message {w.name} to go on") from e
         return (f"adopted session \"{s['name']}\" as shikigami {w.name} ({w.id})"
                 + (", interrupted mid-turn" if interrupted else "") + f"; its Claude Code (pid {pid}) ended"
                 + (f"; ended with it: {'; '.join(d[:120] for d in died[:10])}" if died else "; nothing else ended with it")

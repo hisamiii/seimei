@@ -17,6 +17,9 @@ async def fake_send(self, text, shown=None, files=None):
     self.rec["started"] = True
     self._set("running", question=None)
 W.Worker.send = fake_send
+async def fake_start(self):
+    return True
+W.Worker.start = fake_start
 
 async def main():
     d = Path(tempfile.mkdtemp(prefix="follow-"))
@@ -165,13 +168,16 @@ async def main():
     check("list shows next and steps", "(next)" in r["content"][0]["text"] and "1/2 steps" in r["content"][0]["text"], r["content"][0]["text"])
 
     # Adopt files a task too.
-    wa = await pool.adopt("their-session", "sid-1", str(proj), "opus", None, "400k", "fix bluetooth", "go on", link=None)
+    async def adopt(name, sid, cwd, model, effort, context, origin, first, link=None):
+        w, before = await pool.adopt_start(name, sid, cwd, model, effort, context, origin)
+        return await pool.adopt_go(w, before, origin, first, None, link)
+    wa = await adopt("their-session", "sid-1", str(proj), "opus", None, "400k", "fix bluetooth", "go on", link=None)
     ta = board.current(wa.id)
     check("adopt files a task", ta and ta["title"] == "fix bluetooth" and ta["state"] == "running" and ta["owner"] == "their-session", ta)
     q2 = board.add("Bluetooth", "desktop", "seimei")
-    wb = await pool.adopt("other", "sid-2", str(proj), "opus", None, "400k", "bt", "go on", link=q2["id"])
+    wb = await adopt("other", "sid-2", str(proj), "opus", None, "400k", "bt", "go on", link=q2["id"])
     check("adopt links the task_id", board.current(wb.id) is q2)
-    wc = await pool.adopt("third", "sid-3", str(proj), "opus", None, "400k", "x", "go on", link="#999")
+    wc = await adopt("third", "sid-3", str(proj), "opus", None, "400k", "x", "go on", link="#999")
     check("adopt with a bad task_id still files one", board.current(wc.id) and board.current(wc.id)["title"] == "x")
 
     # #79: a shikigami starts and ships its own items through its board tool.

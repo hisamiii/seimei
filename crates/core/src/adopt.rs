@@ -514,38 +514,34 @@ impl Adopter {
         .and_then(|b| b["tokens"].as_i64())
         .unwrap_or(0);
         let kids = tokio::task::spawn_blocking(move || descendants(pid)).await.unwrap_or_default();
-        if bg {
-            let job = str_of(&s["job"]);
-            let j = job.clone();
-            let err = tokio::task::spawn_blocking(move || stop_job(&j)).await.map_err(|e| e.to_string())?;
-            if !err.is_empty() {
-                return Err(format!("claude stop {job} failed: {err}"));
-            }
-            let mut gone = false;
-            for _ in 0..60 {
-                if !alive(pid) {
-                    gone = true;
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(500)).await;
-            }
-            if !gone {
-                return Err(format!("claude stop {job} returned but pid {pid} still runs; nothing adopted"));
-            }
-        } else {
-            kill(pid, libc::SIGTERM);
-            let mut gone = false;
-            for _ in 0..30 {
-                if !alive(pid) {
-                    gone = true;
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(500)).await;
-            }
-            if !gone {
-                kill(pid, libc::SIGKILL);
-                tokio::time::sleep(Duration::from_secs(1)).await;
-            }
+        let model = match (wish.model.as_str(), s["model"].as_str().filter(|m| !m.is_empty())) {
+            ("", Some(m)) => format!("claude-{m}"),
+            ("", None) => "opus".into(),
+            (m, _) => m.into(),
+        };
+        let effort = Some(wish.effort.clone())
+            .filter(|e| !e.is_empty())
+            .or_else(|| s["effort"].as_str().filter(|e| !e.is_empty()).map(String::from));
+        let context = if wish.context.is_empty() { default_context(tokens).to_string() } else { wish.context.clone() };
+        let a = Adoption {
+            name: if wish.name.is_empty() { name.clone() } else { wish.name.clone() },
+            session_id: str_of(&s["session_id"]),
+            cwd: str_of(&s["cwd"]),
+            model,
+            effort,
+            context,
+            origin: name.clone(),
+            project: Some(wish.project.clone()).filter(|p| !p.is_empty()),
+            link: Some(wish.task_id.clone()).filter(|t| !t.is_empty()),
+        };
+        // The shikigami starts first: if it cannot, the user's session goes on untouched.
+        let (w, before) = self.pool.adopt_start(&a).await.map_err(|e| {
+            let cut = if interrupted { " (interrupted mid-turn)" } else { "" };
+            format!("{e}; nothing ended, session \"{name}\" still runs{cut}")
+        })?;
+        if let Err(e) = end(s, pid, bg).await {
+            self.pool.adopt_undo(&w, before).await;
+            return Err(e);
         }
         // What the old process left running (a language server, a job that outlived it) ends too, as the card said.
         end_left(&kids).await;
@@ -590,30 +586,15 @@ impl Adopter {
             first += &format!("Background processes that ended with the old session: {}. ", list.join("; "));
         }
         first += "Carry on with what you were doing; your final message is your report to the user.";
-        let model = match (wish.model.as_str(), s["model"].as_str().filter(|m| !m.is_empty())) {
-            ("", Some(m)) => format!("claude-{m}"),
-            ("", None) => "opus".into(),
-            (m, _) => m.into(),
-        };
-        let effort = Some(wish.effort.clone())
-            .filter(|e| !e.is_empty())
-            .or_else(|| s["effort"].as_str().filter(|e| !e.is_empty()).map(String::from));
-        let context = if wish.context.is_empty() { default_context(tokens).to_string() } else { wish.context.clone() };
-        let w = self
-            .pool
-            .adopt(Adoption {
-                name: if wish.name.is_empty() { name.clone() } else { wish.name.clone() },
-                session_id: str_of(&s["session_id"]),
-                cwd: str_of(&s["cwd"]),
-                model,
-                effort,
-                context,
-                origin: name.clone(),
-                first,
-                project: Some(wish.project.clone()).filter(|p| !p.is_empty()),
-                link: Some(wish.task_id.clone()).filter(|t| !t.is_empty()),
-            })
-            .await?;
+        if let Err(e) = self.pool.adopt_go(&w, before, &a, &first).await {
+            return Err(format!(
+                "session \"{name}\" ended and shikigami {} ({}) holds it, but its first message failed ({e}); its \
+                 conversation is intact: message {} to go on",
+                w.name(),
+                w.id,
+                w.name()
+            ));
+        }
         let mut said = format!("adopted session \"{name}\" as shikigami {} ({})", w.name(), w.id);
         if interrupted {
             said += ", interrupted mid-turn";
@@ -631,4 +612,42 @@ impl Adopter {
         }
         Ok(said)
     }
+}
+
+/// End the user's Claude Code: a background job through `claude stop`, else SIGTERM (SIGKILL after 15 s).
+async fn end(s: &Value, pid: i64, bg: bool) -> Result<(), String> {
+    if bg {
+        let job = str_of(&s["job"]);
+        let j = job.clone();
+        let err = tokio::task::spawn_blocking(move || stop_job(&j)).await.map_err(|e| e.to_string())?;
+        if !err.is_empty() {
+            return Err(format!("claude stop {job} failed: {err}"));
+        }
+        let mut gone = false;
+        for _ in 0..60 {
+            if !alive(pid) {
+                gone = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+        if !gone {
+            return Err(format!("claude stop {job} returned but pid {pid} still runs; nothing adopted"));
+        }
+    } else {
+        kill(pid, libc::SIGTERM);
+        let mut gone = false;
+        for _ in 0..30 {
+            if !alive(pid) {
+                gone = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+        if !gone {
+            kill(pid, libc::SIGKILL);
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    }
+    Ok(())
 }

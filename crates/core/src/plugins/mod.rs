@@ -276,6 +276,11 @@ impl Plugins {
         }
     }
 
+    /// Drop a session's token (a shikigami whose start was taken back).
+    pub fn forget(&self, who: &str, worker: Option<&str>) {
+        self.tokens.lock().unwrap().retain(|_, g| !(g.who == who && g.worker.as_deref() == worker));
+    }
+
     /// MCP servers for a session: all plugins (seimei, groups None), or the granted groups (a shikigami).
     pub fn servers(&self, who: &str, worker: Option<&str>, groups: Option<&[String]>) -> Map<String, Value> {
         let mut out = Map::new();

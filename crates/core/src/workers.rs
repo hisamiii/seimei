@@ -58,6 +58,8 @@ const EFFORT_SET: [&str; 2] = ["Set effort level", "Effort level"];
 /// really needed.
 pub const CONTEXTS: [(&str, f64); 3] = [("256k", 256_000.0), ("400k", 400_000.0), ("1m", 1_000_000.0)];
 pub const ACTIVE: [&str; 2] = ["running", "asking"];
+/// How long a started process must stay up before adopt ends the user's session.
+const START_SETTLE: Duration = Duration::from_secs(1);
 /// An idle session's process is closed after this; the next message resumes it.
 const IDLE_DISCONNECT: Duration = Duration::from_secs(600);
 /// A turn with nothing to say (a stale task notification replayed on resume) is no report: wait this long for the
@@ -222,6 +224,14 @@ enum Cmd {
     SetMode {
         mode: String,
         done: oneshot::Sender<Result<(), String>>,
+    },
+    /// Start its process without a message.
+    Start {
+        done: oneshot::Sender<Result<(), String>>,
+    },
+    /// Whether its process runs.
+    Up {
+        done: oneshot::Sender<bool>,
     },
     /// Let go of its process (it opens in a terminal next); the next message resumes it here.
     Close {
@@ -444,6 +454,29 @@ impl Worker {
         let (done, rx) = oneshot::channel();
         self.cmd(Cmd::Stop { done });
         let _ = rx.await;
+    }
+
+    /// Start its claude process without a message: adopt does this before it ends the user's session. Whether the
+    /// process is up (one that exits right after the handshake shows here, not as an error).
+    pub async fn start(self: &Arc<Self>) -> Result<bool, String> {
+        let (done, rx) = oneshot::channel();
+        self.cmd(Cmd::Start { done });
+        rx.await.unwrap_or_else(|_| Err("its session ended".into()))?;
+        tokio::time::sleep(START_SETTLE).await;
+        let (done, rx) = oneshot::channel();
+        self.cmd(Cmd::Up { done });
+        Ok(rx.await.unwrap_or(false))
+    }
+
+    /// Close its process without a word to anyone (a start adopt takes back); its session task ends too.
+    pub async fn let_go(self: &Arc<Self>) {
+        let running = self.tx.lock().unwrap().as_ref().is_some_and(|t| !t.is_closed());
+        if running {
+            let (done, rx) = oneshot::channel();
+            self.cmd(Cmd::Close { done });
+            let _ = rx.await;
+        }
+        *self.tx.lock().unwrap() = None;
     }
 
     /// The session is open on the server (after Open on server): its terminal window is still there, or a running
@@ -741,6 +774,12 @@ impl Session {
             Cmd::SetMode { mode, done } => {
                 let _ = done.send(self.set_mode(&mode).await);
             }
+            Cmd::Start { done } => {
+                let _ = done.send(self.connect().await);
+            }
+            Cmd::Up { done } => {
+                let _ = done.send(self.client.is_some());
+            }
             Cmd::Close { done } => {
                 self.idle = None;
                 self.grace = None;
@@ -759,6 +798,13 @@ impl Session {
             ev["files"] = json!(files);
         }
         self.w.add(ev);
+        self.connect().await?;
+        self.stopping = false;
+        self.w.set("running", json!({"question": null}));
+        self.client.as_ref().expect("a session").query(text).map_err(|e| e.to_string())
+    }
+
+    async fn connect(&mut self) -> Result<(), String> {
         if self.client.is_none() {
             let handler: Arc<dyn Handler> = Arc::new(Side { w: self.w.clone() });
             let client = Client::connect(self.w.options(), handler).await.map_err(|e| e.to_string())?;
@@ -768,9 +814,7 @@ impl Session {
             self.client = Some(client);
             self.w.edit(|r| r.insert("started".into(), json!(true)));
         }
-        self.stopping = false;
-        self.w.set("running", json!({"question": null}));
-        self.client.as_ref().expect("a session").query(text).map_err(|e| e.to_string())
+        Ok(())
     }
 
     async fn stop(&mut self) {
@@ -1201,8 +1245,6 @@ pub struct Adoption {
     pub context: String,
     /// The session's name as the user knew it.
     pub origin: String,
-    /// Its first message as a shikigami.
-    pub first: String,
     pub project: Option<String>,
     pub link: Option<String>,
 }
@@ -1623,28 +1665,116 @@ impl Pool {
         }
     }
 
-    /// A shikigami that resumes one of the user's sessions (adopt ended its process). One released earlier comes back
-    /// as itself: same id, name and log, with what was done in the session meanwhile.
-    pub async fn adopt(&self, a: Adoption) -> Result<Arc<Worker>, String> {
-        if let Some(old) = self.released(&a.session_id, &a.cwd) {
-            return self.readopt(old, a).await;
+    /// Adopting one of the user's sessions, step one: the shikigami's claude process starts on it while the user's
+    /// still runs (adopt ends that one next, then adopt_go). One released earlier comes back as itself: same id, name
+    /// and log. Returns the worker and its record from before (None: a new one), for adopt_undo.
+    pub async fn adopt_start(&self, a: &Adoption) -> Result<(Arc<Worker>, Option<Value>), String> {
+        let (w, before) = match self.released(&a.session_id, &a.cwd) {
+            Some(w) => {
+                let r = w.rec();
+                let or = |new: &str, old: &Value| if new.is_empty() { old.clone() } else { json!(new) };
+                let effort = a.effort.as_deref().map_or_else(|| r["effort"].clone(), |e| or(e, &r["effort"]));
+                let fields = json!({"session_id": a.session_id, "model": or(&a.model, &r["model"]), "effort": effort,
+                    "context_cap": or(&a.context, &r["context_cap"]), "started": true, "released": null,
+                    "laptop_window": null, "adopted": a.origin, "question": null});
+                w.edit(|rec| {
+                    for (k, v) in fields.as_object().into_iter().flatten() {
+                        rec.insert(k.clone(), v.clone());
+                    }
+                });
+                w.set("starting", json!({"summary": ""}));
+                (w, Some(r))
+            }
+            None => {
+                let at = now();
+                let task = format!("Adopted from your session \"{}\".", a.origin);
+                let rec = json!({"id": hex(&random_bytes(4)), "name": slug(&a.name), "task": task, "cwd": a.cwd,
+                    "model": a.model, "effort": a.effort, "context_cap": a.context, "subagents": "haiku",
+                    "session_id": a.session_id, "state": "starting", "created": at, "updated": at, "summary": "",
+                    "started": true, "adopted": a.origin});
+                (self.add_worker(rec)?, None)
+            }
+        };
+        match w.start().await {
+            Ok(true) => Ok((w, before)),
+            Ok(false) => {
+                self.adopt_undo(&w, before).await;
+                Err("its shikigami's process exited as it started".into())
+            }
+            Err(e) => {
+                self.adopt_undo(&w, before).await;
+                Err(format!("its shikigami did not start ({e})"))
+            }
         }
-        let at = now();
-        let task = format!("Adopted from your session \"{}\".", a.origin);
-        let rec = json!({"id": hex(&random_bytes(4)), "name": slug(&a.name), "task": task, "cwd": a.cwd,
-            "model": a.model, "effort": a.effort, "context_cap": a.context, "subagents": "haiku",
-            "session_id": a.session_id, "state": "starting", "created": at, "updated": at, "summary": "",
-            "started": true, "adopted": a.origin});
-        let w = self.add_worker(rec.clone())?;
-        if self.file(&w, &a.origin, a.project.as_deref(), a.link.as_deref()).is_err() {
-            // The session is adopted already: a wrong task id only costs the link.
-            self.file(&w, &a.origin, a.project.as_deref(), None)?;
+    }
+
+    /// Take a start back: no worker (or the released one as it was), and the user's session goes on.
+    pub async fn adopt_undo(&self, w: &Arc<Worker>, before: Option<Value>) {
+        w.let_go().await;
+        match before {
+            None => {
+                self.workers.lock().unwrap().retain(|x| x.id != w.id);
+                self.plugins.forget(&w.name(), Some(&w.id));
+            }
+            Some(Value::Object(r)) => *w.rec.lock().unwrap() = Value::Object(r),
+            Some(_) => {}
         }
-        self.events.add(json!({"type": "worker", "worker": w.id, "name": rec["name"], "event": "summoned",
-            "text": task, "cwd": a.cwd, "model": a.model, "effort": a.effort, "context_cap": a.context,
-            "subagents": "haiku"}));
-        w.send(&a.first, None, vec![]).await?;
-        Ok(w)
+        self.changed();
+    }
+
+    /// Step two, once the user's process ended: on the board, in the conversation, and its first message.
+    pub async fn adopt_go(
+        &self,
+        w: &Arc<Worker>,
+        before: Option<Value>,
+        a: &Adoption,
+        first: &str,
+    ) -> Result<(), String> {
+        let r = w.rec();
+        match before {
+            None => {
+                if self.file(w, &a.origin, a.project.as_deref(), a.link.as_deref()).is_err() {
+                    // The session is adopted already: a wrong task id only costs the link.
+                    self.file(w, &a.origin, a.project.as_deref(), None)?;
+                }
+                self.events.add(json!({"type": "worker", "worker": w.id, "name": r["name"], "event": "summoned",
+                    "text": r["task"], "cwd": r["cwd"], "model": r["model"], "effort": r["effort"],
+                    "context_cap": r["context_cap"], "subagents": "haiku"}));
+            }
+            Some(old) => {
+                let gone = &old["released"];
+                if let Some(path) = transcript(&a.session_id, &str_of(&r["cwd"])) {
+                    // What the user and the session did on the server, so the page reads on without a gap.
+                    let start =
+                        if gone["path"] == json!(path.display().to_string()) { gone["offset"].as_u64() } else { None };
+                    let tl =
+                        tokio::task::spawn_blocking(move || sessions::timeline(&path, Some(start.unwrap_or(0)), 400))
+                            .await
+                            .unwrap_or_else(|_| json!({"events": []}));
+                    let evs = tl["events"].as_array().cloned().unwrap_or_default();
+                    if !evs.is_empty() {
+                        w.add(json!({"type": "system", "text": format!("In your session \"{}\" on the server:", a.origin)}));
+                        for mut ev in evs {
+                            if let Some(o) = ev.as_object_mut() {
+                                o.shift_remove("id");
+                                o.shift_remove("t");
+                            }
+                            w.add(ev);
+                        }
+                    }
+                }
+                let cur = self.board.lock().unwrap().current(&w.id).map(|t| t.id.clone());
+                let link = a.link.clone().or_else(|| cur.clone());
+                if self.file(w, &a.origin, a.project.as_deref(), link.as_deref()).is_err() {
+                    self.file(w, &a.origin, a.project.as_deref(), cur.as_deref())?;
+                }
+                let r = w.rec();
+                self.events.add(json!({"type": "worker", "worker": w.id, "name": r["name"], "event": "summoned",
+                    "text": format!("Back from your session \"{}\".", a.origin), "cwd": r["cwd"], "model": r["model"],
+                    "effort": r["effort"], "context_cap": r["context_cap"], "subagents": r["subagents"]}));
+            }
+        }
+        w.send(first, None, vec![]).await
     }
 
     /// The released shikigami this session is (Claude Code may have moved it on to a new transcript).
@@ -1656,51 +1786,6 @@ impl Pool {
                 && (r["session_id"] == json!(session_id)
                     || now.is_some() && transcript(&str_of(&r["session_id"]), &str_of(&r["cwd"])) == now)
         })
-    }
-
-    async fn readopt(&self, w: Arc<Worker>, a: Adoption) -> Result<Arc<Worker>, String> {
-        let r = w.rec();
-        let gone = &r["released"];
-        if let Some(path) = transcript(&a.session_id, &str_of(&r["cwd"])) {
-            // What the user and the session did on the server, so the page reads on without a gap.
-            let start = if gone["path"] == json!(path.display().to_string()) { gone["offset"].as_u64() } else { None };
-            let tl = tokio::task::spawn_blocking(move || sessions::timeline(&path, Some(start.unwrap_or(0)), 400))
-                .await
-                .unwrap_or_else(|_| json!({"events": []}));
-            let evs = tl["events"].as_array().cloned().unwrap_or_default();
-            if !evs.is_empty() {
-                w.add(json!({"type": "system", "text": format!("In your session \"{}\" on the server:", a.origin)}));
-                for mut ev in evs {
-                    if let Some(o) = ev.as_object_mut() {
-                        o.shift_remove("id");
-                        o.shift_remove("t");
-                    }
-                    w.add(ev);
-                }
-            }
-        }
-        let or = |new: &str, old: &Value| if new.is_empty() { old.clone() } else { json!(new) };
-        let effort = a.effort.as_deref().map_or_else(|| r["effort"].clone(), |e| or(e, &r["effort"]));
-        let fields = json!({"session_id": a.session_id, "model": or(&a.model, &r["model"]), "effort": effort,
-            "context_cap": or(&a.context, &r["context_cap"]), "started": true, "released": null,
-            "laptop_window": null, "adopted": a.origin, "question": null});
-        w.edit(|rec| {
-            for (k, v) in fields.as_object().into_iter().flatten() {
-                rec.insert(k.clone(), v.clone());
-            }
-        });
-        let cur = self.board.lock().unwrap().current(&w.id).map(|t| t.id.clone());
-        let link = a.link.clone().or_else(|| cur.clone());
-        if self.file(&w, &a.origin, a.project.as_deref(), link.as_deref()).is_err() {
-            self.file(&w, &a.origin, a.project.as_deref(), cur.as_deref())?;
-        }
-        let r = w.rec();
-        self.events.add(json!({"type": "worker", "worker": w.id, "name": r["name"], "event": "summoned",
-            "text": format!("Back from your session \"{}\".", a.origin), "cwd": r["cwd"], "model": r["model"],
-            "effort": r["effort"], "context_cap": r["context_cap"], "subagents": r["subagents"]}));
-        w.set("starting", json!({"summary": ""}));
-        w.send(&a.first, None, vec![]).await?;
-        Ok(w)
     }
 
     /// Workers that were running when seimei stopped lost their turn: each is resumed with a note to check its state

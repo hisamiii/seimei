@@ -54,6 +54,8 @@ EFFORT_SET = ("Set effort level", "Effort level")
 CONTEXTS = {"256k": 256_000, "400k": 400_000, "1m": 1_000_000}
 ACTIVE = {"running", "asking"}
 IDLE_DISCONNECT = 600
+# Seconds a started process must stay up before adopt ends the user's session.
+START_SETTLE = 1.0
 # A turn with nothing to say (a stale task notification replayed on resume) is no report: wait this long for the
 # real turn before calling the worker done.
 TRIVIAL_GRACE = 30
@@ -425,14 +427,35 @@ class Worker:
                 self.idle_timer.cancel()
                 self.idle_timer = None
             self._add({"type": "user", "text": text if shown is None else shown, **({"files": files} if files else {})})
-            if not self.client:
-                self.client = ClaudeSDKClient(self._options())
-                await self.client.connect()
-                self.rec["started"] = True
-                self.reader = asyncio.create_task(self._read(self.client))
+            await self._connect()
             self.stopping = False
             self._set("running", question=None)
             await self.client.query(text)
+
+    async def _connect(self):
+        if not self.client:
+            client = ClaudeSDKClient(self._options())
+            await client.connect()
+            self.client = client
+            self.rec["started"] = True
+            self.reader = asyncio.create_task(self._read(self.client))
+
+    async def start(self) -> bool:
+        """Start its claude process without a message: adopt does this before it ends the user's session. Whether the
+        process is up (one that exits right after the handshake shows here, not as an error)."""
+        async with self.lock:
+            await self._connect()
+        await asyncio.sleep(START_SETTLE)
+        return bool(self.client) and not self.reader.done()
+
+    async def let_go(self):
+        """Close its process without a word to anyone (a start adopt takes back)."""
+        async with self.lock:
+            if self.client:
+                self.client = None
+                if self.reader:
+                    self.reader.cancel()
+                    await asyncio.gather(self.reader, return_exceptions=True)
 
     async def stop(self):
         if not self.client and self.rec["state"] == "asking":
@@ -802,25 +825,84 @@ class Pool:
         await w.send(task)
         return w
 
-    async def adopt(self, name: str, session_id: str, cwd: str, model: str, effort: str | None, context: str, origin: str,
-                    first: str, project: str | None = None, link: str | None = None) -> Worker:
-        """A shikigami that resumes one of the user's sessions (adopt.py ended its process). One released earlier
-        comes back as itself: same id, name and log, with what was done in the session meanwhile."""
-        if old := self.released(session_id, cwd):
-            return await self._readopt(old, session_id, model, effort, context, origin, first, project, link)
-        now = time.time()
-        rec = {"id": uuid.uuid4().hex[:8], "name": slug(name), "task": f"Adopted from your session \"{origin}\".", "cwd": cwd,
-               "model": model, "effort": effort, "context_cap": context, "subagents": "haiku", "session_id": session_id,
-               "state": "starting", "created": now, "updated": now, "summary": "", "started": True, "adopted": origin}
-        w = Worker(self, rec)
-        self.workers[rec["id"]] = w
+    async def adopt_start(self, name: str, session_id: str, cwd: str, model: str, effort: str | None, context: str,
+                          origin: str) -> tuple[Worker, dict | None]:
+        """Adopting one of the user's sessions, step one: the shikigami's claude process starts on it while the user's
+        still runs (adopt.py ends that one next, then adopt_go). One released earlier comes back as itself: same id,
+        name and log. Returns the worker and its record from before (None: a new one), for adopt_undo."""
+        if w := self.released(session_id, cwd):
+            before = json.loads(json.dumps(w.rec))
+            r = w.rec
+            r.update(session_id=session_id, model=model or r["model"], effort=effort or r.get("effort"),
+                     context_cap=context or r.get("context_cap"), started=True, released=None, laptop_window=None,
+                     adopted=origin, question=None)
+            w.tasks.clear()
+            w.steps.clear()
+            w._set("starting", summary="")
+        else:
+            before = None
+            now = time.time()
+            rec = {"id": uuid.uuid4().hex[:8], "name": slug(name), "task": f"Adopted from your session \"{origin}\".",
+                   "cwd": cwd, "model": model, "effort": effort, "context_cap": context, "subagents": "haiku",
+                   "session_id": session_id, "state": "starting", "created": now, "updated": now, "summary": "",
+                   "started": True, "adopted": origin}
+            w = Worker(self, rec)
+            self.workers[rec["id"]] = w
         try:
-            self._file(w, origin, project, link)
-        except KeyError:
-            # The session is adopted already: a wrong task id only costs the link.
-            self._file(w, origin, project, None)
-        self.events.add({"type": "worker", "worker": w.id, "name": w.name, "event": "summoned", "text": rec["task"],
-                         "cwd": cwd, "model": model, "effort": effort, "context_cap": context, "subagents": "haiku"})
+            up = await w.start()
+        except Exception as e:
+            await self.adopt_undo(w, before)
+            raise RuntimeError(f"its shikigami did not start ({e})") from e
+        if not up:
+            await self.adopt_undo(w, before)
+            raise RuntimeError("its shikigami's process exited as it started")
+        return w, before
+
+    async def adopt_undo(self, w: Worker, before: dict | None):
+        """Take a start back: no worker (or the released one as it was), and the user's session goes on."""
+        await w.let_go()
+        if before is None:
+            self.workers.pop(w.id, None)
+        else:
+            w.rec.clear()
+            w.rec.update(before)
+        self.changed()
+
+    async def adopt_go(self, w: Worker, before: dict | None, origin: str, first: str, project: str | None = None,
+                       link: str | None = None) -> Worker:
+        """Step two, once the user's process ended: on the board, in the conversation, and its first message."""
+        r = w.rec
+        if before is None:
+            try:
+                self._file(w, origin, project, link)
+            except KeyError:
+                # The session is adopted already: a wrong task id only costs the link.
+                self._file(w, origin, project, None)
+            self.events.add({"type": "worker", "worker": w.id, "name": w.name, "event": "summoned", "text": r["task"],
+                             "cwd": r["cwd"], "model": r["model"], "effort": r["effort"], "context_cap": r["context_cap"],
+                             "subagents": "haiku"})
+        else:
+            gone = before.get("released") or {}
+            path = sessions.transcript({"sessionId": r["session_id"], "cwd": r["cwd"]})
+            if path:
+                # What the user and the session did on the server, so the page reads on without a gap.
+                start = gone.get("offset", 0) if gone.get("path") == str(path) else 0
+                try:
+                    tl = await asyncio.to_thread(sessions.timeline, path, start)
+                except OSError:
+                    tl = {"events": []}
+                if tl["events"]:
+                    w._add({"type": "system", "text": f"In your session \"{origin}\" on the server:"})
+                    for ev in tl["events"]:
+                        w._add({k: v for k, v in ev.items() if k not in ("id", "t")})
+            cur = self.board.current(w.id) if self.board else None
+            try:
+                self._file(w, origin, project, link or (cur and cur["id"]))
+            except KeyError:
+                self._file(w, origin, project, cur and cur["id"])
+            self.events.add({"type": "worker", "worker": w.id, "name": w.name, "event": "summoned",
+                             "text": f"Back from your session \"{origin}\".", "cwd": r["cwd"], "model": r["model"],
+                             "effort": r.get("effort"), "context_cap": r.get("context_cap"), "subagents": r.get("subagents")})
         await w.send(first)
         return w
 
@@ -832,39 +914,6 @@ class Pool:
                     {"sessionId": w.rec["session_id"], "cwd": w.rec["cwd"]}) == now):
                 return w
         return None
-
-    async def _readopt(self, w: Worker, session_id: str, model: str, effort: str | None, context: str, origin: str,
-                       first: str, project: str | None, link: str | None) -> Worker:
-        r = w.rec
-        gone = r.get("released") or {}
-        path = sessions.transcript({"sessionId": session_id, "cwd": r["cwd"]})
-        if path:
-            # What the user and the session did on the server, so the page reads on without a gap.
-            start = gone.get("offset", 0) if gone.get("path") == str(path) else 0
-            try:
-                tl = await asyncio.to_thread(sessions.timeline, path, start)
-            except OSError:
-                tl = {"events": []}
-            if tl["events"]:
-                w._add({"type": "system", "text": f"In your session \"{origin}\" on the server:"})
-                for ev in tl["events"]:
-                    w._add({k: v for k, v in ev.items() if k not in ("id", "t")})
-        r.update(session_id=session_id, model=model or r["model"], effort=effort or r.get("effort"),
-                 context_cap=context or r.get("context_cap"), started=True, released=None, laptop_window=None,
-                 adopted=origin, question=None)
-        w.tasks.clear()
-        w.steps.clear()
-        cur = self.board.current(w.id) if self.board else None
-        try:
-            self._file(w, origin, project, link or (cur and cur["id"]))
-        except KeyError:
-            self._file(w, origin, project, cur and cur["id"])
-        self.events.add({"type": "worker", "worker": w.id, "name": w.name, "event": "summoned",
-                         "text": f"Back from your session \"{origin}\".", "cwd": r["cwd"], "model": r["model"],
-                         "effort": r.get("effort"), "context_cap": r.get("context_cap"), "subagents": r.get("subagents")})
-        w._set("starting", summary="")
-        await w.send(first)
-        return w
 
     def report(self, w: Worker, event: str, text: str):
         """A card in the conversation; the dispatcher hears about it now (a stop: at its next turn)."""

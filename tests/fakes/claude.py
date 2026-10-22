@@ -447,7 +447,28 @@ def main():
     real = {HOME / ".claude", HOME / ".local/share/seimei-test/claude"}
     if Path(cfg).resolve() in {p.resolve() for p in real}:
         refuse(f"{cfg} is a real Claude config dir")
-    asyncio.run(Fake(args(argv)).run())
+    opts = args(argv)
+    if sid := opts.get("resume"):
+        resumed(Path(cfg), str(sid))
+    asyncio.run(Fake(opts).run())
+
+
+def resumed(cfg: Path, sid: str):
+    """For the adopt tests: log to resumes.log whether a user's session on sid still ran as this resume started, and
+    exit before the handshake when sid is listed in fail-resume."""
+    old = None
+    for f in (cfg / "sessions").glob("*.json"):
+        try:
+            rec = json.loads(f.read_text())
+        except (OSError, ValueError):
+            continue
+        if rec.get("sessionId") == sid and rec.get("pid") != os.getpid():
+            old = Path(f"/proc/{rec['pid']}").exists()
+    with (cfg / "resumes.log").open("a") as f:
+        f.write(json.dumps({"sid": sid, "old_alive": old}) + "\n")
+    fail = cfg / "fail-resume"
+    if fail.exists() and sid in fail.read_text().split():
+        refuse(f"no conversation found with session ID: {sid}")
 
 
 if __name__ == "__main__":
