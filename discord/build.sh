@@ -13,6 +13,12 @@ git -C "$src" checkout -q --detach "$commit"
 (cd "$src" && nice -n 19 pnpm install -s --frozen-lockfile 2>&1 | grep -v "configured to use" || true)
 mkdir -p "$src/src/userplugins/seimeiConnector"
 cp "$here/seimeiConnector/index.ts" "$here/seimeiConnector/native.ts" "$src/src/userplugins/seimeiConnector/"
+# SlimDiscord (memory purge, from discord-m3/slim) rides along when its source is there.
+slim="${SLIM_DISCORD_SRC:-$HOME/src/discord-m3/slim/plugin/slimDiscord}"
+if [ -f "$slim/index.ts" ]; then
+    mkdir -p "$src/src/userplugins/slimDiscord"
+    cp "$slim/index.ts" "$slim/native.ts" "$src/src/userplugins/slimDiscord/"
+fi
 # No updater: Vencord's own would replace this build (and the plugin) with the next upstream release.
 # Updates come from moving vencord-commit and deploying.
 log=$(cd "$src" && nice -n 19 pnpm -s build --standalone --disable-updater 2>&1) || { printf '%s\n' "$log"; exit 1; }
