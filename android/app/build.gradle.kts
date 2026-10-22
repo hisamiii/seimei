@@ -81,7 +81,8 @@ android {
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
-            buildConfigField("String", "SERVER", "\"http://localhost:8418\"")
+            // The dev server through adb reverse; -Pseimei.server= (empty) starts at the server step instead.
+            buildConfigField("String", "SERVER", "\"${project.findProperty("seimei.server") ?: "http://localhost:8418"}\"")
             buildConfigField("boolean", "TEST_KEY", "true")
             firebase("com.hisamiowo.seimei.debug")
         }

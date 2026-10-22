@@ -26,6 +26,7 @@ import kotlin.coroutines.resume
  */
 object Delivery {
     const val available = true
+    const val FOSS = true
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /** The logged-in API, so an endpoint the push app changes later reaches the server at once. */
@@ -33,6 +34,34 @@ object Delivery {
     private var api: Api? = null
 
     fun pushApps(ctx: Context): List<String> = UnifiedPush.getDistributors(ctx)
+
+    /** The push app seimei registers with: the one in use, else the one the next login picks. */
+    fun current(ctx: Context): String? =
+        UnifiedPush.getAckDistributor(ctx) ?: UnifiedPush.getSavedDistributor(ctx) ?: pushApps(ctx).firstOrNull()
+
+    fun label(ctx: Context, pkg: String?): String {
+        pkg ?: return "none"
+        val pm = ctx.packageManager
+        return runCatching { pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg)
+    }
+
+    /** Another push app: the old one lets go of seimei's endpoint, and the next register goes to this one. */
+    fun pick(ctx: Context, pkg: String) {
+        if (pkg == current(ctx)) return
+        UnifiedPush.unregister(ctx, INSTANCE_DEFAULT)
+        UnifiedPush.saveDistributor(ctx, pkg)
+    }
+
+    fun route(ctx: Context, prefs: Prefs): Route {
+        val app = current(ctx)
+        return when {
+            app != null -> label(ctx, app).let { Route("Through $it", "UnifiedPush. Each notification is encrypted for this phone; $it only carries it.", true) }
+            prefs.listen -> Route("No push app on this phone",
+                "seimei keeps its own connection to the server instead. Install ntfy or another UnifiedPush app to save battery.", false)
+            else -> Route("No notifications",
+                "No push app, and the background connection is off. Install ntfy or another UnifiedPush app, or turn the connection on.", false)
+        }
+    }
 
     fun start(ctx: Context) {
         // A restarted process picks the background connection back up.
@@ -65,6 +94,8 @@ object Delivery {
             prefs.listenSecret = r.getString("ws")
             Listen.start(ctx)
         } else {
+            Listen.stop(ctx)
+            prefs.listenSecret = null
             prefs.upEndpoint = null
             api.post("api/devices/push", JSONObject())
         }

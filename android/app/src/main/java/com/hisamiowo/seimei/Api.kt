@@ -32,6 +32,10 @@ class Api(server: String) {
     @Volatile
     var token: String? = null
 
+    /** The password sign-in's browser session (name=value), held only until the phone is paired. */
+    @Volatile
+    private var cookie: String? = null
+
     // The server pings the stream every 15 s, so 40 s of silence means the link is dead.
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -40,6 +44,7 @@ class Api(server: String) {
 
     private fun request(path: String) = Request.Builder().url(base + path).apply {
         token?.let { header("Authorization", "Bearer $it") }
+        cookie?.let { header("Cookie", it) }
     }
 
     private suspend fun call(req: Request): ByteArray = withContext(Dispatchers.IO) {
@@ -57,6 +62,32 @@ class Api(server: String) {
     suspend fun post(path: String, body: JSONObject = JSONObject()): JSONObject {
         val req = request(path).post(body.toString().toRequestBody(JSON)).build()
         return JSONObject(String(call(req)))
+    }
+
+    /**
+     * A call as the web page makes it (the password sign-in): with the server's own Origin, keeping the session cookie
+     * it sets. The server checks the Origin against its configured one, so [base] must be that address.
+     */
+    suspend fun postAsPage(path: String, body: JSONObject = JSONObject()): JSONObject = withContext(Dispatchers.IO) {
+        val req = request(path).header("Origin", base.trimEnd('/')).post(body.toString().toRequestBody(JSON)).build()
+        client.newCall(req).execute().use { r ->
+            val text = r.body.string()
+            if (!r.isSuccessful) throw HttpError(r.code, text.take(2000))
+            r.headers("Set-Cookie").firstOrNull()?.let { cookie = it.substringBefore(';') }
+            JSONObject(text)
+        }
+    }
+
+    /** Ends the password sign-in's session; the phone logs in with its own key from now on. */
+    suspend fun endPageSession() {
+        if (cookie == null) return
+        try {
+            postAsPage("api/auth/logout")
+        } catch (e: IOException) {
+            // It expires on its own; nothing on the phone holds it any more.
+        } finally {
+            cookie = null
+        }
     }
 
     /** Runs a call that stops at once when its coroutine is cancelled, reading the body with [read]. */

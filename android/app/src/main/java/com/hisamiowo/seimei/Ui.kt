@@ -44,6 +44,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.Font
@@ -88,6 +93,7 @@ import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -222,7 +228,7 @@ class MainActivity : ComponentActivity() {
                 }
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
                     when (vm.phase) {
-                        Phase.Pair -> PairScreen(vm, this)
+                        Phase.Pair -> if (vm.pairServer == null) ServerScreen(vm) else PairScreen(vm, this)
                         Phase.Locked -> LockScreen(vm, this)
                         Phase.Ready -> AppScreen(vm)
                     }
@@ -287,13 +293,9 @@ fun Mark(size: Int = 72) {
     }
 }
 
+/** The first-run screens' frame: the mark, a title and a line under it. */
 @Composable
-fun PairScreen(vm: Seimei, activity: Activity) {
-    var server by remember { mutableStateOf(vm.prefs.server) }
-    var code by remember { mutableStateOf("") }
-    var name by remember { mutableStateOf(Build.MODEL ?: "phone") }
-    // No server built in (a foss build): the field shows from the start.
-    var advanced by remember { mutableStateOf(vm.prefs.server.isEmpty()) }
+fun FirstRun(title: String, line: String, content: @Composable ColumnScope.() -> Unit) {
     Column(
         Modifier.fillMaxSize().safeDrawingPadding().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -301,42 +303,108 @@ fun PairScreen(vm: Seimei, activity: Activity) {
         Spacer(Modifier.height(56.dp))
         Mark()
         Spacer(Modifier.height(20.dp))
-        Text("Pair this phone", style = MaterialTheme.typography.headlineSmall)
+        Text(title, style = MaterialTheme.typography.headlineSmall)
         Spacer(Modifier.height(8.dp))
-        Text(
-            "On seimei's web page, open the menu, then Phone app, then Pair a phone. Type the code it shows.",
-            color = LocalExtra.current.text3, textAlign = TextAlign.Center, fontSize = 14.sp,
-        )
+        Text(line, color = LocalExtra.current.text3, textAlign = TextAlign.Center, fontSize = 14.sp)
         Spacer(Modifier.height(28.dp))
+        content()
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+/** Step 1 when no server is built in: the address, checked before going on. */
+@Composable
+fun ServerScreen(vm: Seimei) {
+    var typed by remember { mutableStateOf(vm.lastServer.removePrefix("https://")) }
+    FirstRun("Connect to your seimei", "The address of the computer that runs seimei. Its page shows it under Phone app.") {
         OutlinedTextField(
-            value = code,
-            // Kept raw; capitals and the dash are display only, so the keyboard's composing text stays in sync.
-            onValueChange = { v -> code = v.filter { it.isLetterOrDigit() }.take(8) },
-            visualTransformation = CodeFormat,
-            label = { Text("Code") },
+            typed,
+            { typed = it.trim(); vm.serverError = null },
+            label = { Text("Server address") },
             singleLine = true,
-            textStyle = MaterialTheme.typography.headlineSmall.copy(fontFamily = FontFamily.Monospace, letterSpacing = 3.sp),
-            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters, autoCorrectEnabled = false),
+            isError = vm.serverError != null,
+            supportingText = vm.serverError?.let { { Text(it) } },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false, imeAction = ImeAction.Go),
+            keyboardActions = KeyboardActions(onGo = { vm.checkServer(typed) }),
             modifier = Modifier.fillMaxWidth(),
         )
+        Spacer(Modifier.height(16.dp))
+        Button(
+            onClick = { vm.checkServer(typed) },
+            enabled = !vm.authBusy && typed.isNotBlank(),
+            modifier = Modifier.fillMaxWidth().height(56.dp),
+        ) { Text(if (vm.authBusy) "Checking" else "Continue", fontSize = 16.sp) }
+    }
+}
+
+/** Step 2: pair with a code from the web page, or with the password. */
+@Composable
+fun PairScreen(vm: Seimei, activity: Activity) {
+    var code by remember { mutableStateOf("") }
+    // Not rememberSaveable: the password never goes into saved state.
+    var password by remember { mutableStateOf("") }
+    var withPassword by remember { mutableStateOf(false) }
+    var name by remember { mutableStateOf(Build.MODEL ?: "phone") }
+    val line = if (withPassword) "Type seimei's password. The phone pairs itself and keeps only its own key; the password is not stored."
+        else "On the seimei page, open the menu, then Phone app, then Pair a phone. Type the code it shows."
+    FirstRun("Pair this phone", line) {
+        ServerChip(vm)
+        Spacer(Modifier.height(20.dp))
+        if (withPassword) {
+            OutlinedTextField(
+                password,
+                { password = it },
+                label = { Text("Password") },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        } else {
+            OutlinedTextField(
+                value = code,
+                // Kept raw; capitals and the dash are display only, so the keyboard's composing text stays in sync.
+                onValueChange = { v -> code = v.filter { it.isLetterOrDigit() }.take(8) },
+                visualTransformation = CodeFormat,
+                label = { Text("Code") },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.headlineSmall.copy(fontFamily = FontFamily.Monospace, letterSpacing = 3.sp),
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters, autoCorrectEnabled = false),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
         Spacer(Modifier.height(12.dp))
         OutlinedTextField(name, { name = it.take(60) }, label = { Text("Name for this phone") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        if (advanced) {
-            Spacer(Modifier.height(12.dp))
-            OutlinedTextField(server, { server = it.trim() }, label = { Text("Server") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        }
         vm.authError?.let {
             Spacer(Modifier.height(16.dp))
             Text(it, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center, fontSize = 14.sp)
         }
         Spacer(Modifier.height(24.dp))
         Button(
-            onClick = { vm.pair(activity, server, code, name) },
-            enabled = !vm.authBusy && code.length == 8 && server.isNotBlank(),
+            onClick = { if (withPassword) vm.pair(activity, name, password = password) else vm.pair(activity, name, code = code) },
+            enabled = !vm.authBusy && (if (withPassword) password.isNotEmpty() else code.length == 8),
             modifier = Modifier.fillMaxWidth().height(56.dp),
         ) { Text(if (vm.authBusy) "Pairing" else "Pair", fontSize = 16.sp) }
-        if (!advanced) TextButton({ advanced = true }) { Text("Another server") }
-        Spacer(Modifier.height(24.dp))
+        TextButton({
+            withPassword = !withPassword
+            password = ""
+            vm.authError = null
+        }) { Text(if (withPassword) "Use a code instead" else "Use the password instead") }
+    }
+}
+
+/** The server being paired with; Change goes back to the server step. */
+@Composable
+fun ServerChip(vm: Seimei) {
+    Row(
+        Modifier.clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(start = 14.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.web, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(8.dp))
+        Text(vm.pairServer.orEmpty().substringAfter("://"), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false))
+        TextButton({ vm.changeServer() }, enabled = !vm.authBusy) { Text("Change") }
     }
 }
 
@@ -463,6 +531,8 @@ fun Header(vm: Seimei) {
     var menu by remember { mutableStateOf(false) }
     var themes by remember { mutableStateOf(false) }
     if (themes) ThemeSheet(vm) { themes = false }
+    var notifications by remember { mutableStateOf(false) }
+    if (notifications) NotificationsSheet(vm) { notifications = false }
     Row(Modifier.statusBarsPadding().fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer), contentAlignment = Alignment.Center) {
             Glyph(24.dp)
@@ -500,7 +570,8 @@ fun Header(vm: Seimei) {
                     text = { Text("Notifications") },
                     onClick = {
                         menu = false
-                        ctx.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName))
+                        vm.pushTest = null
+                        notifications = true
                     },
                 )
                 DropdownMenuItem(

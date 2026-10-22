@@ -82,6 +82,42 @@ async def passkeys():
         await b.close()
 
 
+async def app_password():
+    """The app's first run (#63): its server check, then pairing with the password the way the app sends it (OkHttp's
+    JSON type, the server's Origin, the cookie by hand), and the page session ended once the phone has its key."""
+    jar = aiohttp.DummyCookieJar()
+    async with aiohttp.ClientSession(cookie_jar=jar) as app:
+        r = await app.get(U + "/api/hello")
+        check("hello says seimei", r.status == 200 and "seimei" in await r.json(), r.status)
+        page = {"Origin": U, "Content-Type": "application/json; charset=utf-8"}
+        r = await app.post(U + "/api/auth/password", data='{"password":"qa-password-123"}',
+                           headers={**page, "Origin": "https://elsewhere.example"})
+        check("a login from another origin is refused", r.status == 403, r.status)
+        r = await app.post(U + "/api/auth/password", data='{"password":"qa-password-123"}', headers=page)
+        cookie = r.headers.get("Set-Cookie", "").split(";")[0]
+        check("the app's password login gets a cookie", r.status == 200 and "=" in cookie, (r.status, cookie))
+        r = await app.post(U + "/api/devices/pair", data="{}", headers={**page, "Cookie": cookie})
+        code = (await r.json()).get("code") if r.status == 200 else None
+        check("... which makes a code", code, r.status)
+        pk = ec.generate_private_key(ec.SECP256R1())
+        pub = b64(pk.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo))
+        r = await app.post(U + "/api/devices/claim", data=json.dumps({"code": code, "name": "qa-app", "public_key": pub}),
+                           headers={"Content-Type": "application/json; charset=utf-8"})
+        dev = (await r.json()).get("device") if r.status == 200 else None
+        check("... that pairs the phone", dev, r.status)
+        r = await app.post(U + "/api/auth/logout", data="{}", headers={**page, "Cookie": cookie})
+        check("the app ends the page session", r.status == 200, r.status)
+        r = await app.get(U + "/api/history", headers={"Cookie": cookie})
+        check("... so its cookie no longer works", r.status == 401, r.status)
+        nonce = (await (await app.post(U + "/api/devices/challenge", json={"device": dev}, headers=J)).json())["nonce"]
+        sig = b64(pk.sign(b"seimei device login\n" + nonce.encode(), ec.ECDSA(hashes.SHA256())))
+        r = await app.post(U + "/api/devices/login", json={"device": dev, "nonce": nonce, "signature": sig}, headers=J)
+        tok = (await r.json()).get("token") if r.status == 200 else None
+        check("the phone logs in with its own key", tok, r.status)
+        r = await app.post(U + f"/api/devices/{dev}/revoke", data="{}", headers={"Authorization": f"Bearer {tok}", **J})
+        check("... and unpairs itself", r.status == 200, r.status)
+
+
 async def main():
     async with aiohttp.ClientSession() as web, aiohttp.ClientSession() as phone, aiohttp.ClientSession() as anon:
         r = await anon.get(U + "/")
@@ -141,6 +177,7 @@ async def main():
         r = await web.get(U + "/api/history")
         check("... and the cookie no longer works", r.status == 401, r.status)
 
+        await app_password()
         await passkeys()
 
         # Last: it locks the password out for the rest of this server's life.

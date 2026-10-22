@@ -114,6 +114,11 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     var authBusy by mutableStateOf(false)
         private set
     var authError by mutableStateOf<String?>(null)
+    /** The server being paired with: the server step's answer, the built-in one, or the last one paired. */
+    var pairServer by mutableStateOf(prefs.server.ifEmpty { null })
+    var serverError by mutableStateOf<String?>(null)
+    /** What the server step's field starts with: the saved server, or the one Change went back from. */
+    var lastServer = prefs.server
 
     var theme by mutableStateOf(prefs.theme)
         private set
@@ -221,39 +226,96 @@ class Seimei(app: Application) : AndroidViewModel(app) {
 
     // ---------- pairing and login ----------
 
-    fun pair(activity: Activity, server: String, code: String, name: String) {
+    /** The server step: is this address seimei? Asks its public hello, which says nothing else. */
+    fun checkServer(typed: String) {
+        if (authBusy) return
+        serverError = null
+        val a = when (val a = address(typed)) {
+            is Address.Bad -> return run { serverError = a.why }
+            is Address.Ok -> a
+        }
+        authBusy = true
+        viewModelScope.launch {
+            val notSeimei = "${a.shown} answers, but it is not seimei."
+            try {
+                if (Api(a.url).get("api/hello").has("seimei")) {
+                    pairServer = a.url
+                    authError = null
+                } else serverError = notSeimei
+            } catch (e: HttpError) {
+                // 421: seimei, but its config names another address; a browser login would fail the same way.
+                serverError = if (e.code == 421) "${a.shown} is seimei, but its config.toml gives another address as origin. Use that one." else notSeimei
+            } catch (e: JSONException) {
+                serverError = notSeimei
+            } catch (e: IOException) {
+                serverError = "Could not reach ${a.shown}."
+            } finally {
+                authBusy = false
+            }
+        }
+    }
+
+    /** Back to the server step. */
+    fun changeServer() {
+        lastServer = pairServer.orEmpty()
+        pairServer = null
+        authError = null
+    }
+
+    /**
+     * Pairs with a code from the web page, or with the password: then the phone logs in as the page would, asks for a
+     * code itself and ends that session once paired. Either way the phone keeps only its own key.
+     */
+    fun pair(activity: Activity, name: String, code: String = "", password: String = "") {
+        val server = pairServer ?: return
         if (authBusy) return
         authBusy = true
         authError = null
         viewModelScope.launch {
+            api = Api(server)
             try {
                 val fp = canFingerprint(activity)
                 if (!fp && !BuildConfig.TEST_KEY) {
                     authError = "Set up a fingerprint on this phone first (Settings, Security)."
                     return@launch
                 }
-                val url = server.trim().let { if ("://" in it) it else "https://$it" }
-                if (url.toHttpUrlOrNull() == null) {
-                    authError = "That server address is not valid."
-                    return@launch
-                }
-                api = Api(url)
                 forgetConversations()
+                val claimCode = if (password.isEmpty()) code else {
+                    try {
+                        api.postAsPage("api/auth/password", JSONObject().put("password", password))
+                    } catch (e: HttpError) {
+                        if (e.code != 401) throw e
+                        val wait = runCatching { JSONObject(e.body).optInt("wait") }.getOrDefault(0)
+                        authError = if (wait > 0) "Too many wrong tries. Try again in $wait s." else "That password is wrong."
+                        return@launch
+                    }
+                    api.postAsPage("api/devices/pair").getString("code")
+                }
                 val pub = withContext(Dispatchers.Default) { DeviceKey.create(fp) }
-                val r = api.post("api/devices/claim", JSONObject().put("code", code).put("name", name.trim()).put("public_key", pub))
-                prefs.server = url
+                val r = api.post("api/devices/claim", JSONObject().put("code", claimCode).put("name", name.trim()).put("public_key", pub))
+                prefs.server = server
                 prefs.keyAuth = fp
                 prefs.device = r.getString("device")
+                api.endPageSession()
                 phase = Phase.Locked
                 authBusy = false
                 unlock(activity)
             } catch (e: HttpError) {
                 DeviceKey.delete()
-                authError = if (e.code == 401) "That code is wrong or has expired. Make a new one on the server." else "The server said: ${e.message}"
+                authError = when (e.code) {
+                    401 -> "That code is wrong or has expired. Make a new one on the server."
+                    // The Origin check: the address typed is not the one in the server's config.
+                    403 -> "The server refused this address. Use the one its config.toml gives as origin."
+                    else -> "The server said: ${e.message}"
+                }
+            } catch (e: JSONException) {
+                DeviceKey.delete()
+                authError = "The server's answer made no sense. Is this seimei?"
             } catch (e: IOException) {
                 DeviceKey.delete()
-                authError = "Could not reach $server."
+                authError = "Could not reach ${server.substringAfter("://")}."
             } finally {
+                withContext(NonCancellable) { api.endPageSession() }
                 authBusy = false
             }
         }
@@ -306,8 +368,26 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** The test's outcome, shown in the sheet itself: a snack would sit behind it. */
+    var pushTest by mutableStateOf<String?>(null)
+
+    /** The Notifications sheet's test: the server sends one through whatever this phone registered. */
+    fun testPush() {
+        pushTest = "Sending"
+        viewModelScope.launch {
+            pushTest = try {
+                api.post("api/devices/push/test")
+                "Sent. It should arrive in a few seconds."
+            } catch (e: HttpError) {
+                if (e.code == 409) "This phone has no notifications registered yet." else "The server said: ${e.message}"
+            } catch (e: IOException) {
+                "Could not reach the server."
+            }
+        }
+    }
+
     /** Tells the server how to reach this phone (Firebase, a push app, or the background connection). */
-    private fun registerPush() {
+    fun registerPush() {
         viewModelScope.launch {
             try {
                 Delivery.register(getApplication(), api, prefs)

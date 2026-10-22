@@ -144,7 +144,14 @@ async function openPhones() {
     if (!r) return;
     pairBtn.hidden = true;
     const left = el('p', 'usage-note');
-    codeBox.replaceChildren(el('p', 'usage-note', 'Type this code into the seimei app:'), el('b', null, r.code), left);
+    // The address to type in the app's first step: this page's own, without https:// (the app adds it).
+    const addr = el('div', 'paddr');
+    const copy = el('button', 'btn text', 'Copy');
+    copy.type = 'button';
+    copy.addEventListener('click', () => navigator.clipboard?.writeText(location.host).then(() => snack('Copied.'), () => null));
+    addr.append(el('code', null, location.host), copy);
+    codeBox.replaceChildren(el('p', 'usage-note', 'In the app, connect to'), addr,
+      el('p', 'usage-note', 'then type this code:'), el('b', null, r.code), left);
     codeBox.hidden = false;
     const tick = () => {
       const s = Math.round(r.expires - Date.now() / 1000);

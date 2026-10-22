@@ -13,6 +13,15 @@ import kotlin.coroutines.resume
 /** Notifications through Firebase Cloud Messaging, configured at build time (none means no notifications). */
 object Delivery {
     val available get() = BuildConfig.FCM_APP.isNotEmpty()
+    const val FOSS = false
+
+    // No push apps to pick from here: Firebase is the only way.
+    fun pushApps(ctx: Context): List<String> = emptyList()
+    fun current(ctx: Context): String? = null
+    fun label(ctx: Context, pkg: String?) = pkg ?: "none"
+    fun pick(ctx: Context, pkg: String) {}
+
+    fun route(ctx: Context, prefs: Prefs) = Route("Through Firebase", "Google's push service carries them to this phone.", true)
 
     fun start(ctx: Context) {
         if (!available || FirebaseApp.getApps(ctx).isNotEmpty()) return

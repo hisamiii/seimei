@@ -576,6 +576,8 @@ body.login { display: grid; place-items: center; grid-template-rows: 1fr; paddin
 /* Phone app sheet */
 .pblock { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; padding: 16px 0 4px; }
 .pcode { display: flex; flex-direction: column; gap: 6px; }
+.paddr { display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 14px; border-radius: 12px; background: var(--container-high); }
+.paddr code { flex: 1; min-width: 0; font: 15px/1.4 var(--mono); overflow-wrap: anywhere; }
 .pcode b { font: 500 34px/1.2 var(--mono); letter-spacing: .08em; color: var(--primary); user-select: all; }
 .psec { margin: 20px 0 4px; font-size: 14px; font-weight: 500; color: var(--text-2); }
 .prow { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--container-high); }
