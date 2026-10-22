@@ -1,6 +1,7 @@
 #!/bin/sh
 # deploy.sh [rev]: move the production checkout to a commit (default main) and restart seimei once it is idle.
 # Production never runs from the working tree, so half-finished edits cannot reach the phone.
+# It runs the Rust server, built here; while $state/deploy/python exists (contrib/back-to-python.sh) it runs Python.
 #
 # The deploy itself runs as its own transient unit, outside seimei's cgroup and the caller's, so the restart it ends
 # with cannot cut it off, even when a shikigami (which that restart ends) started it. The caller follows it and prints
@@ -103,9 +104,19 @@ if [ -z "${SEIMEI_DEPLOY_TEST:-}" ]; then
     step=install
     status running install
     units="$HOME/.config/systemd/user"
-    for u in seimei.service seimei-tunnel.service; do
-        cp --remove-destination "$app/$u" "$units/$u"
-    done
+    if [ -e "$dir/python" ]; then
+        cp --remove-destination "$app/contrib/seimei-python.service" "$units/seimei.service"
+    else
+        step=build
+        status running build
+        # Its own target dir, so a build in the working tree never races this one. Swapped in right before the restart.
+        (cd "$app" && nice -n 19 cargo build -q --release --locked -p seimei)
+        mkdir -p "$app/bin"
+        cp "$app/target/release/seimei" "$app/bin/seimei.new"
+        cp --remove-destination "$app/seimei.service" "$units/seimei.service"
+    fi
+    step=install
+    cp --remove-destination "$app/seimei-tunnel.service" "$units/seimei-tunnel.service"
     systemctl --user daemon-reload
     # The Waterfox connector: its native-messaging host runs from the production checkout; the extension is packed
     # for the user to install once (about:addons, Install Add-on From File).
@@ -139,6 +150,9 @@ for _ in range(60):
 PY
 step=restart
 status running restart
+if [ -e "$app/bin/seimei.new" ]; then
+    mv -f "$app/bin/seimei.new" "$app/bin/seimei"
+fi
 systemctl --user restart "$service"
 line="deployed $(git -C "$app" log --oneline -1)"
 echo "$line"

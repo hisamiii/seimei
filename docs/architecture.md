@@ -84,6 +84,16 @@ Production never runs from the working tree. `deploy.sh [rev]` runs as its own t
 restart it ends with cannot cut it off), checks out the commit, syncs dependencies, waits for open cards and an idle
 dispatcher, and restarts the service. The result goes to `deploy/last.json`, which seimei hands to whoever it resumes.
 
+The service runs the Rust server: the deploy builds it in the production checkout (`cargo build --release`, its own
+`target/`) and renames it to `bin/seimei` right before the restart. The Python server still ships alongside and uses
+the same state files, so going back is one command:
+
+    ~/.local/share/seimei-app/contrib/back-to-python.sh
+
+It installs `contrib/seimei-python.service` as `seimei.service`, syncs the venv and restarts. It also leaves
+`deploy/python` in the state folder, which keeps later deploys on Python; delete that file and deploy to go back to
+Rust.
+
 ## Tests
 
 `uv run pytest` runs the offline suite; `-m web` adds the browser tests against the QA server on port 8431

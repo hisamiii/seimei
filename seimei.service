@@ -5,8 +5,8 @@ Wants=network-online.target
 
 [Service]
 WorkingDirectory=%h/.local/share/seimei-app
-# deploy.sh syncs the venv; uv in between would hand python a second SIGTERM on stop.
-ExecStart=%h/.local/share/seimei-app/.venv/bin/python -m seimei
+# deploy.sh builds the binary in the production checkout and swaps it in by rename right before the restart.
+ExecStart=%h/.local/share/seimei-app/bin/seimei serve
 # seimei closes its own Claude sessions; anything left gets SIGKILL after it exits.
 KillMode=mixed
 Restart=on-failure
