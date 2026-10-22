@@ -1210,7 +1210,11 @@ impl Session {
         let name = str_of(&r["name"]);
         let started = r["started"] == true;
         let groups = self.w.granted();
-        let mcp = acp_servers(self.pool.plugins.servers(&name, Some(&self.w.id), Some(&groups)));
+        let plugins = &self.pool.plugins;
+        let mut servers = Map::from_iter([("shikigami".into(), json!({}))]);
+        servers.extend(plugins.servers(&name, Some(&self.w.id), Some(&groups)));
+        servers.insert("shikigami".into(), Value::Object(plugins.own_server(&name, &self.w.id)));
+        let mcp = acp_servers(servers);
         let mut env = self.pool.plugins.env(&name);
         env.extend(a.env);
         let opts = acp::Options {
@@ -1686,7 +1690,7 @@ impl Pool {
             let Some(id) = rec["id"].as_str().map(String::from) else { continue };
             logs.push((id.clone(), rec, EventLog::open(&dir.join(format!("{id}.jsonl")))?));
         }
-        Ok(Arc::new_cyclic(|me: &Weak<Pool>| {
+        let pool = Arc::new_cyclic(|me: &Weak<Pool>| {
             let workers = logs
                 .into_iter()
                 .map(|(id, rec, log)| {
@@ -1724,7 +1728,11 @@ impl Pool {
                 flushing: AtomicBool::new(false),
                 hidden: Mutex::new(HashSet::new()),
             }
-        }))
+        });
+        // An ACP agent reaches its own tools through the plugin socket.
+        let me = Arc::downgrade(&pool);
+        let _ = pool.plugins.own.set(Box::new(move |id, tool, args| Some(me.upgrade()?.get(id)?.call(tool, args))));
+        Ok(pool)
     }
 
     /// Every worker, in workers.json's order.

@@ -25,7 +25,7 @@ pub mod queue;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 
 use serde_json::{Map, Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
@@ -52,6 +52,14 @@ static SPECS: LazyLock<Value> = LazyLock::new(|| {
     let all: Value = serde_json::from_str(include_str!("../../../../tests/cases/tools.json")).expect("tools.json");
     all["plugins"].clone()
 });
+/// The shikigami's own server (ask, board): in-process for Claude Code, `seimei plugin shikigami` for an ACP agent.
+static OWN: LazyLock<Value> = LazyLock::new(|| {
+    let all: Value = serde_json::from_str(include_str!("../../../../tests/cases/tools.json")).expect("tools.json");
+    all["shikigami"].clone()
+});
+
+/// Runs a shikigami's own tool for it: (worker id, tool, args) to the tool's result, None for no such worker.
+pub type OwnTools = Box<dyn Fn(&str, &str, &Value) -> Option<Value> + Send + Sync>;
 
 pub struct Plugin {
     pub name: String,
@@ -73,8 +81,12 @@ pub struct Plugins {
     pub desktop: Option<Arc<desktop::Desktop>>,
     state: PathBuf,
     socket: PathBuf,
+    /// The seimei binary the built-ins run as.
+    exe: String,
     /// Session tokens and what each may do.
     tokens: Mutex<HashMap<String, Grant>>,
+    /// The shikigami's own tools, for a session that reaches them through the socket; set by the worker pool.
+    pub own: OnceLock<OwnTools>,
 }
 
 /// A session token's session: who it is, the plugins it was given, and its claude process. Only that process and
@@ -155,7 +167,9 @@ impl Plugins {
             desktop: None,
             state: state.into(),
             socket: state.join("plugins.sock"),
+            exe: exe.into(),
             tokens: Mutex::default(),
+            own: OnceLock::new(),
         };
         let enabled = cfg.get("enabled").and_then(|e| e.as_array()).cloned().unwrap_or_default();
         for name in enabled.iter().filter_map(|n| n.as_str()) {
@@ -307,6 +321,24 @@ impl Plugins {
         out
     }
 
+    /// A shikigami's own tools (ask, board) as a stdio MCP server, for an agent that cannot be served in-process. Call
+    /// after servers(): its token then carries the granted plugins and these.
+    pub fn own_server(&self, who: &str, worker: &str) -> Map<String, Value> {
+        let mut names = (self.tokens.lock().unwrap().values())
+            .find(|g| g.who == who && g.worker.as_deref() == Some(worker))
+            .map(|g| g.plugins.clone())
+            .unwrap_or_default();
+        names.retain(|n| n != "shikigami");
+        names.push("shikigami".into());
+        let env = json!({"SEIMEI_SOCKET": self.socket.display().to_string(),
+            "SEIMEI_TOKEN": self.token(who, Some(worker), &names), "SEIMEI_STATE": self.state.display().to_string()});
+        Map::from_iter([
+            ("command".into(), json!(self.exe)),
+            ("args".into(), json!(["plugin", "shikigami"])),
+            ("env".into(), env),
+        ])
+    }
+
     /// The tool names that need no permission card: the built-ins carry their own.
     pub fn allowed(&self, groups: Option<&[String]>) -> Vec<String> {
         self.wanted(groups).filter(|p| p.own).map(|p| format!("mcp__{}", p.name)).collect()
@@ -383,6 +415,18 @@ impl Plugins {
                         let plugin = req["plugin"].as_str().unwrap_or("");
                         if !g.plugins.iter().any(|p| p == plugin) {
                             json!({"error": format!("this session has no {plugin} tools")})
+                        } else if plugin == "shikigami" {
+                            // Its own tools, as the in-process server runs them: only a shikigami has them.
+                            let (tool, args) = (req["tool"].as_str().unwrap_or("").to_string(), req["args"].clone());
+                            let me2 = me.clone();
+                            let run = move || {
+                                let w = g.worker.as_deref()?;
+                                me2.own.get()?(w, &tool, &args)
+                            };
+                            match tokio::task::spawn_blocking(run).await.ok().flatten() {
+                                Some(r) => json!({"result": r}),
+                                None => json!({"error": "this session has no shikigami tools"}),
+                            }
                         } else {
                             let session = Local { approvals: &approvals, who: &g.who, worker: g.worker.as_deref() };
                             let (tool, args) = (req["tool"].as_str().unwrap_or(""), &req["args"]);
@@ -523,7 +567,10 @@ impl Remote {
 /// `seimei plugin <name>`: a built-in plugin as an MCP server on stdin and stdout, one JSON-RPC message per line.
 pub async fn serve_stdio(name: &str) -> Result<(), String> {
     let var = |k: &str| std::env::var(k).unwrap_or_default();
-    let mut spec = SPECS.get(name).cloned().ok_or(format!("no built-in plugin {name}"))?;
+    let mut spec = match name {
+        "shikigami" => OWN.clone(),
+        _ => SPECS.get(name).cloned().ok_or(format!("no built-in plugin {name}"))?,
+    };
     if name == "desktop" {
         // One spec per window manager; seimei says which.
         let b = var("SEIMEI_DESKTOP");
@@ -556,7 +603,7 @@ pub async fn serve_stdio(name: &str) -> Result<(), String> {
         let task = tokio::spawn(async move {
             let reply = crate::tools::serve(&spec, msg, |tool, args| async move {
                 match remote.plugin.as_str() {
-                    p if HOSTED.contains(&p) => remote.forward(&tool, &args).await,
+                    p if HOSTED.contains(&p) || p == "shikigami" => remote.forward(&tool, &args).await,
                     "music" => music::call(&tool, &args, remote.as_ref()).await,
                     _ => queue::call(&tool, &args, remote.as_ref()).await,
                 }

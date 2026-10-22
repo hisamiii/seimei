@@ -9,6 +9,8 @@ each prompt plays the script its "!command" line picks, and what no script takes
   !wait           a turn that runs until the client cancels it (stop reason cancelled)
   !crash          exits mid-turn
   !mcp            tells the MCP servers its session got (names, commands, args, env names)
+  !call <server> <tool> <json args>
+                  starts that MCP server as its session got it, calls the tool and tells the result
   !fs             asks the client to read a file and tells what came back
   !mode           tells the session's mode
 
@@ -18,6 +20,7 @@ $FAKE_ACP_NO_LOAD turns the loadSession capability off. Every message both ways 
 import json
 import os
 import queue
+import subprocess
 import sys
 import threading
 import time
@@ -128,6 +131,9 @@ def turn(sid: str, text: str) -> str:
         got = [{"name": m.get("name"), "command": m.get("command"), "args": m.get("args"),
                 "env": sorted(e["name"] for e in m.get("env") or [])} for m in sessions[sid]["mcp"]]
         say(sid, json.dumps(got))
+    elif cmd == "!call":
+        server, tool, args = rest.split(" ", 2)
+        say(sid, json.dumps(mcp_call(sid, server, tool, json.loads(args))))
     elif cmd == "!fs":
         r = ask("fs/read_text_file", {"sessionId": sid, "path": "/etc/hostname"})
         say(sid, json.dumps(r.get("error") or r.get("result")))
@@ -136,6 +142,35 @@ def turn(sid: str, text: str) -> str:
     else:
         say(sid, f"You said: {text}")
     return "end_turn"
+
+
+def mcp_call(sid: str, server: str, tool: str, args: dict):
+    """One tools/call on one of the session's stdio MCP servers, started as an agent starts it."""
+    m = next((m for m in sessions[sid]["mcp"] if m.get("name") == server), None)
+    if m is None:
+        return {"error": f"no server {server}"}
+    env = dict(os.environ, **{e["name"]: e["value"] for e in m.get("env") or []})
+    p = subprocess.Popen([m["command"], *(m.get("args") or [])], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                         env=env, text=True)
+
+    def rpc(i, method, params):
+        p.stdin.write(json.dumps({"jsonrpc": "2.0", "id": i, "method": method, "params": params}) + "\n")
+        p.stdin.flush()
+        for line in p.stdout:
+            msg = json.loads(line)
+            if msg.get("id") == i:
+                return msg
+        return {"error": "the server exited"}
+
+    try:
+        rpc(1, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
+                              "clientInfo": {"name": "fake-acp", "version": "0.1.0"}})
+        p.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n")
+        r = rpc(2, "tools/call", {"name": tool, "arguments": args})
+        return r.get("result") or r.get("error")
+    finally:
+        p.stdin.close()
+        p.wait(timeout=10)
 
 
 def prompt(i, p: dict):

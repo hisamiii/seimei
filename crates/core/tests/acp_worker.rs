@@ -212,6 +212,7 @@ async fn acp_shikigami() {
     assert!(ok);
     let servers: Value = serde_json::from_str(&said(&w, from)[0]).unwrap();
     let want = json!([
+        {"name": "shikigami", "command": "seimei", "args": ["plugin", "shikigami"], "env": ["SEIMEI_SOCKET", "SEIMEI_STATE", "SEIMEI_TOKEN"]},
         {"name": "music", "command": "seimei", "args": ["plugin", "music"], "env": ["SEIMEI_SOCKET", "SEIMEI_STATE", "SEIMEI_TOKEN"]},
         {"name": "acptest-notes", "command": "/bin/true", "args": ["x"], "env": []},
     ]);
