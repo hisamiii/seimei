@@ -29,8 +29,9 @@ use crate::util::chars;
 /// style.md is appended to every message the dispatcher gets, for the model only; past this it is cut.
 const STYLE_MAX: usize = 1000;
 /// A reply that starts with one of these goes to that lane, whatever started the turn: chat: moves the rest of an
-/// event turn to the chat, trajectory: moves that one reply of the user's turn to the trajectory. A first line
-/// "re: <words from one of the user's messages>" anchors the reply to that message. They combine, in any order.
+/// event turn to the chat, trajectory: keeps a reply out of the chat (one that asks something still goes there). A
+/// first line "re: <words from one of the user's messages>" anchors the reply to that message. They combine, in any
+/// order.
 const MARKERS: [&str; 2] = ["chat:", "trajectory:"];
 const RE: &str = "re:";
 /// A re: line longer than this, or one that never ends, is text.
@@ -42,9 +43,6 @@ const HOLD: Duration = Duration::from_secs(30 * 60);
 /// Tokens at which the dispatcher's context compacts (CLAUDE_CODE_AUTO_COMPACT_WINDOW); config [dispatcher]
 /// compact_window.
 const COMPACT_WINDOW: i64 = 400_000;
-/// An event turn that ends on an unmarked reply is asked once where it goes.
-const BOUNCE: &str =
-    "[seimei] mark this reply chat: or trajectory: (answer with just the marker; the reply is moved for you)";
 /// Built-in tools the dispatcher has no use for: it delegates through summon (subagents would be invisible to the
 /// user) and pings through notify. Agent is still called Task in some CLI versions.
 const OFF_TOOLS: [&str; 14] = [
@@ -111,6 +109,24 @@ pub fn head(text: &str, last: bool) -> Option<(Vec<&'static str>, Option<String>
         }
         let text = if !lanes.is_empty() || quote.is_some() { lead } else { rest };
         return Some((lanes, quote, text));
+    }
+}
+
+/// Whether a reply asks the user something: a "?" in its last paragraph.
+fn asks(text: &str) -> bool {
+    text.trim_end().rsplit("\n\n").next().is_some_and(|p| p.contains('?'))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::asks;
+
+    #[test]
+    fn a_question_in_the_last_paragraph_asks() {
+        assert!(asks("Done. Deploy now?"));
+        assert!(asks("Built it.\n\nShould I deploy, or wait for the review? Either works."));
+        assert!(!asks("Why did it fail? The cache was stale.\n\nFixed and deployed."));
+        assert!(!asks("Noted."));
     }
 }
 
@@ -668,10 +684,9 @@ struct Turns {
     head: Option<String>,
     /// "t" while a reply marked trajectory: streams.
     block_lane: Option<&'static str>,
-    /// An event turn's last reply while it has no marker: held until the turn ends, then asked about (BOUNCE).
+    /// An event turn's last reply while it has no marker: held until it shows whether it ends the turn (then it goes
+    /// to the chat) or more of the turn follows (then it stays in the trajectory).
     held: Option<Map<String, Value>>,
-    /// The turn running now answers BOUNCE.
-    bouncing: bool,
     /// What was sent since the last model step; see step().
     inputs: Vec<Source>,
     rate_limits: std::collections::HashMap<String, Value>,
@@ -681,8 +696,6 @@ struct Turns {
 /// What the session loop does after a message was handled.
 enum After {
     Nothing,
-    /// The turn ended on an unmarked reply: ask where it goes.
-    Bounce,
     /// The turn is over.
     Idle,
 }
@@ -702,7 +715,6 @@ impl Turns {
             head: None,
             block_lane: None,
             held: None,
-            bouncing: false,
             inputs: vec![],
             rate_limits: Default::default(),
             style_seen: (None, String::new()),
@@ -753,17 +765,6 @@ impl Turns {
                     None => return "Claude Code exited".into(),
                     Some(m) => match self.handle(m) {
                         After::Nothing => {}
-                        After::Bounce => {
-                            if let Err(e) = client.query(BOUNCE) {
-                                eprintln!("seimei: routing bounce failed: {e}");
-                                if self.held.is_some() {
-                                    self.route_held("");
-                                }
-                                self.bouncing = false;
-                                self.events.set_turn(Map::new());
-                                self.set(None, Some(false));
-                            }
-                        }
                         After::Idle => self.idle_due = Some(Instant::now() + idle_compact().0),
                     },
                 },
@@ -950,9 +951,9 @@ impl Turns {
                 self.set(None, Some(true));
                 self.step();
             }
-            "content_block_start" if self.held.is_some() && !self.bouncing => {
+            "content_block_start" if self.held.is_some() => {
                 // More of the turn follows the held reply: it did not end the turn, so it stays in the trajectory.
-                self.route_held("");
+                self.route_held(false);
                 self.stream(msg);
             }
             "content_block_start" if block == Some("text") => {
@@ -991,15 +992,16 @@ impl Turns {
                 ContentBlock::Text { text } if !text.trim().is_empty() => {
                     let (lanes, quote, text) = head(text.trim(), true).expect("a final head");
                     if self.held.is_some() {
-                        // The answer to BOUNCE (or more of the turn): its marker routes the held reply.
-                        let marker = if self.bouncing { lanes.last().copied().unwrap_or("") } else { "" };
-                        self.route_held(marker);
+                        // More of the turn: the held reply did not end it.
+                        self.route_held(false);
                     }
+                    // trajectory: is for noise; a reply that asks the user something goes to the chat anyway.
+                    let asking = asks(&text);
                     let mut place = Map::new();
                     for m in &lanes {
                         if *m == "chat:" {
                             self.events.to_chat();
-                        } else {
+                        } else if !asking {
                             place = self.to_trajectory();
                         }
                     }
@@ -1013,14 +1015,17 @@ impl Turns {
                     let turn = self.events.turn();
                     let text = text.trim().to_string();
                     let event_turn = turn.get("lane").is_some_and(|l| l == "t") && turn.contains_key("turn");
-                    if !text.is_empty() && lanes.is_empty() && !self.bouncing && event_turn {
-                        // Unmarked in an event turn: if it ends the turn, the turn is asked where it goes.
+                    if !text.is_empty() && event_turn && (lanes.is_empty() || asking) {
+                        // In an event turn: to the chat if it asks or ends the turn; held until that shows.
                         let mut held = Map::new();
                         held.insert("type".into(), json!("assistant"));
                         held.insert("text".into(), json!(text));
                         held.extend(turn);
                         held.extend(place);
                         self.held = Some(held);
+                        if asking {
+                            self.route_held(true);
+                        }
                     } else if !text.is_empty() {
                         let mut ev = Map::new();
                         ev.insert("type".into(), json!("assistant"));
@@ -1031,7 +1036,7 @@ impl Turns {
                 }
                 ContentBlock::ToolUse { id, name, input } => {
                     if self.held.is_some() {
-                        self.route_held("");
+                        self.route_held(false);
                     }
                     let summary = summarize(&input);
                     self.events.add(json!({"type": "tool", "tool_id": id, "name": name, "summary": summary}));
@@ -1057,6 +1062,8 @@ impl Turns {
 
     fn result(&mut self, msg: ResultMessage) -> After {
         self.d.usage.turn("seimei", &msg.session_id, msg.model_usage.as_ref(), false);
+        // The held reply ended the turn: it is what the turn has to say, so it goes to the chat.
+        self.route_held(true);
         if msg.is_error {
             let lane = self.events.turn().get("lane").cloned().unwrap_or(json!("c"));
             if self.stopping {
@@ -1068,25 +1075,8 @@ impl Turns {
                 );
             }
         }
-        if self.held.is_some() && self.bouncing {
-            self.route_held("");
-        }
-        let stopped = self.stopping || msg.is_error;
         self.stopping = false;
-        let turn = self.events.turn();
         self.events.set_turn(Map::new());
-        if self.held.is_some() && !stopped && self.connected {
-            // Once per turn: the bounce turn goes on with the same turn label, and its marker routes the reply.
-            self.bouncing = true;
-            let keep: Map<String, Value> =
-                turn.into_iter().filter(|(k, _)| matches!(k.as_str(), "lane" | "turn" | "why")).collect();
-            self.events.set_turn(keep);
-            return After::Bounce;
-        }
-        if self.held.is_some() {
-            self.route_held("");
-        }
-        self.bouncing = false;
         self.set(None, Some(false));
         After::Idle
     }
@@ -1118,10 +1108,10 @@ impl Turns {
         }
     }
 
-    /// The held reply goes to the chat on chat:, else to the trajectory, where an event turn's reply goes.
-    fn route_held(&mut self, marker: &str) {
+    /// The held reply goes to the chat, or stays in the trajectory with the rest of its event turn.
+    fn route_held(&mut self, chat: bool) {
         let Some(mut ev) = self.held.take() else { return };
-        if marker == "chat:" {
+        if chat {
             let from = ev.remove("turn").unwrap_or(Value::Null);
             let why = ev.remove("why").unwrap_or(json!(""));
             ev.remove("lane");

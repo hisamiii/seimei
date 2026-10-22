@@ -377,8 +377,9 @@ async def dispatcher(self: Fake, text: str, images: int):
     elif t == "permseimei":
         out = await self.permission("Bash", {"command": "uv run pytest -q tests/"}, SUGGEST_BASH, "Run the unit tests")
         await self.say(f"Cards came back: {out}")
-    elif t in ("perm", "event", "longreport", "ask", "run"):
+    elif t in ("perm", "event", "eventplain", "eventask", "longreport", "ask", "run"):
         await self.say({"perm": "Asking runner for permission cards.", "event": "An event turn follows.",
+                        "eventplain": "An event turn follows.", "eventask": "An event turn follows.",
                         "longreport": "runner reports at length.", "ask": "runner asks something.",
                         "run": "runner is running again."}[t])
         await self.tool("mcp__seimei__message", {"worker": "runner", "text": f"!{t}"})
@@ -396,7 +397,9 @@ async def dispatcher(self: Fake, text: str, images: int):
         done = [m for ln in text.splitlines() if (m := REPORTED.search(ln))]
         for m in done:
             await self.tool("mcp__seimei__peek", {"worker": m[2]})
-        await self.say("trajectory: " + ("\n".join(m[3] for m in done) if done else "Noted."))
+        said = "\n".join(m[3] for m in done) if done else "Noted."
+        # A report that says "plain" is passed on unmarked; the rest is marked noise (one that asks still reaches the chat).
+        await self.say(("" if "plain" in said else "trajectory: ") + said)
     else:
         await self.say(f"Echo: {text[:300]}" + (f" ({images} images)" if images else ""))
     self.result("")
@@ -414,6 +417,10 @@ async def shikigami(self: Fake, text: str):
         said = f"Cards came back: {cmd}, {edit}, {plan}"
     elif t == "event":
         said = "Rendered all 12 frames."
+    elif t == "eventplain":
+        said = "Rendered the plain cut."
+    elif t == "eventask":
+        said = "Rendered the cut. Ship it?"
     elif t == "longreport":
         said = REPORT
     elif t == "ask":
