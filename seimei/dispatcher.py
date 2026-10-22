@@ -32,13 +32,13 @@ log = logging.getLogger("seimei")
 # style.md is appended to every message the dispatcher gets, for the model only; past this it is cut.
 STYLE_MAX = 1000
 # A reply that starts with one of these goes to that lane, whatever started the turn: chat: moves the rest of an
-# event turn to the chat, trajectory: moves that one reply of the user's turn to the trajectory. A first line
-# "re: <words from one of the user's messages>" anchors the reply to that message. They combine, in any order.
+# event turn to the chat, trajectory: keeps a reply out of the chat (one that asks something still goes there). A
+# first line "re: <words from one of the user's messages>" anchors the reply to that message. They combine, in any
+# order.
 MARKERS = ("chat:", "trajectory:")
 RE = "re:"
 RE_LINE_MAX = 200  # a re: line longer than this, or one that never ends, is text
 RE_SEARCH = 50  # the user's messages a re: quote is looked for in
-# An event turn that ends on an unmarked reply is asked once where it goes (rules.md: the routing rule is enforced).
 # Info-only notes wait for the next turn; after this long without one, they start a turn of their own.
 HOLD = 30 * 60
 # Idle this long after a turn (the 1 h prompt cache still warm) with this much context: compact now, at a natural
@@ -47,7 +47,6 @@ HOLD = 30 * 60
 COMPACT_WINDOW = 400_000
 IDLE_COMPACT = float(os.environ.get("SEIMEI_IDLE_COMPACT", 40 * 60))
 IDLE_COMPACT_MIN = int(os.environ.get("SEIMEI_IDLE_COMPACT_MIN", 150_000))
-BOUNCE = "[seimei] mark this reply chat: or trajectory: (answer with just the marker; the reply is moved for you)"
 OFF_TOOLS = ["Agent", "Task", "Workflow", "NotebookEdit", "CronCreate", "CronDelete", "CronList", "RemoteTrigger",
              "PushNotification", "DesignSync", "EnterWorktree", "ExitWorktree", "ScheduleWakeup", "LSP"]
 
@@ -60,9 +59,9 @@ They talk to you through a web page, usually from their phone.
 - Replies are read on a phone: lead with the answer, keep it short, avoid wide tables.
 - Phone notifications are yours to decide: only approval cards push on their own. Use notify (level, collapse key, reply=true when they asked something and left the app), presence to see where they are, and watch rules to ping them when a shikigami or session finishes or asks (plugins add triggers, like the GPU queue freeing).
 - Messages starting with [seimei] are events from the server, not typed by the user. Ones that need you (a shikigami finishing, failing or asking, a session's question or permission prompt, a card, an urgent plugin event like a GPU fault) start a turn at once; the rest wait as "Since your last turn" lines on your next turn, at most 30 minutes.
-- A turn the user started goes to the chat. A turn a [seimei] line started goes to the user's Trajectory tab (they see a one-line mention and a badge), unless a show_image or send_file moves the rest of it to the chat. Mark the closing reply of such a turn chat: or trajectory:; if it ends unmarked, seimei asks you once ("mark this reply chat: or trajectory:") and you answer with just the marker; still unmarked, it stays in the Trajectory. Ping with notify when it is urgent. Three markers at the start of a reply steer it; they are removed and combine in any order:
-  - "chat:" sends the reply (and the rest of an event turn) to the chat: a question or decision for the user, a result they asked for.
-  - "trajectory:" sends that reply of a user turn to the Trajectory; the chat gets a one-line mention.
+- A turn the user started goes to the chat. A turn a [seimei] line started works in the user's Trajectory tab (they see a one-line mention and a badge), but its closing reply goes to the chat by default, and a show_image or send_file moves the rest of the turn there. Start a reply with trajectory: only for noise: a guard false alarm, a queue move, a closed session, nothing to do. A trajectory: reply that asks something (a "?" in its last paragraph) goes to the chat anyway. Ping with notify when it is urgent. Three markers at the start of a reply steer it; they are removed and combine in any order:
+  - "chat:" sends the reply and the rest of an event turn to the chat.
+  - "trajectory:" keeps the reply out of the chat (in a user turn, the chat gets a one-line mention). Noise only.
   - A first line "re: <5-60 words copied exactly from one of the user's recent messages>" shows the reply as an answer to that message.
 - A user message that starts with [re: "..."] answers what is quoted there: one of your messages, or a card (a shikigami's report or question, an approval card).
 
@@ -120,6 +119,11 @@ def head(text: str, final: bool = True) -> tuple[list[str], str | None, str] | N
         elif not final and (not lead or any(len(lead) < len(m) and m.startswith(lead.lower()) for m in MARKERS + (RE,))):
             return None
         return lanes, quote, lead if lanes or quote is not None else rest
+
+
+def asks(text: str) -> bool:
+    """Whether a reply asks the user something: a "?" in its last paragraph."""
+    return "?" in text.rstrip().rsplit("\n\n", 1)[-1]
 
 
 def flat(text: str) -> str:
@@ -198,9 +202,9 @@ class Dispatcher:
         self.pending: list[str] = []
         self.head: str | None = None  # the start of a streaming reply, held until it shows whether it is marked
         self.block_lane: str | None = None  # "t" while a reply marked trajectory: streams
-        # An event turn's last reply while it has no marker: held until the turn ends, then asked about (BOUNCE).
+        # An event turn's last reply while it has no marker: held until it shows whether it ends the turn (then it goes
+        # to the chat) or more of the turn follows (then it stays in the trajectory).
         self.held: dict | None = None
-        self.bouncing = False  # the turn running now answers BOUNCE
         # What was sent since the last model step: ("user", event id) or ("event", why); see _step.
         self.inputs: list[tuple[str, object]] = []
         self.write_lock = asyncio.Lock()
@@ -479,9 +483,9 @@ class Dispatcher:
             if kind == "message_start":
                 self._set(busy=True)
                 self._step()
-            elif kind == "content_block_start" and self.held and not self.bouncing:
+            elif kind == "content_block_start" and self.held:
                 # More of the turn follows the held reply: it did not end the turn, so it stays in the trajectory.
-                self._route_held("")
+                self._route_held(False)
                 self._handle(msg)
             elif kind == "content_block_start" and ev["content_block"].get("type") == "text":
                 self.head, self.block_lane = "", None
@@ -507,26 +511,30 @@ class Dispatcher:
                 if isinstance(b, TextBlock) and (text := b.text.strip()):
                     lanes, quote, text = head(text)
                     if self.held:
-                        # The answer to BOUNCE (or more of the turn): its marker routes the held reply.
-                        self._route_held(lanes[-1] if self.bouncing and lanes else "")
+                        # More of the turn: the held reply did not end it.
+                        self._route_held(False)
+                    # trajectory: is for noise; a reply that asks the user something goes to the chat anyway.
+                    asking = asks(text)
                     where = {}
                     for m in lanes:
                         if m == "chat:":
                             self.events.to_chat()
-                        else:
+                        elif not asking:
                             where = self._to_trajectory()
                     if quote is not None and (to := self._anchor(quote)):
                         where |= {"re": to["id"], "re_text": " ".join(to.get("text", "").split())[:300], "re_pin": True}
                     self.block_lane = None
                     turn = self.events.turn
-                    if (text := text.strip()) and not lanes and not self.bouncing and turn.get("lane") == "t" and "turn" in turn:
-                        # Unmarked in an event turn: if it ends the turn, the turn is asked where it goes.
+                    if (text := text.strip()) and (not lanes or asking) and turn.get("lane") == "t" and "turn" in turn:
+                        # In an event turn: to the chat if it asks or ends the turn; held until that shows.
                         self.held = {"type": "assistant", "text": text, **turn, **where}
+                        if asking:
+                            self._route_held(True)
                     elif text:
                         self.events.add({"type": "assistant", "text": text, **where})
                 elif isinstance(b, ToolUseBlock):
                     if self.held:
-                        self._route_held("")
+                        self._route_held(False)
                     self.events.add({"type": "tool", "tool_id": b.id, "name": b.name, "summary": summarize(b.input)})
         elif isinstance(msg, UserMessage):
             if msg.parent_tool_use_id or isinstance(msg.content, str):
@@ -542,25 +550,17 @@ class Dispatcher:
         elif isinstance(msg, ResultMessage):
             if self.usage:
                 self.usage.turn("seimei", msg.session_id, msg.model_usage)
+            # The held reply ended the turn: it is what the turn has to say, so it goes to the chat.
+            if self.held:
+                self._route_held(True)
             if msg.is_error:
                 lane = {"lane": self.events.turn.get("lane", "c")}
                 if self.stopping:
                     self.events.add({"type": "system", "text": "Stopped.", **lane})
                 else:
                     self.events.add({"type": "system", "level": "error", "text": f"Turn failed: {msg.result or msg.subtype}", **lane})
-            if self.held and self.bouncing:
-                self._route_held("")
-            stopped, self.stopping = self.stopping or msg.is_error, False
-            turn, self.events.turn = self.events.turn, {}
-            if self.held and not stopped and self.connected:
-                # Once per turn: the bounce turn goes on with the same turn label, and its marker routes the reply.
-                self.bouncing = True
-                self.events.turn = {k: v for k, v in turn.items() if k in ("lane", "turn", "why")}
-                asyncio.ensure_future(self._bounce())
-                return
-            if self.held:
-                self._route_held("")
-            self.bouncing = False
+            self.stopping = False
+            self.events.turn = {}
             self._set(busy=False)
             self._idle_arm()
         elif isinstance(msg, RateLimitEvent):
@@ -577,21 +577,10 @@ class Dispatcher:
         elif not self.events.turn:
             self.events.turn = {"lane": "t", "turn": self.events.last_id + 1, "why": took[0][1] if took else ""}
 
-    async def _bounce(self):
-        try:
-            await self._write(BOUNCE)
-        except Exception as e:
-            log.warning("routing bounce failed: %s", e)
-            if self.held:
-                self._route_held("")
-            self.bouncing = False
-            self.events.turn = {}
-            self._set(busy=False)
-
-    def _route_held(self, marker: str):
-        """The held reply goes to the chat on chat:, else to the trajectory, where an event turn's reply goes."""
+    def _route_held(self, chat: bool):
+        """The held reply goes to the chat, or stays in the trajectory with the rest of its event turn."""
         ev, self.held = self.held, None
-        if marker == "chat:":
+        if chat:
             ev = {**{k: v for k, v in ev.items() if k not in ("lane", "turn", "why")}, "lane": "c",
                   "from": ev.get("turn"), "why": ev.get("why", "")}
         self.events.add(ev)
