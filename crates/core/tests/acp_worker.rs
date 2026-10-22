@@ -157,6 +157,12 @@ async fn acp_shikigami() {
     assert_eq!(said(&w, from), ["one two three"]);
     assert_eq!(w.get("result"), json!("one two three"));
 
+    // A pause mid-message says it in parts; the report is all of it.
+    let (from, ok) = turn(&w, "!slow", "done").await;
+    assert!(ok);
+    assert_eq!(said(&w, from), ["First half, ", "second half."]);
+    assert_eq!(w.get("result"), json!("First half, second half."));
+
     // 3. A command, allowed on its card: only the once option is picked.
     answers.lock().unwrap().push(true);
     let (from, ok) = turn(&w, "!tool echo hi", "done").await;
@@ -264,6 +270,15 @@ async fn acp_shikigami() {
     assert_eq!(with_prompt, 1);
     let loads = std::fs::read_to_string(fake.join("log.jsonl")).unwrap().matches("\"session/load\"").count();
     assert_eq!(loads, 1);
+
+    // A shorter plan in a later session drops the steps the longer one left.
+    let (_, ok) = turn(&w, "!short", "done").await;
+    assert!(ok);
+    let steps: Vec<(String, String)> = {
+        let board = pool.board.lock().unwrap();
+        board.current(&w.id).unwrap().steps.iter().map(|s| (s.id.clone(), s.state.clone())).collect()
+    };
+    assert_eq!(steps, [("p1".to_string(), "in_progress".to_string())]);
 
     // 12. A session the agent no longer has: the message fails, the record keeps its id.
     w.let_go().await;

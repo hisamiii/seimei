@@ -316,7 +316,7 @@ impl Worker {
     }
 
     /// Claude Code only: what an ACP shikigami cannot do.
-    fn claude_only(&self, what: &str) -> Result<(), String> {
+    pub(crate) fn claude_only(&self, what: &str) -> Result<(), String> {
         match self.agent() {
             Some(a) => Err(format!("{} runs on the ACP agent {a}, which cannot {what}", self.name())),
             None => Ok(()),
@@ -735,8 +735,8 @@ struct Session {
     /// The agent's text so far, said in chunks: one assistant event once something else comes, or a pause.
     chunk: String,
     chunk_until: Option<Instant>,
-    /// Steps its last plan put on the board (p1..pN).
-    plan: usize,
+    /// The message the chunks make so far (a pause may say it in parts): its report is all of it.
+    message: String,
     /// A new ACP session: its first prompt carries the shikigami prompt.
     fresh: bool,
     stopping: bool,
@@ -777,7 +777,7 @@ impl Session {
             queued: vec![],
             chunk: String::new(),
             chunk_until: None,
-            plan: 0,
+            message: String::new(),
             fresh: false,
             stopping: false,
             last_text: String::new(),
@@ -1252,6 +1252,7 @@ impl Session {
         }
         self.stopping = false;
         self.last_text.clear();
+        self.message.clear();
         self.w.set("running", json!({"question": null}));
         let text = if std::mem::take(&mut self.fresh) { format!("{}\n{text}", self.w.prompt()) } else { text };
         self.acp.as_ref().expect("a session").prompt_text(&text).map_err(|e| e.to_string())?;
@@ -1268,7 +1269,8 @@ impl Session {
         }
         self.w.add(json!({"type": "assistant", "text": text}));
         self.w.doing(json!({"text": first_line(&text, 160)}));
-        self.last_text = text;
+        self.message.push_str(&text);
+        self.last_text = self.message.clone();
     }
 
     fn acp_event(&mut self, ev: acp::Event) {
@@ -1282,6 +1284,7 @@ impl Session {
             Event::Update(Update::Thought(_)) => {}
             Event::Update(u) => {
                 self.said();
+                self.message.clear();
                 match u {
                     Update::ToolCall(t) => {
                         let name = if t.kind.is_empty() { "tool".to_string() } else { t.kind.clone() };
@@ -1312,10 +1315,16 @@ impl Session {
         for (i, e) in entries.iter().enumerate() {
             board.step(&self.w.id, &format!("p{}", i + 1), Some(&e.content), Some(&e.status));
         }
-        for i in entries.len()..self.plan {
-            board.step(&self.w.id, &format!("p{}", i + 1), None, Some("deleted"));
+        // Steps of a longer plan before (this session's or an earlier one's) go.
+        let stale: Vec<String> = (board.current(&self.w.id).into_iter().flat_map(|t| &t.steps))
+            .filter(|st| {
+                st.id.strip_prefix('p').and_then(|n| n.parse::<usize>().ok()).is_some_and(|n| n > entries.len())
+            })
+            .map(|st| st.id.clone())
+            .collect();
+        for id in stale {
+            board.step(&self.w.id, &id, None, Some("deleted"));
         }
-        self.plan = entries.len();
     }
 
     /// A turn ended with its stop reason (or the agent failed): the next queued message goes on, else it reports.

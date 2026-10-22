@@ -450,6 +450,7 @@ impl Adopter {
         if w.get("started") != true {
             return Ok(format!("{name} has no session yet; nothing to hand over."));
         }
+        w.claude_only("be handed to you as a session")?;
         if card {
             let argv = self.pool.resume_argv(w);
             let shown = argv[..argv.len() - 1].join(" ");

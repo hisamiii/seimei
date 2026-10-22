@@ -4,6 +4,8 @@ each prompt plays the script its "!command" line picks, and what no script takes
 
   !think          a thought, then the answer
   !chunks         the answer in three chunks
+  !slow           the answer in two chunks, a second apart
+  !short          a plan of one step, then the answer
   !plan           a plan of three steps, then the same plan with the first two done
   !tool <cmd>     an execute tool call that asks permission first; allowed it runs, rejected it fails
   !wait           a turn that runs until the client cancels it (stop reason cancelled)
@@ -90,6 +92,14 @@ def turn(sid: str, text: str) -> str:
     elif cmd == "!chunks":
         for part in ["one ", "two ", "three"]:
             say(sid, part)
+    elif cmd == "!slow":
+        say(sid, "First half, ")
+        time.sleep(1)
+        say(sid, "second half.")
+    elif cmd == "!short":
+        update(sid, {"sessionUpdate": "plan", "entries": [
+            {"content": "Only this", "priority": "medium", "status": "in_progress"}]})
+        say(sid, "Shorter.")
     elif cmd == "!plan":
         steps = ["Read the code", "Change it", "Test it"]
         update(sid, {"sessionUpdate": "plan", "entries": [
