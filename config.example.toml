@@ -40,6 +40,9 @@ enabled = []
 #                      # KDE Plasma and GNOME on Wayland are not supported yet (on X11 they work as x11).
 # shell = "fish"       # the shell a restored Claude session runs in; $SHELL when left out
 
+# [plugins.browser]
+# extension_id = "seimei@localhost"   # the extension's id; deploy.sh keeps the installed one when left out
+
 # [plugins.queue]
 # lib = "~/.local/lib/claude-queue"   # where claude-queue's library lives
 

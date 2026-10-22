@@ -31,3 +31,7 @@ systemctl --user enable --now seimei seimei-tunnel
 
 State lives in `~/.local/share/seimei/` (event log, session id, the dispatcher's notes, auth.json).
 It uses the system `claude` binary on the claude.ai login; `ANTHROPIC_API_KEY` is dropped at startup.
+
+## License
+
+MIT (LICENSE), except `discord/`: it builds into Vencord, so that one folder is GPL-3.0-or-later (discord/LICENSE).

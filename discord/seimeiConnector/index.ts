@@ -1,4 +1,5 @@
 /*
+ * SPDX-License-Identifier: GPL-3.0-or-later
  * seimei connector for Vesktop: answers seimei's requests with Discord's own in-client stores and API.
  * The token stays inside the client: every call goes through RestAPI, which signs it itself.
  * Writes (send, edit, delete, react) only arrive after the user approved a card on the seimei side.

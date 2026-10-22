@@ -1,4 +1,5 @@
 /*
+ * SPDX-License-Identifier: GPL-3.0-or-later
  * seimei connector for Vesktop: the main-process side.
  * It keeps one connection to the seimei server's unix socket (mode 600 in the runtime dir) and hands its requests to
  * the client side by long polling. It never sees or sends the Discord token.

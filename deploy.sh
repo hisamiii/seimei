@@ -109,20 +109,8 @@ if [ -z "${SEIMEI_DEPLOY_TEST:-}" ]; then
     systemctl --user daemon-reload
     # The Waterfox connector: its native-messaging host runs from the production checkout; the extension is packed
     # for the user to install once (about:addons, Install Add-on From File).
-    hosts="$HOME/.mozilla/native-messaging-hosts"
-    mkdir -p "$hosts"
-    printf '{"name": "seimei", "description": "seimei connector", "path": "%s", "type": "stdio", "allowed_extensions": ["seimei@localhost"]}\n' \
-        "$app/browser/host.py" > "$hosts/seimei.json"
-    python3 - "$app/browser" "$HOME/.local/share/seimei/seimei-waterfox.xpi" <<'PY'
-import sys, zipfile
-from pathlib import Path
-src, out = Path(sys.argv[1]), Path(sys.argv[2])
-tmp = out.with_suffix(".tmp")
-with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
-    for f in ("manifest.json", "background.js", "read.js", "icon.svg"):
-        z.write(src / f, f)
-tmp.replace(out)
-PY
+    python3 "$app/browser/install.py" "$app/browser" "$HOME/.mozilla/native-messaging-hosts" \
+        "$HOME/.local/share/seimei/seimei-waterfox.xpi" "${XDG_CONFIG_HOME:-$HOME/.config}/seimei/config.toml" >/dev/null
     # The Discord connector: Vencord with the SeimeiConnector plugin, for Vesktop to load from its Vencord Location.
     "$app/discord/build.sh"
     systemctl --user reenable seimei.service seimei-tunnel.service 2>/dev/null
