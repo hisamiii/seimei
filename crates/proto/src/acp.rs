@@ -105,6 +105,23 @@ pub struct ToolCall {
     pub content: Vec<String>,
 }
 
+impl ToolCall {
+    /// What an update (or a permission request's partial call) says, over what was known.
+    fn merge(&mut self, u: &ToolCall) {
+        for (mine, theirs) in [(&mut self.title, &u.title), (&mut self.kind, &u.kind), (&mut self.status, &u.status)] {
+            if !theirs.is_empty() {
+                mine.clone_from(theirs);
+            }
+        }
+        if u.input.is_some() {
+            self.input.clone_from(&u.input);
+        }
+        if !u.content.is_empty() {
+            self.content.clone_from(&u.content);
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlanEntry {
     pub content: String,
@@ -147,7 +164,8 @@ pub struct PermissionOption {
     pub kind: String,
 }
 
-/// `session/request_permission`: the tool call and the options the agent offers.
+/// `session/request_permission`: the tool call (what the request says over what its updates said) and the options
+/// the agent offers.
 #[derive(Clone, Debug)]
 pub struct PermissionRequest {
     pub tool: ToolCall,
@@ -465,6 +483,8 @@ async fn read(
 ) {
     let mut r = BufReader::with_capacity(1 << 16, stdout);
     let mut buf = Vec::new();
+    // The open tool calls as their updates left them: a permission request may name only the id.
+    let mut calls: HashMap<String, ToolCall> = HashMap::new();
     loop {
         match read_line(&mut r, &mut buf, MAX_LINE).await {
             Ok(Line::Eof) | Err(_) => break,
@@ -483,11 +503,19 @@ async fn read(
                 };
                 match (v["method"].as_str(), v.get("id").filter(|i| !i.is_null())) {
                     (Some("session/update"), None) => {
-                        let _ = events.send(Event::Update(update(&v["params"]["update"])));
+                        let u = update(&v["params"]["update"]);
+                        if let Update::ToolCall(t) | Update::ToolCallUpdate(t) = &u {
+                            if ["completed", "failed"].contains(&t.status.as_str()) {
+                                calls.remove(&t.id);
+                            } else {
+                                calls.entry(t.id.clone()).or_default().merge(t);
+                            }
+                        }
+                        let _ = events.send(Event::Update(u));
                     }
                     (Some(_), None) => {}
                     (Some("session/request_permission"), Some(id)) => {
-                        permission(id.clone(), &v["params"], &handler, &out, &inflight);
+                        permission(id.clone(), &v["params"], &calls, &handler, &out, &inflight);
                     }
                     (Some(m), Some(id)) => {
                         let err = json!({"code": -32601, "message": format!("Method not found: {m}")});
@@ -530,6 +558,7 @@ async fn read(
 fn permission(
     id: Value,
     p: &Value,
+    calls: &HashMap<String, ToolCall>,
     handler: &Arc<dyn Handler>,
     out: &mpsc::UnboundedSender<String>,
     inflight: &Inflight,
@@ -540,7 +569,11 @@ fn permission(
         .flatten()
         .map(|o| PermissionOption { id: s(&o["optionId"]), name: s(&o["name"]), kind: s(&o["kind"]) })
         .collect();
-    let req = PermissionRequest { tool: tool_call(&p["toolCall"]), options };
+    let asked = tool_call(&p["toolCall"]);
+    let mut tool = calls.get(&asked.id).cloned().unwrap_or_default();
+    tool.merge(&asked);
+    tool.id = asked.id;
+    let req = PermissionRequest { tool, options };
     let key = id.to_string();
     let (h, out2, open, id2, key2) = (handler.clone(), out.clone(), inflight.clone(), id.clone(), key.clone());
     let mut slot = inflight.lock().unwrap();

@@ -189,11 +189,26 @@ async fn acp_shikigami() {
     assert!(log(&w)[from..].iter().any(|e| e["type"] == "tool_result" && e["error"] == true));
     assert_eq!(cards.lock().unwrap().len(), 2);
 
+    // As dsh asks: kind other, the tool named in the title, a request that names only the call's id.
+    answers.lock().unwrap().push(true);
+    let (from, ok) = turn(&w, "!dsh echo dsh", "done").await;
+    assert!(ok);
+    let card = cards.lock().unwrap().last().cloned().unwrap();
+    assert_eq!(card["tool"], "Bash", "{card}");
+    assert!(card["detail"].as_str().unwrap().contains("echo dsh"), "{card}");
+    assert_eq!(said(&w, from), ["Ran it (allow-once)."]);
+    let evs = log(&w)[from..].to_vec();
+    assert!(evs.iter().any(|e| e["type"] == "tool" && e["name"] == "Bash" && e["summary"] == "echo dsh"), "{evs:?}");
+    let (from, ok) = turn(&w, &format!("!dsh {}", blocked_command()), "done").await;
+    assert!(ok);
+    assert_eq!(said(&w, from), ["Did not run it (reject-once)."]);
+    assert_eq!(cards.lock().unwrap().len(), 3, "the guard reads dsh's command too");
+
     // 5. What the guard blocks gets no card.
     let (from, ok) = turn(&w, &format!("!tool {}", blocked_command()), "done").await;
     assert!(ok);
     assert_eq!(said(&w, from), ["Did not run it (reject-once)."]);
-    assert_eq!(cards.lock().unwrap().len(), 2, "no card for a blocked command");
+    assert_eq!(cards.lock().unwrap().len(), 3, "no card for a blocked command");
     let blocked = events
         .after(0)
         .iter()

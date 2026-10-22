@@ -1287,9 +1287,9 @@ impl Session {
                 self.message.clear();
                 match u {
                     Update::ToolCall(t) => {
-                        let name = if t.kind.is_empty() { "tool".to_string() } else { t.kind.clone() };
-                        self.w.add(json!({"type": "tool", "tool_id": t.id, "name": name, "summary": t.title}));
-                        self.w.doing(json!({"name": name, "summary": t.title}));
+                        let (name, summary) = tool_line(&t);
+                        self.w.add(json!({"type": "tool", "tool_id": t.id, "name": name, "summary": summary}));
+                        self.w.doing(json!({"name": name, "summary": summary}));
                     }
                     Update::ToolCallUpdate(t) if matches!(t.status.as_str(), "completed" | "failed") => {
                         let text = t.content.join("\n");
@@ -1385,10 +1385,22 @@ fn acp_servers(servers: Map<String, Value>) -> Vec<acp::McpServer> {
 }
 
 /// An ACP tool call as the Claude Code call the guard and the cards know: a command is Bash, a file edit Write, a
-/// read Read, a fetch WebFetch. What has no such shape keeps its kind and its raw input (the guard passes it, and a
-/// card shows it).
+/// read Read, a fetch WebFetch. An agent that calls everything kind other (dsh) is read by its tool's name. What has
+/// no such shape keeps its name and its raw input (the guard passes it, and a card shows it).
 pub fn claude_shaped(t: &acp::ToolCall) -> (String, Value) {
     let raw = t.input.clone().unwrap_or(json!({}));
+    let named = matches!(t.kind.as_str(), "other" | "");
+    let kind = match t.title.to_lowercase().as_str() {
+        "bash" | "shell" if named => "execute",
+        "write" | "edit" | "str_replace_editor" if named => "edit",
+        "read" | "read_image" if named => "read",
+        "web_fetch" if named => "fetch",
+        "grep" if named => return ("Grep".into(), raw),
+        "glob" if named => return ("Glob".into(), raw),
+        "web_search" if named => return ("WebSearch".into(), raw),
+        _ if named && !t.title.is_empty() => return (t.title.clone(), raw),
+        _ => t.kind.as_str(),
+    };
     let s = |k: &str| raw[k].as_str().filter(|v| !v.is_empty()).map(String::from);
     let path = ["file_path", "path", "abs_path"].iter().find_map(|k| s(k));
     let command = match &raw["command"] {
@@ -1407,13 +1419,30 @@ pub fn claude_shaped(t: &acp::ToolCall) -> (String, Value) {
         }
         _ => None,
     };
-    match (t.kind.as_str(), command, path) {
+    // A command run in another folder (dsh's workdir) is that cd first.
+    let command = match (command, s("workdir")) {
+        (Some(c), Some(wd)) => Some(format!("cd {} && {c}", sh_quote(&wd))),
+        (c, _) => c,
+    };
+    match (kind, command, path) {
         ("execute", Some(c), _) => ("Bash".into(), json!({"command": c})),
         ("edit" | "delete" | "move", _, Some(p)) => ("Write".into(), json!({"file_path": p})),
         ("read" | "search", _, Some(p)) => ("Read".into(), json!({"file_path": p})),
         ("fetch", _, _) if s("url").is_some() => ("WebFetch".into(), json!({"url": s("url")})),
         (kind, _, _) => (if kind.is_empty() { "tool".into() } else { kind.into() }, raw),
     }
+}
+
+/// A tool call as its event shows it: its kind and title, or for an agent that names its tools in the title (dsh),
+/// the Claude Code tool it amounts to and what it works on.
+fn tool_line(t: &acp::ToolCall) -> (String, String) {
+    if !matches!(t.kind.as_str(), "other" | "") {
+        return (t.kind.clone(), t.title.clone());
+    }
+    let (name, input) = claude_shaped(t);
+    let on = ["command", "file_path", "url", "pattern", "query"].iter().find_map(|k| input[k].as_str());
+    let name = if name.is_empty() { "tool".into() } else { name };
+    (name, on.map_or_else(|| t.title.clone(), |v| first_line(v, 160)))
 }
 
 /// What a shikigami's ACP agent asks of seimei: permission, through the guard and then a card. Only the once options

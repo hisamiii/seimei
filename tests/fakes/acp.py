@@ -8,6 +8,7 @@ each prompt plays the script its "!command" line picks, and what no script takes
   !short          a plan of one step, then the answer
   !plan           a plan of three steps, then the same plan with the first two done
   !tool <cmd>     an execute tool call that asks permission first; allowed it runs, rejected it fails
+  !dsh <command>  the same, shaped as dsh sends it (kind other, title bash; the request names only the id)
   !wait           a turn that runs until the client cancels it (stop reason cancelled)
   !crash          exits mid-turn
   !mcp            tells the MCP servers its session got (names, commands, args, env names)
@@ -36,6 +37,8 @@ OPTIONS = [{"optionId": "allow-once", "name": "Allow", "kind": "allow_once"},
            {"optionId": "allow-always", "name": "Always allow", "kind": "allow_always"},
            {"optionId": "reject-once", "name": "Reject", "kind": "reject_once"},
            {"optionId": "reject-always", "name": "Always reject", "kind": "reject_always"}]
+DSH_OPTIONS = [{"optionId": "allow-once", "name": "Allow once", "kind": "allow_once"},
+               {"optionId": "reject-once", "name": "Reject", "kind": "reject_once"}]
 
 out_lock = threading.Lock()
 waiting: dict = {}  # id of a request to the client -> queue for its answer
@@ -108,11 +111,17 @@ def turn(sid: str, text: str) -> str:
             {"content": s, "priority": "medium", "status": st}
             for s, st in zip(steps, ["completed", "in_progress", "pending"])]})
         say(sid, "Planned.")
-    elif cmd == "!tool":
-        call = {"toolCallId": "call_1", "title": f"Run {rest}", "kind": "execute", "status": "pending",
-                "rawInput": {"command": rest}}
+    elif cmd in ("!tool", "!dsh"):
+        if cmd == "!tool":
+            call = {"toolCallId": "call_1", "title": f"Run {rest}", "kind": "execute", "status": "pending",
+                    "rawInput": {"command": rest}}
+            asked, options = call, OPTIONS
+        else:  # as dsh sends it: kind other, the tool's name as title, a request that names only the id
+            call = {"toolCallId": "call_1", "title": "bash", "kind": "other", "status": "in_progress",
+                    "rawInput": {"command": rest, "description": "a command"}}
+            asked, options = {"toolCallId": "call_1"}, DSH_OPTIONS
         update(sid, {"sessionUpdate": "tool_call", **call})
-        r = ask("session/request_permission", {"sessionId": sid, "toolCall": call, "options": OPTIONS})
+        r = ask("session/request_permission", {"sessionId": sid, "toolCall": asked, "options": options})
         outcome = (r.get("result") or {}).get("outcome") or {}
         if outcome.get("outcome") == "cancelled" or sid in cancelled:
             update(sid, {"sessionUpdate": "tool_call_update", "toolCallId": "call_1", "status": "failed"})
