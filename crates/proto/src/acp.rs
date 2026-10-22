@@ -1,7 +1,7 @@
 //! A client for the Agent Client Protocol (ACP v1): JSON-RPC 2.0 over an agent's stdio, the way Zed runs agents.
 //!
 //! [`Client::connect`] starts the agent, sends `initialize`, then opens a session (`session/new`, or `session/load`
-//! to go on with an earlier one). What the agent says comes out of [`Client::recv`] as [`Event`]s: the session's
+//! to go on with an earlier one, `session/resume` when the agent can only resume: that one replays nothing). What the agent says comes out of [`Client::recv`] as [`Event`]s: the session's
 //! updates in order, and the end of each prompt's turn after its last update. The agent's permission requests go to
 //! a [`Handler`]; seimei advertises no file system or terminal, so any other request from the agent is refused.
 
@@ -259,12 +259,17 @@ impl Client {
         let mut params = json!({"cwd": opts.cwd, "mcpServers": mcp});
         let r = match &opts.load {
             Some(id) => {
-                if self.init["agentCapabilities"]["loadSession"] != json!(true) {
-                    return Err(Error::Unsupported("the agent cannot load a session".into()));
-                }
+                let caps = &self.init["agentCapabilities"];
+                let method = if caps["loadSession"] == json!(true) {
+                    "session/load"
+                } else if caps["sessionCapabilities"]["resume"].is_object() {
+                    "session/resume"
+                } else {
+                    return Err(Error::Unsupported("the agent cannot load or resume a session".into()));
+                };
                 params["sessionId"] = json!(id);
                 self.session_id = id.clone();
-                self.request("session/load", params).await?
+                self.request(method, params).await?
             }
             None => {
                 let r = self.request("session/new", params).await?;

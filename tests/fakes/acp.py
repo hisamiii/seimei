@@ -17,7 +17,7 @@ each prompt plays the script its "!command" line picks, and what no script takes
   !mode           tells the session's mode
 
 Sessions live in $FAKE_ACP_DIR/sessions/<id>.json; session/load replays one as updates before it answers.
-$FAKE_ACP_NO_LOAD turns the loadSession capability off. Every message both ways goes to $FAKE_ACP_LOG (JSON lines,
+$FAKE_ACP_NO_LOAD turns the loadSession capability off; $FAKE_ACP_RESUME turns session/resume on (no replay). Every message both ways goes to $FAKE_ACP_LOG (JSON lines,
 {"dir": "in" or "out", "pid": ..., "msg": ...}), so a test can check them against the protocol's types."""
 import json
 import os
@@ -206,20 +206,23 @@ def handle(msg: dict):
     if method == "initialize":
         caps = {"loadSession": not os.environ.get("FAKE_ACP_NO_LOAD"), "promptCapabilities": {"image": True},
                 "mcpCapabilities": {"http": False, "sse": False}}
+        if os.environ.get("FAKE_ACP_RESUME"):
+            caps["sessionCapabilities"] = {"resume": {}}
         send({"id": i, "result": {"protocolVersion": 1, "agentCapabilities": caps, "authMethods": [],
                                   "agentInfo": {"name": "fake-acp", "version": "0.1.0"}}})
-    elif method in ("session/new", "session/load"):
+    elif method in ("session/new", "session/load", "session/resume"):
         if not Path(p.get("cwd", "")).is_dir():
             send({"id": i, "error": {"code": -32602, "message": f"no folder {p.get('cwd')}"}})
             return
         sid = p.get("sessionId") or str(uuid.uuid4())
         history = []
-        if method == "session/load":
+        if method != "session/new":
             f = DIR / "sessions" / f"{sid}.json"
             if not f.exists():
                 send({"id": i, "error": {"code": -32002, "message": f"no session {sid}"}})
                 return
-            history = json.loads(f.read_text())["history"]
+            if method == "session/load":
+                history = json.loads(f.read_text())["history"]
         sessions[sid] = {"cwd": p["cwd"], "mcp": p.get("mcpServers") or [], "mode": "ask", "history": []}
         for kind, text in history:
             say(sid, text, kind)

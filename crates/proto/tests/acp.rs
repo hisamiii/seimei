@@ -144,6 +144,7 @@ fn conform(dir: &Path) {
             ("in", Some("initialize")) => check::<acp::InitializeRequest>(p, "initialize"),
             ("in", Some("session/new")) => check::<acp::NewSessionRequest>(p, "session/new"),
             ("in", Some("session/load")) => check::<acp::LoadSessionRequest>(p, "session/load"),
+            ("in", Some("session/resume")) => check::<acp::ResumeSessionRequest>(p, "session/resume"),
             ("in", Some("session/prompt")) => check::<acp::PromptRequest>(p, "session/prompt"),
             ("in", Some("session/set_mode")) => check::<acp::SetSessionModeRequest>(p, "session/set_mode"),
             ("in", Some("session/cancel")) => {
@@ -168,6 +169,7 @@ fn conform(dir: &Path) {
                     "initialize" => check::<acp::InitializeResponse>(r, "initialize answer"),
                     "session/new" => check::<acp::NewSessionResponse>(r, "session/new answer"),
                     "session/load" => check::<acp::LoadSessionResponse>(r, "session/load answer"),
+                    "session/resume" => check::<acp::ResumeSessionResponse>(r, "session/resume answer"),
                     "session/prompt" => check::<acp::PromptResponse>(r, "session/prompt answer"),
                     "session/set_mode" => check::<acp::SetSessionModeResponse>(r, "session/set_mode answer"),
                     other => panic!("an answer to {other}"),
@@ -337,10 +339,18 @@ async fn load_goes_on_with_a_session() {
     again.load = Some("no-such-session".into());
     let e = Client::connect(again.clone(), Pick::new(None)).await.err().unwrap();
     assert!(matches!(&e, Error::Refused(m) if m == "no session no-such-session"), "{e}");
-    again.load = Some(id);
+    again.load = Some(id.clone());
     again.env.push(("FAKE_ACP_NO_LOAD".into(), "1".into()));
-    let e = Client::connect(again, Pick::new(None)).await.err().unwrap();
-    assert_eq!(e.to_string(), "the agent cannot load a session");
+    let e = Client::connect(again.clone(), Pick::new(None)).await.err().unwrap();
+    assert_eq!(e.to_string(), "the agent cannot load or resume a session");
+
+    // An agent that can only resume (dsh): the same session, nothing replayed.
+    again.env.push(("FAKE_ACP_RESUME".into(), "1".into()));
+    let mut c = Client::connect(again, Pick::new(None)).await.unwrap();
+    assert_eq!(c.session_id, id);
+    c.prompt_text("and the wren?").unwrap();
+    assert_eq!(turn(&mut c).await.0, [text("You said: and the wren?")]);
+    c.close().await;
     conform(&o.cwd);
 }
 
