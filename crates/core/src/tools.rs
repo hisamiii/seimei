@@ -231,6 +231,28 @@ fn address(s: &Live) -> String {
     format!("uds:{}", sock.unwrap_or_else(|| format!("/run/user/{uid}/cc-socks/{}.sock", s.pid)))
 }
 
+/// The summon tool as listed: tools.json's, plus a tools option when plugins can be granted and a harness option
+/// when config has ACP agents.
+pub fn summon_spec(groups: &[String], agents: &[String]) -> Value {
+    let mut t = (SERVER["tools"].as_array().into_iter().flatten()).find(|t| t["name"] == "summon").cloned().unwrap();
+    let props = &mut t["inputSchema"]["properties"];
+    if !groups.is_empty() {
+        props["tools"] = json!({"type": "array", "items": {"type": "string", "enum": groups},
+                "description": "plugin tool groups to grant it, with the same cards, guard and rules as yours (their \
+                                prompt sections come along); default none. Grant only what the task needs."});
+    }
+    if !agents.is_empty() {
+        let harness: Vec<String> =
+            std::iter::once("claude".into()).chain(agents.iter().map(|a| format!("acp:{a}"))).collect();
+        props["harness"] = json!({"type": "string", "enum": harness,
+                "description": "what it runs on: claude (Claude Code, the default) or an ACP agent from config. An \
+                                agent keeps its own login and model, so model, effort and context are ignored, and it \
+                                cannot be tuned, handed to the user or opened in a terminal. Only when the user asks \
+                                for that agent."});
+    }
+    t
+}
+
 impl Tools {
     /// One JSON-RPC message; None for a notification.
     pub async fn handle(self: Arc<Self>, message: Value) -> Option<Value> {
@@ -238,10 +260,15 @@ impl Tools {
         serve(&spec, message, |name, args| async move { self.call(&name, &args).await }).await
     }
 
-    /// The server as Claude Code sees it: the watch tool lists the plugins' triggers too.
+    /// The server as Claude Code sees it: summon offers the plugins' tool groups and config `[agents]`, and the watch
+    /// tool lists the plugins' triggers too.
     fn spec(&self) -> Value {
-        let extra = self.watches.triggers().split_off(TRIGGERS.len());
         let mut spec = SERVER.clone();
+        let agents: Vec<String> = self.pool.agents.get().into_iter().flatten().map(|(n, _)| n.clone()).collect();
+        for t in spec["tools"].as_array_mut().into_iter().flatten().filter(|t| t["name"] == "summon") {
+            *t = summon_spec(&self.pool.plugins.names(), &agents);
+        }
+        let extra = self.watches.triggers().split_off(TRIGGERS.len());
         if extra.is_empty() {
             return spec;
         }

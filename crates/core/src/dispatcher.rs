@@ -363,6 +363,16 @@ impl Dispatcher {
                 groups.join(", ")
             )
         };
+        let agents: Vec<&String> = self.tools.pool.agents.get().into_iter().flatten().map(|(n, _)| n).collect();
+        let grants = if agents.is_empty() {
+            grants
+        } else {
+            let list = agents.iter().map(|n| format!("acp:{n}")).collect::<Vec<_>>().join(", ");
+            format!(
+                "{grants}- summon's harness option runs a shikigami on an ACP agent ({list}) instead of Claude Code, \
+                 on that agent's own login and model; only when the user asks for it.\n"
+            )
+        };
         PROMPT
             .replace("{notes}", &self.notes_path().display().to_string())
             .replace("{name}", &self.cfg.name)

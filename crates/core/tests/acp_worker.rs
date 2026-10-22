@@ -295,3 +295,16 @@ async fn acp_shikigami() {
 
     let _ = std::fs::remove_dir_all(&base);
 }
+
+/// summon lists tools.json's spec as is with nothing to pick, the tool groups and the harness when there are some.
+#[test]
+fn summon_options() {
+    let all: Value = serde_json::from_str(include_str!("../../../tests/cases/tools.json")).unwrap();
+    let plain = all["tools"].as_array().unwrap().iter().find(|t| t["name"] == "summon").unwrap();
+    assert_eq!(&seimei_core::tools::summon_spec(&[], &[]), plain);
+    let t = seimei_core::tools::summon_spec(&["music".into()], &["dsh".into()]);
+    let props = &t["inputSchema"]["properties"];
+    assert_eq!(props["tools"]["items"]["enum"], json!(["music"]));
+    assert_eq!(props["harness"]["enum"], json!(["claude", "acp:dsh"]));
+    assert_eq!(t["inputSchema"]["required"], plain["inputSchema"]["required"]);
+}
