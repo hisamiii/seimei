@@ -397,6 +397,10 @@ pub fn blocked(tool: &str, inp: &Value, cwd: &str) -> Option<String> {
             if KITTY_SOCKET.is_match(lit) {
                 return Some(KITTY.into());
             }
+            // Wildcards alone name no folder: "***" is a mask, "*" * 40 a rule line.
+            if lit.chars().all(|c| matches!(c, '*' | '?')) {
+                continue;
+            }
             if let Some(name) = secret_word(lit, &[&here, home()]) {
                 return Some(format!("reading {name}"));
             }

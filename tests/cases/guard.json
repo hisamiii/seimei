@@ -1287,6 +1287,49 @@
    },
    "cwd": "/home/tester",
    "blocked": false
+  },
+  {
+   "tool": "Bash",
+   "input": {
+    "command": "mkdir -p ~/.minisign && chmod 700 ~/.minisign && ls ~/.minisign ~/src/seimei/contrib/minisign.pub 2>&1; python3 - <<'EOF'\nimport os, pty, sys\npw=b\"PASSWORD\\n\"\npid, fd = pty.fork()\nif pid == 0:\n    os.execvp(\"minisign\", [\"minisign\",\"-G\",\"-p\",os.path.expanduser(\"~/src/seimei/contrib/minisign.pub\"),\"-s\",os.path.expanduser(\"~/.minisign/seimei.key\")])\nout=b\"\"\nwhile True:\n    try: data=os.read(fd,1024)\n    except OSError: break\n    if not data: break\n    out+=data\n    if b\"assword\" in data: os.write(fd,pw)\nos.waitpid(pid,0)\nprint(out.decode(errors=\"replace\").replace(\"PASSWORD\",\"***\"))\nEOF\nls -la ~/.minisign/ ~/src/seimei/contrib/minisign.pub"
+   },
+   "cwd": "/home/tester",
+   "blocked": false
+  },
+  {
+   "tool": "Bash",
+   "input": {
+    "command": "python3 -c \"print('*' * 40); print('**bold**'); print(f'{1:*^9}', '?')\""
+   },
+   "cwd": "/home/tester",
+   "blocked": false
+  },
+  {
+   "tool": "Bash",
+   "input": {
+    "command": "mkdir -p ~/.minisign && chmod 700 ~/.minisign && ls ~/.minisign ~/src/seimei/contrib/minisign.pub 2>&1; python3 - <<'EOF'\nimport os, pty, sys\npw=b\"PASSWORD\\n\"\npid, fd = pty.fork()\nif pid == 0:\n    os.execvp(\"minisign\", [\"minisign\",\"-G\",\"-p\",os.path.expanduser(\"~/src/seimei/contrib/minisign.pub\"),\"-s\",os.path.expanduser(\"~/.ssh/id_ed25519\")])\nout=b\"\"\nwhile True:\n    try: data=os.read(fd,1024)\n    except OSError: break\n    if not data: break\n    out+=data\n    if b\"assword\" in data: os.write(fd,pw)\nos.waitpid(pid,0)\nprint(out.decode(errors=\"replace\").replace(\"PASSWORD\",\"***\"))\nEOF\nls -la ~/.minisign/ ~/src/seimei/contrib/minisign.pub"
+   },
+   "cwd": "/home/tester",
+   "blocked": true,
+   "why": "SSH"
+  },
+  {
+   "tool": "Bash",
+   "input": {
+    "command": "python3 -c \"import glob, os; print(glob.glob(os.path.expanduser('~/*/id_*')))\""
+   },
+   "cwd": "/home/tester",
+   "blocked": true,
+   "why": "SSH"
+  },
+  {
+   "tool": "Bash",
+   "input": {
+    "command": "python3 -c \"import glob, os; print([open(p).read() for p in glob.glob(os.path.expanduser('~/.s*/*'))])\""
+   },
+   "cwd": "/home/tester",
+   "blocked": true,
+   "why": "SSH"
   }
  ]
 }

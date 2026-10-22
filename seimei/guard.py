@@ -274,6 +274,9 @@ def blocked(tool: str, inp: dict, cwd: str) -> str | None:
         for lit in (m.group(1) for pattern in LITERALS for m in pattern.finditer(flat)):
             if KITTY_SOCKET.match(lit):
                 return KITTY
+            # Wildcards alone name no folder: "***" is a mask, "*" * 40 a rule line.
+            if not lit.strip("*?"):
+                continue
             if name := _secret_word(lit, [here, HOME]):
                 return f"reading {name}"
     return None
