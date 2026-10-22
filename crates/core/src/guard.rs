@@ -524,7 +524,16 @@ impl Guard {
                 ),
             );
         }
-        if let Some(what) = check(tool, &args) {
+        // A plugin's check may ask its window manager.
+        let what = {
+            let (tool, args) = (tool.to_string(), args.clone());
+            let detail = excerpt(&tool, &args, 300);
+            // A check that broke asks rather than lets the call through.
+            tokio::task::spawn_blocking(move || check(&tool, &args)).await.unwrap_or_else(|_| {
+                Some(json!({"action": "command", "target": "a call seimei could not check", "detail": detail}))
+            })
+        };
+        if let Some(what) = what {
             let card = format!("{}: {}", what["action"].as_str().unwrap_or(""), what["target"].as_str().unwrap_or(""));
             let key = format!("approval:{}", tool_use_id.unwrap_or(""));
             self.tell(worker, &format!("waits on an approval card ({card})"), false, Some(&key));

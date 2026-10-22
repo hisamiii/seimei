@@ -252,10 +252,10 @@ fn main() {
             .filter(|t| !t.is_empty())
             .unwrap_or("kitty -d {cwd} --title {title}")
             .into(),
-        plugins: Arc::new(Plugins::load(
-            &cfg.get("plugins").and_then(|p| p.as_table()).cloned().unwrap_or_default(),
-            &state,
-        )),
+        plugins: Arc::new(
+            Plugins::load(&cfg.get("plugins").and_then(|p| p.as_table()).cloned().unwrap_or_default(), &state)
+                .about(about),
+        ),
     };
     let app = Arc::new(seimei_server::App::new(setup).unwrap_or_else(|e| die(&format!("workers: {e}"))));
     wire(&app);
@@ -278,6 +278,20 @@ fn main() {
         if let Some(d) = &app.pool.plugins.discord {
             tokio::spawn(d.link.clone().run(seimei_core::plugins::link::runtime_path("discord", a.dev)));
         }
+        if let Some(d) = &app.pool.plugins.desktop {
+            let disp = app.dispatcher.clone();
+            d.attach(seimei_core::plugins::desktop::Hooks {
+                events: events.clone(),
+                note: Box::new(move |t| disp.note(t, None)),
+                approvals: app.approvals.clone(),
+            });
+            let desk = d.clone();
+            seimei_core::approvals::add_check(Arc::new(move |tool, inp| {
+                seimei_core::plugins::desktop::checks::check(tool, inp, &desk)
+            }));
+            tokio::spawn(d.clone().run());
+            tokio::spawn(d.clone().layout());
+        }
         if app.pool.plugins.queue.is_some() {
             let (st, p, ev) = (state.clone(), app.pool.clone(), events.clone());
             let watcher = seimei_core::plugins::queue::Watcher::new(
@@ -290,13 +304,15 @@ fn main() {
         let wake = seimei_core::wake::WakeWatch::new(events.clone(), app.pool.clone());
         tokio::spawn(wake.run(std::time::Duration::from_secs(10)));
         // `systemctl --user kill -s USR1 seimei` from a key binding: end the turn.
-        let (ev, d) = (events.clone(), app.dispatcher.clone());
+        let (ev, d, desk) = (events.clone(), app.dispatcher.clone(), app.pool.plugins.desktop.clone());
         tokio::spawn(async move {
             let mut usr1 = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined1()).unwrap();
             while usr1.recv().await.is_some() {
+                // The plugins stop driving too.
+                let halted = desk.as_ref().map(|d| format!(" {}", d.halt())).unwrap_or_default();
                 d.interrupt();
                 ev.add(serde_json::json!({"type": "system", "level": "warn", "text": "Stopped with the stop key."}));
-                d.note("The user pressed the stop key: your turn was interrupted.", None);
+                d.note(&format!("The user pressed the stop key: your turn was interrupted.{halted}"), None);
             }
         });
         tokio::spawn(push.run());

@@ -17,6 +17,7 @@
 //! session it serves: the card names that session, and a plugin cannot answer cards.
 
 pub mod browser;
+pub mod desktop;
 pub mod discord;
 pub mod link;
 pub mod music;
@@ -34,14 +35,16 @@ use crate::util::{config_file, token_urlsafe};
 use crate::watches::Watches;
 
 /// What a built-in ships: its manifest and its prompt section.
-const BUILTIN: [(&str, &str, &str); 4] = [
+const BUILTIN: [(&str, &str, &str); 5] = [
     ("browser", include_str!("browser/plugin.toml"), include_str!("browser/prompt.md")),
+    // Its prompt depends on the window manager and the computer: Plugins::about sets it.
+    ("desktop", include_str!("desktop/plugin.toml"), ""),
     ("discord", include_str!("discord/plugin.toml"), include_str!("discord/prompt.md")),
     ("music", include_str!("music/plugin.toml"), ""),
     ("queue", include_str!("queue/plugin.toml"), include_str!("queue/prompt.md")),
 ];
 /// Built-ins whose tools run inside seimei (they share a connector and what it knows); their process forwards calls.
-const HOSTED: [&str; 2] = ["browser", "discord"];
+const HOSTED: [&str; 3] = ["browser", "desktop", "discord"];
 /// What an external entry may pass on to Claude Code (its mcpServers format).
 const MCP_KEYS: [&str; 6] = ["type", "command", "args", "env", "url", "headers"];
 /// Each built-in's MCP server as Claude Code sees it (initialize and tools/list).
@@ -67,6 +70,7 @@ pub struct Plugins {
     pub queue: Option<queue::Queue>,
     pub browser: Option<Arc<browser::Browser>>,
     pub discord: Option<Arc<discord::Discord>>,
+    pub desktop: Option<Arc<desktop::Desktop>>,
     state: PathBuf,
     socket: PathBuf,
     /// Session tokens and what each may do.
@@ -148,6 +152,7 @@ impl Plugins {
             queue: None,
             browser: None,
             discord: None,
+            desktop: None,
             state: state.into(),
             socket: state.join("plugins.sock"),
             tokens: Mutex::default(),
@@ -155,16 +160,23 @@ impl Plugins {
         let enabled = cfg.get("enabled").and_then(|e| e.as_array()).cloned().unwrap_or_default();
         for name in enabled.iter().filter_map(|n| n.as_str()) {
             let own = cfg.get(name).and_then(|t| t.as_table()).cloned().unwrap_or_default();
-            match out.plugin(name, &own, exe, &dir) {
-                Ok(p) => {
-                    match name {
-                        "queue" => out.queue = Some(queue::Queue::new(&own)),
-                        "browser" => out.browser = Some(Arc::new(browser::Browser::new())),
-                        "discord" => out.discord = Some(Arc::new(discord::Discord::new(Some(state)))),
-                        _ => {}
+            let loaded = out.plugin(name, &own, exe, &dir).and_then(|p| {
+                match name {
+                    "queue" => out.queue = Some(queue::Queue::new(&own)),
+                    "browser" => out.browser = Some(Arc::new(browser::Browser::new())),
+                    "discord" => out.discord = Some(Arc::new(discord::Discord::new(Some(state)))),
+                    "desktop" => {
+                        let s = |k: &str| own.get(k).and_then(|v| v.as_str()).filter(|v| !v.is_empty());
+                        let d = desktop::Desktop::new(s("backend"), desktop::Ctx::system(), state, s("shell"), None)?;
+                        eprintln!("seimei: desktop backend: {}", d.b.name());
+                        out.desktop = Some(Arc::new(d));
                     }
-                    out.list.push(p);
+                    _ => {}
                 }
+                Ok(p)
+            });
+            match loaded {
+                Ok(p) => out.list.push(p),
                 Err(e) => eprintln!("seimei: plugin {name}: {e}; seimei goes on without it"),
             }
         }
@@ -213,6 +225,16 @@ impl Plugins {
             "not built in, no {} and its [plugins.{name}] has no command or url",
             folder.join("plugin.toml").display()
         ))
+    }
+
+    /// The computer seimei runs on, from config [host] about: the desktop's prompt names it.
+    pub fn about(mut self, about: &str) -> Plugins {
+        if let Some(d) = &self.desktop
+            && let Some(p) = self.list.iter_mut().find(|p| p.name == "desktop")
+        {
+            p.prompt = d.prompt(about);
+        }
+        self
     }
 
     pub fn names(&self) -> Vec<String> {
@@ -267,11 +289,13 @@ impl Plugins {
         for p in self.wanted(groups) {
             let mut entry = p.mcp.clone();
             if p.linked {
-                entry.insert(
-                    "env".into(),
-                    json!({"SEIMEI_SOCKET": self.socket.display().to_string(), "SEIMEI_TOKEN": self.token(who, worker, &names),
-                           "SEIMEI_STATE": self.state.display().to_string()}),
-                );
+                let mut env = json!({"SEIMEI_SOCKET": self.socket.display().to_string(),
+                                     "SEIMEI_TOKEN": self.token(who, worker, &names), "SEIMEI_STATE": self.state.display().to_string()});
+                // The desktop's tools are named after its window manager.
+                if let Some(d) = self.desktop.as_ref().filter(|_| p.name == "desktop") {
+                    env["SEIMEI_DESKTOP"] = json!(d.b.name());
+                }
+                entry.insert("env".into(), env);
             }
             out.insert(p.name.clone(), Value::Object(entry));
         }
@@ -393,9 +417,10 @@ pub trait Session: Send + Sync {
 impl Plugins {
     /// A hosted plugin's tool call.
     async fn call(&self, plugin: &str, tool: &str, args: &Value, session: &impl Session) -> Value {
-        match (plugin, &self.browser, &self.discord) {
-            ("browser", Some(b), _) => b.call(tool, args, session).await,
-            ("discord", _, Some(d)) => d.call(tool, args, session).await,
+        match (plugin, &self.browser, &self.discord, &self.desktop) {
+            ("browser", Some(b), _, _) => b.call(tool, args, session).await,
+            ("discord", _, Some(d), _) => d.call(tool, args, session).await,
+            ("desktop", _, _, Some(d)) => d.call(tool, args, session).await,
             _ => crate::tools::text(&format!("{plugin} is not on"), true),
         }
     }
@@ -492,8 +517,13 @@ impl Remote {
 
 /// `seimei plugin <name>`: a built-in plugin as an MCP server on stdin and stdout, one JSON-RPC message per line.
 pub async fn serve_stdio(name: &str) -> Result<(), String> {
-    let spec = SPECS.get(name).cloned().ok_or(format!("no built-in plugin {name}"))?;
     let var = |k: &str| std::env::var(k).unwrap_or_default();
+    let mut spec = SPECS.get(name).cloned().ok_or(format!("no built-in plugin {name}"))?;
+    if name == "desktop" {
+        // One spec per window manager; seimei says which.
+        let b = var("SEIMEI_DESKTOP");
+        spec = spec.get(&b).cloned().ok_or(format!("no desktop backend {b:?}"))?;
+    }
     let remote = Arc::new(Remote {
         plugin: name.into(),
         socket: var("SEIMEI_SOCKET"),

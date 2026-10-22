@@ -1,0 +1,2175 @@
+{
+ "about": "The desktop plugin on fakes: no compositor, a fake niri socket and fake command line tools (tests/fakes/desktop), input devices writing to a file. {home} is the test's HOME. checks: the card a tool call needs (null: none), with ours the windows seimei opened, and no window manager running, so a close names no window. layout_command, layout_describe: how a remembered window starts again and how a restore card lists them. keys: the input events (type, code, value; each call ends with a sync) a device sends. niri: tool calls and checks against a fake niri with this state; log is what the fake tools were run with, keys what the input devices sent.",
+ "checks": [
+  {
+   "backend": "niri",
+   "tool": "Bash",
+   "input": {
+    "command": "niri msg action quit"
+   },
+   "want": {
+    "action": "command",
+    "target": "quit niri (ends the desktop session)",
+    "detail": "niri msg action quit"
+   }
+  },
+  {
+   "backend": "niri",
+   "tool": "Bash",
+   "input": {
+    "command": "niri msg action quit --skip-confirmation"
+   },
+   "want": {
+    "action": "command",
+    "target": "quit niri (ends the desktop session)",
+    "detail": "niri msg action quit --skip-confirmation"
+   }
+  },
+  {
+   "backend": "niri",
+   "tool": "Bash",
+   "input": {
+    "command": "niri msg action close-window --id 7"
+   },
+   "ours": [
+    7
+   ],
+   "want": null
+  },
+  {
+   "backend": "niri",
+   "tool": "Bash",
+   "input": {
+    "command": "niri msg action close-window --id 8"
+   },
+   "ours": [
+    7
+   ],
+   "want": {
+    "action": "command",
+    "target": "close a window",
+    "detail": "niri msg action close-window --id 8"
+   }
+  },
+  {
+   "backend": "niri",
+   "tool": "Bash",
+   "input": {
+    "command": "niri msg action close-window --id=8"
+   },
+   "want": {
+    "action": "command",
+    "target": "close a window",
+    "detail": "niri msg action close-window --id=8"
+   }
+  },
+  {
+   "backend": "niri",
+   "tool": "Bash",
+   "input": {
+    "command": "niri msg action close-window"
+   },
+   "want": {
+    "action": "command",
+    "target": "close a window",
+    "detail": "niri msg action close-window"
+   }
+  },
+  {
+   "backend": "niri",
+   "tool": "Bash",
+   "input": {
+    "command": "niri msg action focus-window --id 8"
+   },
+   "want": null
+  },
+  {
+   "backend": "niri",
+   "tool": "Bash",
+   "input": {
+    "command": "sleep 1; niri msg action quit"
+   },
+   "want": {
+    "action": "command",
+    "target": "quit niri (ends the desktop session)",
+    "detail": "sleep 1; niri msg action quit"
+   }
+  },
+  {
+   "backend": "niri",
+   "tool": "Bash",
+   "input": {
+    "command": "niri msg --json windows"
+   },
+   "want": null
+  },
+  {
+   "backend": "niri",
+   "tool": "Bash",
+   "input": {
+    "command": "echo 'bind' > ~/.config/niri/config.kdl"
+   },
+   "want": {
+    "action": "command",
+    "target": "edit the niri config",
+    "detail": "echo 'bind' > ~/.config/niri/config.kdl"
+   }
+  },
+  {
+   "backend": "niri",
+   "tool": "Bash",
+   "input": {
+    "command": "echo 'bind' >> $HOME/.config/niri/config.kdl"
+   },
+   "want": {
+    "action": "command",
+    "target": "edit the niri config",
+    "detail": "echo 'bind' >> $HOME/.config/niri/config.kdl"
+   }
+  },
+  {
+   "backend": "niri",
+   "tool": "Bash",
+   "input": {
+    "command": "cat ~/.config/niri/config.kdl 2>/dev/null"
+   },
+   "want": null
+  },
+  {
+   "backend": "niri",
+   "tool": "Bash",
+   "input": {
+    "command": "sed -i 's/a/b/' ~/.config/niri/config.kdl"
+   },
+   "want": {
+    "action": "command",
+    "target": "edit the niri config",
+    "detail": "sed -i 's/a/b/' ~/.config/niri/config.kdl"
+   }
+  },
+  {
+   "backend": "niri",
+   "tool": "Bash",
+   "input": {
+    "command": "sed -n 1,20p ~/.config/niri/config.kdl"
+   },
+   "want": null
+  },
+  {
+   "backend": "niri",
+   "tool": "Bash",
+   "input": {
+    "command": "perl -pi -e 's/a/b/' ~/.config/niri/config.kdl"
+   },
+   "want": {
+    "action": "command",
+    "target": "edit the niri config",
+    "detail": "perl -pi -e 's/a/b/' ~/.config/niri/config.kdl"
+   }
+  },
+  {
+   "backend": "niri",
+   "tool": "Bash",
+   "input": {
+    "command": "cp ~/.config/niri/config.kdl /tmp/niri.kdl"
+   },
+   "want": null
+  },
+  {
+   "backend": "niri",
+   "tool": "Bash",
+   "input": {
+    "command": "cp /tmp/niri.kdl ~/.config/niri/config.kdl"
+   },
+   "want": {
+    "action": "command",
+    "target": "edit the niri config",
+    "detail": "cp /tmp/niri.kdl ~/.config/niri/config.kdl"
+   }
+  },
+  {
+   "backend": "niri",
+   "tool": "Bash",
+   "input": {
+    "command": "install -t ~/.config/niri /tmp/niri.kdl"
+   },
+   "want": {
+    "action": "command",
+    "target": "edit the niri config",
+    "detail": "install -t ~/.config/niri /tmp/niri.kdl"
+   }
+  },
+  {
+   "backend": "niri",
+   "tool": "Bash",
+   "input": {
+    "command": "ln -sf /tmp/niri.kdl {home}/.config/niri/config.kdl"
+   },
+   "want": {
+    "action": "command",
+    "target": "edit the niri config",
+    "detail": "ln -sf /tmp/niri.kdl {home}/.config/niri/config.kdl"
+   }
+  },
+  {
+   "backend": "niri",
+   "tool": "Bash",
+   "input": {
+    "command": "cat /tmp/x | tee ~/.config/niri/config.kdl"
+   },
+   "want": {
+    "action": "command",
+    "target": "edit the niri config",
+    "detail": "cat /tmp/x | tee ~/.config/niri/config.kdl"
+   }
+  },
+  {
+   "backend": "niri",
+   "tool": "Bash",
+   "input": {
+    "command": "rm ~/.config/niri/old.kdl"
+   },
+   "want": {
+    "action": "command",
+    "target": "edit the niri config",
+    "detail": "rm ~/.config/niri/old.kdl"
+   }
+  },
+  {
+   "backend": "niri",
+   "tool": "Bash",
+   "input": {
+    "command": "mv ~/.config/niri/config.kdl ~/backup.kdl"
+   },
+   "want": {
+    "action": "command",
+    "target": "edit the niri config",
+    "detail": "mv ~/.config/niri/config.kdl ~/backup.kdl"
+   }
+  },
+  {
+   "backend": "niri",
+   "tool": "Bash",
+   "input": {
+    "command": "dd if=/tmp/x of=$HOME/.config/niri/config.kdl"
+   },
+   "want": {
+    "action": "command",
+    "target": "edit the niri config",
+    "detail": "dd if=/tmp/x of=$HOME/.config/niri/config.kdl"
+   }
+  },
+  {
+   "backend": "niri",
+   "tool": "Bash",
+   "input": {
+    "command": "cd ~/.config/niri && tee config.kdl < /tmp/x"
+   },
+   "want": {
+    "action": "command",
+    "target": "edit the niri config",
+    "detail": "cd ~/.config/niri && tee config.kdl < /tmp/x"
+   }
+  },
+  {
+   "backend": "niri",
+   "tool": "Bash",
+   "input": {
+    "command": "cd ~/.config/niri && cat config.kdl"
+   },
+   "want": null
+  },
+  {
+   "backend": "niri",
+   "tool": "Bash",
+   "input": {
+    "command": "python3 -c \"open('{home}/.config/niri/config.kdl', 'w').write('x')\""
+   },
+   "want": {
+    "action": "command",
+    "target": "edit the niri config",
+    "detail": "python3 -c \"open('{home}/.config/niri/config.kdl', 'w').write('x')\""
+   }
+  },
+  {
+   "backend": "niri",
+   "tool": "Bash",
+   "input": {
+    "command": "python3 -c \"print(open('{home}/.config/niri/config.kdl').read())\""
+   },
+   "want": null
+  },
+  {
+   "backend": "niri",
+   "tool": "Bash",
+   "input": {
+    "command": "ls ~/.config/niri-backup && rm ~/.config/niri-backup/x"
+   },
+   "want": null
+  },
+  {
+   "backend": "niri",
+   "tool": "Write",
+   "input": {
+    "file_path": "{home}/.config/niri/config.kdl",
+    "content": "binds {}"
+   },
+   "want": {
+    "action": "edit",
+    "target": "edit the niri config",
+    "detail": "{home}/.config/niri/config.kdl\n\nbinds {}"
+   }
+  },
+  {
+   "backend": "niri",
+   "tool": "Edit",
+   "input": {
+    "file_path": "{home}/.config/niri/../niri/config.kdl",
+    "old_string": "a",
+    "new_string": "b"
+   },
+   "want": {
+    "action": "edit",
+    "target": "edit the niri config",
+    "detail": "{home}/.config/niri/../niri/config.kdl\n\nb"
+   }
+  },
+  {
+   "backend": "niri",
+   "tool": "Edit",
+   "input": {
+    "file_path": "~/.config/niri/config.kdl",
+    "old_string": "a",
+    "new_string": "b"
+   },
+   "want": {
+    "action": "edit",
+    "target": "edit the niri config",
+    "detail": "~/.config/niri/config.kdl\n\nb"
+   }
+  },
+  {
+   "backend": "niri",
+   "tool": "Write",
+   "input": {
+    "file_path": "{home}/.config/niri-old/config.kdl",
+    "content": "x"
+   },
+   "want": null
+  },
+  {
+   "backend": "niri",
+   "tool": "Read",
+   "input": {
+    "file_path": "{home}/.config/niri/config.kdl"
+   },
+   "want": null
+  },
+  {
+   "backend": "niri",
+   "tool": "mcp__desktop__niri",
+   "input": {
+    "action": "quit"
+   },
+   "want": {
+    "action": "desktop",
+    "target": "quit niri (ends the desktop session)",
+    "detail": "niri msg action quit"
+   }
+  },
+  {
+   "backend": "niri",
+   "tool": "mcp__desktop__niri",
+   "input": {
+    "action": "close-window",
+    "args": [
+     "--id",
+     "7"
+    ]
+   },
+   "ours": [
+    7
+   ],
+   "want": null
+  },
+  {
+   "backend": "niri",
+   "tool": "mcp__desktop__niri",
+   "input": {
+    "action": "close-window",
+    "args": [
+     "--id",
+     "9"
+    ]
+   },
+   "ours": [
+    7
+   ],
+   "want": {
+    "action": "desktop",
+    "target": "close a window",
+    "detail": "niri msg action close-window --id 9"
+   }
+  },
+  {
+   "backend": "niri",
+   "tool": "mcp__desktop__niri",
+   "input": {
+    "action": "close-window"
+   },
+   "want": {
+    "action": "desktop",
+    "target": "close a window",
+    "detail": "niri msg action close-window"
+   }
+  },
+  {
+   "backend": "niri",
+   "tool": "mcp__desktop__niri",
+   "input": {
+    "action": "focus-window",
+    "args": [
+     "--id",
+     "9"
+    ]
+   },
+   "want": null
+  },
+  {
+   "backend": "niri",
+   "tool": "mcp__desktop__sway",
+   "input": {
+    "action": "exit"
+   },
+   "want": null
+  },
+  {
+   "backend": "sway",
+   "tool": "Bash",
+   "input": {
+    "command": "swaymsg exit"
+   },
+   "want": {
+    "action": "command",
+    "target": "exit sway (ends the desktop session)",
+    "detail": "swaymsg exit"
+   }
+  },
+  {
+   "backend": "sway",
+   "tool": "Bash",
+   "input": {
+    "command": "swaymsg kill"
+   },
+   "want": {
+    "action": "command",
+    "target": "close a window",
+    "detail": "swaymsg kill"
+   }
+  },
+  {
+   "backend": "sway",
+   "tool": "Bash",
+   "input": {
+    "command": "swaymsg '[con_id=5] kill'"
+   },
+   "ours": [
+    5
+   ],
+   "want": null
+  },
+  {
+   "backend": "sway",
+   "tool": "Bash",
+   "input": {
+    "command": "swaymsg '[con_id=6] kill'"
+   },
+   "ours": [
+    5
+   ],
+   "want": {
+    "action": "command",
+    "target": "close a window",
+    "detail": "swaymsg '[con_id=6] kill'"
+   }
+  },
+  {
+   "backend": "sway",
+   "tool": "Bash",
+   "input": {
+    "command": "swaymsg '[app_id=firefox] kill'"
+   },
+   "want": {
+    "action": "command",
+    "target": "close the windows matching [app_id=firefox]",
+    "detail": "swaymsg '[app_id=firefox] kill'"
+   }
+  },
+  {
+   "backend": "sway",
+   "tool": "Bash",
+   "input": {
+    "command": "swaymsg 'workspace 2; exit'"
+   },
+   "want": {
+    "action": "command",
+    "target": "exit sway (ends the desktop session)",
+    "detail": "swaymsg 'workspace 2; exit'"
+   }
+  },
+  {
+   "backend": "sway",
+   "tool": "Bash",
+   "input": {
+    "command": "swaymsg -t get_tree"
+   },
+   "want": null
+  },
+  {
+   "backend": "sway",
+   "tool": "Bash",
+   "input": {
+    "command": "swaymsg -t command exit"
+   },
+   "want": {
+    "action": "command",
+    "target": "exit sway (ends the desktop session)",
+    "detail": "swaymsg -t command exit"
+   }
+  },
+  {
+   "backend": "sway",
+   "tool": "Bash",
+   "input": {
+    "command": "swaymsg workspace 3"
+   },
+   "want": null
+  },
+  {
+   "backend": "sway",
+   "tool": "Bash",
+   "input": {
+    "command": "printf 'bindsym' >> ~/.config/sway/config"
+   },
+   "want": {
+    "action": "command",
+    "target": "edit the sway config",
+    "detail": "printf 'bindsym' >> ~/.config/sway/config"
+   }
+  },
+  {
+   "backend": "sway",
+   "tool": "Write",
+   "input": {
+    "file_path": "{home}/.config/sway/config",
+    "content": "bindsym"
+   },
+   "want": {
+    "action": "edit",
+    "target": "edit the sway config",
+    "detail": "{home}/.config/sway/config\n\nbindsym"
+   }
+  },
+  {
+   "backend": "sway",
+   "tool": "mcp__desktop__sway",
+   "input": {
+    "action": "exit"
+   },
+   "want": {
+    "action": "desktop",
+    "target": "exit sway (ends the desktop session)",
+    "detail": "swaymsg exit"
+   }
+  },
+  {
+   "backend": "sway",
+   "tool": "mcp__desktop__sway",
+   "input": {
+    "action": "[con_id=5]",
+    "args": [
+     "kill"
+    ]
+   },
+   "ours": [
+    5
+   ],
+   "want": null
+  },
+  {
+   "backend": "sway",
+   "tool": "mcp__desktop__sway",
+   "input": {
+    "action": "[con_id=6]",
+    "args": [
+     "kill"
+    ]
+   },
+   "want": {
+    "action": "desktop",
+    "target": "close a window",
+    "detail": "swaymsg [con_id=6] kill"
+   }
+  },
+  {
+   "backend": "hyprland",
+   "tool": "Bash",
+   "input": {
+    "command": "hyprctl dispatch exit"
+   },
+   "want": {
+    "action": "command",
+    "target": "exit Hyprland (ends the desktop session)",
+    "detail": "hyprctl dispatch exit"
+   }
+  },
+  {
+   "backend": "hyprland",
+   "tool": "Bash",
+   "input": {
+    "command": "hyprctl kill"
+   },
+   "want": {
+    "action": "command",
+    "target": "kill a window (hyprctl kill: the next one clicked)",
+    "detail": "hyprctl kill"
+   }
+  },
+  {
+   "backend": "hyprland",
+   "tool": "Bash",
+   "input": {
+    "command": "hyprctl dispatch killactive"
+   },
+   "want": {
+    "action": "command",
+    "target": "close a window",
+    "detail": "hyprctl dispatch killactive"
+   }
+  },
+  {
+   "backend": "hyprland",
+   "tool": "Bash",
+   "input": {
+    "command": "hyprctl dispatch closewindow address:0x5"
+   },
+   "ours": [
+    5
+   ],
+   "want": null
+  },
+  {
+   "backend": "hyprland",
+   "tool": "Bash",
+   "input": {
+    "command": "hyprctl dispatch closewindow address:0x6"
+   },
+   "ours": [
+    5
+   ],
+   "want": {
+    "action": "command",
+    "target": "close a window",
+    "detail": "hyprctl dispatch closewindow address:0x6"
+   }
+  },
+  {
+   "backend": "hyprland",
+   "tool": "Bash",
+   "input": {
+    "command": "hyprctl dispatch closewindow class:firefox"
+   },
+   "want": {
+    "action": "command",
+    "target": "close the windows matching class:firefox",
+    "detail": "hyprctl dispatch closewindow class:firefox"
+   }
+  },
+  {
+   "backend": "hyprland",
+   "tool": "Bash",
+   "input": {
+    "command": "hyprctl clients -j"
+   },
+   "want": null
+  },
+  {
+   "backend": "hyprland",
+   "tool": "Bash",
+   "input": {
+    "command": "sed -i 's/a/b/' ~/.config/hypr/hyprland.conf"
+   },
+   "want": {
+    "action": "command",
+    "target": "edit the Hyprland config",
+    "detail": "sed -i 's/a/b/' ~/.config/hypr/hyprland.conf"
+   }
+  },
+  {
+   "backend": "hyprland",
+   "tool": "mcp__desktop__hyprland",
+   "input": {
+    "action": "exit"
+   },
+   "want": {
+    "action": "desktop",
+    "target": "exit Hyprland (ends the desktop session)",
+    "detail": "hyprctl dispatch exit"
+   }
+  },
+  {
+   "backend": "hyprland",
+   "tool": "mcp__desktop__hyprland",
+   "input": {
+    "action": "closewindow",
+    "args": [
+     "address:0x5"
+    ]
+   },
+   "ours": [
+    5
+   ],
+   "want": null
+  },
+  {
+   "backend": "hyprland",
+   "tool": "mcp__desktop__hyprland",
+   "input": {
+    "action": "workspace",
+    "args": [
+     "2"
+    ]
+   },
+   "want": null
+  },
+  {
+   "backend": "x11",
+   "tool": "Bash",
+   "input": {
+    "command": "xdotool getactivewindow windowclose"
+   },
+   "want": {
+    "action": "command",
+    "target": "close a window",
+    "detail": "xdotool getactivewindow windowclose"
+   }
+  },
+  {
+   "backend": "x11",
+   "tool": "Bash",
+   "input": {
+    "command": "xdotool windowkill 12"
+   },
+   "ours": [
+    12
+   ],
+   "want": null
+  },
+  {
+   "backend": "x11",
+   "tool": "Bash",
+   "input": {
+    "command": "xdotool windowkill 0xd"
+   },
+   "ours": [
+    12
+   ],
+   "want": {
+    "action": "command",
+    "target": "close a window",
+    "detail": "xdotool windowkill 0xd"
+   }
+  },
+  {
+   "backend": "x11",
+   "tool": "Bash",
+   "input": {
+    "command": "xdotool search --name x windowclose %@"
+   },
+   "want": {
+    "action": "command",
+    "target": "close windows (xdotool, a window stack)",
+    "detail": "xdotool search --name x windowclose %@"
+   }
+  },
+  {
+   "backend": "x11",
+   "tool": "Bash",
+   "input": {
+    "command": "wmctrl -c Firefox"
+   },
+   "want": {
+    "action": "command",
+    "target": "close windows (wmctrl)",
+    "detail": "wmctrl -c Firefox"
+   }
+  },
+  {
+   "backend": "x11",
+   "tool": "Bash",
+   "input": {
+    "command": "wmctrl -i -c 0xc"
+   },
+   "ours": [
+    12
+   ],
+   "want": null
+  },
+  {
+   "backend": "x11",
+   "tool": "Bash",
+   "input": {
+    "command": "wmctrl -l"
+   },
+   "want": null
+  },
+  {
+   "backend": "x11",
+   "tool": "Bash",
+   "input": {
+    "command": "xkill"
+   },
+   "want": {
+    "action": "command",
+    "target": "kill a window (xkill)",
+    "detail": "xkill"
+   }
+  },
+  {
+   "backend": "x11",
+   "tool": "Bash",
+   "input": {
+    "command": "echo x > ~/.config/i3/config"
+   },
+   "want": null
+  },
+  {
+   "backend": "x11",
+   "tool": "mcp__desktop__x11",
+   "input": {
+    "action": "windowclose",
+    "args": [
+     "12"
+    ]
+   },
+   "ours": [
+    12
+   ],
+   "want": null
+  },
+  {
+   "backend": "x11",
+   "tool": "mcp__desktop__x11",
+   "input": {
+    "action": "windowclose",
+    "args": [
+     "13"
+    ]
+   },
+   "ours": [
+    12
+   ],
+   "want": {
+    "action": "desktop",
+    "target": "close a window",
+    "detail": "xdotool windowclose 13"
+   }
+  },
+  {
+   "backend": "x11",
+   "tool": "mcp__desktop__x11",
+   "input": {
+    "action": "key",
+    "args": [
+     "ctrl+t"
+    ]
+   },
+   "want": null
+  },
+  {
+   "backend": "kde",
+   "tool": "Bash",
+   "input": {
+    "command": "echo x > ~/.config/kwinrc"
+   },
+   "want": null
+  },
+  {
+   "backend": "kde",
+   "tool": "mcp__desktop__kde",
+   "input": {
+    "action": "quit"
+   },
+   "want": null
+  }
+ ],
+ "layout_command": [
+  {
+   "rec": {
+    "app_id": "firefox",
+    "argv": [
+     "/usr/lib/firefox/firefox",
+     "--new-window",
+     "https://x.org"
+    ]
+   },
+   "shell": "fish",
+   "want": "/usr/lib/firefox/firefox"
+  },
+  {
+   "rec": {
+    "app_id": "anki",
+    "argv": [
+     "/usr/bin/python3",
+     "/usr/bin/anki",
+     "-p",
+     "me"
+    ]
+   },
+   "shell": "fish",
+   "want": "/usr/bin/python3 /usr/bin/anki"
+  },
+  {
+   "rec": {
+    "app_id": "vesktop",
+    "argv": [
+     "electron",
+     "/usr/lib/vesktop/app.asar",
+     "--x"
+    ]
+   },
+   "shell": "fish",
+   "want": "electron /usr/lib/vesktop/app.asar"
+  },
+  {
+   "rec": {
+    "app_id": "odd",
+    "argv": [
+     "/opt/my app/run it",
+     "a b"
+    ]
+   },
+   "shell": "fish",
+   "want": "'/opt/my app/run it'"
+  },
+  {
+   "rec": {
+    "app_id": "gone",
+    "argv": []
+   },
+   "shell": "fish",
+   "want": null
+  },
+  {
+   "rec": {
+    "app_id": "kitty",
+    "cwd": "/srv/my code",
+    "argv": [
+     "kitty"
+    ]
+   },
+   "shell": "fish",
+   "want": "kitty -d '/srv/my code'"
+  },
+  {
+   "rec": {
+    "app_id": "kitty",
+    "cwd": null,
+    "argv": [
+     "kitty"
+    ]
+   },
+   "shell": "zsh",
+   "want": "kitty -d {home}"
+  },
+  {
+   "rec": {
+    "app_id": "kitty",
+    "cwd": "/tmp",
+    "argv": [
+     "kitty"
+    ],
+    "claude": {
+     "session_id": "0b8d7f8e-1111-2222-3333-444455556666",
+     "cwd": "/home/me/src/it's",
+     "name": "fix",
+     "args": [
+      "--model",
+      "opus"
+     ]
+    }
+   },
+   "shell": "fish",
+   "want": "kitty -d '/home/me/src/it'\"'\"'s' fish -c 'claude --model opus --resume 0b8d7f8e-1111-2222-3333-444455556666; exec fish'"
+  },
+  {
+   "rec": {
+    "app_id": "kitty",
+    "cwd": "/tmp",
+    "argv": [
+     "kitty"
+    ],
+    "claude": {
+     "session_id": "abc",
+     "cwd": null,
+     "name": null,
+     "args": []
+    }
+   },
+   "shell": "bash",
+   "want": "kitty -d /tmp bash -c 'claude --resume abc; exec bash'"
+  }
+ ],
+ "layout_describe": [
+  {
+   "plan": [],
+   "want": ""
+  },
+  {
+   "plan": [
+    {
+     "app_id": "firefox",
+     "workspace": 1
+    },
+    {
+     "app_id": "kitty",
+     "workspace": 2,
+     "claude": {
+      "session_id": "0b8d7f8e-1111-2222",
+      "name": null
+     }
+    },
+    {
+     "app_id": "kitty",
+     "workspace": null,
+     "claude": {
+      "session_id": "x",
+      "name": "fix the build"
+     }
+    }
+   ],
+   "want": "workspace 1: firefox\nworkspace 2: resume Claude session \"0b8d7f8e\"\nworkspace None: resume Claude session \"fix the build\""
+  }
+ ],
+ "keys": [
+  {
+   "device": "keyboard",
+   "op": "type",
+   "args": [
+    "Hi! a\n"
+   ],
+   "want": {
+    "events": [
+     [
+      1,
+      42,
+      1
+     ],
+     [
+      1,
+      35,
+      1
+     ],
+     [
+      1,
+      35,
+      0
+     ],
+     [
+      1,
+      42,
+      0
+     ],
+     [
+      1,
+      23,
+      1
+     ],
+     [
+      1,
+      23,
+      0
+     ],
+     [
+      1,
+      42,
+      1
+     ],
+     [
+      1,
+      2,
+      1
+     ],
+     [
+      1,
+      2,
+      0
+     ],
+     [
+      1,
+      42,
+      0
+     ],
+     [
+      1,
+      57,
+      1
+     ],
+     [
+      1,
+      57,
+      0
+     ],
+     [
+      1,
+      30,
+      1
+     ],
+     [
+      1,
+      30,
+      0
+     ],
+     [
+      1,
+      28,
+      1
+     ],
+     [
+      1,
+      28,
+      0
+     ]
+    ],
+    "error": null
+   }
+  },
+  {
+   "device": "keyboard",
+   "op": "type",
+   "args": [
+    "{}~|"
+   ],
+   "want": {
+    "events": [
+     [
+      1,
+      42,
+      1
+     ],
+     [
+      1,
+      26,
+      1
+     ],
+     [
+      1,
+      26,
+      0
+     ],
+     [
+      1,
+      42,
+      0
+     ],
+     [
+      1,
+      42,
+      1
+     ],
+     [
+      1,
+      27,
+      1
+     ],
+     [
+      1,
+      27,
+      0
+     ],
+     [
+      1,
+      42,
+      0
+     ],
+     [
+      1,
+      42,
+      1
+     ],
+     [
+      1,
+      41,
+      1
+     ],
+     [
+      1,
+      41,
+      0
+     ],
+     [
+      1,
+      42,
+      0
+     ],
+     [
+      1,
+      42,
+      1
+     ],
+     [
+      1,
+      43,
+      1
+     ],
+     [
+      1,
+      43,
+      0
+     ],
+     [
+      1,
+      42,
+      0
+     ]
+    ],
+    "error": null
+   }
+  },
+  {
+   "device": "keyboard",
+   "op": "type",
+   "args": [
+    "café ü"
+   ],
+   "want": {
+    "events": [],
+    "error": "can only type ASCII text, not éü"
+   }
+  },
+  {
+   "device": "keyboard",
+   "op": "combo",
+   "args": [
+    "ctrl+shift+t"
+   ],
+   "want": {
+    "events": [
+     [
+      1,
+      29,
+      1
+     ],
+     [
+      1,
+      42,
+      1
+     ],
+     [
+      1,
+      20,
+      1
+     ],
+     [
+      1,
+      20,
+      0
+     ],
+     [
+      1,
+      42,
+      0
+     ],
+     [
+      1,
+      29,
+      0
+     ]
+    ],
+    "error": null
+   }
+  },
+  {
+   "device": "keyboard",
+   "op": "combo",
+   "args": [
+    "Super + Return"
+   ],
+   "want": {
+    "events": [
+     [
+      1,
+      125,
+      1
+     ],
+     [
+      1,
+      28,
+      1
+     ],
+     [
+      1,
+      28,
+      0
+     ],
+     [
+      1,
+      125,
+      0
+     ]
+    ],
+    "error": null
+   }
+  },
+  {
+   "device": "keyboard",
+   "op": "combo",
+   "args": [
+    "f12"
+   ],
+   "want": {
+    "events": [
+     [
+      1,
+      88,
+      1
+     ],
+     [
+      1,
+      88,
+      0
+     ]
+    ],
+    "error": null
+   }
+  },
+  {
+   "device": "keyboard",
+   "op": "combo",
+   "args": [
+    "ctrl+hyper"
+   ],
+   "want": {
+    "events": [],
+    "error": "unknown key 'hyper'"
+   }
+  },
+  {
+   "device": "pointer",
+   "op": "move",
+   "args": [
+    0.5,
+    0.25
+   ],
+   "want": {
+    "events": [
+     [
+      3,
+      0,
+      32768
+     ],
+     [
+      3,
+      1,
+      16384
+     ]
+    ],
+    "error": null
+   }
+  },
+  {
+   "device": "pointer",
+   "op": "move",
+   "args": [
+    -1,
+    2
+   ],
+   "want": {
+    "events": [
+     [
+      3,
+      0,
+      0
+     ],
+     [
+      3,
+      1,
+      65535
+     ]
+    ],
+    "error": null
+   }
+  },
+  {
+   "device": "pointer",
+   "op": "click",
+   "args": [
+    "left",
+    2
+   ],
+   "want": {
+    "events": [
+     [
+      1,
+      272,
+      1
+     ],
+     [
+      1,
+      272,
+      0
+     ],
+     [
+      1,
+      272,
+      1
+     ],
+     [
+      1,
+      272,
+      0
+     ]
+    ],
+    "error": null
+   }
+  },
+  {
+   "device": "pointer",
+   "op": "click",
+   "args": [
+    "right",
+    1
+   ],
+   "want": {
+    "events": [
+     [
+      1,
+      273,
+      1
+     ],
+     [
+      1,
+      273,
+      0
+     ]
+    ],
+    "error": null
+   }
+  },
+  {
+   "device": "pointer",
+   "op": "scroll",
+   "args": [
+    3
+   ],
+   "want": {
+    "events": [
+     [
+      2,
+      8,
+      -1
+     ],
+     [
+      2,
+      8,
+      -1
+     ],
+     [
+      2,
+      8,
+      -1
+     ]
+    ],
+    "error": null
+   }
+  },
+  {
+   "device": "pointer",
+   "op": "scroll",
+   "args": [
+    -2
+   ],
+   "want": {
+    "events": [
+     [
+      2,
+      8,
+      1
+     ],
+     [
+      2,
+      8,
+      1
+     ]
+    ],
+    "error": null
+   }
+  }
+ ],
+ "niri": {
+  "state": {
+   "outputs": {
+    "eDP-1": {
+     "name": "eDP-1",
+     "make": "x",
+     "logical": {
+      "x": 0,
+      "y": 0,
+      "width": 1600,
+      "height": 1000,
+      "scale": 1.5,
+      "transform": "Normal"
+     }
+    }
+   },
+   "workspaces": [
+    {
+     "id": 1,
+     "idx": 1,
+     "name": null,
+     "output": "eDP-1",
+     "is_urgent": false,
+     "is_active": true,
+     "is_focused": true,
+     "active_window_id": 3
+    },
+    {
+     "id": 2,
+     "idx": 2,
+     "name": "music",
+     "output": "eDP-1",
+     "is_urgent": false,
+     "is_active": false,
+     "is_focused": false,
+     "active_window_id": 5
+    },
+    {
+     "id": 3,
+     "idx": 3,
+     "name": null,
+     "output": "eDP-1",
+     "is_urgent": false,
+     "is_active": false,
+     "is_focused": false,
+     "active_window_id": null
+    }
+   ],
+   "windows": [
+    {
+     "id": 4,
+     "title": "~",
+     "app_id": "kitty",
+     "pid": 1,
+     "workspace_id": 1,
+     "is_focused": false,
+     "is_floating": false,
+     "is_urgent": true,
+     "layout": {
+      "pos_in_scrolling_layout": [
+       2,
+       1
+      ]
+     }
+    },
+    {
+     "id": 3,
+     "title": "Docs \"draft\"",
+     "app_id": "firefox",
+     "pid": 1,
+     "workspace_id": 1,
+     "is_focused": true,
+     "is_floating": false,
+     "is_urgent": false,
+     "layout": {
+      "pos_in_scrolling_layout": [
+       1,
+       1
+      ]
+     }
+    },
+    {
+     "id": 5,
+     "title": "Music",
+     "app_id": "quodlibet",
+     "pid": 1,
+     "workspace_id": 2,
+     "is_focused": false,
+     "is_floating": true,
+     "is_urgent": false,
+     "layout": {
+      "pos_in_scrolling_layout": null
+     }
+    }
+   ],
+   "focused": 3,
+   "keyboard-layouts": {
+    "names": [
+     "English (US)",
+     "Russian"
+    ],
+    "current_idx": 0
+   }
+  },
+  "ours": [
+   5
+  ],
+  "checks": [
+   {
+    "tool": "Bash",
+    "input": {
+     "command": "niri msg action close-window"
+    },
+    "want": {
+     "action": "command",
+     "target": "close firefox \"Docs \"draft\"\"",
+     "detail": "niri msg action close-window"
+    }
+   },
+   {
+    "tool": "Bash",
+    "input": {
+     "command": "niri msg action close-window --id 4"
+    },
+    "want": {
+     "action": "command",
+     "target": "close kitty \"~\"",
+     "detail": "niri msg action close-window --id 4"
+    }
+   },
+   {
+    "tool": "Bash",
+    "input": {
+     "command": "niri msg action close-window --id 5"
+    },
+    "want": null
+   },
+   {
+    "tool": "Bash",
+    "input": {
+     "command": "niri msg action close-window --id 99"
+    },
+    "want": {
+     "action": "command",
+     "target": "close a window",
+     "detail": "niri msg action close-window --id 99"
+    }
+   },
+   {
+    "tool": "mcp__desktop__niri",
+    "input": {
+     "action": "close-window",
+     "args": [
+      "--id",
+      "4"
+     ]
+    },
+    "want": {
+     "action": "desktop",
+     "target": "close kitty \"~\"",
+     "detail": "niri msg action close-window --id 4"
+    }
+   }
+  ],
+  "calls": [
+   {
+    "tool": "desktop",
+    "args": {},
+    "want": {
+     "text": "Output eDP-1: 1600x1000 logical, scale 1.5\nWorkspace 1 on eDP-1 (active):\n  window 3: firefox \"Docs \"draft\"\" [focused]\n  window 4: kitty \"~\" [urgent]\nWorkspace 2 \"music\" on eDP-1:\n  window 5: quodlibet \"Music\" [floating, opened by seimei]\nWorkspace 3 on eDP-1: empty\nKeyboard layout: English (US) (of English (US), Russian)\nScreen unlocked",
+     "error": false,
+     "log": [],
+     "keys": []
+    }
+   },
+   {
+    "tool": "niri",
+    "args": {
+     "action": "focus-workspace",
+     "args": [
+      "2"
+     ]
+    },
+    "want": {
+     "text": "Done.",
+     "error": false,
+     "log": [
+      [
+       "niri",
+       "msg",
+       "action",
+       "focus-workspace",
+       "2"
+      ]
+     ],
+     "keys": []
+    }
+   },
+   {
+    "tool": "niri",
+    "args": {
+     "args": [
+      "2"
+     ]
+    },
+    "want": {
+     "text": "KeyError: 'action'",
+     "error": true,
+     "log": [],
+     "keys": []
+    }
+   },
+   {
+    "tool": "niri_query",
+    "args": {
+     "what": "workspaces"
+    },
+    "want": {
+     "text": "[{\"id\":1,\"idx\":1,\"name\":null,\"output\":\"eDP-1\",\"is_urgent\":false,\"is_active\":true,\"is_focused\":true,\"active_window_id\":3},{\"id\":2,\"idx\":2,\"name\":\"music\",\"output\":\"eDP-1\",\"is_urgent\":false,\"is_active\":false,\"is_focused\":false,\"active_window_id\":5},{\"id\":3,\"idx\":3,\"name\":null,\"output\":\"eDP-1\",\"is_urgent\":false,\"is_active\":false,\"is_focused\":false,\"active_window_id\":null}]",
+     "error": false,
+     "log": [
+      [
+       "niri",
+       "msg",
+       "--json",
+       "workspaces"
+      ]
+     ],
+     "keys": []
+    }
+   },
+   {
+    "tool": "niri_query",
+    "args": {
+     "what": "everything"
+    },
+    "want": {
+     "text": "what is one of outputs, workspaces, windows, focused-window, focused-output, layers, keyboard-layouts, version",
+     "error": true,
+     "log": [],
+     "keys": []
+    }
+   },
+   {
+    "tool": "type_text",
+    "args": {
+     "window": 3,
+     "text": "Hi!"
+    },
+    "want": {
+     "text": "Typed.",
+     "error": false,
+     "log": [],
+     "keys": [
+      [
+       1,
+       42,
+       1
+      ],
+      [
+       1,
+       35,
+       1
+      ],
+      [
+       1,
+       35,
+       0
+      ],
+      [
+       1,
+       42,
+       0
+      ],
+      [
+       1,
+       23,
+       1
+      ],
+      [
+       1,
+       23,
+       0
+      ],
+      [
+       1,
+       42,
+       1
+      ],
+      [
+       1,
+       2,
+       1
+      ],
+      [
+       1,
+       2,
+       0
+      ],
+      [
+       1,
+       42,
+       0
+      ]
+     ]
+    }
+   },
+   {
+    "tool": "type_text",
+    "args": {
+     "window": "3",
+     "text": "ok"
+    },
+    "want": {
+     "text": "Typed.",
+     "error": false,
+     "log": [],
+     "keys": [
+      [
+       1,
+       24,
+       1
+      ],
+      [
+       1,
+       24,
+       0
+      ],
+      [
+       1,
+       37,
+       1
+      ],
+      [
+       1,
+       37,
+       0
+      ]
+     ]
+    }
+   },
+   {
+    "tool": "type_text",
+    "args": {
+     "window": 3,
+     "text": "été"
+    },
+    "want": {
+     "text": "can only type ASCII text, not é",
+     "error": true,
+     "log": [],
+     "keys": []
+    }
+   },
+   {
+    "tool": "type_text",
+    "args": {
+     "window": 4,
+     "text": "x"
+    },
+    "want": {
+     "text": "window 4 did not take focus, so nothing was sent",
+     "error": true,
+     "log": [
+      [
+       "niri",
+       "msg",
+       "action",
+       "focus-window",
+       "--id",
+       "4"
+      ]
+     ],
+     "keys": []
+    }
+   },
+   {
+    "tool": "type_text",
+    "args": {
+     "window": 99,
+     "text": "x"
+    },
+    "want": {
+     "text": "no window 99",
+     "error": true,
+     "log": [],
+     "keys": []
+    }
+   },
+   {
+    "tool": "type_text",
+    "args": {
+     "window": 3
+    },
+    "want": {
+     "text": "KeyError: 'text'",
+     "error": true,
+     "log": [],
+     "keys": []
+    }
+   },
+   {
+    "tool": "press_keys",
+    "args": {
+     "window": 3,
+     "keys": [
+      "ctrl+t",
+      "Enter"
+     ]
+    },
+    "want": {
+     "text": "Pressed.",
+     "error": false,
+     "log": [],
+     "keys": [
+      [
+       1,
+       29,
+       1
+      ],
+      [
+       1,
+       20,
+       1
+      ],
+      [
+       1,
+       20,
+       0
+      ],
+      [
+       1,
+       29,
+       0
+      ],
+      [
+       1,
+       28,
+       1
+      ],
+      [
+       1,
+       28,
+       0
+      ]
+     ]
+    }
+   },
+   {
+    "tool": "press_keys",
+    "args": {
+     "window": 3,
+     "keys": [
+      "hyper+x"
+     ]
+    },
+    "want": {
+     "text": "unknown key 'hyper'",
+     "error": true,
+     "log": [],
+     "keys": []
+    }
+   },
+   {
+    "tool": "click",
+    "args": {
+     "x": 784,
+     "y": 490
+    },
+    "want": {
+     "text": "Clicked.",
+     "error": false,
+     "log": [],
+     "keys": [
+      [
+       3,
+       0,
+       32768
+      ],
+      [
+       3,
+       1,
+       32768
+      ],
+      [
+       1,
+       272,
+       1
+      ],
+      [
+       1,
+       272,
+       0
+      ]
+     ]
+    }
+   },
+   {
+    "tool": "click",
+    "args": {
+     "x": 0,
+     "y": 1000,
+     "button": "right",
+     "window": 3
+    },
+    "want": {
+     "text": "Clicked.",
+     "error": false,
+     "log": [],
+     "keys": [
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       1,
+       65535
+      ],
+      [
+       1,
+       273,
+       1
+      ],
+      [
+       1,
+       273,
+       0
+      ]
+     ]
+    }
+   },
+   {
+    "tool": "click",
+    "args": {
+     "x": 10,
+     "y": 10,
+     "window": 4
+    },
+    "want": {
+     "text": "window 4 is no longer focused; focus it and take a new screenshot",
+     "error": true,
+     "log": [],
+     "keys": []
+    }
+   },
+   {
+    "tool": "click",
+    "args": {
+     "x": 10,
+     "y": 10,
+     "count": 0
+    },
+    "want": {
+     "text": "Moved.",
+     "error": false,
+     "log": [],
+     "keys": [
+      [
+       3,
+       0,
+       418
+      ],
+      [
+       3,
+       1,
+       669
+      ]
+     ]
+    }
+   },
+   {
+    "tool": "click",
+    "args": {
+     "x": 10,
+     "y": 10,
+     "button": "side"
+    },
+    "want": {
+     "text": "KeyError: 'side'",
+     "error": true,
+     "log": [],
+     "keys": [
+      [
+       3,
+       0,
+       418
+      ],
+      [
+       3,
+       1,
+       669
+      ]
+     ]
+    }
+   },
+   {
+    "tool": "click",
+    "args": {
+     "y": 10
+    },
+    "want": {
+     "text": "KeyError: 'x'",
+     "error": true,
+     "log": [],
+     "keys": []
+    }
+   },
+   {
+    "tool": "scroll",
+    "args": {
+     "x": 100,
+     "y": 100,
+     "amount": -2
+    },
+    "want": {
+     "text": "Scrolled.",
+     "error": false,
+     "log": [],
+     "keys": [
+      [
+       3,
+       0,
+       4180
+      ],
+      [
+       3,
+       1,
+       6687
+      ],
+      [
+       2,
+       8,
+       1
+      ],
+      [
+       2,
+       8,
+       1
+      ]
+     ]
+    }
+   },
+   {
+    "tool": "unlock_screen",
+    "args": {},
+    "want": {
+     "text": "The screen is not locked.",
+     "error": false,
+     "log": [],
+     "keys": []
+    }
+   },
+   {
+    "tool": "restore_desktop",
+    "args": {},
+    "want": {
+     "text": "Nothing to bring back: no earlier layout from the last 3 days, or everything is already open.",
+     "error": false,
+     "log": [],
+     "keys": []
+    }
+   }
+  ]
+ }
+}

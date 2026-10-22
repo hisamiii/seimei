@@ -45,7 +45,7 @@ static RAW: LazyLock<Regex> = LazyLock::new(|| re(r"\bclaude\s+(stop|kill|attach
 static QUOTED: LazyLock<Regex> =
     LazyLock::new(|| re(r#"["']claude["']\s*,\s*["'](stop|kill|attach|rm|respawn|-r|--resume|-c|--continue)["']"#));
 // Redirect targets: > file, >> file, &> file, 2> file; not 2>&1 or >&2 (no file).
-static REDIRECT: LazyLock<Regex> =
+pub(crate) static REDIRECT: LazyLock<Regex> =
     LazyLock::new(|| re(r#"(?:^|[^<>&\w-])(?:\d|&)?>>?\|?\s*("[^"]*"|'[^']*'|[^\s;&|<>()]+)"#));
 // Claude Code's settings hold its allow rules and default mode: an agent writing them could grant itself what the
 // cards would ask for (auth audit P3). Any write to one takes a card, in every mode.
@@ -160,6 +160,15 @@ fn cc_settings_hit(tool: &str, inp: &Value) -> Option<String> {
 }
 
 /// What a tool call needs the user's OK for, or None. Plugins add their own checks on top (phase 4).
+/// A plugin's own cards for tool calls (the desktop's: closing windows, editing the WM's config).
+pub type Check = Arc<dyn Fn(&str, &Value) -> Option<Value> + Send + Sync>;
+static CHECKS: std::sync::RwLock<Vec<Check>> = std::sync::RwLock::new(vec![]);
+
+/// Consult check after the built-in ones, for as long as seimei runs.
+pub fn add_check(check: Check) {
+    CHECKS.write().unwrap().push(check);
+}
+
 pub fn check(tool: &str, inp: &Value) -> Option<Value> {
     if tool == "Bash" {
         let cmd = field(inp, &["command"]);
@@ -167,7 +176,9 @@ pub fn check(tool: &str, inp: &Value) -> Option<Value> {
             return Some(json!({"action": "command", "target": hit, "detail": cmd}));
         }
     }
-    let path = cc_settings_hit(tool, inp)?;
+    let Some(path) = cc_settings_hit(tool, inp) else {
+        return CHECKS.read().unwrap().iter().find_map(|c| c(tool, inp));
+    };
     let detail = field(inp, &["command", "content", "new_string"]);
     Some(json!({
         "action": if tool != "Bash" { "edit" } else { "command" },

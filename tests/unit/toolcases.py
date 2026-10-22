@@ -21,6 +21,14 @@ class Stub:
     def __getattr__(self, k): return Stub()
     def __call__(self, *a, **k): return Stub()
 
+class DesktopHost:
+    """What the desktop plugin reads from seimei when it starts: config [host] about and the state folder."""
+    def __init__(self, about):
+        self.config = {"host": {"about": about}} if about else {}
+        self.state = Path(tempfile.mkdtemp(prefix="tools-desk-"))
+        self.events = self.approvals = self.files = None
+    def note(self, text): pass
+
 async def main():
     d = Path(tempfile.mkdtemp(prefix="tools-"))
     extra = (make_adopt_tools(Stub()) + make_push_tools(Stub()) + make_watch_tools(Watches(d / "w.json", Stub(), Stub()))
@@ -46,14 +54,26 @@ async def main():
     check("shikigami tools", got == CASES["shikigami"]["tools"], got)
     await bridge.aclose()
     # Each built-in plugin's server (the Rust one serves it as `seimei plugin <name>`).
-    for name, spec in CASES["plugins"].items():
-        plugin = importlib.import_module(f"seimei.plugins.{name}").Plugin(Stub(), {})
-        bridge = SdkMcpBridge(name, plugin.server()["instance"])
+    servers = [(name, {}, spec) for name, spec in CASES["plugins"].items() if name != "desktop"]
+    # The desktop's tools depend on its window manager: one spec per backend, and the prompt with and without [host] about.
+    servers += [("desktop", {"backend": b}, spec) for b, spec in CASES["plugins"]["desktop"].items()]
+    for name, cfg, spec in servers:
+        label = f"{name} {cfg['backend']}" if cfg else name
+        if cfg:
+            host = DesktopHost(None)
+            plugin = importlib.import_module(f"seimei.plugins.{name}").Plugin(host, cfg)
+            check(f"{label} prompt", plugin.prompt == spec["prompt"], plugin.prompt)
+            about = importlib.import_module(f"seimei.plugins.{name}").Plugin(DesktopHost("laptop (Arch, niri)"), cfg)
+            check(f"{label} prompt with about", about.prompt == spec["prompt_about"], about.prompt)
+            bridge = SdkMcpBridge(name, plugin.server("seimei", None)["instance"])
+        else:
+            plugin = importlib.import_module(f"seimei.plugins.{name}").Plugin(Stub(), {})
+            bridge = SdkMcpBridge(name, plugin.server()["instance"])
         init = await bridge.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
             "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}})
-        check(f"{name} initialize", init["result"] == spec["initialize"], init)
+        check(f"{label} initialize", init["result"] == spec["initialize"], init)
         got = (await bridge.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}))["result"]["tools"]
-        check(f"{name} tools", got == spec["tools"], got)
+        check(f"{label} tools", got == spec["tools"], got)
         await bridge.aclose()
 
 asyncio.run(main())

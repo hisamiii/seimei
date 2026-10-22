@@ -446,11 +446,16 @@ impl Worker {
         let _ = rx.await;
     }
 
-    /// The session is open on the server (after Open on server): a running Claude Code holds it. Blocking. (The
-    /// desktop plugin also knows whether its window is still there; that comes with the plugins, phase 4.)
+    /// The session is open on the server (after Open on server): its terminal window is still there, or a running
+    /// Claude Code holds the session (a trust prompt delays that, hence the window check). Blocking.
     pub fn on_laptop(&self) -> bool {
         if self.state() != "laptop" {
             return false;
+        }
+        if let Some(d) = &self.pool().plugins.desktop
+            && d.window_open(&self.get("laptop_window")) == Some(true)
+        {
+            return true;
         }
         let sid = str_of(&self.get("session_id"));
         sessions::live(&Own::new()).iter().any(|s| s.rec["sessionId"] == json!(sid) || s.session_id == sid)
@@ -534,7 +539,7 @@ impl Worker {
             self.cmd(Cmd::Close { done });
             let _ = rx.await;
         }
-        self.pool().open_terminal(self, title, extra).map(Some)
+        self.pool().open_terminal(self, title, extra).await
     }
 
     /// Change its effort and model without restarting the task. The model switches at its next request; the effort
@@ -1605,13 +1610,17 @@ impl Pool {
     }
 
     /// Open its session in a terminal on the server: the window it opened in (its id, when known).
-    fn open_terminal(&self, w: &Worker, title: &str, extra: &[&str]) -> Result<Value, String> {
+    async fn open_terminal(&self, w: &Worker, title: &str, extra: &[&str]) -> Result<Option<Value>, String> {
         let mut argv = self.resume_argv(w);
         argv.extend(extra.iter().map(|a| a.to_string()));
         let words: Vec<String> = argv.iter().map(|a| sh_quote(a)).collect();
         let term =
             self.terminal.replace("{cwd}", &sh_quote(&str_of(&w.get("cwd")))).replace("{title}", &sh_quote(title));
-        spawn_detached(&format!("{term} {}", words.join(" ")))
+        let cmd = format!("{term} {}", words.join(" "));
+        match &self.plugins.desktop {
+            Some(d) => d.spawn(&cmd, false).await,
+            None => spawn_detached(&cmd).map(Some),
+        }
     }
 
     /// A shikigami that resumes one of the user's sessions (adopt ended its process). One released earlier comes back

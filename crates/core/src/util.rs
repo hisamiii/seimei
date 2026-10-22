@@ -134,21 +134,35 @@ pub fn cut(s: &str, n: usize) -> &str {
 /// JSON the way Python's json.dumps writes it by default: ", " and ": " between items, non-ASCII as \\u escapes.
 /// Tool call summaries show it on the page.
 pub fn py_json(v: &Value) -> String {
-    struct Py;
+    py_dumps(v, false, true)
+}
+
+/// The same with ensure_ascii=False: other characters as they are.
+pub fn py_json_utf8(v: &Value) -> String {
+    py_dumps(v, false, false)
+}
+
+/// The same with separators=(",", ":"), as compact JSON for a model to read.
+pub fn py_json_compact(v: &Value) -> String {
+    py_dumps(v, true, true)
+}
+
+fn py_dumps(v: &Value, compact: bool, ascii: bool) -> String {
+    struct Py(bool, bool);
     impl serde_json::ser::Formatter for Py {
         fn begin_array_value<W: ?Sized + std::io::Write>(&mut self, w: &mut W, first: bool) -> std::io::Result<()> {
-            if first { Ok(()) } else { w.write_all(b", ") }
+            if first { Ok(()) } else { w.write_all(if self.0 { b"," } else { b", " }) }
         }
         fn begin_object_key<W: ?Sized + std::io::Write>(&mut self, w: &mut W, first: bool) -> std::io::Result<()> {
-            if first { Ok(()) } else { w.write_all(b", ") }
+            if first { Ok(()) } else { w.write_all(if self.0 { b"," } else { b", " }) }
         }
         fn begin_object_value<W: ?Sized + std::io::Write>(&mut self, w: &mut W) -> std::io::Result<()> {
-            w.write_all(b": ")
+            w.write_all(if self.0 { b":" } else { b": " })
         }
         fn write_string_fragment<W: ?Sized + std::io::Write>(&mut self, w: &mut W, s: &str) -> std::io::Result<()> {
             for c in s.chars() {
-                if c.is_ascii() {
-                    w.write_all(&[c as u8])?;
+                if c.is_ascii() || !self.1 {
+                    w.write_all(c.encode_utf8(&mut [0; 4]).as_bytes())?;
                 } else {
                     for unit in c.encode_utf16(&mut [0; 2]) {
                         write!(w, "\\u{unit:04x}")?;
@@ -159,9 +173,9 @@ pub fn py_json(v: &Value) -> String {
         }
     }
     let mut out = vec![];
-    let mut ser = serde_json::Serializer::with_formatter(&mut out, Py);
+    let mut ser = serde_json::Serializer::with_formatter(&mut out, Py(compact, ascii));
     v.serialize(&mut ser).expect("JSON to memory");
-    String::from_utf8(out).expect("ASCII")
+    String::from_utf8(out).expect("UTF-8")
 }
 
 /// At most `n` characters.
