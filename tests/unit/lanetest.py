@@ -37,8 +37,10 @@ async def main():
     check("an event folded into a user turn keeps it the user's", a.get("lane") == "c", a)
     d.stopping = True; d._handle(done(True)); s = last()
     check("Stopped. stays with the turn's lane", s["text"] == "Stopped." and s.get("lane") == "c", s)
-    d._handle(step()); d._handle(say("on my own")); d._handle(done()); a = last()
+    d._handle(step()); d._handle(say("trajectory: on my own")); d._handle(done()); a = last()
     check("a turn with no input (a background task) is the trajectory's", a.get("lane") == "t" and a.get("why") == "", a)
+    d._handle(step()); d._handle(say("done on my own")); d._handle(done()); a = last()
+    check("its unmarked closing reply goes to the chat", a.get("lane") == "c" and a.get("from") and a["text"] == "done on my own", a)
     for e, want in ((("worker", "done"), "t"), (("worker", "failed"), "t"), (("worker", "asking"), None), (("worker", "replied"), None)):
         ev.add({"type": e[0], "event": e[1], "worker": "w", "name": "x", "text": ""})
         check(f"worker {e[1]} -> {want or 'chat'}", last().get("lane") == want, last())
