@@ -557,6 +557,8 @@ impl Dispatcher {
             });
             let why = match Client::connect(self.options(), handler).await {
                 Ok(mut client) => {
+                    // Its plugins run under this process: their session token is good only from there.
+                    self.tools.pool.plugins.root("seimei", None, client.pid());
                     t.set(Some(true), None);
                     if failures > 0 {
                         self.events.add(json!({"type": "system", "text": "Session is back."}));

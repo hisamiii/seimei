@@ -172,7 +172,8 @@ async fn queue_plugin_over_stdio() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
-/// Seimei's socket for a test: its plugins (as config enables them) and the cards they raise.
+/// Seimei's socket for a test: its plugins (as config enables them) and the cards they raise. The test stands in
+/// for seimei's claude process: the plugins it starts may use seimei's token.
 async fn host(name: &str, enabled: &str) -> (std::path::PathBuf, Arc<EventLog>, Arc<Approvals>, Arc<Plugins>) {
     let d = std::env::temp_dir().join(format!("seimei-plugin-{name}-{}", std::process::id()));
     let state = d.join("state");
@@ -181,6 +182,8 @@ async fn host(name: &str, enabled: &str) -> (std::path::PathBuf, Arc<EventLog>, 
     let approvals = Arc::new(Approvals::new(events.clone()));
     let cfg: toml::Table = format!("enabled = [\"{enabled}\"]").parse().unwrap();
     let plugins = Arc::new(Plugins::load(&cfg, &state));
+    plugins.servers("seimei", None, None);
+    plugins.root("seimei", None, Some(std::process::id()));
     tokio::spawn(plugins.clone().listen(approvals.clone()));
     for _ in 0..100 {
         if state.join("plugins.sock").exists() {
@@ -266,5 +269,126 @@ async fn music_plugin_over_stdio() {
     let cmds: Vec<Value> = sent.lock().unwrap().iter().map(|r| r["cmd"].clone()).collect();
     assert_eq!(cmds, [json!("status")]);
     drop(srv);
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// A connector at the link: answers the browser's ops like the extension would, and keeps them.
+fn fake_browser(path: std::path::PathBuf) -> Arc<std::sync::Mutex<Vec<Value>>> {
+    let seen = Arc::new(std::sync::Mutex::new(vec![]));
+    let log = seen.clone();
+    std::thread::spawn(move || {
+        let conn = loop {
+            match std::os::unix::net::UnixStream::connect(&path) {
+                Ok(c) => break c,
+                Err(_) => std::thread::sleep(Duration::from_millis(20)),
+            }
+        };
+        let tab = |id: i64, title: &str| {
+            json!({"id": id, "window": 1, "index": id, "title": title, "url": format!("https://x.org/{id}"),
+                   "active": false, "pinned": false, "audible": false, "asleep": false})
+        };
+        for line in BufReader::new(&conn).lines() {
+            let req: Value = serde_json::from_str(&line.unwrap()).unwrap();
+            let a = &req["args"];
+            let result = match req["op"].as_str().unwrap() {
+                "tabs" => json!({"tabs": [tab(5, "Mine")], "focused": 1}),
+                "open" => tab(9, "Opened"),
+                "info" => json!(
+                    a["tabs"].as_array().unwrap().iter().map(|i| tab(i.as_i64().unwrap(), "Mine")).collect::<Vec<_>>()
+                ),
+                "close" => json!(a["tabs"].as_array().unwrap().len()),
+                _ => Value::Null,
+            };
+            log.lock().unwrap().push(req.clone());
+            (&conn)
+                .write_all(format!("{}\n", json!({"id": req["id"], "ok": true, "result": result})).as_bytes())
+                .unwrap();
+        }
+    });
+    seen
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn browser_plugin_forwards_to_seimei() {
+    let (d, events, approvals, plugins) = host("browser", "browser").await;
+    let link = d.join("run/seimei/browser.sock");
+    tokio::spawn(plugins.browser.as_ref().unwrap().link.clone().run(link.clone()));
+    let seen = fake_browser(link);
+    let env = plugins.servers("seimei", None, None)["browser"]["env"].as_object().unwrap().clone();
+    let spec = cases("tools.json")["plugins"]["browser"].clone();
+    let env2 = env.clone();
+    let mut srv = tokio::task::spawn_blocking(move || {
+        let mut srv = Server::start("browser", &env2, &[]);
+        assert_eq!(srv.ask(1, "tools/list", json!({}))["tools"], spec["tools"]);
+        // The connector may still be connecting.
+        let mut tabs = srv.call(2, "browser_tabs", json!({}));
+        for i in 0..50 {
+            if !tabs.1 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+            tabs = srv.call(100 + i, "browser_tabs", json!({}));
+        }
+        assert_eq!(tabs, ("Window 1 (focused):\n  [5] Mine · https://x.org/5".into(), false));
+        let (t, err) = srv.call(3, "browser_open", json!({"url": "https://x.org/9"}));
+        assert!(!err && t.starts_with("Opened tab [9]"), "{t}");
+        // A tab seimei opened closes without a card.
+        assert_eq!(srv.call(4, "browser_close", json!({"tabs": [9]})), ("Closed 1 tab.".into(), false));
+        srv
+    })
+    .await
+    .unwrap();
+
+    // The user's tab asks first.
+    let mut sub = events.subscribe();
+    let call = tokio::task::spawn_blocking(move || {
+        let r = srv.call(5, "browser_close", json!({"tabs": [5]}));
+        (srv, r)
+    });
+    let card = loop {
+        let ev = tokio::time::timeout(Duration::from_secs(10), sub.recv()).await.unwrap().unwrap();
+        if ev["type"] == "approval" {
+            break ev;
+        }
+    };
+    assert_eq!((&card["who"], &card["target"]), (&json!("seimei"), &json!("close the tab \"Mine\"")));
+    approvals.decide(card["aid"].as_str().unwrap(), false, None, None);
+    let (srv, r) = call.await.unwrap();
+    assert_eq!(r, ("The user denied it; no tabs closed.".into(), true));
+    drop(srv);
+    let closes: Vec<Value> =
+        seen.lock().unwrap().iter().filter(|r| r["op"] == "close").map(|r| r["args"].clone()).collect();
+    assert_eq!(closes, [json!({"tabs": [9]})]);
+
+    // A shikigami given only queue gets no browser tools, even with the browser server's command at hand.
+    let groups = ["queue".to_string()];
+    let theirs = plugins.servers("w", Some("w1"), Some(&groups));
+    assert!(theirs.get("browser").is_none());
+    // Its token, as a granted session would see it; then its grant goes back to queue alone.
+    let w_token = plugins.servers("w", Some("w1"), None)["browser"]["env"]["SEIMEI_TOKEN"].clone();
+    plugins.servers("w", Some("w1"), Some(&groups));
+    plugins.root("w", Some("w1"), Some(std::process::id()));
+    let mut w_env = env.clone();
+    w_env.insert("SEIMEI_TOKEN".into(), w_token);
+    // seimei's token from a process outside seimei's claude process.
+    let mut other = Command::new("sleep").arg("30").spawn().unwrap();
+    let env3 = env.clone();
+    let refused = tokio::task::spawn_blocking(move || {
+        let mut srv = Server::start("browser", &w_env, &[]);
+        let a = srv.call(1, "browser_tabs", json!({}));
+        (a, srv)
+    })
+    .await
+    .unwrap();
+    assert_eq!(refused.0, ("this session has no browser tools".into(), true));
+    drop(refused.1);
+    plugins.root("seimei", None, Some(other.id()));
+    let outside =
+        tokio::task::spawn_blocking(move || Server::start("browser", &env3, &[]).call(1, "browser_tabs", json!({})))
+            .await
+            .unwrap();
+    assert_eq!(outside, ("not this session's process".into(), true));
+    let _ = other.kill();
+    let _ = other.wait();
     let _ = std::fs::remove_dir_all(&d);
 }

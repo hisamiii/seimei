@@ -757,6 +757,9 @@ impl Session {
         if self.client.is_none() {
             let handler: Arc<dyn Handler> = Arc::new(Side { w: self.w.clone() });
             let client = Client::connect(self.w.options(), handler).await.map_err(|e| e.to_string())?;
+            // Its plugins run under this process: their session token is good only from there.
+            let name = str_of(&self.w.get("name"));
+            self.w.pool().plugins.root(&name, Some(&self.w.id), client.pid());
             self.client = Some(client);
             self.w.edit(|r| r.insert("started".into(), json!(true)));
         }

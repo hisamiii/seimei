@@ -16,6 +16,8 @@
 //! grants it, with the plugin's prompt section. A plugin raises a card through seimei's socket, with the token of the
 //! session it serves: the card names that session, and a plugin cannot answer cards.
 
+pub mod browser;
+pub mod link;
 pub mod music;
 pub mod queue;
 
@@ -31,10 +33,13 @@ use crate::util::{config_file, token_urlsafe};
 use crate::watches::Watches;
 
 /// What a built-in ships: its manifest and its prompt section.
-const BUILTIN: [(&str, &str, &str); 2] = [
+const BUILTIN: [(&str, &str, &str); 3] = [
+    ("browser", include_str!("browser/plugin.toml"), include_str!("browser/prompt.md")),
     ("music", include_str!("music/plugin.toml"), ""),
     ("queue", include_str!("queue/plugin.toml"), include_str!("queue/prompt.md")),
 ];
+/// Built-ins whose tools run inside seimei (they share a connector and what it knows); their process forwards calls.
+const HOSTED: [&str; 1] = ["browser"];
 /// What an external entry may pass on to Claude Code (its mcpServers format).
 const MCP_KEYS: [&str; 6] = ["type", "command", "args", "env", "url", "headers"];
 /// Each built-in's MCP server as Claude Code sees it (initialize and tools/list).
@@ -58,10 +63,56 @@ pub struct Plugin {
 pub struct Plugins {
     list: Vec<Plugin>,
     pub queue: Option<queue::Queue>,
+    pub browser: Option<Arc<browser::Browser>>,
     state: PathBuf,
     socket: PathBuf,
-    /// Session tokens: token -> (who, worker).
-    tokens: Mutex<HashMap<String, (String, Option<String>)>>,
+    /// Session tokens and what each may do.
+    tokens: Mutex<HashMap<String, Grant>>,
+}
+
+/// A session token's session: who it is, the plugins it was given, and its claude process. Only that process and
+/// its children may use the token (another process of the user's could read it from the plugin's environment).
+#[derive(Clone)]
+struct Grant {
+    who: String,
+    worker: Option<String>,
+    plugins: Vec<String>,
+    root: Option<u32>,
+}
+
+/// Whether pid is root or runs under it.
+fn descends(pid: u32, root: u32) -> bool {
+    let mut p = pid;
+    for _ in 0..64 {
+        if p == root {
+            return true;
+        }
+        let Ok(stat) = std::fs::read_to_string(format!("/proc/{p}/stat")) else { return false };
+        // The fields after the command name, which may hold spaces and parentheses itself.
+        let rest = stat.rsplit_once(')').map_or("", |(_, r)| r);
+        match rest.split_whitespace().nth(1).and_then(|v| v.parse().ok()) {
+            Some(parent) if parent > 1 => p = parent,
+            _ => return false,
+        }
+    }
+    false
+}
+
+/// A built-in's tools inside seimei, for the session a token names: its cards go to the user.
+struct Local<'a> {
+    approvals: &'a Approvals,
+    who: &'a str,
+    worker: Option<&'a str>,
+}
+
+impl Session for Local<'_> {
+    fn names(&self) -> HashMap<String, String> {
+        HashMap::new()
+    }
+
+    async fn card(&self, what: Value) -> Result<String, String> {
+        Ok(self.approvals.hold(what, self.who, self.worker).await.to_string())
+    }
 }
 
 fn to_json(v: &toml::Value) -> Value {
@@ -92,6 +143,7 @@ impl Plugins {
         let mut out = Plugins {
             list: vec![],
             queue: None,
+            browser: None,
             state: state.into(),
             socket: state.join("plugins.sock"),
             tokens: Mutex::default(),
@@ -101,8 +153,10 @@ impl Plugins {
             let own = cfg.get(name).and_then(|t| t.as_table()).cloned().unwrap_or_default();
             match out.plugin(name, &own, exe, &dir) {
                 Ok(p) => {
-                    if name == "queue" {
-                        out.queue = Some(queue::Queue::new(&own));
+                    match name {
+                        "queue" => out.queue = Some(queue::Queue::new(&own)),
+                        "browser" => out.browser = Some(Arc::new(browser::Browser::new())),
+                        _ => {}
                     }
                     out.list.push(p);
                 }
@@ -174,27 +228,43 @@ impl Plugins {
         self.list.iter().filter(move |p| groups.is_none_or(|g| g.contains(&p.name)))
     }
 
-    /// The session token for who (and worker): the same one for as long as seimei runs.
-    fn token(&self, who: &str, worker: Option<&str>) -> String {
+    /// The session token for who (and worker), given these plugins: the same one for as long as seimei runs.
+    fn token(&self, who: &str, worker: Option<&str>, plugins: &[String]) -> String {
         let mut tokens = self.tokens.lock().unwrap();
-        let me = (who.to_string(), worker.map(String::from));
-        if let Some((t, _)) = tokens.iter().find(|(_, v)| **v == me) {
+        if let Some((t, g)) = tokens.iter_mut().find(|(_, g)| g.who == who && g.worker.as_deref() == worker) {
+            g.plugins = plugins.to_vec();
             return t.clone();
         }
         let t = token_urlsafe(24);
-        tokens.insert(t.clone(), me);
+        let g = Grant { who: who.into(), worker: worker.map(String::from), plugins: plugins.to_vec(), root: None };
+        tokens.insert(t.clone(), g);
         t
+    }
+
+    /// The claude process a session runs in (it starts the session's plugins): set each time the session starts.
+    pub fn root(&self, who: &str, worker: Option<&str>, pid: Option<u32>) {
+        let mut tokens = self.tokens.lock().unwrap();
+        if let Some(g) = tokens.values_mut().find(|g| g.who == who && g.worker.as_deref() == worker) {
+            g.root = pid;
+        }
     }
 
     /// MCP servers for a session: all plugins (seimei, groups None), or the granted groups (a shikigami).
     pub fn servers(&self, who: &str, worker: Option<&str>, groups: Option<&[String]>) -> Map<String, Value> {
         let mut out = Map::new();
+        let names: Vec<String> = self.wanted(groups).map(|p| p.name.clone()).collect();
+        // A session that keeps its token keeps only what it is given now, even when that is no plugin at all.
+        let mut tokens = self.tokens.lock().unwrap();
+        if let Some(g) = tokens.values_mut().find(|g| g.who == who && g.worker.as_deref() == worker) {
+            g.plugins = names.clone();
+        }
+        drop(tokens);
         for p in self.wanted(groups) {
             let mut entry = p.mcp.clone();
             if p.linked {
                 entry.insert(
                     "env".into(),
-                    json!({"SEIMEI_SOCKET": self.socket.display().to_string(), "SEIMEI_TOKEN": self.token(who, worker),
+                    json!({"SEIMEI_SOCKET": self.socket.display().to_string(), "SEIMEI_TOKEN": self.token(who, worker, &names),
                            "SEIMEI_STATE": self.state.display().to_string()}),
                 );
             }
@@ -248,7 +318,9 @@ impl Plugins {
         }
     }
 
-    /// The socket plugins raise cards through: one JSON line in ({token, op: "card", card}), one out ({outcome}).
+    /// The socket plugins raise cards through and forward calls to: one JSON line in, one out. {token, op: "card",
+    /// card} gets {outcome}; {token, op: "call", plugin, tool, args} runs a hosted plugin's tool and gets its result.
+    /// The token must come from its session's process tree, and a call from a session given that plugin.
     pub async fn listen(self: Arc<Self>, approvals: Arc<Approvals>) {
         let _ = std::fs::remove_file(&self.socket);
         let listener = match tokio::net::UnixListener::bind(&self.socket) {
@@ -259,6 +331,7 @@ impl Plugins {
         let _ = std::fs::set_permissions(&self.socket, std::fs::Permissions::from_mode(0o600));
         while let Ok((sock, _)) = listener.accept().await {
             let (me, approvals) = (self.clone(), approvals.clone());
+            let pid = sock.peer_cred().ok().and_then(|c| c.pid()).map(|p| p as u32);
             tokio::spawn(async move {
                 let (rd, mut wr) = sock.into_split();
                 let mut rd = tokio::io::BufReader::new(rd);
@@ -267,10 +340,26 @@ impl Plugins {
                     return;
                 }
                 let req: Value = serde_json::from_str(&line).unwrap_or_default();
-                let me_is = me.tokens.lock().unwrap().get(req["token"].as_str().unwrap_or("")).cloned();
-                let reply = match (me_is, req["op"].as_str()) {
+                let grant = me.tokens.lock().unwrap().get(req["token"].as_str().unwrap_or("")).cloned();
+                let mine = |g: &Grant| matches!((pid, g.root), (Some(p), Some(r)) if descends(p, r));
+                let reply = match (grant, req["op"].as_str()) {
                     (None, _) => json!({"error": "unknown session"}),
-                    (Some((who, worker)), Some("card")) => {
+                    (Some(g), _) if !mine(&g) => json!({"error": "not this session's process"}),
+                    (Some(g), Some("call")) => {
+                        let plugin = req["plugin"].as_str().unwrap_or("");
+                        if !g.plugins.iter().any(|p| p == plugin) {
+                            json!({"error": format!("this session has no {plugin} tools")})
+                        } else {
+                            let session = Local { approvals: &approvals, who: &g.who, worker: g.worker.as_deref() };
+                            let (tool, args) = (req["tool"].as_str().unwrap_or(""), &req["args"]);
+                            // The call went away (cancelled, or its session ended): drop it, cards and all.
+                            tokio::select! {
+                                r = me.call(plugin, tool, args, &session) => json!({"result": r}),
+                                _ = rd.read_u8() => return,
+                            }
+                        }
+                    }
+                    (Some(Grant { who, worker, .. }), Some("card")) => {
                         // Only what a card shows: a plugin cannot make it a permission card or set its expiry.
                         let c = &req["card"];
                         let what = json!({"action": c["action"].as_str().unwrap_or("plugin"),
@@ -296,6 +385,16 @@ pub trait Session: Send + Sync {
     fn card(&self, what: Value) -> impl Future<Output = Result<String, String>> + Send;
 }
 
+impl Plugins {
+    /// A hosted plugin's tool call.
+    async fn call(&self, plugin: &str, tool: &str, args: &Value, session: &impl Session) -> Value {
+        match (plugin, &self.browser) {
+            ("browser", Some(b)) => b.call(tool, args, session).await,
+            _ => crate::tools::text(&format!("{plugin} is not on"), true),
+        }
+    }
+}
+
 /// The session a plugin process serves, as its env tells it.
 struct Remote {
     plugin: String,
@@ -319,6 +418,29 @@ impl Session for Remote {
         tokio::io::BufReader::new(rd).read_line(&mut line).await.map_err(|_| lost())?;
         let reply: Value = serde_json::from_str(&line).map_err(|_| lost())?;
         reply["outcome"].as_str().map(String::from).ok_or_else(lost)
+    }
+}
+
+impl Remote {
+    /// A hosted plugin's call, run by seimei.
+    async fn forward(&self, tool: &str, args: &Value) -> Value {
+        let lost = |e: &str| crate::tools::text(e, true);
+        let Ok(sock) = tokio::net::UnixStream::connect(&self.socket).await else {
+            return lost("seimei restarted, ask again");
+        };
+        let (rd, mut wr) = sock.into_split();
+        let req = json!({"token": self.token, "op": "call", "plugin": self.plugin, "tool": tool, "args": args});
+        if wr.write_all(format!("{req}\n").as_bytes()).await.is_err() {
+            return lost("seimei restarted, ask again");
+        }
+        let mut line = String::new();
+        let _ = tokio::io::BufReader::new(rd).read_line(&mut line).await;
+        let reply: Value = serde_json::from_str(&line).unwrap_or_default();
+        match (reply.get("result"), reply["error"].as_str()) {
+            (Some(r), _) => r.clone(),
+            (None, Some(e)) => lost(e),
+            (None, None) => lost("seimei restarted, ask again"),
+        }
     }
 }
 
@@ -353,6 +475,7 @@ pub async fn serve_stdio(name: &str) -> Result<(), String> {
         let task = tokio::spawn(async move {
             let reply = crate::tools::serve(&spec, msg, |tool, args| async move {
                 match remote.plugin.as_str() {
+                    p if HOSTED.contains(&p) => remote.forward(&tool, &args).await,
                     "music" => music::call(&tool, &args, remote.as_ref()).await,
                     _ => queue::call(&tool, &args, remote.as_ref()).await,
                 }

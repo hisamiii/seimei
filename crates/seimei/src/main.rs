@@ -272,6 +272,9 @@ fn main() {
         tokio::spawn(app.watcher.clone().run());
         tokio::spawn(app.watches.clone().run(events.clone()));
         tokio::spawn(app.pool.plugins.clone().listen(app.approvals.clone()));
+        if let Some(b) = &app.pool.plugins.browser {
+            tokio::spawn(b.link.clone().run(seimei_core::plugins::link::runtime_path("browser", a.dev)));
+        }
         if app.pool.plugins.queue.is_some() {
             let (st, p, ev) = (state.clone(), app.pool.clone(), events.clone());
             let watcher = seimei_core::plugins::queue::Watcher::new(
