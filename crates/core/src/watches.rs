@@ -3,16 +3,17 @@
 //! A rule names a trigger and a target, the ping (title, body, level, key, reply) and an expiry. It fires once unless
 //! repeat is set; the dispatcher hears that it fired, and that it expired without firing. {name} and {detail} in the
 //! title or body become who it was about and what happened (a shikigami's summary, a session's question).
-//! (The queue plugin's triggers come with the plugins, phase 4.)
+//! Plugins add triggers of their own (the queue's).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use serde_json::{Value, json};
 
 use crate::events::EventLog;
+use crate::plugins::Plugins;
 use crate::push::Push;
 use crate::util::{chars, hex, now, random_bytes, read_json, write_json};
 
@@ -62,6 +63,8 @@ pub struct Watches {
     /// Shikigami states by id, and the user's sessions' (status, what they ask) by session id, as last seen.
     workers: Mutex<HashMap<String, String>>,
     sessions: Mutex<HashMap<String, (String, String)>>,
+    /// Their triggers come on top of TRIGGERS.
+    pub plugins: OnceLock<Arc<Plugins>>,
 }
 
 fn s(v: &Value) -> String {
@@ -82,7 +85,15 @@ impl Watches {
             rules: Mutex::new(rules),
             workers: Mutex::default(),
             sessions: Mutex::default(),
+            plugins: OnceLock::new(),
         }
+    }
+
+    /// Every trigger: (name, what fires it).
+    pub fn triggers(&self) -> Vec<(&'static str, &'static str)> {
+        let mut all = TRIGGERS.to_vec();
+        all.extend(self.plugins.get().map(|p| p.triggers()).unwrap_or_default());
+        all
     }
 
     fn save(&self, rules: &[Value]) {
@@ -92,9 +103,13 @@ impl Watches {
     }
 
     pub fn add(&self, r: NewRule) -> Result<Value, String> {
-        if !TRIGGERS.iter().any(|(t, _)| *t == r.trigger) {
-            let all: Vec<&str> = TRIGGERS.iter().map(|(t, _)| *t).collect();
+        let triggers = self.triggers();
+        if !triggers.iter().any(|(t, _)| *t == r.trigger) {
+            let all: Vec<&str> = triggers.iter().map(|(t, _)| *t).collect();
             return Err(format!("unknown trigger {}; one of {}", crate::util::py_repr(&r.trigger), all.join(", ")));
+        }
+        if let Some(p) = self.plugins.get() {
+            p.check_trigger(&r.trigger, if r.target.trim().is_empty() { "*" } else { r.target.trim() })?;
         }
         let at = now();
         let hours = if r.hours == 0.0 || r.hours.is_nan() { DEFAULT_HOURS } else { r.hours };
@@ -166,6 +181,18 @@ impl Watches {
                 .cloned()
                 .collect()
         };
+        self.ping(trigger, name, detail, hits);
+    }
+
+    /// Ping for this one rule, if it is still there.
+    pub fn fire_rule(&self, rule: &Value, name: &str, detail: &str) {
+        let hit = self.rules.lock().unwrap().iter().find(|r| r["id"] == rule["id"]).cloned();
+        if let Some(r) = hit {
+            self.ping(&s(&r["trigger"]), name, detail, vec![r]);
+        }
+    }
+
+    fn ping(&self, trigger: &str, name: &str, detail: &str, hits: Vec<Value>) {
         let detail = chars(detail, 300);
         let fill = |x: &Value| s(x).replace("{name}", name).replace("{detail}", &detail);
         for r in hits {
@@ -278,7 +305,12 @@ impl Watches {
                     // A subscriber that falls behind is dropped: listen again.
                     None => q = events.subscribe(),
                 },
-                _ = every.tick() => self.tick(),
+                _ = every.tick() => {
+                    self.tick();
+                    if let Some(p) = self.plugins.get() {
+                        p.watch(&self).await;
+                    }
+                }
             }
         }
     }

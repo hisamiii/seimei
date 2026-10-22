@@ -107,7 +107,7 @@ pub struct Setup {
     /// The terminal a released or lent session opens in (config [sessions] terminal).
     pub terminal: String,
     /// The plugins enabled in config.
-    pub plugins: Vec<String>,
+    pub plugins: Arc<seimei_core::plugins::Plugins>,
 }
 
 impl App {
@@ -147,6 +147,7 @@ impl App {
         let p = pool.clone();
         let tell = Box::new(move |line: &str| p.notify(line, false, None));
         let watches = Arc::new(Watches::new(&state.join("watches.json"), push.clone(), tell));
+        let _ = watches.plugins.set(pool.plugins.clone());
         let tools = Arc::new(Tools {
             adopter: adopter.clone(),
             watches: watches.clone(),
@@ -295,6 +296,9 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/files/{name}", get(file))
         .route("/api/upload", post(upload))
         .route("/api/uploads/{id}", get(uploaded));
+    if app.pool.plugins.queue.is_some() {
+        r = r.route("/api/queue", get(queue_view)).route("/api/queue/action", post(queue_action));
+    }
     if app.auth.is_some() {
         r = r
             .route("/api/auth/password", post(login_password))
@@ -676,6 +680,23 @@ async fn theme_set(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> Resp
         app.events.flash(ev);
     }
     ok(rec)
+}
+
+/// claude-queue's state: cqd's snapshot, or the /proc view when cqd is down.
+async fn queue_view() -> Response {
+    ok(seimei_core::plugins::queue::view().await)
+}
+
+/// The user steers the queue from the app: the same actions as queue_control, no card.
+async fn queue_action(bytes: Bytes) -> Response {
+    let b = match body(&bytes) {
+        Ok(b) => b,
+        Err(r) => return r,
+    };
+    match seimei_core::plugins::queue::action(&b).await {
+        None => text(StatusCode::SERVICE_UNAVAILABLE, "cqd is not running"),
+        Some(r) => json_status(if r.get("error").is_some() { StatusCode::BAD_REQUEST } else { StatusCode::OK }, r),
+    }
 }
 
 async fn tasks_view(State(app): Shared) -> Response {

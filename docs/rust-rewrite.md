@@ -59,7 +59,7 @@ seimei passwd | pair | devices | lockdown | ...   as today
 | runtime, HTTP, SSE, websockets | tokio, axum, tower-http |
 | web UI embedded | rust-embed (the same plain JS/CSS/HTML files, no build step) |
 | Claude Code | our own client of its stream-json control protocol (below) |
-| MCP (plugins, seimei's own tools) | rmcp, the official Rust SDK |
+| MCP (plugins, seimei's own tools) | a small JSON-RPC handler (`tools::serve`: initialize, tools/list, tools/call) over the specs in `tests/cases/tools.json` |
 | ACP workers (#69) | agent-client-protocol, Zed's official crate |
 | passkeys | webauthn-rs |
 | phone keys (P-256 ECDSA), Web Push (RFC 8291), FCM JWT | RustCrypto: p256, hkdf, aes-gcm, rsa or ring |
@@ -111,7 +111,7 @@ A port of the parts of the MIT Python Agent SDK that seimei uses, about 1,200 li
 - **Inbound control requests**, each handled on its own task:
   - `can_use_tool`: becomes a permission card;
   - `hook_callback`: the guard's PreToolUse hook and the PreCompact hook;
-  - `mcp_message`: JSON-RPC for seimei's in-process tools, through rmcp's server handler on an in-memory transport.
+  - `mcp_message`: JSON-RPC for seimei's in-process tools, answered by `tools::serve`, the same handler the plugins use on stdio.
   `control_cancel_request` aborts the matching task (the card then ends as "cancelled").
 
 Protocol drift is the main risk: the protocol is Claude Code's internal one, and seimei uses whatever version the user
@@ -155,10 +155,7 @@ name = "music"
 command = "seimei"            # or any executable: a plugin can be written in any language
 args = ["plugin", "music"]
 prompt = "prompt.md"          # the prompt section that comes with the tools
-always_load = ["now_playing"]
-[[cards]]                     # guard cards for calls the plugin makes risky, checked before the call
-tool = "playlist_delete"
-target = "delete a playlist"
+worker_note = "..."           # a line for every shikigami's prompt, granted or not
 ```
 
 - **Who starts it.** seimei hands the plugins to each Claude Code session in its MCP config (command, args, env).
@@ -212,7 +209,7 @@ Python stays installed for a week as the way back (same state files).
 | 5 | ACP harness (#69) against a fake ACP agent, then dsh and Codex | ACP cases; one live run each |
 | 6 | `setup`, `update`, release signing, static builds, docs | install on a clean user account; switch the live service |
 
-**Progress (2026-10-21).** Phases 0 to 2 are done; phase 3 has started.
+**Progress (2026-10-22).** Phases 0 to 3 are done; phase 4 has started.
 - **Rule for the port.** Match seimei's behavior, not Python's: the wire protocol, the meaning of the state files and `tests/cases/` stay identical, everything else is plain Rust with std or a small crate. Where the two sides differ on a case, the right side wins; for the guard, blocking more is fine and every bypass found becomes a new case.
 - **Guard and cards.** The deny-list, the approval checks and the permission card options run in Rust over `tests/cases/` (`guard.json`, `check.json`, `permissions.json`). The port found one bypass in the Python guard (globs skipped hidden folders), now fixed and a case.
 - **Phase 2 server.** `SEIMEI_SERVER=target/debug/seimei uv run pytest -m web -k "tauth or tpush63 or tthemes"` runs the gate against it.
@@ -223,9 +220,10 @@ Python stays installed for a week as the way back (same state files).
 - **Dispatcher.** The session on the proto crate with its turn routing (lanes, `re:` anchors, the held reply and its bounce), notes, idle compaction and reconnects; the guard hooks and audit, approval and permission cards, usage, and seimei's tools except the shikigami ones and watch. `/api/send`, `/api/interrupt` and `/api/approvals/{aid}` are in. `tests/cases/markers.json` holds both sides, and Rust serves `tests/cases/tools.json`, which Python is held to; scripted chats give the same event log on both servers. `tu1`, `tchatlane` and `ttasks` pass; the rest of `ttraj`, `treply` and `tperm64` waits for the shikigami (P3d).
 - **Shikigami.** Summon, message, peek, stop, tune and the workers list; each shikigami's session with its cards, guard hooks, step list mirrored onto its board task, ask and board tools, reports batched to the dispatcher, and resume after a restart. `tests/cases/workers.json` holds both sides and `tools.json` has the shikigami's own server. A scripted run (cards, ask and answer, stop, tune) gives the same logs on both servers. `ttraj`, `tperm64` and `ttune74` pass.
 - **The user's sessions.** The list and its watcher, a session's page (timeline, open question, live output of a running command), typing into its kitty window and answering its question, archive, the sessions, session_peek and alias tools, and the summon heads-up about a busy session in the same checkout. What seimei reads from a session's screen before it types is in `tests/cases/screens.json` and what the dispatcher hears from the sessions in `tests/cases/sessionevents.json`, both run on both sides. The pages, the typed keys and the tool replies match Python's on the QA server; `tcache` passes.
-- **Adopt and hand-offs.** Adopt (now, or waiting for the next idle across restarts), Hand to seimei, Give to me with its card, Open on server, and adopting a released shikigami back as itself. A scripted run (cards approved and denied, the waiting file, the board, the terminal log) gives the same results on both servers; `treply` and `thandoff` pass. Until the queue plugin is ported, the queue's `claude-queue` wrapping of a resumed session is a config check in the pool.
+- **Adopt and hand-offs.** Adopt (now, or waiting for the next idle across restarts), Hand to seimei, Give to me with its card, Open on server, and adopting a released shikigami back as itself. A scripted run (cards approved and denied, the waiting file, the board, the terminal log) gives the same results on both servers; `treply` and `thandoff` pass. The queue plugin wraps a resumed session in `claude-queue`.
 - **Watches and the wake note.** The watch tool and its rules, fired from the worker and session listings and expired every 15 s, and the note after the server slept. The rules run on both sides from `tests/cases/watches.json`; the tool replies match Python's on the QA server apart from the MCP schema checks Claude Code makes first. The queue plugin's triggers come with the plugins (phase 4). All 14 web tests pass on Rust.
 - **Phase 3 gate.** All 14 web tests pass on Rust, and so do the Rust twins of the live permtest and tunetest (`crates/core/tests/live_*.rs`, run by `tests/live/*_rs.py` under `pytest -m live`; the cards' offline checks are `crates/core/tests/approvals.rs`). The pool tells the dispatcher through a small `Listener` trait, so a test can stand in for it. Plugin tool groups and their prompt text come with the plugins (phase 4).
+- **Plugin host and the queue plugin (phase 4).** A built-in runs as `seimei plugin <name>`, a stdio MCP server Claude Code starts per session (stdio, so ACP agents can use it too); its manifest and prompt ship in the binary. seimei has every enabled plugin, a shikigami the groups summon grants, each with its prompt section; user plugins and external servers load as before. A plugin raises a card through `plugins.sock` with its session's token: only the card's action, target and detail pass, and the card names that session. The queue plugin (its four tools, the claude-queue env and wrap, the queue_free and queue_wait triggers, the cqd watcher and `/api/queue`) runs on `tests/cases/queue.json` on both sides, and `tools.json` holds its spec. `crates/seimei/tests/plugin.rs` drives the built binary on stdio against a fake cqd and the real card socket; `tests/live/plugintest_rs.py` has a haiku shikigami start it, read the queue and get a denied kill card. No rmcp: the hand-rolled handler already serves seimei's own tools.
 
 **Size:** today's 7.8k lines of core Python and 4.3k of plugins should come to roughly 12 to 15k lines of Rust.
 The web UI (4.7k lines) and the Android app carry over unchanged. So do the Discord (Vencord, TypeScript) and

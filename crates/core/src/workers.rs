@@ -32,6 +32,7 @@ use crate::events::EventLog;
 use crate::guard::{Guard, HOOK_TIMEOUT};
 use crate::metrics::{self, WorkerEvents};
 use crate::paths::{expand, home};
+use crate::plugins::Plugins;
 use crate::sessions::{self, Own};
 use crate::tasks::{Board, Fields};
 use crate::transcripts::{brief, project_of, transcript};
@@ -325,13 +326,36 @@ impl Worker {
         }
     }
 
+    /// The plugin groups it may use: what summon granted that is still enabled.
+    pub fn granted(&self) -> Vec<String> {
+        let enabled = self.pool().plugins.names();
+        (self.get("tools").as_array().into_iter().flatten())
+            .filter_map(|g| g.as_str().map(String::from))
+            .filter(|g| enabled.contains(g))
+            .collect()
+    }
+
     pub fn prompt(&self) -> String {
         let r = self.rec();
+        let pool = self.pool();
         let subagents = r["subagents"].as_str().filter(|s| !s.is_empty()).unwrap_or("haiku");
-        PROMPT
+        let mut text = PROMPT
             .replace("{name}", r["name"].as_str().unwrap_or(""))
             .replace("{subagents}", subagents)
-            .replace("{about}", &self.pool().about)
+            .replace("{about}", &pool.about);
+        let notes = pool.plugins.worker_notes();
+        if !notes.is_empty() {
+            text += &format!("{notes}\n");
+        }
+        let groups = self.granted();
+        if let Some(first) = groups.first() {
+            text += &format!(
+                "\nYou have seimei's {} tools (mcp__{first}__...), with seimei's rules for them:\n\n{}\n",
+                groups.join(", "),
+                pool.plugins.prompt(Some(&groups))
+            );
+        }
+        text
     }
 
     fn env(&self) -> Vec<(String, String)> {
@@ -339,12 +363,13 @@ impl Worker {
         let subagents = r["subagents"].as_str().filter(|s| !s.is_empty()).unwrap_or("haiku");
         // No auto-memory: a shikigami reports what it learned, and seimei decides what is kept. The todo tools
         // (TaskCreate, TaskUpdate) are off by default for current models: the board mirrors them.
-        let mut env = vec![
+        let mut env = self.pool().plugins.env(r["name"].as_str().unwrap_or(""));
+        env.extend([
             (NO_CONNECTORS.0.to_string(), NO_CONNECTORS.1.to_string()),
             ("CLAUDE_CODE_DISABLE_AUTO_MEMORY".into(), "1".into()),
             ("CLAUDE_CODE_SUBAGENT_MODEL".into(), subagents.into()),
             ("CLAUDE_CODE_ENABLE_TODO_TOOLS".into(), "1".into()),
-        ];
+        ]);
         if let Some(cap) = CONTEXTS.iter().find(|c| r["context_cap"] == c.0) {
             env.push(("CLAUDE_CODE_AUTO_COMPACT_WINDOW".into(), format!("{}", cap.1 as i64)));
         }
@@ -356,17 +381,19 @@ impl Worker {
         let sid = str_of(&r["session_id"]);
         let (resume, session_id) = if r["started"] == true { (Some(sid), None) } else { (None, Some(sid)) };
         let hook = |id: &str, timeout| HookMatcher { matcher: None, callbacks: vec![id.into()], timeout };
+        let (plugins, groups) = (&self.pool().plugins, self.granted());
         Options {
             cwd: Some(PathBuf::from(str_of(&r["cwd"]))),
             model: Some(str_of(&r["model"])),
             permission_mode: Some(self.mode()),
             // Whatever Claude Code would ask in a terminal becomes a card (in bypass only its safety checks ask: blocked).
             can_use_tool: true,
-            // Its own tools carry their own cards; external MCP servers ask like the rest.
-            allowed_tools: vec!["mcp__shikigami".into()],
+            // Its own tools and seimei's plugins carry their own cards; external MCP servers ask like the rest.
+            allowed_tools: [vec!["mcp__shikigami".into()], plugins.allowed(Some(&groups))].concat(),
             setting_sources: Some(vec!["user".into(), "project".into(), "local".into()]),
             system_prompt: SystemPrompt::Preset { append: Some(self.prompt()) },
             sdk_mcp_servers: vec!["shikigami".into()],
+            mcp_servers: plugins.servers(&str_of(&r["name"]), Some(&self.id), Some(&groups)),
             // Workers talk to the user through their report and ask, never to other sessions directly.
             disallowed_tools: OFF_TOOLS.iter().map(|t| t.to_string()).collect(),
             skills: Some(SKILLS.iter().map(|s| s.to_string()).collect()),
@@ -1153,7 +1180,7 @@ pub struct Parts {
     /// A released or lent session opens in this terminal ({cwd} and {title} filled in, quoted); config [sessions].
     pub terminal: String,
     /// The plugins enabled in config.
-    pub plugins: Vec<String>,
+    pub plugins: Arc<Plugins>,
 }
 
 /// A user's session that goes on as a shikigami.
@@ -1230,7 +1257,8 @@ pub struct Pool {
     guard: Arc<Guard>,
     pub dispatcher: OnceLock<Arc<dyn Listener>>,
     terminal: String,
-    plugins: Vec<String>,
+    /// The enabled plugins: their env, the groups summon grants, and how a session opens in a terminal.
+    pub plugins: Arc<Plugins>,
     batch: Mutex<Batch>,
     flushing: AtomicBool,
     hidden: Mutex<HashSet<String>>,
@@ -1516,9 +1544,11 @@ impl Pool {
         {
             return Err(format!("no task {link} on the board"));
         }
-        if !s.tools.is_empty() {
-            // Plugin tool groups come with the plugins (phase 4).
-            return Err(format!("no such tool group: {} (enabled: none)", s.tools.join(", ")));
+        let unknown = self.plugins.unknown(&s.tools);
+        if !unknown.is_empty() {
+            let names = self.plugins.names();
+            let enabled = if names.is_empty() { "none".into() } else { names.join(", ") };
+            return Err(format!("no such tool group: {} (enabled: {enabled})", unknown.join(", ")));
         }
         let at = now();
         let model = if s.model.is_empty() { "opus".to_string() } else { s.model.clone() };
@@ -1529,6 +1559,15 @@ impl Pool {
             "state": "starting", "created": at, "updated": at, "summary": ""});
         if let Some(m) = &s.mode {
             rec["mode"] = json!(m);
+        }
+        if !s.tools.is_empty() {
+            let mut tools: Vec<&String> = vec![];
+            for t in &s.tools {
+                if !tools.contains(&t) {
+                    tools.push(t);
+                }
+            }
+            rec["tools"] = json!(tools);
         }
         let w = self.add_worker(rec.clone())?;
         self.file(&w, &title_of(&s.task, &name), s.project.as_deref(), s.link.as_deref())?;
@@ -1556,14 +1595,10 @@ impl Pool {
         Ok(w)
     }
 
-    /// The command that resumes a shikigami's session in a terminal. With the queue plugin on it runs under
-    /// claude-queue, so benches can pause it like a session under seimei (the plugin's own hook in phase 4).
+    /// The command that resumes a shikigami's session in a terminal, as the plugins run it (claude-queue).
     pub fn resume_argv(&self, w: &Worker) -> Vec<String> {
         let sid = str_of(&w.get("session_id"));
-        if self.plugins.iter().any(|p| p == "queue") {
-            return vec!["claude-queue".into(), w.name(), "--resume".into(), sid];
-        }
-        vec!["claude".into(), "--resume".into(), sid]
+        self.plugins.wrap(&w.name(), vec!["claude".into(), "--resume".into(), sid])
     }
 
     /// Open its session in a terminal on the server: the window it opened in (its id, when known).

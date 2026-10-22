@@ -1,6 +1,6 @@
-"""tests/cases/tools.json against the Python servers (seimei's and a shikigami's): initialize and tools/list, as Claude
-Code gets them over the SDK's in-process bridge (no plugins)."""
-import asyncio, json, tempfile
+"""tests/cases/tools.json against the Python servers (seimei's, a shikigami's and each built-in plugin's): initialize
+and tools/list, as Claude Code gets them over the SDK's in-process bridge."""
+import asyncio, importlib, json, tempfile
 from pathlib import Path
 from claude_agent_sdk._internal.sdk_mcp_bridge import SdkMcpBridge
 from seimei.adopt import make_adopt_tools
@@ -45,6 +45,16 @@ async def main():
     got = (await bridge.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}))["result"]["tools"]
     check("shikigami tools", got == CASES["shikigami"]["tools"], got)
     await bridge.aclose()
+    # Each built-in plugin's server (the Rust one serves it as `seimei plugin <name>`).
+    for name, spec in CASES["plugins"].items():
+        plugin = importlib.import_module(f"seimei.plugins.{name}").Plugin(Stub(), {})
+        bridge = SdkMcpBridge(name, plugin.server()["instance"])
+        init = await bridge.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}})
+        check(f"{name} initialize", init["result"] == spec["initialize"], init)
+        got = (await bridge.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}))["result"]["tools"]
+        check(f"{name} tools", got == spec["tools"], got)
+        await bridge.aclose()
 
 asyncio.run(main())
 print(f"{sum(res)}/{len(res)}")

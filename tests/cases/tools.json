@@ -1,5 +1,5 @@
 {
- "about": "seimei's own MCP server as Claude Code sees it (no plugins): the initialize result and tools/list. The descriptions are prompt text. tests/unit/toolcases.py holds the Python server to this; the Rust server serves this file.",
+ "about": "seimei's own MCP server as Claude Code sees it (no plugins): the initialize result and tools/list. shikigami: a shikigami's own server. plugins: each built-in plugin's server (the Rust one serves it as `seimei plugin <name>`). The descriptions are prompt text. tests/unit/toolcases.py holds the Python server to this; the Rust server serves this file.",
  "initialize": {
   "capabilities": {
    "tools": {
@@ -670,5 +670,100 @@
     "name": "board"
    }
   ]
+ },
+ "plugins": {
+  "queue": {
+   "initialize": {
+    "capabilities": {
+     "tools": {
+      "listChanged": false
+     }
+    },
+    "protocolVersion": "2025-06-18",
+    "serverInfo": {
+     "name": "queue",
+     "version": "1.0.0"
+    }
+   },
+   "tools": [
+    {
+     "_meta": {
+      "anthropic/alwaysLoad": true
+     },
+     "description": "claude-queue right now: which queued command holds the GPU/NPU turn (pid, session, memory, how long, about how long it has left, STUCK when its command ended but it still holds the turn), which device opens wait, in which order, for what (another command, a bench, free memory) and roughly when they start, agents frozen by a bench, idle memory hogs, and whether grants are closed after a GPU fault. Use it when a job seems stuck on its GPU or NPU.",
+     "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+     },
+     "name": "queue"
+    },
+    {
+     "description": "Steer claude-queue's GPU/NPU queue (cqd). action: bump (to: front, or a class: interactive, bench, batch), hold / unhold (a waiter keeps its place but does not start), admit (let a memory-blocked waiter start once), revoke (stop counting a lease; its processes keep their devices; kill=true instead sends SIGTERM to the command, after the user approves), park / unpark (freeze an idle agent memory hog and swap it out; never one holding a GPU/NPU), grants (to: on or off; cqd closes them after a GPU/NPU fault, check dmesg first). target: a waiter or lease id from the queue tool (W12, L3), a pid or a queue name; a hog's name for park.",
+     "inputSchema": {
+      "properties": {
+       "action": {
+        "type": "string",
+        "enum": [
+         "bump",
+         "hold",
+         "unhold",
+         "admit",
+         "revoke",
+         "park",
+         "unpark",
+         "grants"
+        ]
+       },
+       "target": {
+        "type": "string"
+       },
+       "to": {
+        "type": "string"
+       },
+       "kill": {
+        "type": "boolean"
+       }
+      },
+      "required": [
+       "action"
+      ],
+      "type": "object"
+     },
+     "name": "queue_control"
+    },
+    {
+     "description": "Show or set claude-queue's policies (cqd): bench_window (\"22:00-08:00\" or null), couple_gpu_npu, exempt (agents never frozen, first in line), interactive ({who: [queue names]}), mem_reserve_gb, mem_default_gb, mem_wait_timeout, wait_event_min, holder_idle_min, lease_linger_s, external_idle_s (agent jobs wait this long after the user's own GPU/NPU use), external_idle_bench_s (a bench's cool-down after it), desktop_busy_bench_pct (desktop GPU use above it holds a bench), contam_desktop_pct, max_freeze_s, rehome, desktop_names, desktop_args, gate (on/off). No key: all of them. Change only what the user asked for.",
+     "inputSchema": {
+      "properties": {
+       "key": {
+        "type": "string"
+       },
+       "value": {}
+      },
+      "type": "object"
+     },
+     "name": "queue_policy"
+    },
+    {
+     "description": "Past GPU/NPU jobs of claude-queue (cqd): when, agent, how long they ran and waited, memory peaks, whether a bench was contaminated. key matches the command (script path), agent a queue name.",
+     "inputSchema": {
+      "properties": {
+       "key": {
+        "type": "string"
+       },
+       "agent": {
+        "type": "string"
+       },
+       "n": {
+        "type": "integer"
+       }
+      },
+      "type": "object"
+     },
+     "name": "queue_history"
+    }
+   ]
+  }
  }
 }

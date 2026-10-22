@@ -1,5 +1,5 @@
 //! seimei [serve] [--dev] [--no-login] | passwd [--keep-sessions] | passkeys [--clear] | logout-all | lockdown | pair
-//! | devices [--revoke ID]
+//! | devices [--revoke ID] | plugin NAME
 
 use std::collections::HashSet;
 use std::io::Write;
@@ -10,12 +10,13 @@ use seimei_core::auth::Auth;
 use seimei_core::dispatcher;
 use seimei_core::events::EventLog;
 use seimei_core::permissions::configured;
+use seimei_core::plugins::Plugins;
 use seimei_core::push::{Fcm, Push, WebPush};
 use seimei_core::util::{config_file, data_dir};
 use serde_json::Value;
 
-const COMMANDS: [&str; 8] =
-    ["serve", "passwd", "passkeys", "logout-all", "lockdown", "pair", "devices", "screen-password"];
+const COMMANDS: [&str; 9] =
+    ["serve", "passwd", "passkeys", "logout-all", "lockdown", "pair", "devices", "screen-password", "plugin"];
 
 struct Args {
     command: String,
@@ -25,6 +26,8 @@ struct Args {
     clear: bool,
     revoke: Option<String>,
     model: Option<String>,
+    /// `seimei plugin <name>`: which one.
+    plugin: Option<String>,
 }
 
 fn args() -> Args {
@@ -36,6 +39,7 @@ fn args() -> Args {
         clear: false,
         revoke: None,
         model: None,
+        plugin: None,
     };
     let mut it = std::env::args().skip(1);
     while let Some(x) = it.next() {
@@ -47,6 +51,10 @@ fn args() -> Args {
             "--clear" => a.clear = true,
             "--revoke" => a.revoke = it.next(),
             "--model" => a.model = it.next(),
+            "plugin" => {
+                a.command = "plugin".into();
+                a.plugin = it.next();
+            }
             c if COMMANDS.contains(&c) => a.command = c.into(),
             other => die(&format!("unknown argument {other}; usage: seimei [{}] [--dev]", COMMANDS.join("|"))),
         }
@@ -165,6 +173,12 @@ fn account(auth: &Auth, a: &Args) {
 
 fn main() {
     let a = args();
+    if a.command == "plugin" {
+        // Claude Code starts it for a session: an MCP server on stdin and stdout.
+        let name = a.plugin.clone().unwrap_or_else(|| die("usage: seimei plugin NAME"));
+        let rt = tokio::runtime::Runtime::new().expect("a runtime");
+        return rt.block_on(seimei_core::plugins::serve_stdio(&name)).unwrap_or_else(|e| die(&e));
+    }
     let cfg: toml::Table = std::fs::read_to_string(config_file())
         .ok()
         .map(|s| s.parse().unwrap_or_else(|e| die(&format!("config.toml: {e}"))))
@@ -238,9 +252,10 @@ fn main() {
             .filter(|t| !t.is_empty())
             .unwrap_or("kitty -d {cwd} --title {title}")
             .into(),
-        plugins: (cfg.get("plugins").and_then(|p| p.get("enabled")).and_then(|e| e.as_array()).into_iter().flatten())
-            .filter_map(|p| p.as_str().map(String::from))
-            .collect(),
+        plugins: Arc::new(Plugins::load(
+            &cfg.get("plugins").and_then(|p| p.as_table()).cloned().unwrap_or_default(),
+            &state,
+        )),
     };
     let app = Arc::new(seimei_server::App::new(setup).unwrap_or_else(|e| die(&format!("workers: {e}"))));
     wire(&app);
@@ -256,6 +271,16 @@ fn main() {
         tokio::spawn(app.pool.clone().sweep());
         tokio::spawn(app.watcher.clone().run());
         tokio::spawn(app.watches.clone().run(events.clone()));
+        tokio::spawn(app.pool.plugins.clone().listen(app.approvals.clone()));
+        if app.pool.plugins.queue.is_some() {
+            let (st, p, ev) = (state.clone(), app.pool.clone(), events.clone());
+            let watcher = seimei_core::plugins::queue::Watcher::new(
+                Box::new(move || seimei_core::plugins::queue::names(&st)),
+                Box::new(move |line, urgent, key| p.notify(line, urgent, Some(key))),
+                Box::new(move |snap| ev.flash(snap)),
+            );
+            tokio::spawn(watcher.run());
+        }
         let wake = seimei_core::wake::WakeWatch::new(events.clone(), app.pool.clone());
         tokio::spawn(wake.run(std::time::Duration::from_secs(10)));
         // `systemctl --user kill -s USR1 seimei` from a key binding: end the turn.

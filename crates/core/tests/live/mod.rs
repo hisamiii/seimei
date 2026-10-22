@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use seimei_core::approvals::Approvals;
 use seimei_core::events::EventLog;
 use seimei_core::guard::Guard;
+use seimei_core::plugins::Plugins;
 use seimei_core::tasks::Board;
 use seimei_core::usage::Usage;
 use seimei_core::workers::{Listener, Parts, Pool};
@@ -67,6 +68,18 @@ pub fn transcript(cwd: &Path, session_id: &str) -> PathBuf {
 
 /// A pool on a state folder of its own, wired like the server's: the guard tells it, it tells `heard`.
 pub fn pool(state: &Path, mode: &str, events: &Arc<EventLog>, approvals: &Arc<Approvals>) -> (Arc<Pool>, Arc<Heard>) {
+    let plugins = Arc::new(Plugins::load(&Default::default(), state));
+    pool_with(state, mode, events, approvals, plugins)
+}
+
+/// The same, with these plugins.
+pub fn pool_with(
+    state: &Path,
+    mode: &str,
+    events: &Arc<EventLog>,
+    approvals: &Arc<Approvals>,
+    plugins: Arc<Plugins>,
+) -> (Arc<Pool>, Arc<Heard>) {
     std::fs::create_dir_all(state).unwrap();
     let guard = Arc::new(Guard::new(events.clone(), approvals.clone(), state));
     let parts = Parts {
@@ -76,7 +89,7 @@ pub fn pool(state: &Path, mode: &str, events: &Arc<EventLog>, approvals: &Arc<Ap
         approvals: approvals.clone(),
         guard: guard.clone(),
         terminal: String::new(),
-        plugins: vec![],
+        plugins,
     };
     let pool = Pool::new(state, mode, "test machine", parts).unwrap();
     let p = pool.clone();

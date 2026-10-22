@@ -234,7 +234,30 @@ fn address(s: &Live) -> String {
 impl Tools {
     /// One JSON-RPC message; None for a notification.
     pub async fn handle(self: Arc<Self>, message: Value) -> Option<Value> {
-        serve(&SERVER, message, |name, args| async move { self.call(&name, &args).await }).await
+        let spec = self.spec();
+        serve(&spec, message, |name, args| async move { self.call(&name, &args).await }).await
+    }
+
+    /// The server as Claude Code sees it: the watch tool lists the plugins' triggers too.
+    fn spec(&self) -> Value {
+        let extra = self.watches.triggers().split_off(TRIGGERS.len());
+        let mut spec = SERVER.clone();
+        if extra.is_empty() {
+            return spec;
+        }
+        let all = self.watches.triggers();
+        for t in spec["tools"].as_array_mut().into_iter().flatten().filter(|t| t["name"] == "watch") {
+            let listed: Vec<String> = TRIGGERS.iter().map(|(k, v)| format!("{k}: {v}")).collect();
+            let more: Vec<String> = all.iter().map(|(k, v)| format!("{k}: {v}")).collect();
+            let desc = t["description"].as_str().unwrap_or("").replace(&listed.join("; "), &more.join("; "));
+            t["description"] = json!(desc);
+            t["inputSchema"]["properties"]["trigger"]["enum"] = json!(all.iter().map(|(k, _)| *k).collect::<Vec<_>>());
+            if extra.iter().any(|(k, _)| *k == "queue_wait") {
+                let target = &mut t["inputSchema"]["properties"]["target"]["description"];
+                *target = json!(format!("{}; minutes for queue_wait", target.as_str().unwrap_or("")));
+            }
+        }
+        spec
     }
 
     async fn call(self: Arc<Self>, name: &str, a: &Value) -> Value {
@@ -532,7 +555,7 @@ impl Tools {
                     repeat: truthy(&a["repeat"]),
                 };
                 // An unknown trigger is the first thing to hear about, then a missing title.
-                if rule.title.is_empty() && TRIGGERS.iter().any(|(t, _)| *t == rule.trigger) {
+                if rule.title.is_empty() && self.watches.triggers().iter().any(|(t, _)| *t == rule.trigger) {
                     return text("A rule needs a title for its ping.", true);
                 }
                 let r = match self.watches.add(rule) {

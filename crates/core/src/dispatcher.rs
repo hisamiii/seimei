@@ -352,12 +352,23 @@ impl Dispatcher {
     }
 
     pub fn prompt(&self) -> String {
+        let plugins = &self.tools.pool.plugins;
+        let groups = plugins.names();
+        let grants = if groups.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "- summon's tools option grants a shikigami plugin tool groups ({}); it gets none unless you grant \
+                 them, and they come with the same cards, guard and rules as yours.\n",
+                groups.join(", ")
+            )
+        };
         PROMPT
             .replace("{notes}", &self.notes_path().display().to_string())
             .replace("{name}", &self.cfg.name)
             .replace("{about}", &self.cfg.about)
-            .replace("{grants}", "")
-            .replace("{plugins}", "")
+            .replace("{grants}", &grants)
+            .replace("{plugins}", &plugins.prompt(None))
     }
 
     /// A resumed session keeps the system prompt it had until its next compaction: when a deploy changed the prompt,
@@ -488,25 +499,29 @@ impl Dispatcher {
                 (None, Some(sid))
             };
         let checklist = self.state.join("compact-checklist.md");
+        let plugins = &self.tools.pool.plugins;
+        let mut env = plugins.env("seimei");
+        env.extend([
+            (NO_CONNECTORS.0.into(), NO_CONNECTORS.1.into()),
+            // It compacts at this many tokens, whatever the model's window is.
+            ("CLAUDE_CODE_AUTO_COMPACT_WINDOW".into(), self.cfg.compact_window.to_string()),
+        ]);
         Options {
             cwd: Some(cwd.clone()),
             model: Some(self.cfg.model.clone()),
             permission_mode: Some(self.cfg.mode.clone()),
             // Whatever Claude Code would ask in a terminal becomes a card, which a chat message also settles.
             can_use_tool: true,
-            // seimei's tools carry their own cards; external MCP servers ask like the rest.
-            allowed_tools: vec!["mcp__seimei".into()],
+            // seimei's tools and its plugins carry their own cards; external MCP servers ask like the rest.
+            allowed_tools: [vec!["mcp__seimei".into()], plugins.allowed(None)].concat(),
             include_partial_messages: true,
             setting_sources: Some(vec!["user".into(), "project".into(), "local".into()]),
             system_prompt: SystemPrompt::Preset { append: Some(self.prompt()) },
-            // It compacts at this many tokens, whatever the model's window is.
-            env: vec![
-                (NO_CONNECTORS.0.into(), NO_CONNECTORS.1.into()),
-                ("CLAUDE_CODE_AUTO_COMPACT_WINDOW".into(), self.cfg.compact_window.to_string()),
-            ],
+            env,
             disallowed_tools: OFF_TOOLS.iter().map(|t| t.to_string()).collect(),
             skills: Some(vec![]),
             sdk_mcp_servers: vec!["seimei".into()],
+            mcp_servers: plugins.servers("seimei", None, None),
             hooks: vec![
                 (
                     "PreToolUse".into(),
