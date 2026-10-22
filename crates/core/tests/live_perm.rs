@@ -25,6 +25,7 @@ fn summon(name: &str, task: &str, cwd: &str, mode: Option<&str>) -> Summon {
         link: None,
         tools: vec![],
         mode: mode.map(String::from),
+        harness: None,
     }
 }
 

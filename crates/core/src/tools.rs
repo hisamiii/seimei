@@ -359,6 +359,7 @@ impl Tools {
             link: opt("task_id"),
             tools,
             mode: opt("mode"),
+            harness: opt("harness"),
         };
         let w = match self.pool.summon(s).await {
             Ok(w) => w,

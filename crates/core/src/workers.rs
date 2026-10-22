@@ -7,7 +7,7 @@
 //! Lock order: the board before the pool and the records, never the other way round (the dispatcher's drift line
 //! reads the pool under the board lock), so nothing here touches the board while it holds a pool or record lock.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -15,6 +15,7 @@ use std::sync::{Arc, LazyLock, Mutex, OnceLock, Weak};
 use std::time::Duration;
 
 use regex::Regex;
+use seimei_proto::acp;
 use seimei_proto::{
     AssistantMessage, BoxFuture, Client, ContentBlock, Handler, HookMatcher, Message, Options, Permission,
     PermissionRequest, ResultMessage, SystemPrompt, UserContent, UserMessage,
@@ -66,6 +67,8 @@ const IDLE_DISCONNECT: Duration = Duration::from_secs(600);
 /// real turn before calling the worker done.
 const TRIVIAL_GRACE: Duration = Duration::from_secs(30);
 const TRIVIAL: [&str; 2] = ["", "No response requested."];
+/// An ACP agent's text chunks are one event; this long without another, what came so far is said.
+const CHUNK_PAUSE: Duration = Duration::from_millis(500);
 /// Built-in tools a shikigami has no use for: scheduling, notebooks, worktree switching, remote triggers, design sync,
 /// and talking to other sessions (its report and ask go through seimei).
 const OFF_TOOLS: [&str; 13] = [
@@ -116,6 +119,31 @@ const SHOWN: [&str; 16] = [
     "tunes",
     "effort_next",
 ];
+/// An ACP agent a shikigami can run on (config [agents.<name>]: command, args, env). It uses its own login: seimei
+/// never handles its keys.
+#[derive(Clone, Debug, Default)]
+pub struct Agent {
+    pub command: String,
+    pub args: Vec<String>,
+    pub env: Vec<(String, String)>,
+}
+
+/// The [agents] table: each entry with a command.
+pub fn agents_from(cfg: Option<&toml::Table>) -> BTreeMap<String, Agent> {
+    let mut out = BTreeMap::new();
+    for (name, a) in cfg.into_iter().flatten() {
+        let Some(command) = a.get("command").and_then(|c| c.as_str()).filter(|c| !c.is_empty()) else { continue };
+        let strs = |v: Option<&toml::Value>| -> Vec<String> {
+            v.and_then(|v| v.as_array()).into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect()
+        };
+        let env = (a.get("env").and_then(|e| e.as_table()).into_iter().flatten())
+            .filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_string())))
+            .collect();
+        out.insert(name.clone(), Agent { command: expand(command), args: strs(a.get("args")), env });
+    }
+    out
+}
+
 /// The shikigami's own MCP server (ask, board), as tests/cases/tools.json has it.
 static SERVER: LazyLock<Value> = LazyLock::new(|| {
     let all: Value = serde_json::from_str(include_str!("../../../tests/cases/tools.json")).expect("tools.json");
@@ -280,6 +308,19 @@ impl Worker {
             *rec = json!({});
         }
         f(rec.as_object_mut().expect("an object"))
+    }
+
+    /// The ACP agent it runs on (harness acp:<agent>); None for Claude Code.
+    pub fn agent(&self) -> Option<String> {
+        self.get("harness").as_str().and_then(|h| h.strip_prefix("acp:")).map(String::from)
+    }
+
+    /// Claude Code only: what an ACP shikigami cannot do.
+    fn claude_only(&self, what: &str) -> Result<(), String> {
+        match self.agent() {
+            Some(a) => Err(format!("{} runs on the ACP agent {a}, which cannot {what}", self.name())),
+            None => Ok(()),
+        }
     }
 
     /// Its permission mode: what summon or the user set, else the configured one.
@@ -548,6 +589,7 @@ impl Worker {
 
     /// Stop it if it works, let go of its process, and resume the session in a terminal on the server.
     async fn to_laptop(self: &Arc<Self>, title: &str, extra: &[&str]) -> Result<Option<Value>, String> {
+        self.claude_only("open in a terminal")?;
         if self.get("started") != true {
             return Err("it has no session yet".into());
         }
@@ -594,6 +636,7 @@ impl Worker {
         if self.state() == "released" {
             return Err(format!("{} is the user's own session now", self.name()));
         }
+        self.claude_only("change its effort or model")?;
         let (done, rx) = oneshot::channel();
         let (effort, model) = (effort.map(String::from), model.map(String::from));
         self.cmd(Cmd::Tune { effort, model, by: by.into(), done });
@@ -605,6 +648,7 @@ impl Worker {
         if !crate::permissions::MODES.contains(&mode) {
             return Err(format!("mode is one of {}", crate::permissions::MODES.join(", ")));
         }
+        self.claude_only("change its permission mode")?;
         let (done, rx) = oneshot::channel();
         self.cmd(Cmd::SetMode { mode: mode.into(), done });
         rx.await.unwrap_or_else(|_| Err("its session ended".into()))
@@ -683,6 +727,18 @@ struct Session {
     w: Arc<Worker>,
     pool: Arc<Pool>,
     client: Option<Client>,
+    /// Its ACP agent, for a shikigami on one (harness acp:<agent>) instead of Claude Code.
+    acp: Option<acp::Client>,
+    /// An ACP turn runs; messages sent meanwhile wait in queued for the next one.
+    turn: bool,
+    queued: Vec<String>,
+    /// The agent's text so far, said in chunks: one assistant event once something else comes, or a pause.
+    chunk: String,
+    chunk_until: Option<Instant>,
+    /// Steps its last plan put on the board (p1..pN).
+    plan: usize,
+    /// A new ACP session: its first prompt carries the shikigami prompt.
+    fresh: bool,
     stopping: bool,
     last_text: String,
     turn_text: bool,
@@ -703,12 +759,26 @@ async fn next(client: &mut Option<Client>) -> Option<Message> {
     }
 }
 
+async fn next_acp(client: &mut Option<acp::Client>) -> Option<acp::Event> {
+    match client {
+        Some(c) => c.recv().await,
+        None => std::future::pending().await,
+    }
+}
+
 impl Session {
     fn new(w: Arc<Worker>) -> Session {
         Session {
             pool: w.pool(),
             w,
             client: None,
+            acp: None,
+            turn: false,
+            queued: vec![],
+            chunk: String::new(),
+            chunk_until: None,
+            plan: 0,
+            fresh: false,
             stopping: false,
             last_text: String::new(),
             turn_text: false,
@@ -722,7 +792,7 @@ impl Session {
 
     async fn run(mut self, mut rx: mpsc::UnboundedReceiver<Cmd>) {
         loop {
-            let (grace, idle) = (self.grace, self.idle);
+            let (grace, idle, chunk) = (self.grace, self.idle, self.chunk_until);
             tokio::select! {
                 cmd = rx.recv() => match cmd {
                     Some(c) => self.command(c).await,
@@ -732,7 +802,12 @@ impl Session {
                     Some(m) => self.handle(m).await,
                     None => self.ended().await,
                 },
+                ev = next_acp(&mut self.acp) => match ev {
+                    Some(e) => self.acp_event(e),
+                    None => self.ended().await,
+                },
                 _ = sleep_until(grace.unwrap_or_else(far)), if grace.is_some() => self.settle(),
+                _ = sleep_until(chunk.unwrap_or_else(far)), if chunk.is_some() => self.said(),
                 _ = sleep_until(idle.unwrap_or_else(far)), if idle.is_some() => {
                     // Close an idle session's process; the next message resumes it.
                     self.idle = None;
@@ -748,6 +823,10 @@ impl Session {
         if let Some(mut c) = self.client.take() {
             c.close().await;
         }
+        if let Some(mut c) = self.acp.take() {
+            c.close().await;
+        }
+        self.turn = false;
     }
 
     /// The stream ended: the claude process is gone.
@@ -778,7 +857,7 @@ impl Session {
                 let _ = done.send(self.connect().await);
             }
             Cmd::Up { done } => {
-                let _ = done.send(self.client.is_some());
+                let _ = done.send(self.client.is_some() || self.acp.is_some());
             }
             Cmd::Close { done } => {
                 self.idle = None;
@@ -799,12 +878,18 @@ impl Session {
         }
         self.w.add(ev);
         self.connect().await?;
+        if self.acp.is_some() {
+            return self.prompt_acp(text.into());
+        }
         self.stopping = false;
         self.w.set("running", json!({"question": null}));
         self.client.as_ref().expect("a session").query(text).map_err(|e| e.to_string())
     }
 
     async fn connect(&mut self) -> Result<(), String> {
+        if let Some(agent) = self.w.agent() {
+            return self.connect_acp(&agent).await;
+        }
         if self.client.is_none() {
             let handler: Arc<dyn Handler> = Arc::new(Side { w: self.w.clone() });
             let client = Client::connect(self.w.options(), handler).await.map_err(|e| e.to_string())?;
@@ -819,6 +904,23 @@ impl Session {
 
     async fn stop(&mut self) {
         let state = self.w.state();
+        if self.w.agent().is_some() && !self.turn {
+            // No turn runs (it asked, then ended its turn; or a restart): stopping only ends the wait.
+            if ACTIVE.contains(&state.as_str()) {
+                self.queued.clear();
+                self.w.set("stopped", json!({"summary": "Stopped.", "question": null}));
+                self.pool.report(&self.w, "stopped", "");
+            }
+            return;
+        }
+        if let Some(c) = &self.acp {
+            self.stopping = true;
+            self.queued.clear();
+            if let Err(e) = c.cancel() {
+                eprintln!("seimei: cancelling {}: {e}", self.w.name());
+            }
+            return;
+        }
         if self.client.is_none() && state == "asking" {
             // Asking after a restart: no process runs, so stopping only ends the wait.
             self.w.set("stopped", json!({"summary": "Stopped.", "question": null}));
@@ -1095,6 +1197,262 @@ impl Session {
         self.stopping = false;
         self.idle = Some(Instant::now() + IDLE_DISCONNECT);
     }
+
+    /// Start its ACP agent: a new session (its id goes on the record), or the one it had, loaded. The agent gets the
+    /// granted plugins as stdio MCP servers and seimei's env for the shikigami, and runs its own login.
+    async fn connect_acp(&mut self, agent: &str) -> Result<(), String> {
+        if self.acp.is_some() {
+            return Ok(());
+        }
+        let a = (self.pool.agents.get().and_then(|m| m.get(agent)).cloned())
+            .ok_or(format!("no ACP agent {agent} in config [agents]"))?;
+        let r = self.w.rec();
+        let name = str_of(&r["name"]);
+        let started = r["started"] == true;
+        let groups = self.w.granted();
+        let mcp = acp_servers(self.pool.plugins.servers(&name, Some(&self.w.id), Some(&groups)));
+        let mut env = self.pool.plugins.env(&name);
+        env.extend(a.env);
+        let opts = acp::Options {
+            program: a.command.into(),
+            args: a.args,
+            cwd: PathBuf::from(str_of(&r["cwd"])),
+            env,
+            env_remove: vec![],
+            mcp_servers: mcp,
+            load: started.then(|| str_of(&r["session_id"])),
+        };
+        let handler: Arc<dyn acp::Handler> = Arc::new(AcpSide { w: self.w.clone() });
+        let mut c = acp::Client::connect(opts, handler).await.map_err(|e| format!("{agent}: {e}"))?;
+        // Its log has the history a loaded session replays.
+        c.drain();
+        self.pool.plugins.root(&name, Some(&self.w.id), c.pid());
+        if !started {
+            let sid = c.session_id.clone();
+            self.w.edit(|r| {
+                r.insert("session_id".into(), json!(sid));
+                r.insert("started".into(), json!(true));
+            });
+            self.pool.changed();
+            self.fresh = true;
+        }
+        self.acp = Some(c);
+        Ok(())
+    }
+
+    /// A message for the agent: a new turn, or the next one when a turn runs (ACP has no message into a turn).
+    fn prompt_acp(&mut self, text: String) -> Result<(), String> {
+        if self.turn {
+            self.queued.push(text);
+            return Ok(());
+        }
+        self.stopping = false;
+        self.last_text.clear();
+        self.w.set("running", json!({"question": null}));
+        let text = if std::mem::take(&mut self.fresh) { format!("{}\n{text}", self.w.prompt()) } else { text };
+        self.acp.as_ref().expect("a session").prompt_text(&text).map_err(|e| e.to_string())?;
+        self.turn = true;
+        Ok(())
+    }
+
+    /// Its text so far, as one assistant event.
+    fn said(&mut self) {
+        self.chunk_until = None;
+        let text = std::mem::take(&mut self.chunk);
+        if text.trim().is_empty() {
+            return;
+        }
+        self.w.add(json!({"type": "assistant", "text": text}));
+        self.w.doing(json!({"text": first_line(&text, 160)}));
+        self.last_text = text;
+    }
+
+    fn acp_event(&mut self, ev: acp::Event) {
+        use acp::{Event, Update};
+        match ev {
+            Event::Update(Update::Text(t)) => {
+                self.chunk.push_str(&t);
+                self.chunk_until = Some(Instant::now() + CHUNK_PAUSE);
+            }
+            // Its thinking stays out of the log, as Claude Code's does.
+            Event::Update(Update::Thought(_)) => {}
+            Event::Update(u) => {
+                self.said();
+                match u {
+                    Update::ToolCall(t) => {
+                        let name = if t.kind.is_empty() { "tool".to_string() } else { t.kind.clone() };
+                        self.w.add(json!({"type": "tool", "tool_id": t.id, "name": name, "summary": t.title}));
+                        self.w.doing(json!({"name": name, "summary": t.title}));
+                    }
+                    Update::ToolCallUpdate(t) if matches!(t.status.as_str(), "completed" | "failed") => {
+                        let text = t.content.join("\n");
+                        self.w.add(json!({"type": "tool_result", "tool_id": t.id, "error": t.status == "failed",
+                            "text": text}));
+                    }
+                    Update::Plan(entries) => self.plan_steps(&entries),
+                    _ => {}
+                }
+            }
+            Event::TurnEnd(end) => {
+                self.said();
+                self.turn = false;
+                self.turn_ended(end);
+            }
+            Event::Unreadable(line) => eprintln!("seimei: {} wrote: {}", self.w.name(), chars(&line, 200)),
+        }
+    }
+
+    /// The agent's plan is its task's steps: p1..pN, the whole list each time.
+    fn plan_steps(&mut self, entries: &[acp::PlanEntry]) {
+        let mut board = self.pool.board.lock().unwrap();
+        for (i, e) in entries.iter().enumerate() {
+            board.step(&self.w.id, &format!("p{}", i + 1), Some(&e.content), Some(&e.status));
+        }
+        for i in entries.len()..self.plan {
+            board.step(&self.w.id, &format!("p{}", i + 1), None, Some("deleted"));
+        }
+        self.plan = entries.len();
+    }
+
+    /// A turn ended with its stop reason (or the agent failed): the next queued message goes on, else it reports.
+    fn turn_ended(&mut self, end: Result<String, String>) {
+        let n = self.w.get("turns").as_i64().unwrap_or(0);
+        self.w.edit(|r| r.insert("turns".into(), json!(n + 1)));
+        let stopped = self.stopping || end.as_deref() == Ok("cancelled");
+        if !stopped && end.is_ok() && !self.queued.is_empty() {
+            let text = std::mem::take(&mut self.queued).join("\n\n");
+            if self.prompt_acp(text).is_ok() {
+                return;
+            }
+        }
+        self.queued.clear();
+        let text = self.last_text.trim().to_string();
+        let state = self.w.state();
+        if state == "asking" && !stopped {
+        } else if stopped {
+            self.w.set("stopped", json!({"summary": "Stopped.", "question": null}));
+            self.pool.report(&self.w, "stopped", "");
+        } else {
+            match end {
+                Ok(reason) if reason == "end_turn" => {
+                    self.w.set("done", json!({"summary": first_line(&text, 160), "result": chars(&text, 4000)}));
+                    self.pool.report(&self.w, "done", &text);
+                }
+                Ok(reason) | Err(reason) => {
+                    let why = match reason.as_str() {
+                        "max_tokens" => "The agent ran out of tokens.".to_string(),
+                        "max_turn_requests" => "The agent hit its limit of model requests for a turn.".to_string(),
+                        "refusal" => "The agent refused.".to_string(),
+                        r => format!("The agent failed: {r}."),
+                    };
+                    self.w.set("failed", json!({"summary": why}));
+                    let said = if text.is_empty() { why } else { format!("{why} It said: {text}") };
+                    self.pool.report(&self.w, "failed", &said);
+                }
+            }
+        }
+        self.go_idle();
+    }
+}
+
+/// The granted plugins as an ACP agent takes them: stdio servers only (an agent need not speak HTTP MCP).
+fn acp_servers(servers: Map<String, Value>) -> Vec<acp::McpServer> {
+    let strs = |v: &Value| -> Vec<String> {
+        v.as_array().into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect()
+    };
+    (servers.into_iter())
+        .filter_map(|(name, e)| {
+            let command = e["command"].as_str()?.to_string();
+            let env = (e["env"].as_object().into_iter().flatten())
+                .filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_string())))
+                .collect();
+            Some(acp::McpServer { name, command, args: strs(&e["args"]), env })
+        })
+        .collect()
+}
+
+/// An ACP tool call as the Claude Code call the guard and the cards know: a command is Bash, a file edit Write, a
+/// read Read, a fetch WebFetch. What has no such shape keeps its kind and its raw input (the guard passes it, and a
+/// card shows it).
+pub fn claude_shaped(t: &acp::ToolCall) -> (String, Value) {
+    let raw = t.input.clone().unwrap_or(json!({}));
+    let s = |k: &str| raw[k].as_str().filter(|v| !v.is_empty()).map(String::from);
+    let path = ["file_path", "path", "abs_path"].iter().find_map(|k| s(k));
+    let command = match &raw["command"] {
+        Value::String(c) => Some(c.clone()),
+        // Codex sends argv; a shell's -c script is the command itself.
+        Value::Array(a) => {
+            let argv: Vec<&str> = a.iter().filter_map(Value::as_str).collect();
+            let shell = |p: &str| ["sh", "bash", "zsh", "dash"].contains(&p.rsplit('/').next().unwrap_or(p));
+            match argv.as_slice() {
+                [sh, flag, script] if shell(sh) && ["-c", "-lc"].contains(flag) => Some(script.to_string()),
+                _ if argv.len() == a.len() && !a.is_empty() => {
+                    Some(argv.iter().map(|w| sh_quote(w)).collect::<Vec<_>>().join(" "))
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    };
+    match (t.kind.as_str(), command, path) {
+        ("execute", Some(c), _) => ("Bash".into(), json!({"command": c})),
+        ("edit" | "delete" | "move", _, Some(p)) => ("Write".into(), json!({"file_path": p})),
+        ("read" | "search", _, Some(p)) => ("Read".into(), json!({"file_path": p})),
+        ("fetch", _, _) if s("url").is_some() => ("WebFetch".into(), json!({"url": s("url")})),
+        (kind, _, _) => (if kind.is_empty() { "tool".into() } else { kind.into() }, raw),
+    }
+}
+
+/// What a shikigami's ACP agent asks of seimei: permission, through the guard and then a card. Only the once options
+/// are ever picked: an agent's always rules would be rules seimei cannot see.
+struct AcpSide {
+    w: Arc<Worker>,
+}
+
+impl acp::Handler for AcpSide {
+    fn permission(&self, req: acp::PermissionRequest) -> BoxFuture<acp::Outcome> {
+        let w = self.w.clone();
+        let seq = w.asked.fetch_add(1, Ordering::SeqCst) + 1;
+        Box::pin(async move {
+            let pool = w.pool();
+            let pick = |kind: &str| req.options.iter().find(|o| o.kind == kind).map(|o| o.id.clone());
+            let reject = pick("reject_once").map_or(acp::Outcome::Cancelled, acp::Outcome::Selected);
+            let Some(allow) = pick("allow_once") else { return reject };
+            let (tool, input) = claude_shaped(&req.tool);
+            let (name, cwd) = (w.name(), str_of(&w.get("cwd")));
+            let hook = json!({"tool_name": tool, "tool_input": input, "cwd": cwd, "session_id": w.get("session_id")});
+            let said = pool.guard.pre(&name, Some(&w.id), &hook, Some(&req.tool.id)).await;
+            match said["hookSpecificOutput"]["permissionDecision"].as_str() {
+                Some("deny") => return reject,
+                // Its own card was approved.
+                Some("allow") => return acp::Outcome::Selected(allow),
+                _ => {}
+            }
+            let ask = PermissionRequest {
+                tool_name: tool,
+                input,
+                tool_use_id: Some(req.tool.id.clone()),
+                description: Some(req.tool.title.clone()).filter(|t| !t.is_empty()),
+                ..PermissionRequest::default()
+            };
+            let waiting = |t: Option<String>| w.waiting_card(seq, t);
+            // Claude Code's modes are not the agent's: every request is a card ("default").
+            let d = crate::permissions::can_use(
+                &pool.approvals,
+                &name,
+                Some(&w.id),
+                &ask,
+                &pool.mode,
+                "default",
+                Some(&waiting),
+            )
+            .await;
+            match d.permission {
+                Permission::Allow { .. } => acp::Outcome::Selected(allow),
+                Permission::Deny { .. } => reject,
+            }
+        })
+    }
 }
 
 fn far() -> Instant {
@@ -1179,6 +1537,8 @@ pub struct Summon {
     pub link: Option<String>,
     pub tools: Vec<String>,
     pub mode: Option<String>,
+    /// claude (None) or acp:<agent>, an agent from config [agents].
+    pub harness: Option<String>,
 }
 
 /// Lines for the dispatcher not sent yet: (key, line, urgent, repeats), oldest first.
@@ -1309,6 +1669,8 @@ pub struct Pool {
     terminal: String,
     /// The enabled plugins: their env, the groups summon grants, and how a session opens in a terminal.
     pub plugins: Arc<Plugins>,
+    /// The ACP agents a shikigami can run on (config [agents]), set once at startup.
+    pub agents: OnceLock<BTreeMap<String, Agent>>,
     batch: Mutex<Batch>,
     flushing: AtomicBool,
     hidden: Mutex<HashSet<String>>,
@@ -1357,6 +1719,7 @@ impl Pool {
                 dispatcher: OnceLock::new(),
                 terminal: parts.terminal,
                 plugins: parts.plugins,
+                agents: OnceLock::new(),
                 batch: Mutex::new(vec![]),
                 flushing: AtomicBool::new(false),
                 hidden: Mutex::new(HashSet::new()),
@@ -1600,8 +1963,22 @@ impl Pool {
             let enabled = if names.is_empty() { "none".into() } else { names.join(", ") };
             return Err(format!("no such tool group: {} (enabled: {enabled})", unknown.join(", ")));
         }
+        let harness = s.harness.as_deref().filter(|h| !h.is_empty() && *h != "claude");
+        if let Some(h) = harness {
+            let agents = self.agents.get().map(|a| a.keys().map(|k| format!("acp:{k}")).collect::<Vec<_>>());
+            let agents = agents.unwrap_or_default();
+            if !agents.iter().any(|a| a == h) {
+                let known = if agents.is_empty() { "none in config".into() } else { agents.join(", ") };
+                return Err(format!("harness is claude or an ACP agent from config [agents] ({known})"));
+            }
+        }
         let at = now();
-        let model = if s.model.is_empty() { "opus".to_string() } else { s.model.clone() };
+        // An ACP agent picks its own model: the record names the agent.
+        let model = match harness {
+            Some(h) => h.to_string(),
+            None if s.model.is_empty() => "opus".to_string(),
+            None => s.model.clone(),
+        };
         let subagents = if s.subagents.is_empty() { "haiku".to_string() } else { s.subagents.clone() };
         let cwd = path.display().to_string();
         let mut rec = json!({"id": hex(&random_bytes(4)), "name": name, "task": s.task, "cwd": cwd, "model": model,
@@ -1609,6 +1986,9 @@ impl Pool {
             "state": "starting", "created": at, "updated": at, "summary": ""});
         if let Some(m) = &s.mode {
             rec["mode"] = json!(m);
+        }
+        if let Some(h) = harness {
+            rec["harness"] = json!(h);
         }
         if !s.tools.is_empty() {
             let mut tools: Vec<&String> = vec![];

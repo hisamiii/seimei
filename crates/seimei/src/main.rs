@@ -258,6 +258,7 @@ fn main() {
         ),
     };
     let app = Arc::new(seimei_server::App::new(setup).unwrap_or_else(|e| die(&format!("workers: {e}"))));
+    let _ = app.pool.agents.set(seimei_core::workers::agents_from(cfg.get("agents").and_then(|a| a.as_table())));
     wire(&app);
 
     let rt = tokio::runtime::Runtime::new().expect("a runtime");

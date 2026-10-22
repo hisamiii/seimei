@@ -55,6 +55,7 @@ async fn tune_live() {
             link: None,
             tools: vec![],
             mode: None,
+            harness: None,
         })
         .await
         .unwrap();

@@ -285,6 +285,11 @@ impl Client {
         self.events.recv().await
     }
 
+    /// Drop the events read so far: a loaded session's history, which its owner keeps already.
+    pub fn drain(&mut self) {
+        while self.events.try_recv().is_ok() {}
+    }
+
     /// Start a turn with these content blocks; its updates and then its TurnEnd come from recv.
     pub fn prompt(&self, content: Vec<Value>) -> Result<(), Error> {
         let n = self.id();

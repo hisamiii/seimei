@@ -67,6 +67,7 @@ async fn queue_plugin_live() {
             link: None,
             tools: vec!["queue".into()],
             mode: None,
+            harness: None,
         })
         .await
         .unwrap();

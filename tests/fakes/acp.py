@@ -3,6 +3,7 @@
 each prompt plays the script its "!command" line picks, and what no script takes is echoed back.
 
   !think          a thought, then the answer
+  !chunks         the answer in three chunks
   !plan           a plan of three steps, then the same plan with the first two done
   !tool <cmd>     an execute tool call that asks permission first; allowed it runs, rejected it fails
   !wait           a turn that runs until the client cancels it (stop reason cancelled)
@@ -83,6 +84,9 @@ def turn(sid: str, text: str) -> str:
     if cmd == "!think":
         say(sid, "Thinking it over.", "agent_thought_chunk")
         say(sid, "Done thinking.")
+    elif cmd == "!chunks":
+        for part in ["one ", "two ", "three"]:
+            say(sid, part)
     elif cmd == "!plan":
         steps = ["Read the code", "Change it", "Test it"]
         update(sid, {"sessionUpdate": "plan", "entries": [
