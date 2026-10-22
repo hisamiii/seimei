@@ -57,8 +57,8 @@ sealed interface Updating {
 object Updater {
     var state by mutableStateOf<Updating>(Updating.Idle)
 
-    /** Only the release app updates itself; debug builds have another package name. */
-    val enabled get() = BuildConfig.APPLICATION_ID == "com.hisamiowo.seimei"
+    /** Own release builds update themselves; debug and store builds do not (build.gradle.kts, UPDATER). */
+    val enabled get() = BuildConfig.UPDATER
 
     fun canInstall(ctx: Context) = ctx.packageManager.canRequestPackageInstalls()
 

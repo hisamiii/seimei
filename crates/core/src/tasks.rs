@@ -130,55 +130,9 @@ fn missing(tid: &str) -> Error {
     Error::NotFound(format!("no task {tid}"))
 }
 
-/// The board as it stood when it was built (2026-10-21), so it starts with today's real work.
+/// A new board: empty, numbered from #1.
 fn seed() -> Data {
-    let at = now();
-    let rows = [
-        ("#47", "Metrics view", "seimei", "dev", "done", Some("3905ef87")),
-        ("#48", "re: anchor marker", "seimei", "dev", "done", Some("3905ef87")),
-        ("#52", "Remove the Screen tab", "seimei", "dev", "done", Some("3905ef87")),
-        ("#53", "Conversation cache on the phone", "seimei", "dev", "done", Some("3905ef87")),
-        ("#54", "Fold info-only events", "seimei", "dev", "done", Some("3905ef87")),
-        ("#55", "Task board", "seimei", "dev", "running", Some("3905ef87")),
-        ("t1", "Back up the signing key", "seimei", YOU, "open", None),
-        ("t2", "M4 step 0 tests", "seimei", YOU, "open", None),
-        ("t3", "Font fix", "discord tiled", "discord-tiled", "done", Some("dc956b55")),
-        ("t4", "Material icons", "discord tiled", "discord-tiled", "open", Some("dc956b55")),
-        ("t5", "ASR internal-mic A/B", "desktop", YOU, "open", None),
-        ("t6", "Clean up yah", "yah cleanup", "cleanup", "paused", Some("313245d5")),
-        ("t7", "Minecraft harness", "minecraft harness", "mc", "paused", Some("e468acc5")),
-    ];
-    let n = rows.len();
-    let tasks = rows
-        .iter()
-        .enumerate()
-        .map(|(i, &(id, title, project, owner, state, worker))| Task {
-            id: id.into(),
-            title: title.into(),
-            project: project.into(),
-            owner: owner.into(),
-            state: state.into(),
-            done_at: (state == "done").then(|| at - 60.0 * (n - i) as f64),
-            worker: worker.map(String::from),
-            linked: None,
-            wstate: None,
-            steps: vec![],
-            pos: 0,
-            since: None,
-            created: at,
-            updated: at,
-            shipped: false,
-            other: Map::new(),
-        })
-        .collect();
-    let projects = ["seimei", "discord tiled", "desktop", "yah cleanup", "minecraft harness"]
-        .map(|name| Project {
-            name: name.into(),
-            color: None,
-            paused: matches!(name, "yah cleanup" | "minecraft harness"),
-        })
-        .into();
-    Data { next: 56, other: 8, tasks, projects }
+    Data { next: 1, other: 1, tasks: vec![], projects: vec![] }
 }
 
 pub struct Board {

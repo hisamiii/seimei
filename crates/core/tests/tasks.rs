@@ -15,14 +15,11 @@ fn fits(want: &Value, got: &Value) -> bool {
     }
 }
 
-fn run(s: &Value, fails: &mut Vec<String>) {
+fn run(s: &Value, seed: &Value, fails: &mut Vec<String>) {
     let dir = std::env::temp_dir().join(format!("seimei-board-{}-{}", std::process::id(), fails.len()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("tasks.json");
-    let _ = std::fs::remove_file(&path);
-    if let Some(start) = s.get("start") {
-        std::fs::write(&path, start.to_string()).unwrap();
-    }
+    std::fs::write(&path, s.get("start").unwrap_or(seed).to_string()).unwrap();
     let mut b = Board::open(&path, None);
     for (i, step) in s["steps"].as_array().unwrap().iter().enumerate() {
         let (a, want) = (&step["args"], &step["expect"]);
@@ -202,7 +199,7 @@ fn board_cases() {
     let doc: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     let mut fails = vec![];
     for s in doc["scenarios"].as_array().unwrap() {
-        run(s, &mut fails);
+        run(s, &doc["seed"], &mut fails);
     }
     for f in &fails {
         eprintln!("FAIL {f}");

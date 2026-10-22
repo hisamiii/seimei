@@ -3,7 +3,7 @@ the task_id named); its state follows the worker's; the worker's own todo list (
 steps; a worker with no step list after NUDGE_AFTER tool calls is reminded once; the drift line says where the board
 and the workers disagree; owners' queues reorder and each shows its next item."""
 import os; os.environ["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1"  # test sessions never write the user's memories
-import asyncio, tempfile, time
+import asyncio, json, tempfile, time
 from pathlib import Path
 from claude_agent_sdk import AssistantMessage, ToolResultBlock, ToolUseBlock, UserMessage
 from seimei import tasks as T, workers as W, dispatcher as D
@@ -25,6 +25,8 @@ async def main():
     d = Path(tempfile.mkdtemp(prefix="follow-"))
     proj = d / "src" / "demo"; proj.mkdir(parents=True)
     events = EventLog(d / "events.jsonl")
+    seed = json.loads((Path(__file__).resolve().parents[1] / "cases/tasks.json").read_text())["seed"]
+    (d / "tasks.json").write_text(json.dumps(seed))
     board = T.Board(d / "tasks.json", events)
     pool = W.Pool(events, d)
     pool.board = board

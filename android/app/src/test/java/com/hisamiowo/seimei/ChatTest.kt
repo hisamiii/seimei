@@ -114,7 +114,7 @@ class ChatTest {
     @Test fun agentRows() {
         val now = System.currentTimeMillis() / 1000.0
         val seen = JSONObject()
-        val busy = JSONObject().put("pid", 7).put("name", "tmc").put("status", "busy").put("since", now).put("project", "tmc-lab")
+        val busy = JSONObject().put("pid", 7).put("name", "gardener").put("status", "busy").put("since", now).put("project", "plants")
             .put("doing", JSONObject().put("tool", "Bash").put("what", "make").put("since", now - 250))
         val r = fromSession(busy, seen)
         assertEquals("work", r.state)
@@ -134,9 +134,9 @@ class ChatTest {
     }
 
     @Test fun projectTintsMatchTheWebPage() {
-        // The page's tint(): h = (h * 31 + code) >>> 0, then TINTS[h % 10]; yah -> 2, tmc-lab -> 8, seimei -> 6.
-        assertEquals(Color(0xFF94E2D5), tintOf("yah", MOCHA))
-        assertEquals(Color(0xFFEBA0AC), tintOf("tmc-lab", MOCHA))
+        // The page's tint(): h = (h * 31 + code) >>> 0, then TINTS[h % 10]; weather -> 2, plants -> 8, seimei -> 6.
+        assertEquals(Color(0xFF94E2D5), tintOf("weather", MOCHA))
+        assertEquals(Color(0xFFEBA0AC), tintOf("plants", MOCHA))
         assertEquals(Color(0xFFF9E2AF), tintOf("seimei", MOCHA))
     }
 

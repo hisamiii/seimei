@@ -56,6 +56,9 @@ android {
         buildConfigField("String", "SERVER", "\"${project.findProperty("seimei.server") ?: ""}\"")
         // Debug builds may use a key without the fingerprint when the phone has none (emulators); release never does.
         buildConfigField("boolean", "TEST_KEY", "false")
+        // The app updates itself from the paired server. Store builds pass -Pseimei.updater=false: F-Droid and Play
+        // update the app themselves.
+        buildConfigField("boolean", "UPDATER", "${project.findProperty("seimei.updater") ?: "true"}")
         firebase("com.hisamiowo.seimei")
     }
 
@@ -84,6 +87,8 @@ android {
             // The dev server through adb reverse; -Pseimei.server= (empty) starts at the server step instead.
             buildConfigField("String", "SERVER", "\"${project.findProperty("seimei.server") ?: "http://localhost:8418"}\"")
             buildConfigField("boolean", "TEST_KEY", "true")
+            // The server's APK is a release build: another app id, so it would not install over this one.
+            buildConfigField("boolean", "UPDATER", "false")
             firebase("com.hisamiowo.seimei.debug")
         }
         release {

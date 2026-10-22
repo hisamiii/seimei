@@ -37,28 +37,8 @@ ORDER = {"asks": 0, "running": 1, "review": 2, "open": 3, "paused": 4, "done": 5
 
 
 def seed() -> dict:
-    """The board as it stood when it was built (2026-10-21), so it starts with today's real work."""
-    now = time.time()
-    rows = [
-        ("#47", "Metrics view", "seimei", "dev", "done", "3905ef87"),
-        ("#48", "re: anchor marker", "seimei", "dev", "done", "3905ef87"),
-        ("#52", "Remove the Screen tab", "seimei", "dev", "done", "3905ef87"),
-        ("#53", "Conversation cache on the phone", "seimei", "dev", "done", "3905ef87"),
-        ("#54", "Fold info-only events", "seimei", "dev", "done", "3905ef87"),
-        ("#55", "Task board", "seimei", "dev", "running", "3905ef87"),
-        ("t1", "Back up the signing key", "seimei", YOU, "open", None),
-        ("t2", "M4 step 0 tests", "seimei", YOU, "open", None),
-        ("t3", "Font fix", "discord tiled", "discord-tiled", "done", "dc956b55"),
-        ("t4", "Material icons", "discord tiled", "discord-tiled", "open", "dc956b55"),
-        ("t5", "ASR internal-mic A/B", "desktop", YOU, "open", None),
-        ("t6", "Clean up yah", "yah cleanup", "cleanup", "paused", "313245d5"),
-        ("t7", "Minecraft harness", "minecraft harness", "mc", "paused", "e468acc5"),
-    ]
-    tasks = [{"id": i, "title": t, "project": p, "owner": o, "state": s, "done_at": now - 60 * (len(rows) - n) if s == "done" else None,
-              "worker": w, "created": now, "updated": now} for n, (i, t, p, o, s, w) in enumerate(rows)]
-    projects = [{"name": n, "color": None, "paused": n in ("yah cleanup", "minecraft harness")}
-                for n in ("seimei", "discord tiled", "desktop", "yah cleanup", "minecraft harness")]
-    return {"next": 56, "other": 8, "tasks": tasks, "projects": projects}
+    """A new board: empty, numbered from #1."""
+    return {"next": 1, "other": 1, "tasks": [], "projects": []}
 
 
 class Board:

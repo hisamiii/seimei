@@ -148,21 +148,25 @@ def seed():
     session("yesterdays-notes", "idle", [prompt, said], cwd=f"{HOME}/src/tmc", idle=15 * 3600)
 
 seed()
-if BOARD and FRESH:
-    # #58: a board with every state, a queue and steps, for the Tasks lane tests.
-    from seimei import tasks as TK
-    b = TK.seed()
-    byid = {t["id"]: t for t in b["tasks"]}
-    byid["#55"]["steps"] = [{"id": "1", "title": "Read the board code", "state": "completed"},
-                          {"id": "2", "title": "Follow worker states", "state": "in_progress"},
-                          {"id": "3", "title": "Mirror the steps", "state": "pending"}]
-    byid["t4"]["state"] = "asks"
-    now = time.time()
-    for i, (tid, title, st, steps) in enumerate([
-            ("#56", "Drift line", "review", [{"id": "1", "title": "Write it", "state": "completed"}, {"id": "2", "title": "Test it", "state": "completed"}]),
-            ("#57", "Queue order", "open", []), ("#59", "After the queue", "open", [])]):
-        b["tasks"].append({"id": tid, "title": title, "project": "seimei", "owner": "dev", "state": st, "done_at": None,
-                           "worker": None, "steps": steps, "since": now - 600, "created": now + i, "updated": now})
+if FRESH:
+    # The board as it stood on 2026-10-21 (the board cases' fixture): new boards start empty.
+    b = json.loads((Path(__file__).resolve().parents[1] / "cases/tasks.json").read_text())["seed"]
+    for t in b["tasks"]:  # the fixture's fixed times, moved to now
+        t["done_at"] = t["done_at"] and time.time() - (t["created"] - t["done_at"])
+        t["created"] = t["updated"] = time.time()
+    if BOARD:
+        # #58: every state, a queue and steps, for the Tasks lane tests.
+        byid = {t["id"]: t for t in b["tasks"]}
+        byid["#55"]["steps"] = [{"id": "1", "title": "Read the board code", "state": "completed"},
+                              {"id": "2", "title": "Follow worker states", "state": "in_progress"},
+                              {"id": "3", "title": "Mirror the steps", "state": "pending"}]
+        byid["t4"]["state"] = "asks"
+        now = time.time()
+        for i, (tid, title, st, steps) in enumerate([
+                ("#56", "Drift line", "review", [{"id": "1", "title": "Write it", "state": "completed"}, {"id": "2", "title": "Test it", "state": "completed"}]),
+                ("#57", "Queue order", "open", []), ("#59", "After the queue", "open", [])]):
+            b["tasks"].append({"id": tid, "title": title, "project": "seimei", "owner": "dev", "state": st, "done_at": None,
+                               "worker": None, "steps": steps, "since": now - 600, "created": now + i, "updated": now})
     (STATE_ROOT / "dev" / "tasks.json").write_text(json.dumps(b))
 
 

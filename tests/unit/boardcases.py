@@ -19,8 +19,7 @@ def fits(want, got) -> bool:
 
 async def run(s: dict):
     d = Path(tempfile.mkdtemp(prefix="board-"))
-    if "start" in s:
-        (d / "tasks.json").write_text(json.dumps(s["start"]))
+    (d / "tasks.json").write_text(json.dumps(s.get("start", CASES["seed"])))
     b = T.Board(d / "tasks.json")
     tool = T.make_task_tools(b)[0].handler
     for i, step in enumerate(s["steps"]):

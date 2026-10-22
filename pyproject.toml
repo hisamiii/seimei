@@ -2,6 +2,7 @@
 name = "seimei"
 version = "0.1.0"
 description = "Phone-driven dispatcher for Claude Code sessions, the desktop and apps"
+license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
     "aiohttp>=3.11",
