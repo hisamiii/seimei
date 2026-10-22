@@ -16,6 +16,7 @@
 //! grants it, with the plugin's prompt section. A plugin raises a card through seimei's socket, with the token of the
 //! session it serves: the card names that session, and a plugin cannot answer cards.
 
+pub mod music;
 pub mod queue;
 
 use std::collections::HashMap;
@@ -30,8 +31,10 @@ use crate::util::{config_file, token_urlsafe};
 use crate::watches::Watches;
 
 /// What a built-in ships: its manifest and its prompt section.
-const BUILTIN: [(&str, &str, &str); 1] =
-    [("queue", include_str!("queue/plugin.toml"), include_str!("queue/prompt.md"))];
+const BUILTIN: [(&str, &str, &str); 2] = [
+    ("music", include_str!("music/plugin.toml"), ""),
+    ("queue", include_str!("queue/plugin.toml"), include_str!("queue/prompt.md")),
+];
 /// What an external entry may pass on to Claude Code (its mcpServers format).
 const MCP_KEYS: [&str; 6] = ["type", "command", "args", "env", "url", "headers"];
 /// Each built-in's MCP server as Claude Code sees it (initialize and tools/list).
@@ -286,14 +289,22 @@ impl Plugins {
     }
 }
 
+/// What a built-in's tools need from the session they serve: who is who in the queue, and the user's OK.
+pub trait Session: Send + Sync {
+    fn names(&self) -> HashMap<String, String>;
+    /// Show an Approve/Deny card: approved, denied or expired; Err when seimei cannot be reached.
+    fn card(&self, what: Value) -> impl Future<Output = Result<String, String>> + Send;
+}
+
 /// The session a plugin process serves, as its env tells it.
 struct Remote {
+    plugin: String,
     socket: String,
     token: String,
     state: PathBuf,
 }
 
-impl queue::Session for Remote {
+impl Session for Remote {
     fn names(&self) -> HashMap<String, String> {
         queue::names(&self.state)
     }
@@ -316,6 +327,7 @@ pub async fn serve_stdio(name: &str) -> Result<(), String> {
     let spec = SPECS.get(name).cloned().ok_or(format!("no built-in plugin {name}"))?;
     let var = |k: &str| std::env::var(k).unwrap_or_default();
     let remote = Arc::new(Remote {
+        plugin: name.into(),
         socket: var("SEIMEI_SOCKET"),
         token: var("SEIMEI_TOKEN"),
         state: var("SEIMEI_STATE").into(),
@@ -340,7 +352,10 @@ pub async fn serve_stdio(name: &str) -> Result<(), String> {
         // Each call on its own: a card that waits for the user does not hold up the other tools.
         let task = tokio::spawn(async move {
             let reply = crate::tools::serve(&spec, msg, |tool, args| async move {
-                queue::call(&tool, &args, remote.as_ref()).await
+                match remote.plugin.as_str() {
+                    "music" => music::call(&tool, &args, remote.as_ref()).await,
+                    _ => queue::call(&tool, &args, remote.as_ref()).await,
+                }
             })
             .await;
             if let Some(r) = reply {

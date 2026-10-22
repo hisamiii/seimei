@@ -1,0 +1,248 @@
+{
+ "about": "The music plugin, run by tests/unit/musiccases.py (Python) and crates/core/tests/music.rs (Rust). describe: the music tool's text for a bridge result. cards: a music call against a fake Quod Libet bridge whose search finds `found`: the card it raises first (null: none) and the request the bridge then gets, the user approving.",
+ "describe": [
+  {
+   "name": "search: two of five, one with nothing tagged",
+   "cmd": "search",
+   "result": {
+    "songs": [
+     {
+      "key": "/m/a.flac",
+      "title": "Song",
+      "artist": "Art",
+      "album": "Alb",
+      "track": 3,
+      "length": 245,
+      "rating": 0.8
+     },
+     {
+      "key": "/m/b.ogg",
+      "title": null,
+      "artist": null,
+      "album": null,
+      "track": null,
+      "length": 61,
+      "rating": null
+     }
+    ],
+    "total": 5
+   },
+   "want": "5 songs\nArt - Song (Alb #3) 4:05 rating 0.80\n    key: /m/a.flac\n? - ? 1:01\n    key: /m/b.ogg\n... and 3 more"
+  },
+  {
+   "name": "a playlist, all of it",
+   "cmd": "playlist",
+   "result": {
+    "name": "Faves",
+    "songs": [
+     {
+      "key": "/m/c.mp3",
+      "title": "Kickstart",
+      "artist": "Mötley Crüe",
+      "album": "Dr. Feelgood",
+      "track": null,
+      "length": 3600,
+      "rating": 1
+     }
+    ],
+    "total": 1
+   },
+   "want": "1 songs in Faves\nMötley Crüe - Kickstart (Dr. Feelgood) 60:00 rating 1.00\n    key: /m/c.mp3"
+  },
+  {
+   "name": "the queue, no total",
+   "cmd": "queue",
+   "result": {
+    "songs": [
+     {
+      "key": "/m/a.flac",
+      "title": "Song",
+      "artist": "Art",
+      "album": "Alb",
+      "track": 3,
+      "length": 245,
+      "rating": 0.8
+     }
+    ]
+   },
+   "want": "1 songs\nArt - Song (Alb #3) 4:05 rating 0.80\n    key: /m/a.flac"
+  },
+  {
+   "name": "status: playing",
+   "cmd": "status",
+   "result": {
+    "paused": false,
+    "song": {
+     "key": "/m/a.flac",
+     "title": "Song",
+     "artist": "Art",
+     "album": "Alb",
+     "track": 3,
+     "length": 245,
+     "rating": 0.8
+    },
+    "position": 75,
+    "volume": 1.0,
+    "queue": 2
+   },
+   "want": "playing: Art - Song (Alb #3) 4:05 rating 0.80\n    key: /m/a.flac\nposition 1:15, volume 1.0, 2 in the queue"
+  },
+  {
+   "name": "status: paused, nothing loaded",
+   "cmd": "status",
+   "result": {
+    "paused": true,
+    "song": null,
+    "position": 0,
+    "volume": 0.5,
+    "queue": 0
+   },
+   "want": "paused: nothing loaded\nposition 0:00, volume 0.5, 0 in the queue"
+  },
+  {
+   "name": "plugins: on first, then by name",
+   "cmd": "plugins",
+   "result": {
+    "plugins": [
+     {
+      "id": "b",
+      "name": "beta",
+      "enabled": false,
+      "description": ""
+     },
+     {
+      "id": "a",
+      "name": "Alpha",
+      "enabled": true,
+      "description": "does a"
+     },
+     {
+      "id": "c",
+      "name": "gamma",
+      "enabled": true,
+      "description": null
+     },
+     {
+      "id": "d",
+      "name": "Delta",
+      "enabled": false,
+      "description": "does d"
+     }
+    ]
+   },
+   "want": "[on] a: Alpha - does a\n[on] c: gamma\nb: beta\nd: Delta - does d"
+  },
+  {
+   "name": "browse",
+   "cmd": "browse",
+   "result": {
+    "total": 2,
+    "values": [
+     {
+      "value": "Rock",
+      "songs": 10
+     },
+     {
+      "value": "Jazz",
+      "songs": 3
+     }
+    ]
+   },
+   "want": "2 values\nRock (10)\nJazz (3)"
+  }
+ ],
+ "cards": [
+  {
+   "command": "tags",
+   "args": {
+    "query": "artist=Art",
+    "tags": {
+     "genre": "Rock"
+    }
+   },
+   "found": [
+    {
+     "key": "/m/a.flac",
+     "title": "Song",
+     "artist": "Art",
+     "album": "Alb",
+     "track": 3,
+     "length": 245,
+     "rating": 0.8
+    },
+    {
+     "key": "/m/c.mp3",
+     "title": "Kickstart",
+     "artist": "Mötley Crüe",
+     "album": "Dr. Feelgood",
+     "track": null,
+     "length": 3600,
+     "rating": 1
+    }
+   ],
+   "target": "write tags to 2 music files",
+   "sent": {
+    "cmd": "tags",
+    "keys": [
+     "/m/a.flac",
+     "/m/c.mp3"
+    ],
+    "tags": {
+     "genre": "Rock"
+    }
+   }
+  },
+  {
+   "command": "tags",
+   "args": {
+    "keys": [
+     "/m/b.ogg"
+    ],
+    "tags": {
+     "title": ""
+    }
+   },
+   "found": [],
+   "target": "write tags to 1 music file",
+   "sent": {
+    "cmd": "tags",
+    "keys": [
+     "/m/b.ogg"
+    ],
+    "tags": {
+     "title": ""
+    }
+   }
+  },
+  {
+   "command": "playlist_delete",
+   "args": {
+    "name": "Faves"
+   },
+   "found": [],
+   "target": "delete the playlist \"Faves\"",
+   "sent": {
+    "cmd": "playlist_delete",
+    "name": "Faves"
+   }
+  },
+  {
+   "command": "rate",
+   "args": {
+    "keys": [
+     "/m/a.flac"
+    ],
+    "rating": 0.6
+   },
+   "found": [],
+   "target": null,
+   "sent": {
+    "cmd": "rate",
+    "keys": [
+     "/m/a.flac"
+    ],
+    "rating": 0.6
+   }
+  }
+ ]
+}

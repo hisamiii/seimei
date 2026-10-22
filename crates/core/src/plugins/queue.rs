@@ -18,6 +18,7 @@ use regex::Regex;
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
+use super::Session;
 use crate::guard::name_matches;
 use crate::sessions::{self, Own};
 use crate::tools::text;
@@ -513,13 +514,6 @@ pub fn history_text(rows: &[Value]) -> String {
         })
         .collect();
     lines.join("\n")
-}
-
-/// What a tool needs from the session it runs in: who is who in the queue, and the user's OK.
-pub trait Session: Send + Sync {
-    fn names(&self) -> HashMap<String, String>;
-    /// Show an Approve/Deny card: approved, denied or expired; Err when seimei cannot be reached.
-    fn card(&self, what: Value) -> impl Future<Output = Result<String, String>> + Send;
 }
 
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
