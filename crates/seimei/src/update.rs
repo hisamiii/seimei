@@ -186,4 +186,14 @@ mod tests {
         let other = minisign::KeyPair::generate_unencrypted_keypair().unwrap();
         assert!(verify(&other.pk.to_base64(), data, &good, "1.2.0", "seimei-x86_64-linux").is_err());
     }
+
+    #[test]
+    fn the_release_key_reads_as_release_sh_builds_it_in() {
+        let file = include_str!("../../../contrib/minisign.pub");
+        // release.sh passes the last line (the base64 key) as SEIMEI_UPDATE_KEY.
+        let line = file.trim_end().lines().last().unwrap();
+        assert!(minisign_verify::PublicKey::from_base64(line).is_ok());
+        let key = minisign::PublicKeyBox::from_string(file).unwrap().into_public_key().unwrap();
+        assert_eq!(key.to_base64(), line);
+    }
 }
