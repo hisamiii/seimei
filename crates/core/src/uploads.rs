@@ -48,7 +48,8 @@ pub fn kind(name: &str) -> &'static str {
     }
 }
 
-fn valid_id(id: &str) -> bool {
+/// An upload id: 32 hex digits.
+pub fn is_id(id: &str) -> bool {
     id.len() == 32 && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
@@ -143,7 +144,7 @@ impl Uploads {
         let mut gone = 0;
         for d in std::fs::read_dir(&self.dir).into_iter().flatten().flatten() {
             let p = d.path();
-            if !p.is_dir() || !valid_id(&d.file_name().to_string_lossy()) {
+            if !p.is_dir() || !is_id(&d.file_name().to_string_lossy()) {
                 continue;
             }
             let newest = std::fs::read_dir(&p)
@@ -175,8 +176,12 @@ impl Uploads {
         }
     }
 
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
     pub fn path(&self, id: &str) -> Option<PathBuf> {
-        if !valid_id(id) {
+        if !is_id(id) {
             return None;
         }
         let files: Vec<PathBuf> =

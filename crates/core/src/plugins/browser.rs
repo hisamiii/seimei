@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
 
-use super::Session;
 use super::link::Link;
+use super::{Session, int, py, size, strip};
 use crate::tools::text;
 use crate::util::{now, truthy};
 
@@ -22,24 +22,6 @@ pub struct Browser {
     /// Tabs seimei opened (any session): they close without a card.
     opened: Mutex<HashSet<i64>>,
     reads: tokio::sync::Mutex<HashMap<i64, (f64, Value)>>,
-}
-
-/// A value as Python's str() shows it.
-fn py(v: &Value) -> String {
-    match v {
-        Value::String(s) => s.clone(),
-        Value::Null => "None".into(),
-        v => v.to_string(),
-    }
-}
-
-/// An integer argument, as Python's int() reads it.
-fn int(v: &Value) -> Result<i64, String> {
-    match v {
-        Value::Number(n) => n.as_i64().or(n.as_f64().map(|f| f as i64)).ok_or(format!("not an integer: {n}")),
-        Value::String(s) => s.trim().parse().map_err(|_| format!("not an integer: {s}")),
-        v => Err(format!("not an integer: {v}")),
-    }
 }
 
 /// One tab: id, title, URL and what it is doing.
@@ -99,16 +81,6 @@ pub fn read_text(tab: &Value, off: i64, limit: i64, r: &Value) -> String {
     out + &part
 }
 
-fn kb(n: i64) -> String {
-    if n < 1024 {
-        format!("{n} B")
-    } else if n < 1 << 20 {
-        format!("{} KB", n >> 10)
-    } else {
-        format!("{:.1} MB", n as f64 / (1u64 << 20) as f64)
-    }
-}
-
 /// browser_downloads' text.
 pub fn downloads_text(ds: &Value) -> String {
     let ds = ds.as_array().map_or(&[][..], |v| v);
@@ -117,8 +89,11 @@ pub fn downloads_text(ds: &Value) -> String {
     }
     let line = |d: &Value| {
         let (done, total) = (d["bytes"].as_i64().unwrap_or(0), d["total"].as_i64().unwrap_or(0));
-        let size =
-            if total <= 0 || d["state"] == "complete" { kb(done) } else { format!("{} of {}", kb(done), kb(total)) };
+        let size = if total <= 0 || d["state"] == "complete" {
+            size(done)
+        } else {
+            format!("{} of {}", size(done), size(total))
+        };
         let error = if truthy(&d["error"]) { format!(" ({})", py(&d["error"])) } else { String::new() };
         let gone = if truthy(&d["exists"]) { "" } else { " (file gone)" };
         format!(
@@ -134,7 +109,7 @@ pub fn downloads_text(ds: &Value) -> String {
 
 /// A path inside ~/Downloads: relative, no .. or hidden parts.
 pub fn filename(name: &str) -> Result<String, String> {
-    let name = name.trim();
+    let name = strip(name);
     let parts: Vec<&str> = name.split(['/', '\\']).filter(|p| !p.is_empty()).collect();
     let bad = parts.is_empty()
         || name.starts_with(['/', '~'])

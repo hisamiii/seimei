@@ -275,6 +275,9 @@ fn main() {
         if let Some(b) = &app.pool.plugins.browser {
             tokio::spawn(b.link.clone().run(seimei_core::plugins::link::runtime_path("browser", a.dev)));
         }
+        if let Some(d) = &app.pool.plugins.discord {
+            tokio::spawn(d.link.clone().run(seimei_core::plugins::link::runtime_path("discord", a.dev)));
+        }
         if app.pool.plugins.queue.is_some() {
             let (st, p, ev) = (state.clone(), app.pool.clone(), events.clone());
             let watcher = seimei_core::plugins::queue::Watcher::new(

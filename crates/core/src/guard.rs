@@ -62,7 +62,7 @@ static STDIN_FLAG: LazyLock<Regex> = LazyLock::new(|| re(r"^-[a-z]*s"));
 static CODE_FLAG: LazyLock<Regex> = LazyLock::new(|| re(r"^-[a-zA-Z]*[cemEpr]$"));
 
 /// Which secret a path is or lies in, once its links are followed.
-fn secret_path(p: &Path) -> Option<&'static str> {
+pub fn secret_path(p: &Path) -> Option<&'static str> {
     let p = realpath(p);
     SECRETS.iter().find(|(rel, ..)| p.starts_with(home().join(rel))).map(|s| s.1)
 }

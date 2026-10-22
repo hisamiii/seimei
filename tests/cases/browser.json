@@ -847,6 +847,41 @@
      "error": true,
      "card": null,
      "sent": []
+    },
+    {
+     "tool": "browser_download",
+     "args": {
+      "url": "https://x.org/a.pdf",
+      "filename": " \u001c/etc/passwd"
+     },
+     "want": "filename must be a plain relative name inside Downloads, like papers/attention.pdf",
+     "error": true,
+     "card": null,
+     "sent": []
+    },
+    {
+     "tool": "browser_download",
+     "args": {
+      "url": "https://x.org/a.pdf",
+      "filename": "\u001fa.pdf\u001c"
+     },
+     "replies": {
+      "download": {
+       "id": 24
+      }
+     },
+     "want": "Download 24 started. browser_downloads shows its state and path.",
+     "error": false,
+     "card": null,
+     "sent": [
+      {
+       "op": "download",
+       "args": {
+        "url": "https://x.org/a.pdf",
+        "filename": "a.pdf"
+       }
+      }
+     ]
     }
    ]
   }

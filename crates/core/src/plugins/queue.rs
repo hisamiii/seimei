@@ -650,7 +650,7 @@ impl Queue {
 
 /// queue_wait's target in minutes: "" or * is 10.
 fn wait_minutes(target: &str) -> Option<f64> {
-    match target.trim() {
+    match super::strip(target) {
         "" | "*" => Some(10.0),
         t => t.parse().ok().filter(|m: &f64| m.is_finite()),
     }

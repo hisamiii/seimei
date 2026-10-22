@@ -17,6 +17,7 @@
 //! session it serves: the card names that session, and a plugin cannot answer cards.
 
 pub mod browser;
+pub mod discord;
 pub mod link;
 pub mod music;
 pub mod queue;
@@ -33,13 +34,14 @@ use crate::util::{config_file, token_urlsafe};
 use crate::watches::Watches;
 
 /// What a built-in ships: its manifest and its prompt section.
-const BUILTIN: [(&str, &str, &str); 3] = [
+const BUILTIN: [(&str, &str, &str); 4] = [
     ("browser", include_str!("browser/plugin.toml"), include_str!("browser/prompt.md")),
+    ("discord", include_str!("discord/plugin.toml"), include_str!("discord/prompt.md")),
     ("music", include_str!("music/plugin.toml"), ""),
     ("queue", include_str!("queue/plugin.toml"), include_str!("queue/prompt.md")),
 ];
 /// Built-ins whose tools run inside seimei (they share a connector and what it knows); their process forwards calls.
-const HOSTED: [&str; 1] = ["browser"];
+const HOSTED: [&str; 2] = ["browser", "discord"];
 /// What an external entry may pass on to Claude Code (its mcpServers format).
 const MCP_KEYS: [&str; 6] = ["type", "command", "args", "env", "url", "headers"];
 /// Each built-in's MCP server as Claude Code sees it (initialize and tools/list).
@@ -64,6 +66,7 @@ pub struct Plugins {
     list: Vec<Plugin>,
     pub queue: Option<queue::Queue>,
     pub browser: Option<Arc<browser::Browser>>,
+    pub discord: Option<Arc<discord::Discord>>,
     state: PathBuf,
     socket: PathBuf,
     /// Session tokens and what each may do.
@@ -144,6 +147,7 @@ impl Plugins {
             list: vec![],
             queue: None,
             browser: None,
+            discord: None,
             state: state.into(),
             socket: state.join("plugins.sock"),
             tokens: Mutex::default(),
@@ -156,6 +160,7 @@ impl Plugins {
                     match name {
                         "queue" => out.queue = Some(queue::Queue::new(&own)),
                         "browser" => out.browser = Some(Arc::new(browser::Browser::new())),
+                        "discord" => out.discord = Some(Arc::new(discord::Discord::new(Some(state)))),
                         _ => {}
                     }
                     out.list.push(p);
@@ -388,10 +393,51 @@ pub trait Session: Send + Sync {
 impl Plugins {
     /// A hosted plugin's tool call.
     async fn call(&self, plugin: &str, tool: &str, args: &Value, session: &impl Session) -> Value {
-        match (plugin, &self.browser) {
-            ("browser", Some(b)) => b.call(tool, args, session).await,
+        match (plugin, &self.browser, &self.discord) {
+            ("browser", Some(b), _) => b.call(tool, args, session).await,
+            ("discord", _, Some(d)) => d.call(tool, args, session).await,
             _ => crate::tools::text(&format!("{plugin} is not on"), true),
         }
+    }
+}
+
+/// A value as Python's str() shows it.
+pub(crate) fn py(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        Value::Null => "None".into(),
+        Value::Bool(b) => if *b { "True" } else { "False" }.into(),
+        v => v.to_string(),
+    }
+}
+
+/// An integer argument, as Python's int() reads it.
+pub(crate) fn int(v: &Value) -> Result<i64, String> {
+    match v {
+        Value::Number(n) => n.as_i64().or(n.as_f64().map(|f| f as i64)).ok_or(format!("not an integer: {n}")),
+        Value::String(s) => strip(s).parse().map_err(|_| format!("not an integer: {s}")),
+        v => Err(format!("not an integer: {v}")),
+    }
+}
+
+/// Whitespace as Python's isspace() sees it: Unicode's, plus the four ASCII separators \x1c to \x1f.
+pub(crate) fn space(c: char) -> bool {
+    c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c)
+}
+
+/// s without whitespace at either end, as Python's strip() leaves it.
+pub(crate) fn strip(s: &str) -> &str {
+    s.trim_matches(space)
+}
+
+/// A byte count for people: 512 B, 3 KB, 1.5 MB.
+pub(crate) fn size(n: i64) -> String {
+    if n < 1024 {
+        format!("{n} B")
+    } else if n < 1 << 20 {
+        format!("{} KB", n >> 10)
+    } else {
+        format!("{:.1} MB", n as f64 / (1u64 << 20) as f64)
     }
 }
 

@@ -272,8 +272,8 @@ async fn music_plugin_over_stdio() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
-/// A connector at the link: answers the browser's ops like the extension would, and keeps them.
-fn fake_browser(path: std::path::PathBuf) -> Arc<std::sync::Mutex<Vec<Value>>> {
+/// A connector at a link (the browser extension, the Vesktop plugin): answers each op as answer says, and keeps them.
+fn connector(path: std::path::PathBuf, answer: fn(&str, &Value) -> Value) -> Arc<std::sync::Mutex<Vec<Value>>> {
     let seen = Arc::new(std::sync::Mutex::new(vec![]));
     let log = seen.clone();
     std::thread::spawn(move || {
@@ -283,22 +283,9 @@ fn fake_browser(path: std::path::PathBuf) -> Arc<std::sync::Mutex<Vec<Value>>> {
                 Err(_) => std::thread::sleep(Duration::from_millis(20)),
             }
         };
-        let tab = |id: i64, title: &str| {
-            json!({"id": id, "window": 1, "index": id, "title": title, "url": format!("https://x.org/{id}"),
-                   "active": false, "pinned": false, "audible": false, "asleep": false})
-        };
         for line in BufReader::new(&conn).lines() {
             let req: Value = serde_json::from_str(&line.unwrap()).unwrap();
-            let a = &req["args"];
-            let result = match req["op"].as_str().unwrap() {
-                "tabs" => json!({"tabs": [tab(5, "Mine")], "focused": 1}),
-                "open" => tab(9, "Opened"),
-                "info" => json!(
-                    a["tabs"].as_array().unwrap().iter().map(|i| tab(i.as_i64().unwrap(), "Mine")).collect::<Vec<_>>()
-                ),
-                "close" => json!(a["tabs"].as_array().unwrap().len()),
-                _ => Value::Null,
-            };
+            let result = answer(req["op"].as_str().unwrap(), &req["args"]);
             log.lock().unwrap().push(req.clone());
             (&conn)
                 .write_all(format!("{}\n", json!({"id": req["id"], "ok": true, "result": result})).as_bytes())
@@ -308,12 +295,29 @@ fn fake_browser(path: std::path::PathBuf) -> Arc<std::sync::Mutex<Vec<Value>>> {
     seen
 }
 
+/// The browser extension's answers.
+fn browser_op(op: &str, a: &Value) -> Value {
+    let tab = |id: i64, title: &str| {
+        json!({"id": id, "window": 1, "index": id, "title": title, "url": format!("https://x.org/{id}"),
+               "active": false, "pinned": false, "audible": false, "asleep": false})
+    };
+    match op {
+        "tabs" => json!({"tabs": [tab(5, "Mine")], "focused": 1}),
+        "open" => tab(9, "Opened"),
+        "info" => {
+            json!(a["tabs"].as_array().unwrap().iter().map(|i| tab(i.as_i64().unwrap(), "Mine")).collect::<Vec<_>>())
+        }
+        "close" => json!(a["tabs"].as_array().unwrap().len()),
+        _ => Value::Null,
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn browser_plugin_forwards_to_seimei() {
     let (d, events, approvals, plugins) = host("browser", "browser").await;
     let link = d.join("run/seimei/browser.sock");
     tokio::spawn(plugins.browser.as_ref().unwrap().link.clone().run(link.clone()));
-    let seen = fake_browser(link);
+    let seen = connector(link, browser_op);
     let env = plugins.servers("seimei", None, None)["browser"]["env"].as_object().unwrap().clone();
     let spec = cases("tools.json")["plugins"]["browser"].clone();
     let env2 = env.clone();
@@ -390,5 +394,66 @@ async fn browser_plugin_forwards_to_seimei() {
     assert_eq!(outside, ("not this session's process".into(), true));
     let _ = other.kill();
     let _ = other.wait();
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// The Vesktop plugin's answers.
+fn discord_op(op: &str, a: &Value) -> Value {
+    match op {
+        "where" | "ack" => json!("#general in Home"),
+        "send" => json!({"where": "#general in Home", "id": "600001"}),
+        _ => json!({"op": op, "args": a}),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn discord_plugin_forwards_to_seimei() {
+    let (d, events, approvals, plugins) = host("discord", "discord").await;
+    let link = d.join("run/seimei/discord.sock");
+    tokio::spawn(plugins.discord.as_ref().unwrap().link.clone().run(link.clone()));
+    let seen = connector(link, discord_op);
+    let env = plugins.servers("seimei", None, None)["discord"]["env"].as_object().unwrap().clone();
+    let spec = cases("tools.json")["plugins"]["discord"].clone();
+    let mut srv = tokio::task::spawn_blocking(move || {
+        let mut srv = Server::start("discord", &env, &[]);
+        assert_eq!(srv.ask(1, "tools/list", json!({}))["tools"], spec["tools"]);
+        // The connector may still be connecting; marking read needs no card.
+        let mut r = srv.call(2, "discord_mark_read", json!({"channel": "111111"}));
+        for i in 0..50 {
+            if !r.1 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+            r = srv.call(100 + i, "discord_mark_read", json!({"channel": "111111"}));
+        }
+        assert_eq!(r, ("Marked #general in Home as read.".into(), false));
+        srv
+    })
+    .await
+    .unwrap();
+
+    // A send waits for the card, then sends what it showed.
+    let mut sub = events.subscribe();
+    let call = tokio::task::spawn_blocking(move || {
+        let r = srv.call(3, "discord_send", json!({"channel": "111111", "text": "hello all"}));
+        (srv, r)
+    });
+    let card = loop {
+        let ev = tokio::time::timeout(Duration::from_secs(10), sub.recv()).await.unwrap().unwrap();
+        if ev["type"] == "approval" {
+            break ev;
+        }
+    };
+    assert_eq!(
+        (&card["who"], &card["target"], &card["detail"]),
+        (&json!("seimei"), &json!("send a Discord message to #general in Home"), &json!("hello all"))
+    );
+    approvals.decide(card["aid"].as_str().unwrap(), true, None, None);
+    let (srv, r) = call.await.unwrap();
+    assert_eq!(r, ("Sent to #general in Home (message 600001).".into(), false));
+    drop(srv);
+    let sends: Vec<Value> =
+        seen.lock().unwrap().iter().filter(|r| r["op"] == "send").map(|r| r["args"].clone()).collect();
+    assert_eq!(sends, [json!({"channel": "111111", "text": "hello all", "reply_to": null, "files": []})]);
     let _ = std::fs::remove_dir_all(&d);
 }

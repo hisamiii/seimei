@@ -1,0 +1,6 @@
+# The discord plugin, built into seimei: Claude Code starts `seimei plugin discord` for each session that has it.
+# Its tools run inside seimei, which holds the Vesktop link; the process forwards each call.
+name = "discord"
+command = "seimei"
+args = ["plugin", "discord"]
+prompt = "prompt.md"
