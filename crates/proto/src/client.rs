@@ -315,7 +315,7 @@ impl Drop for Client {
     }
 }
 
-async fn write(mut stdin: ChildStdin, mut rx: mpsc::UnboundedReceiver<String>, stop: CancellationToken) {
+pub(crate) async fn write(mut stdin: ChildStdin, mut rx: mpsc::UnboundedReceiver<String>, stop: CancellationToken) {
     loop {
         let line = tokio::select! {
             _ = stop.cancelled() => break,
@@ -331,14 +331,14 @@ async fn write(mut stdin: ChildStdin, mut rx: mpsc::UnboundedReceiver<String>, s
     // Dropping stdin is Claude Code's EOF.
 }
 
-enum Line {
+pub(crate) enum Line {
     Data,
     TooLong(usize),
     Eof,
 }
 
 /// One line into [buf], without its size growing past [max]: a longer line is consumed and reported.
-async fn read_line(r: &mut BufReader<ChildStdout>, buf: &mut Vec<u8>, max: usize) -> std::io::Result<Line> {
+pub(crate) async fn read_line(r: &mut BufReader<ChildStdout>, buf: &mut Vec<u8>, max: usize) -> std::io::Result<Line> {
     buf.clear();
     let mut seen = 0usize;
     loop {

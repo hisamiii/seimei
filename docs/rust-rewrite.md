@@ -60,7 +60,7 @@ seimei passwd | pair | devices | lockdown | ...   as today
 | web UI embedded | rust-embed (the same plain JS/CSS/HTML files, no build step) |
 | Claude Code | our own client of its stream-json control protocol (below) |
 | MCP (plugins, seimei's own tools) | a small JSON-RPC handler (`tools::serve`: initialize, tools/list, tools/call) over the specs in `tests/cases/tools.json` |
-| ACP workers (#69) | agent-client-protocol, Zed's official crate |
+| ACP workers (#69) | our own client (`seimei_proto::acp`); the official `agent-client-protocol-schema` types check its messages in tests |
 | passkeys | webauthn-rs |
 | phone keys (P-256 ECDSA), Web Push (RFC 8291), FCM JWT | RustCrypto: p256, hkdf, aes-gcm, rsa or ring |
 | HTTP client (FCM, Web Push, update) | reqwest with rustls |
@@ -209,7 +209,7 @@ Python stays installed for a week as the way back (same state files).
 | 5 | ACP harness (#69) against a fake ACP agent, then dsh and Codex | ACP cases; one live run each |
 | 6 | `setup`, `update`, release signing, static builds, docs | install on a clean user account; switch the live service |
 
-**Progress (2026-10-22).** Phases 0 to 4 are done.
+**Progress (2026-10-22).** Phases 0 to 4 are done; phase 5 has started.
 - **Rule for the port.** Match seimei's behavior, not Python's: the wire protocol, the meaning of the state files and `tests/cases/` stay identical, everything else is plain Rust with std or a small crate. Where the two sides differ on a case, the right side wins; for the guard, blocking more is fine and every bypass found becomes a new case.
 - **Guard and cards.** The deny-list, the approval checks and the permission card options run in Rust over `tests/cases/` (`guard.json`, `check.json`, `permissions.json`). The port found one bypass in the Python guard (globs skipped hidden folders), now fixed and a case.
 - **Phase 2 server.** `SEIMEI_SERVER=target/debug/seimei uv run pytest -m web -k "tauth or tpush63 or tthemes"` runs the gate against it.
@@ -230,6 +230,7 @@ Python stays installed for a week as the way back (same state files).
 - **Desktop plugin.** Hosted too: the four backends (niri, sway, Hyprland, X11 with KDE), the uinput keyboard and pointer, the AT-SPI helper, the layout memory with its restore card, unlock, and the guard's checks on windows seimei did not open and on writes to the window manager's config, which run as a plugin check in the guard (a check that panics asks with a card). `tests/cases/desktop.json` runs on both sides on fakes only: the window manager's tools are `tests/fakes/desktop/fakebin.py` first on PATH, niri is a fake socket, and the devices write to a file, never `/dev/uinput`. `crates/seimei/tests/desktop.rs` also drives `seimei plugin desktop` through the binary. Sway, Hyprland and X11 are covered by their checks only; no compositor fake for them yet.
 - **Phase 4 gate.** Every plugin's cases pass on both sides, and `tests/live/dispatchertest_rs.py` runs seimei's dispatcher on haiku, wired as the server wires it, with the queue, music, browser and discord plugins on fakes: it calls a read-only tool of each and their texts reach its reply with no card. Desktop sits out of that run, since its devices are the real `/dev/uinput`; its gate is `desktop.json` and `desktop.rs` on fakes.
 - **Adopt starts first (#87).** On both sides the shikigami's process starts on the session while the user's still runs, and only then does the user's end; a start that fails leaves the session running and nothing behind. `tadopt87` checks both outcomes on either server.
+- **ACP client (phase 5).** `seimei_proto::acp` starts an agent, initializes it and opens a session (new, or loaded to go on with one), with seimei's MCP servers. It streams the session's updates (text, thoughts, tool calls, plans, modes) and ends each turn with its stop reason; permission requests go to a handler, and a cancel answers any still open. It reuses the stream-json client's line reader and writer. Zed's `agent-client-protocol` crate was the plan, but it is 13.7k lines on its own futures stack, the same trade as rmcp. Instead, its schema crate is a test-only dependency: `crates/proto/tests/acp.rs` runs the client against `tests/fakes/acp.py`, and every message both ways must parse as the protocol's own type. The `Harness` trait and `acp:<agent>` shikigami come next.
 
 **Size:** today's 7.8k lines of core Python and 4.3k of plugins should come to roughly 12 to 15k lines of Rust.
 The web UI (4.7k lines) and the Android app carry over unchanged. So do the Discord (Vencord, TypeScript) and

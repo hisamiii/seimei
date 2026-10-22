@@ -1,7 +1,7 @@
 [package]
 name = "seimei-proto"
 version = "0.1.0"
-description = "A client for Claude Code's stream-json control protocol (what the Agent SDKs speak)"
+description = "Clients for Claude Code's stream-json control protocol (what the Agent SDKs speak) and for ACP agents"
 edition.workspace = true
 rust-version.workspace = true
 
@@ -11,3 +11,7 @@ serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
+
+[dev-dependencies]
+# The protocol's own types, in tests only: every message both ways must parse as what ACP says it is.
+agent-client-protocol-schema = { version = "=1.12.0", default-features = false }
