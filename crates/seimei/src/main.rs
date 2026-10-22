@@ -1,7 +1,8 @@
-//! seimei [serve] [--dev] [--no-login] | setup | passwd [--keep-sessions] | passkeys [--clear] | logout-all | lockdown
-//! | pair | devices [--revoke ID] | screen-password [--clear] | plugin NAME
+//! seimei [serve] [--dev] [--no-login] | setup | update [--check] | version | passwd [--keep-sessions]
+//! | passkeys [--clear] | logout-all | lockdown | pair | devices [--revoke ID] | screen-password [--clear] | plugin NAME
 
 mod setup;
+mod update;
 
 use std::collections::HashSet;
 use std::io::Write;
@@ -17,8 +18,20 @@ use seimei_core::push::{Fcm, Push, WebPush};
 use seimei_core::util::{config_file, data_dir};
 use serde_json::Value;
 
-const COMMANDS: [&str; 10] =
-    ["serve", "setup", "passwd", "passkeys", "logout-all", "lockdown", "pair", "devices", "screen-password", "plugin"];
+const COMMANDS: [&str; 12] = [
+    "serve",
+    "setup",
+    "update",
+    "version",
+    "passwd",
+    "passkeys",
+    "logout-all",
+    "lockdown",
+    "pair",
+    "devices",
+    "screen-password",
+    "plugin",
+];
 
 struct Args {
     command: String,
@@ -26,6 +39,8 @@ struct Args {
     no_login: bool,
     keep_sessions: bool,
     clear: bool,
+    /// `seimei update --check`: only say whether there is one.
+    check: bool,
     revoke: Option<String>,
     model: Option<String>,
     /// `seimei plugin <name>`: which one.
@@ -39,6 +54,7 @@ fn args() -> Args {
         no_login: false,
         keep_sessions: false,
         clear: false,
+        check: false,
         revoke: None,
         model: None,
         plugin: None,
@@ -51,6 +67,8 @@ fn args() -> Args {
             "--login" => {} // the default now; kept for old scripts
             "--keep-sessions" => a.keep_sessions = true,
             "--clear" => a.clear = true,
+            "--check" => a.check = true,
+            "--version" => a.command = "version".into(),
             "--revoke" => a.revoke = it.next(),
             "--model" => a.model = it.next(),
             "plugin" => {
@@ -209,6 +227,9 @@ fn main() {
     if a.command == "setup" {
         return setup::run(secret);
     }
+    if a.command == "version" {
+        return println!("seimei {}", env!("CARGO_PKG_VERSION"));
+    }
     let cfg: toml::Table = std::fs::read_to_string(config_file())
         .ok()
         .map(|s| s.parse().unwrap_or_else(|e| die(&format!("config.toml: {e}"))))
@@ -221,6 +242,9 @@ fn main() {
     let state = if a.dev { data_dir().join("dev") } else { data_dir() };
     std::fs::create_dir_all(&state).unwrap_or_else(|e| die(&format!("{}: {e}", state.display())));
 
+    if a.command == "update" {
+        return update::run(a.check, &state);
+    }
     if a.command != "serve" {
         return account(&Auth::new(&state, &origin), &a, &state);
     }
@@ -347,6 +371,16 @@ fn main() {
         });
         tokio::spawn(push.run());
         tokio::spawn(app.uploads.clone().run());
+        let (d, pool, ev) = (app.dispatcher.clone(), app.pool.clone(), events.clone());
+        tokio::spawn(update::restart_when_idle(
+            state.clone(),
+            move || !d.busy() && pool.running() == 0,
+            move |version| {
+                let text = format!("Restarting on seimei {version}.");
+                ev.add(serde_json::json!({"type": "system", "text": text}));
+                ev.close();
+            },
+        ));
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
             .await
             .unwrap_or_else(|e| die(&format!("port {port}: {e}")));
