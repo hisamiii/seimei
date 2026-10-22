@@ -125,7 +125,7 @@ async fn run(work: std::path::PathBuf, state: std::path::PathBuf) {
         events: events.clone(),
         auth: None,
         origins: Default::default(),
-        web: state.join("noweb"),
+        web: Some(state.join("noweb")),
         state: state.clone(),
         push,
         dispatcher: dispatcher::Config::new(&disp, "default", "test machine", true),

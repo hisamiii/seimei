@@ -96,8 +96,8 @@ pub struct Setup {
     pub events: Arc<EventLog>,
     pub auth: Option<Arc<Auth>>,
     pub origins: HashSet<String>,
-    /// The web UI's folder.
-    pub web: PathBuf,
+    /// The web UI's folder; None for the one built into the binary.
+    pub web: Option<PathBuf>,
     /// The state folder.
     pub state: PathBuf,
     pub push: Arc<Push>,
@@ -113,11 +113,11 @@ pub struct Setup {
 impl App {
     pub fn new(setup: Setup) -> std::io::Result<App> {
         let Setup { events, auth, origins, web, state, push, dispatcher: disp, shikigami, terminal, plugins } = setup;
-        let (web, state) = (web.as_path(), state.as_path());
+        let state = state.as_path();
         // Only these Host headers are served: a page using DNS rebinding cannot read the API from the browser (L4).
         let mut hosts: HashSet<String> = ["localhost", "127.0.0.1", "::1"].map(String::from).into();
         hosts.extend(origins.iter().filter_map(|o| url::Url::parse(o).ok()?.host_str().map(String::from)));
-        let (version, mut assets) = load_web(web);
+        let (version, mut assets) = load_web(web.as_deref());
         let mut pages = HashMap::new();
         for name in ["index.html", "login.html"] {
             let page = assets.remove(name).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
@@ -237,10 +237,19 @@ impl App {
     }
 }
 
-/// Snapshot the page files at startup, so edits on disk never mix with a running server. Assets live under
-/// /static/<hash>/, so a restart gets fresh URLs past any cache.
-fn load_web(web: &Path) -> (String, HashMap<String, Bytes>) {
+mod embedded {
+    include!(concat!(env!("OUT_DIR"), "/web.rs"));
+}
+
+/// The page files: the ones built in, or a snapshot of a folder at startup, so edits on disk never mix with a running
+/// server. Assets live under /static/<hash>/, so a restart gets fresh URLs past any cache.
+fn load_web(web: Option<&Path>) -> (String, HashMap<String, Bytes>) {
     let mut files = vec![];
+    let Some(web) = web else {
+        let files: Vec<(String, Bytes)> =
+            embedded::WEB.iter().map(|(n, d)| (n.to_string(), Bytes::from_static(d))).collect();
+        return (web_version(&files), files.into_iter().collect());
+    };
     let mut stack = vec![web.to_path_buf()];
     while let Some(dir) = stack.pop() {
         for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
@@ -253,12 +262,17 @@ fn load_web(web: &Path) -> (String, HashMap<String, Bytes>) {
         }
     }
     files.sort_by(|a, b| a.0.cmp(&b.0));
+    (web_version(&files), files.into_iter().collect())
+}
+
+/// The files' hash, in name order: their /static/<hash>/ URLs.
+fn web_version(files: &[(String, Bytes)]) -> String {
     let mut h = openssl::sha::Sha256::new();
-    for (name, data) in &files {
+    for (name, data) in files {
         h.update(name.as_bytes());
         h.update(data);
     }
-    (seimei_core::util::hex(&h.finish())[..12].to_string(), files.into_iter().collect())
+    seimei_core::util::hex(&h.finish())[..12].to_string()
 }
 
 fn mime(name: &str) -> &'static str {

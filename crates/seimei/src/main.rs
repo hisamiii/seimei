@@ -1,5 +1,7 @@
-//! seimei [serve] [--dev] [--no-login] | passwd [--keep-sessions] | passkeys [--clear] | logout-all | lockdown | pair
-//! | devices [--revoke ID] | plugin NAME
+//! seimei [serve] [--dev] [--no-login] | setup | passwd [--keep-sessions] | passkeys [--clear] | logout-all | lockdown
+//! | pair | devices [--revoke ID] | screen-password [--clear] | plugin NAME
+
+mod setup;
 
 use std::collections::HashSet;
 use std::io::Write;
@@ -15,8 +17,8 @@ use seimei_core::push::{Fcm, Push, WebPush};
 use seimei_core::util::{config_file, data_dir};
 use serde_json::Value;
 
-const COMMANDS: [&str; 9] =
-    ["serve", "passwd", "passkeys", "logout-all", "lockdown", "pair", "devices", "screen-password", "plugin"];
+const COMMANDS: [&str; 10] =
+    ["serve", "setup", "passwd", "passkeys", "logout-all", "lockdown", "pair", "devices", "screen-password", "plugin"];
 
 struct Args {
     command: String,
@@ -98,7 +100,7 @@ fn date(t: &Value, with_time: bool) -> String {
 }
 
 /// Recovery lives on the server: these never go through the web page.
-fn account(auth: &Auth, a: &Args) {
+fn account(auth: &Auth, a: &Args, state: &std::path::Path) {
     match a.command.as_str() {
         "passwd" => {
             let pw = secret("New seimei password: ");
@@ -166,7 +168,32 @@ fn account(auth: &Auth, a: &Args) {
                 println!("No paired phones.");
             }
         }
-        "screen-password" => die("screen-password comes with the desktop plugin (phase 4); use the Python seimei"),
+        "screen-password" => {
+            // The desktop plugin's unlock_screen types it; the command lives here, with recovery.
+            let path = state.join("unlock");
+            if a.clear {
+                let _ = std::fs::remove_file(&path);
+                println!("Screen password removed; seimei can no longer unlock the screen.");
+                return;
+            }
+            let pw = secret("Your login (screen lock) password: ");
+            if pw.is_empty() || secret("Again: ") != pw {
+                die("the two entries differ");
+            }
+            if !pw.chars().all(|c| c.is_ascii_graphic() || c == ' ') {
+                die("the unlock tool can only type printable ASCII");
+            }
+            use std::os::unix::fs::OpenOptionsExt;
+            let f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&path);
+            let written = f.and_then(|mut f| f.write_all(pw.as_bytes()));
+            written.unwrap_or_else(|e| die(&format!("{}: {e}", path.display())));
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+            println!(
+                "Saved to {} (only you can read it). seimei types it into the lock screen; it never reaches the model.",
+                path.display()
+            );
+        }
         _ => unreachable!(),
     }
 }
@@ -178,6 +205,9 @@ fn main() {
         let name = a.plugin.clone().unwrap_or_else(|| die("usage: seimei plugin NAME"));
         let rt = tokio::runtime::Runtime::new().expect("a runtime");
         return rt.block_on(seimei_core::plugins::serve_stdio(&name)).unwrap_or_else(|e| die(&e));
+    }
+    if a.command == "setup" {
+        return setup::run(secret);
     }
     let cfg: toml::Table = std::fs::read_to_string(config_file())
         .ok()
@@ -192,7 +222,7 @@ fn main() {
     std::fs::create_dir_all(&state).unwrap_or_else(|e| die(&format!("{}: {e}", state.display())));
 
     if a.command != "serve" {
-        return account(&Auth::new(&state, &origin), &a);
+        return account(&Auth::new(&state, &origin), &a, &state);
     }
 
     let (origins, auth): (HashSet<String>, Option<Arc<Auth>>) = if a.dev {
@@ -226,9 +256,8 @@ fn main() {
         let (ev, p) = (events.clone(), push.clone());
         auth.set_alarm(Box::new(move |title, text| seimei_server::App::alarm(&ev, &p, title, text)));
     }
-    let web = std::env::var_os("SEIMEI_WEB")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../seimei/web"));
+    // The web UI is built in; SEIMEI_WEB serves a folder instead (to try page edits without a build).
+    let web = std::env::var_os("SEIMEI_WEB").map(std::path::PathBuf::from);
     let approvals = cfg.get("approvals").and_then(|s| s.as_table()).cloned().unwrap_or_default();
     let mut disp = cfg.get("dispatcher").and_then(|s| s.as_table()).cloned().unwrap_or_default();
     if let Some(m) = &a.model {
