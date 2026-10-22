@@ -215,6 +215,39 @@ async fn acp_shikigami() {
         .any(|e| e["type"] == "system" && e["text"].as_str().unwrap_or("").starts_with("Blocked fakey"));
     assert!(blocked);
 
+    // A call the agent runs without asking: the guard looks at it once it ended. A harmless one is only audited.
+    let (from, ok) = turn(&w, "!unasked echo fine", "done").await;
+    assert!(ok);
+    assert_eq!(said(&w, from), ["Ran it unasked.", "Went on."]);
+    // One it would have blocked stops the turn, and the agent hears why with its next message.
+    let (from, ok) = turn(&w, &format!("!unasked {}", blocked_command()), "stopped").await;
+    assert!(ok, "{}", w.state());
+    assert_eq!(said(&w, from), ["Ran it unasked."]);
+    let note = log(&w)[from..].iter().find(|e| e["type"] == "system").cloned().unwrap_or_default();
+    assert!(note["text"].as_str().unwrap_or("").starts_with("The guard stopped this turn"), "{note}");
+    assert!(
+        events.after(0).iter().any(|e| e["text"].as_str().unwrap_or("").starts_with("Stopped fakey: it ran a call"))
+    );
+    let (from, ok) = turn(&w, "carry on", "done").await;
+    assert!(ok);
+    let next = said(&w, from);
+    assert!(
+        next[0].starts_with("You said: [seimei] The guard stopped your last turn") && next[0].ends_with("carry on"),
+        "{next:?}"
+    );
+    let (from, ok) = turn(&w, "and again", "done").await;
+    assert!(ok);
+    assert_eq!(said(&w, from), ["You said: and again"], "the note goes once");
+    let audit = std::fs::read_to_string(state.join("audit.jsonl")).unwrap();
+    let unasked: Vec<Value> = (audit.lines().map(|l| serde_json::from_str::<Value>(l).unwrap()))
+        .filter(|r| r["event"] == "unasked")
+        .collect();
+    let decisions: Vec<&str> = unasked.iter().map(|r| r["decision"].as_str().unwrap()).collect();
+    assert_eq!(decisions, ["allowed", "stopped"], "{unasked:?}");
+    // Calls it asked for are not seen again.
+    assert_eq!(unasked.iter().filter(|r| r["id"] == "call_1").count(), 0);
+    assert_eq!(cards.lock().unwrap().len(), 3, "no card for an unasked call");
+
     // 6. Its plan is its task's steps, the whole list each time.
     let (_, ok) = turn(&w, "!plan", "done").await;
     assert!(ok);

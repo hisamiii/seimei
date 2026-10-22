@@ -555,6 +555,47 @@ impl Guard {
         json!({})
     }
 
+    /// A call an ACP agent ran without asking for permission, seen once it ended. What pre() would have blocked or held
+    /// for a card comes back as what it was, for the worker to stop its turn; the rest is only audited.
+    pub async fn unasked(
+        &self,
+        who: &str,
+        worker: Option<&str>,
+        inp: &Value,
+        tool_use_id: Option<&str>,
+    ) -> Option<String> {
+        let tool = inp["tool_name"].as_str().unwrap_or("");
+        let args = if inp["tool_input"].is_object() { inp["tool_input"].clone() } else { json!({}) };
+        let home = home().display().to_string();
+        let cwd = inp["cwd"].as_str().filter(|c| !c.is_empty()).unwrap_or(&home);
+        let mut rec = json!({"event": "unasked", "who": who, "worker": worker, "session": inp["session_id"],
+            "id": tool_use_id, "tool": tool, "input": brief(&args)});
+        let why = match blocked(tool, &args, cwd) {
+            Some(why) => Some(format!("the guard blocks {why}")),
+            None => {
+                let (tool, args) = (tool.to_string(), args.clone());
+                let what = tokio::task::spawn_blocking(move || check(&tool, &args))
+                    .await
+                    .unwrap_or_else(|_| Some(json!({"action": "command", "target": "a call seimei could not check"})));
+                what.map(|w| {
+                    let s = |k: &str| w[k].as_str().unwrap_or("").to_string();
+                    format!("it needs an approval card ({}: {})", s("action"), s("target"))
+                })
+            }
+        };
+        rec["decision"] = json!(if why.is_some() { "stopped" } else { "allowed" });
+        if let Some(why) = &why {
+            rec["why"] = json!(why);
+            self.events.add(json!({"type": "system", "level": "error",
+                "text": format!("Stopped {who}: it ran a call without asking, and {why}.")}));
+            let line =
+                format!("ran a call without asking, and {why}; its turn was stopped: {}", excerpt(tool, &args, 120));
+            self.tell(worker, &line, true, None);
+        }
+        self.audit(rec);
+        why
+    }
+
     /// PostToolUseFailure: the outcome goes into the audit log; repeated failures reach the dispatcher.
     pub fn failed(&self, worker: Option<&str>, inp: &Value, tool_use_id: Option<&str>) -> Value {
         let error = match &inp["error"] {

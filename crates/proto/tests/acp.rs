@@ -80,6 +80,7 @@ async fn turn(c: &mut Client) -> (Vec<Update>, Result<String, String>) {
             Some(Event::Update(u)) => ups.push(u),
             Some(Event::TurnEnd(end)) => return (ups, end),
             Some(Event::Unreadable(l)) => panic!("unreadable: {l}"),
+            Some(Event::Unasked(t)) => panic!("a call it asked for shows as unasked: {t:?}"),
             None => panic!("the agent exited mid-turn"),
         }
     }
@@ -246,6 +247,25 @@ async fn permission_allowed_and_rejected() {
     let (ups, end) = turn(&mut c).await;
     assert_eq!(ups[1..], [upd("failed", vec!["denied".into()]), text("Did not run it (reject-once).")]);
     assert_eq!(end, Ok("end_turn".into()));
+
+    // A call it runs without asking is told once, when it ended, whole.
+    c.prompt_text("!unasked echo hi").unwrap();
+    let mut unasked = vec![];
+    loop {
+        match tokio::time::timeout(Duration::from_secs(20), c.recv()).await.expect("an event in time") {
+            Some(Event::Unasked(t)) => unasked.push(t),
+            Some(Event::TurnEnd(_)) => break,
+            Some(_) => {}
+            None => panic!("the agent exited mid-turn"),
+        }
+    }
+    assert_eq!(unasked.len(), 1, "{unasked:?}");
+    let u = &unasked[0];
+    assert_eq!((u.id.as_str(), u.kind.as_str(), u.status.as_str()), ("call_u", "execute", "completed"));
+    assert_eq!(
+        (u.input.clone(), u.content.clone()),
+        (Some(json!({"command": "echo hi"})), vec!["ran echo hi".to_string()])
+    );
     c.close().await;
     conform(&o.cwd);
 }

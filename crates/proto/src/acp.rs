@@ -5,7 +5,7 @@
 //! updates in order, and the end of each prompt's turn after its last update. The agent's permission requests go to
 //! a [`Handler`]; seimei advertises no file system or terminal, so any other request from the agent is refused.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::process::{ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -154,6 +154,10 @@ pub enum Event {
     TurnEnd(Result<String, String>),
     /// A line that is not JSON-RPC.
     Unreadable(String),
+    /// A tool call that ended (completed or failed) with no permission request for it: the agent ran it on its own
+    /// say. The whole call as its updates left it, after the update that ended it. Not sooner: some agents (dsh)
+    /// report a call in progress before they ask for it.
+    Unasked(ToolCall),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -485,6 +489,8 @@ async fn read(
     let mut buf = Vec::new();
     // The open tool calls as their updates left them: a permission request may name only the id.
     let mut calls: HashMap<String, ToolCall> = HashMap::new();
+    // The open calls a permission request named.
+    let mut asked: HashSet<String> = HashSet::new();
     loop {
         match read_line(&mut r, &mut buf, MAX_LINE).await {
             Ok(Line::Eof) | Err(_) => break,
@@ -504,17 +510,25 @@ async fn read(
                 match (v["method"].as_str(), v.get("id").filter(|i| !i.is_null())) {
                     (Some("session/update"), None) => {
                         let u = update(&v["params"]["update"]);
+                        let mut unasked = None;
                         if let Update::ToolCall(t) | Update::ToolCallUpdate(t) = &u {
-                            if ["completed", "failed"].contains(&t.status.as_str()) {
-                                calls.remove(&t.id);
-                            } else {
-                                calls.entry(t.id.clone()).or_default().merge(t);
+                            let mut whole = calls.remove(&t.id).unwrap_or_default();
+                            whole.merge(t);
+                            whole.id.clone_from(&t.id);
+                            if !["completed", "failed"].contains(&t.status.as_str()) {
+                                calls.insert(t.id.clone(), whole);
+                            } else if !asked.remove(&t.id) {
+                                unasked = Some(whole);
                             }
                         }
                         let _ = events.send(Event::Update(u));
+                        if let Some(call) = unasked {
+                            let _ = events.send(Event::Unasked(call));
+                        }
                     }
                     (Some(_), None) => {}
                     (Some("session/request_permission"), Some(id)) => {
+                        asked.insert(s(&v["params"]["toolCall"]["toolCallId"]));
                         permission(id.clone(), &v["params"], &calls, &handler, &out, &inflight);
                     }
                     (Some(m), Some(id)) => {

@@ -135,6 +135,18 @@ def turn(sid: str, text: str) -> str:
             update(sid, {"sessionUpdate": "tool_call_update", "toolCallId": "call_1", "status": "failed",
                          "content": [{"type": "content", "content": {"type": "text", "text": "denied"}}]})
             say(sid, f"Did not run it ({outcome.get('optionId') or r.get('error')}).")
+    elif cmd == "!unasked":
+        # Runs a command without asking, then goes on for a second unless it is cancelled.
+        update(sid, {"sessionUpdate": "tool_call", "toolCallId": "call_u", "title": f"Run {rest}", "kind": "execute",
+                     "status": "in_progress", "rawInput": {"command": rest}})
+        update(sid, {"sessionUpdate": "tool_call_update", "toolCallId": "call_u", "status": "completed",
+                     "content": [{"type": "content", "content": {"type": "text", "text": f"ran {rest}"}}]})
+        say(sid, "Ran it unasked.")
+        for _ in range(20):
+            if sid in cancelled:
+                return "cancelled"
+            time.sleep(0.05)
+        say(sid, "Went on.")
     elif cmd == "!wait":
         say(sid, "Working.")
         for _ in range(600):

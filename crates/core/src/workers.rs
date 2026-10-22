@@ -739,6 +739,8 @@ struct Session {
     message: String,
     /// A new ACP session: its first prompt carries the shikigami prompt.
     fresh: bool,
+    /// Why the guard stopped its last turn: its next prompt starts with it.
+    guard_note: Option<String>,
     stopping: bool,
     last_text: String,
     turn_text: bool,
@@ -779,6 +781,7 @@ impl Session {
             chunk_until: None,
             message: String::new(),
             fresh: false,
+            guard_note: None,
             stopping: false,
             last_text: String::new(),
             turn_text: false,
@@ -803,7 +806,7 @@ impl Session {
                     None => self.ended().await,
                 },
                 ev = next_acp(&mut self.acp) => match ev {
-                    Some(e) => self.acp_event(e),
+                    Some(e) => self.acp_event(e).await,
                     None => self.ended().await,
                 },
                 _ = sleep_until(grace.unwrap_or_else(far)), if grace.is_some() => self.settle(),
@@ -1254,6 +1257,10 @@ impl Session {
         self.last_text.clear();
         self.message.clear();
         self.w.set("running", json!({"question": null}));
+        let text = match self.guard_note.take() {
+            Some(note) => format!("{note}\n\n{text}"),
+            None => text,
+        };
         let text = if std::mem::take(&mut self.fresh) { format!("{}\n{text}", self.w.prompt()) } else { text };
         self.acp.as_ref().expect("a session").prompt_text(&text).map_err(|e| e.to_string())?;
         self.turn = true;
@@ -1273,7 +1280,7 @@ impl Session {
         self.last_text = self.message.clone();
     }
 
-    fn acp_event(&mut self, ev: acp::Event) {
+    async fn acp_event(&mut self, ev: acp::Event) {
         use acp::{Event, Update};
         match ev {
             Event::Update(Update::Text(t)) => {
@@ -1306,6 +1313,26 @@ impl Session {
                 self.turn_ended(end);
             }
             Event::Unreadable(line) => eprintln!("seimei: {} wrote: {}", self.w.name(), chars(&line, 200)),
+            Event::Unasked(t) => self.unasked(t).await,
+        }
+    }
+
+    /// A call the agent ran without asking: the guard sees it only after the fact. One it would have blocked, or held
+    /// for a card, stops the turn; the agent hears why with its next message.
+    async fn unasked(&mut self, t: acp::ToolCall) {
+        let (tool, input) = claude_shaped(&t);
+        let (name, cwd) = (self.w.name(), str_of(&self.w.get("cwd")));
+        let hook = json!({"tool_name": tool, "tool_input": input, "cwd": cwd, "session_id": self.w.get("session_id")});
+        let Some(why) = self.pool.guard.unasked(&name, Some(&self.w.id), &hook, Some(&t.id)).await else { return };
+        let said = format!("The guard stopped this turn: the agent ran a call without asking, and {why}.");
+        self.w.add(json!({"type": "system", "text": said}));
+        self.guard_note = Some(format!(
+            "[seimei] The guard stopped your last turn: you ran a call without asking for permission, and {why}. \
+             Ask before every call that changes or reads outside the project; seimei blocks some outright and puts \
+             the rest on the user's phone."
+        ));
+        if self.turn {
+            self.stop().await;
         }
     }
 
