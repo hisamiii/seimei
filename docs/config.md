@@ -25,6 +25,12 @@ ceiling: summon may only pick a stricter one, and only the user raises it, on a 
 In bypass nothing asks, except Claude Code's own safety checks: those it still raises in bypass (for example "This
 shell -c script runs rm and could not be checked") are blocked without a card, as they were before cards existed.
 
+## Guard rules
+
+`~/.config/seimei/guard.toml` holds the guard's rules, one `[[rule]]` each; there is none until the user writes it.
+`contrib/guard.example.toml` documents the fields and has the rules seimei used to build in, commented out. seimei
+reads the file again when it changes. See [security.md](security.md) for how a call is decided.
+
 ## Command line
 
 ```

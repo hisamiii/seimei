@@ -34,6 +34,9 @@ use crate::approvals::Approvals;
 use crate::util::{config_file, token_urlsafe};
 use crate::watches::Watches;
 
+/// The built-ins, whose own tools ask the guard themselves.
+pub const BUILTIN_NAMES: [&str; 5] = ["browser", "desktop", "discord", "music", "queue"];
+
 /// What a built-in ships: its manifest and its prompt section.
 const BUILTIN: [(&str, &str, &str); 5] = [
     ("browser", include_str!("browser/plugin.toml"), include_str!("browser/prompt.md")),
@@ -452,6 +455,46 @@ impl Plugins {
                 };
                 let _ = wr.write_all(format!("{reply}\n").as_bytes()).await;
             });
+        }
+    }
+}
+
+/// guard.toml's rules for a built-in's own tool call: None to go on, or the reply that ends it. about: what the plugin
+/// knows (facts for the rules, and the card's title and detail); reads: files the call reads; kind: the card's action.
+pub(crate) async fn ask_guard(
+    session: &impl Session,
+    plugin: &str,
+    tool: &str,
+    args: &Value,
+    about: Option<crate::guard::About>,
+    reads: &[PathBuf],
+    kind: &str,
+) -> Option<Value> {
+    let full = format!("mcp__{plugin}__{tool}");
+    let home = crate::paths::home().display().to_string();
+    let facts = about.as_ref().map_or(Value::Null, |a| Value::Object(a.facts.clone()));
+    let v = crate::guard::decide(&full, args, &home, &facts, reads)?;
+    match v.action {
+        crate::guard::Action::Allow => None,
+        crate::guard::Action::Deny => Some(crate::tools::text(
+            &format!("seimei's guard blocks {}. This is the user's rule; if they want it, they do it themselves.", v.message),
+            true,
+        )),
+        crate::guard::Action::Card => {
+            let mut card = crate::guard::card(&full, args, &v.message, about.as_ref());
+            card["action"] = json!(kind);
+            match session.card(card).await {
+                Ok(o) if o == "approved" => None,
+                Ok(o) => {
+                    let undone = match plugin {
+                        "discord" => "nothing was done on Discord",
+                        "browser" => "no tabs closed",
+                        _ => "nothing changed",
+                    };
+                    Some(crate::tools::text(&format!("The user {o} it; {undone}."), true))
+                }
+                Err(e) => Some(crate::tools::text(&e, true)),
+            }
         }
     }
 }

@@ -1,5 +1,5 @@
 {
- "about": "Discord plugin scenarios: tool calls on one connection, with the connector's replies (or fails) per step and the user's outcome for a card. files is laid out under a temp folder first: home is HOME, state is seimei's state (its uploads). tests/unit/discordcases.py --write fills in the wants from Python.",
+ "about": "Discord plugin scenarios: tool calls on one connection, with the connector's replies (or fails) per step and the user's outcome for a card. files is laid out under a temp folder first: home is HOME, state is seimei's state (its uploads). tests/unit/discordcases.py --write fills in the wants from Python. A step's rust holds what the Rust side answers instead, where its guard.toml rules (the example's) differ from the frozen Python plugin.",
  "files": {
   "home/Downloads/a.txt": "hello",
   "home/Downloads/pics/b.png": "PNGDATA",
@@ -2908,7 +2908,10 @@
         "message": "333333333333333333"
        }
       }
-     ]
+     ],
+     "rust": {
+      "want": "seimei's guard blocks editing or deleting someone else's Discord message. This is the user's rule; if they want it, they do it themselves."
+     }
     },
     {
      "tool": "discord_edit",
@@ -3144,7 +3147,10 @@
         "message": "444444444444444444"
        }
       }
-     ]
+     ],
+     "rust": {
+      "want": "seimei's guard blocks editing or deleting someone else's Discord message. This is the user's rule; if they want it, they do it themselves."
+     }
     },
     {
      "tool": "discord_delete",

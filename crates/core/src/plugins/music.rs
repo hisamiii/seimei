@@ -8,6 +8,7 @@ use serde_json::{Map, Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
 use super::Session;
+use crate::guard::About;
 use crate::tools::text;
 use crate::util::truthy;
 
@@ -133,9 +134,10 @@ pub fn describe(cmd: &str, r: &Value) -> String {
     }
 }
 
-/// The card a command needs first, with the args it then runs with: tag writes and deleting a playlist.
-async fn ask(cmd: &str, mut args: Map<String, Value>) -> Result<Option<(Value, Map<String, Value>)>, String> {
-    let card = |target: String, detail: String| json!({"action": "desktop", "target": target, "detail": detail});
+/// What a card would show for a command that changes the library, with the args it then runs with: tag writes and
+/// deleting a playlist.
+async fn ask(cmd: &str, mut args: Map<String, Value>) -> Result<Option<(About, Map<String, Value>)>, String> {
+    let card = |what: String, detail: String| About { what, detail, ..Default::default() };
     match cmd {
         "tags" => {
             let mut keys: Vec<Value> = args.get("keys").and_then(|k| k.as_array()).cloned().unwrap_or_default();
@@ -163,17 +165,16 @@ async fn ask(cmd: &str, mut args: Map<String, Value>) -> Result<Option<(Value, M
 async fn music(a: &Value, session: &impl Session) -> Value {
     let cmd = a["command"].as_str().unwrap_or("");
     let mut args = a["args"].as_object().cloned().unwrap_or_default();
-    match ask(cmd, args.clone()).await {
+    let about = match ask(cmd, args.clone()).await {
         Err(e) => return text(&e, true),
-        Ok(Some((card, then))) => {
-            match session.card(card).await {
-                Ok(o) if o == "approved" => {}
-                Ok(o) => return text(&format!("The user {o} it; nothing changed."), true),
-                Err(e) => return text(&e, true),
-            }
+        Ok(Some((about, then))) => {
             args = then;
+            Some(about)
         }
-        Ok(None) => {}
+        Ok(None) => None,
+    };
+    if let Some(no) = super::ask_guard(session, "music", "music", a, about, &[], "desktop").await {
+        return no;
     }
     match bridge(cmd, &args).await {
         Ok(r) => text(&describe(cmd, &r), false),
@@ -221,7 +222,10 @@ async fn media(a: &Value) -> Value {
 pub async fn call(tool: &str, a: &Value, session: &impl Session) -> Value {
     match tool {
         "music" => music(a, session).await,
-        "media" => media(a).await,
+        "media" => match super::ask_guard(session, "music", "media", a, None, &[], "desktop").await {
+            Some(no) => no,
+            None => media(a).await,
+        },
         _ => text(&format!("no such tool: {tool}"), true),
     }
 }

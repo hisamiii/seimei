@@ -758,6 +758,12 @@ impl Desktop {
 
     /// One of the desktop tools, for the session the call came from.
     pub async fn call(self: &Arc<Self>, tool: &str, args: &Value, session: &impl Session) -> Value {
+        let full = format!("mcp__desktop__{tool}");
+        let a = args.clone();
+        let about = self.blocking(move |d| checks::check(&full, &a, d)).await;
+        if let Some(no) = super::ask_guard(session, "desktop", tool, args, about, &[], "desktop").await {
+            return no;
+        }
         let name = self.b.name();
         let r: Result<String, String> = match tool {
             "desktop" => self.blocking(|d| d.overview()).await,

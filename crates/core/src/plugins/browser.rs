@@ -164,6 +164,9 @@ impl Browser {
             let opened = self.opened.lock().unwrap();
             ids.iter().filter(|i| !opened.contains(i)).copied().collect()
         };
+        // Facts for the guard's rules: tabs = theirs when any of them seimei did not open.
+        let mut about = crate::guard::About::default();
+        about.facts.insert("tabs".into(), json!(if theirs.is_empty() { "mine" } else { "theirs" }));
         if !theirs.is_empty() {
             let ts = self.link.call("info", 30, json!({"tabs": theirs})).await?;
             let ts = ts.as_array().cloned().unwrap_or_default();
@@ -179,11 +182,10 @@ impl Browser {
                     format!("{title}\n{}", py(&t["url"]))
                 })
                 .collect();
-            let card = json!({"action": "desktop", "target": target, "detail": detail.join("\n")});
-            match session.card(card).await? {
-                o if o == "approved" => {}
-                o => return Ok(text(&format!("The user {o} it; no tabs closed."), true)),
-            }
+            (about.what, about.detail) = (target, detail.join("\n"));
+        }
+        if let Some(no) = super::ask_guard(session, "browser", "browser_close", a, Some(about), &[], "desktop").await {
+            return Ok(no);
         }
         let n = self.link.call("close", 30, json!({"tabs": ids})).await?;
         self.opened.lock().unwrap().retain(|i| !ids.contains(i));
@@ -230,6 +232,12 @@ impl Browser {
 
     /// One tool call, for the session that makes it.
     pub async fn call(&self, tool: &str, a: &Value, session: &impl Session) -> Value {
+        // browser_close asks the guard itself, with which tabs are whose.
+        if tool != "browser_close"
+            && let Some(no) = super::ask_guard(session, "browser", tool, a, None, &[], "desktop").await
+        {
+            return no;
+        }
         self.run(tool, a, session).await.unwrap_or_else(|e| text(&e, true))
     }
 }

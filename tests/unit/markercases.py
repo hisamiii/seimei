@@ -20,6 +20,8 @@ for c in CASES["quoted"]:
     got = quoted(c["event"])
     check(f"quoted {json.dumps(c['event'])[:60]}", list(got) == [c["chip"], c["line"]], got)
 src = Path(__file__).resolve().parents[2] / "crates/core/src"
-check("the Rust prompt is Python's", (src / "dispatcher.md").read_text() == PROMPT)
+# Rust writes the guard's paragraph from guard.toml where {guard} stands; the rest is Python's.
+before, after = (src / "dispatcher.md").read_text().split("{guard}")
+check("the Rust prompt is Python's", PROMPT.startswith(before) and PROMPT.endswith(after))
 check("the Rust checklist is Python's", (src / "checklist.md").read_text() == CHECKLIST)
 print(f"{sum(res)}/{len(res)}")

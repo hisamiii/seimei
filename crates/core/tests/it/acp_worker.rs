@@ -19,17 +19,9 @@ fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
 }
 
-/// A guard case that blocks a command whatever the home: the fake agent asks to run it.
-fn blocked_command() -> String {
-    let doc: Value =
-        serde_json::from_str(&std::fs::read_to_string(root().join("tests/cases/guard.json")).unwrap()).unwrap();
-    let c = (doc["cases"].as_array().unwrap().iter())
-        .find(|c| {
-            c["tool"] == "Bash" && c["blocked"] == true && !c.to_string().contains("/h") && !c.to_string().contains('~')
-        })
-        .unwrap();
-    c["input"]["command"].as_str().unwrap().to_string()
-}
+/// A command the test's guard.toml refuses: the fake agent asks to run it.
+const BLOCKED: &str = "guard-test-refused now";
+const RULES: &str = "[[rule]]\nargv = [\"guard-test-refused\"]\naction = \"deny\"\nmessage = \"the test's rule\"\n";
 
 async fn until(secs: u64, f: impl Fn() -> bool) -> bool {
     for _ in 0..secs * 20 {
@@ -71,6 +63,11 @@ async fn acp_shikigami() {
         std::fs::create_dir_all(d).unwrap();
     }
     let work = work.canonicalize().unwrap();
+    let config = base.join("config");
+    std::fs::create_dir_all(config.join("seimei")).unwrap();
+    std::fs::write(config.join("seimei/guard.toml"), RULES).unwrap();
+    let mut env = crate::env::Env::lock();
+    env.set("XDG_CONFIG_HOME", &config);
     let events = Arc::new(EventLog::open(&state.join("events.jsonl")).unwrap());
     let approvals = Arc::new(Approvals::new(events.clone()));
     // A built-in, an external stdio server and an HTTP one: an ACP agent gets the stdio ones.
@@ -200,13 +197,13 @@ async fn acp_shikigami() {
     assert_eq!(said(&w, from), ["Ran it (allow-once)."]);
     let evs = log(&w)[from..].to_vec();
     assert!(evs.iter().any(|e| e["type"] == "tool" && e["name"] == "Bash" && e["summary"] == "echo dsh"), "{evs:?}");
-    let (from, ok) = turn(&w, &format!("!dsh {}", blocked_command()), "done").await;
+    let (from, ok) = turn(&w, &format!("!dsh {}", BLOCKED), "done").await;
     assert!(ok);
     assert_eq!(said(&w, from), ["Did not run it (reject-once)."]);
     assert_eq!(cards.lock().unwrap().len(), 3, "the guard reads dsh's command too");
 
     // 5. What the guard blocks gets no card.
-    let (from, ok) = turn(&w, &format!("!tool {}", blocked_command()), "done").await;
+    let (from, ok) = turn(&w, &format!("!tool {}", BLOCKED), "done").await;
     assert!(ok);
     assert_eq!(said(&w, from), ["Did not run it (reject-once)."]);
     assert_eq!(cards.lock().unwrap().len(), 3, "no card for a blocked command");
@@ -221,7 +218,7 @@ async fn acp_shikigami() {
     assert!(ok);
     assert_eq!(said(&w, from), ["Ran it unasked.", "Went on."]);
     // One it would have blocked stops the turn, and the agent hears why with its next message.
-    let (from, ok) = turn(&w, &format!("!unasked {}", blocked_command()), "stopped").await;
+    let (from, ok) = turn(&w, &format!("!unasked {}", BLOCKED), "stopped").await;
     assert!(ok, "{}", w.state());
     assert_eq!(said(&w, from), ["Ran it unasked."]);
     let note = log(&w)[from..].iter().find(|e| e["type"] == "system").cloned().unwrap_or_default();
@@ -305,7 +302,7 @@ async fn acp_shikigami() {
     let before = n();
     let (from, _) = turn(&w, "!dsh echo bypass", "done").await;
     assert!(ran(from), "{:?}", said(&w, from));
-    let (from, _) = turn(&w, &format!("!dsh {}", blocked_command()), "done").await;
+    let (from, _) = turn(&w, &format!("!dsh {}", BLOCKED), "done").await;
     assert_eq!(said(&w, from), ["Did not run it (reject-once)."], "bypass does not pass the guard");
     assert_eq!(n(), before, "bypass: no cards");
     // A command call without its command: the guard had nothing to read, so a card even in bypass.

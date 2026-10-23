@@ -65,6 +65,7 @@ async fn discord_cases() {
     // Before the plugin looks: it finds ~/Downloads from HOME.
     let mut env = crate::env::Env::lock();
     env.set("HOME", dir.join("home"));
+    env.example_rules(&dir.join("config"));
     for (rel, spec) in doc["files"].as_object().unwrap() {
         let p = dir.join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
@@ -107,7 +108,8 @@ async fn discord_cases() {
             });
             for key in ["want", "error", "card", "sent"] {
                 n += 1;
-                if got[key] != s[key] {
+                // Where Rust's guard.toml answers differ from the frozen Python plugin's: "rust": {"want": ...}.
+                if got[key] != *s.pointer(&format!("/rust/{key}")).unwrap_or(&s[key]) {
                     fails.push(format!("{} #{i} {} {key}: {}", sc["name"], s["tool"], got[key]));
                 }
             }

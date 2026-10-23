@@ -227,6 +227,14 @@ pub fn run(read_secret: impl Fn(&str) -> String) {
             println!("Start it later with `systemctl --user enable --now seimei`.");
         }
     }
+    let guard = seimei_core::util::guard_file();
+    if !guard.exists() {
+        println!(
+            "\nThe guard has no rules: agents may do what Claude Code lets them. Rules go in {}; \
+             contrib/guard.example.toml in seimei's source has examples to copy.",
+            guard.display()
+        );
+    }
     println!(
         "\nOpen {origin} and log in. For the phone: install the app, then run `seimei pair` and type the code into it."
     );

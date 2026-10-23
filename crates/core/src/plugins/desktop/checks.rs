@@ -1,5 +1,5 @@
-//! The desktop plugin's cards: closing a window seimei did not open, ending the desktop session and editing the WM's
-//! config wait for the user's OK, from a desktop tool or from Bash and the file tools (the user's calls, 2026-10-19).
+//! What the desktop plugin tells the guard about a call: closing a window seimei did not open, ending the desktop
+//! session or editing the WM's config, from a desktop tool or from Bash and the file tools. Rules decide what follows.
 
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 
 use super::{Desktop, text_of};
 use crate::approvals::REDIRECT;
+use crate::guard::About;
 use crate::shell::commands;
 
 /// Changes every operand: any config path among them is a write.
@@ -121,8 +122,19 @@ pub fn writes_config(cmd: &str, conf: &Path, home: &Path) -> bool {
     false
 }
 
-/// The card a tool call needs, or None.
-pub fn check(tool: &str, inp: &Value, desk: &Desktop) -> Option<Value> {
+/// What a hit on the desktop is, as the fact rules match: quit (ends the session), config (an edit of the WM's
+/// config) or close (a window seimei did not open).
+fn kind(what: &str) -> &'static str {
+    if what.contains("ends the desktop session") { "quit" } else { "close" }
+}
+
+fn about(fact: &str, what: String, detail: String) -> Option<About> {
+    let facts = serde_json::Map::from_iter([("desktop".to_string(), json!(fact))]);
+    Some(About { facts, what, detail })
+}
+
+/// What a tool call does to the desktop, for the guard's rules (facts desktop = quit, close or config), or None.
+pub fn check(tool: &str, inp: &Value, desk: &Desktop) -> Option<About> {
     let b = &desk.b;
     let home = &b.ctx().home;
     let conf = b.config_dir();
@@ -133,11 +145,11 @@ pub fn check(tool: &str, inp: &Value, desk: &Desktop) -> Option<Value> {
         let cmd = inp.get("command").map(text_of).unwrap_or_default();
         for c in commands(&cmd).into_iter().flatten() {
             if let Some(hit) = b.bash_hit(&c.argv, &ours) {
-                return Some(json!({"action": "command", "target": hit, "detail": cmd}));
+                return about(kind(&hit), hit, cmd);
             }
         }
         if conf.as_ref().is_some_and(|c| writes_config(&cmd, c, home)) {
-            return Some(json!({"action": "command", "target": edit, "detail": cmd}));
+            return about("config", edit, cmd);
         }
     } else if ["Write", "Edit", "NotebookEdit"].contains(&tool) {
         let path = field("file_path").or_else(|| field("notebook_path")).unwrap_or_default();
@@ -147,7 +159,7 @@ pub fn check(tool: &str, inp: &Value, desk: &Desktop) -> Option<Value> {
         {
             let detail =
                 field("content").or_else(|| field("new_string")).or_else(|| field("new_source")).unwrap_or_default();
-            return Some(json!({"action": "edit", "target": edit, "detail": format!("{path}\n\n{detail}")}));
+            return about("config", edit, format!("{path}\n\n{detail}"));
         }
     } else if tool == format!("mcp__desktop__{}", b.name()) {
         let mut args = vec![inp.get("action").map(text_of).unwrap_or_default()];
@@ -160,9 +172,7 @@ pub fn check(tool: &str, inp: &Value, desk: &Desktop) -> Option<Value> {
             }
         }
         if let Some(hit) = b.action_hit(&args, &ours) {
-            return Some(
-                json!({"action": "desktop", "target": hit, "detail": format!("{} {}", b.action_cmd(), args.join(" "))}),
-            );
+            return about(kind(&hit), hit, format!("{} {}", b.action_cmd(), args.join(" ")));
         }
     }
     None

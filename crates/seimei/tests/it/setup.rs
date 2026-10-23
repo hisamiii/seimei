@@ -75,6 +75,7 @@ fn setup_first_run_then_again() {
     assert!(o.status.success(), "{out}");
     assert!(out.contains("Claude Code 2.1.296 found"), "{out}");
     assert!(out.contains("at least 8"), "the short one is refused: {out}");
+    assert!(out.contains("contrib/guard.example.toml"), "where rules come from: {out}");
 
     let cfg: toml::Table = h.read("cfg/seimei/config.toml").parse().unwrap();
     assert_eq!(cfg["server"]["port"].as_integer(), Some(9100));

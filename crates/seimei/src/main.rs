@@ -365,7 +365,7 @@ fn main() {
                 approvals: app.approvals.clone(),
             });
             let desk = d.clone();
-            seimei_core::approvals::add_check(Arc::new(move |tool, inp| {
+            seimei_core::guard::add_facts(Arc::new(move |tool, inp| {
                 seimei_core::plugins::desktop::checks::check(tool, inp, &desk)
             }));
             tokio::spawn(d.clone().run());

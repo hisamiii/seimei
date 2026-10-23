@@ -18,6 +18,7 @@ fn report(fails: &[String], total: usize) {
 fn queue_cases() {
     let mut env = crate::env::Env::lock();
     env.set("TZ", "UTC");
+    env.example_rules(&std::env::temp_dir().join(format!("seimei-queue-rules-{}", std::process::id())));
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/cases/queue.json");
     let doc: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     let names: HashMap<String, String> = serde_json::from_value(doc["names"].clone()).unwrap();

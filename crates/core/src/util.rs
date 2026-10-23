@@ -19,6 +19,11 @@ pub fn config_file() -> PathBuf {
     xdg("XDG_CONFIG_HOME", ".config").join("seimei/config.toml")
 }
 
+/// The user's guard rules: only the user edits this file.
+pub fn guard_file() -> PathBuf {
+    xdg("XDG_CONFIG_HOME", ".config").join("seimei/guard.toml")
+}
+
 fn xdg(var: &str, fallback: &str) -> PathBuf {
     match std::env::var_os(var) {
         Some(v) if !v.is_empty() => PathBuf::from(v),

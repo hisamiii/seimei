@@ -5,3 +5,4 @@ fakeclaude-empty/
 run/
 .shots/
 *.log
+cfg/seimei/guard.toml

@@ -523,6 +523,12 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
 /// One tool call.
 pub async fn call(tool: &str, a: &Value, session: &impl Session) -> Value {
     let not_running = || text("cqd is not running.", true);
+    // queue_control asks the guard itself, with the job a kill would stop.
+    if tool != "queue_control"
+        && let Some(no) = super::ask_guard(session, "queue", tool, a, None, &[], "desktop").await
+    {
+        return no;
+    }
     match tool {
         "queue" => {
             let names = session.names();
@@ -543,13 +549,17 @@ pub async fn call(tool: &str, a: &Value, session: &impl Session) -> Value {
                     ),
                     None => s(t),
                 };
-                let card = json!({"action": "desktop", "target": format!("stop the GPU/NPU job {what}"),
-                    "detail": "SIGTERM to the whole command (its systemd scope)"});
-                match session.card(card).await {
-                    Ok(o) if o == "approved" => action = "kill".into(),
-                    Ok(o) => return text(&format!("The user {o} it; nothing changed."), true),
-                    Err(e) => return text(&e, true),
+                let about = crate::guard::About {
+                    what: format!("stop the GPU/NPU job {what}"),
+                    detail: "SIGTERM to the whole command (its systemd scope)".into(),
+                    ..Default::default()
+                };
+                if let Some(no) = super::ask_guard(session, "queue", tool, a, Some(about), &[], "desktop").await {
+                    return no;
                 }
+                action = "kill".into();
+            } else if let Some(no) = super::ask_guard(session, "queue", tool, a, None, &[], "desktop").await {
+                return no;
             }
             let req = json!({"op": "control", "action": action, "target": a["target"], "to": a["to"]});
             match blocking(move || cqd(&req)).await {

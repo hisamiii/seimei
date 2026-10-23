@@ -74,6 +74,9 @@ impl Drop for Server {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn queue_plugin_over_stdio() {
+    // The example's rules: the cards these tools raise are guard.toml's now. Children inherit it.
+    let mut rules = crate::env::Env::lock();
+    rules.example_rules(&std::env::temp_dir().join(format!("seimei-queue_plugin_over_stdio-rules-{}", std::process::id())));
     let (d, events, approvals, plugins) = host("queue", "queue").await;
     let cases_queue = cases("queue.json");
     let cqd_sock = d.join("cqd.sock");
@@ -195,6 +198,9 @@ async fn host(name: &str, enabled: &str) -> (std::path::PathBuf, Arc<EventLog>, 
 
 #[tokio::test(flavor = "multi_thread")]
 async fn music_plugin_over_stdio() {
+    // The example's rules: the cards these tools raise are guard.toml's now. Children inherit it.
+    let mut rules = crate::env::Env::lock();
+    rules.example_rules(&std::env::temp_dir().join(format!("seimei-music_plugin_over_stdio-rules-{}", std::process::id())));
     let (d, events, approvals, plugins) = host("music", "music").await;
     let env = plugins.servers("seimei", None, None)["music"]["env"].as_object().unwrap().clone();
     // A Quod Libet bridge that answers status and keeps the rest, and a playerctl that logs its args.
@@ -313,6 +319,9 @@ fn browser_op(op: &str, a: &Value) -> Value {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn browser_plugin_forwards_to_seimei() {
+    // The example's rules: the cards these tools raise are guard.toml's now. Children inherit it.
+    let mut rules = crate::env::Env::lock();
+    rules.example_rules(&std::env::temp_dir().join(format!("seimei-browser_plugin_forwards_to_seimei-rules-{}", std::process::id())));
     let (d, events, approvals, plugins) = host("browser", "browser").await;
     let link = d.join("run/seimei/browser.sock");
     tokio::spawn(plugins.browser.as_ref().unwrap().link.clone().run(link.clone()));
@@ -407,6 +416,9 @@ fn discord_op(op: &str, a: &Value) -> Value {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn discord_plugin_forwards_to_seimei() {
+    // The example's rules: the cards these tools raise are guard.toml's now. Children inherit it.
+    let mut rules = crate::env::Env::lock();
+    rules.example_rules(&std::env::temp_dir().join(format!("seimei-discord_plugin_forwards_to_seimei-rules-{}", std::process::id())));
     let (d, events, approvals, plugins) = host("discord", "discord").await;
     let link = d.join("run/seimei/discord.sock");
     tokio::spawn(plugins.discord.as_ref().unwrap().link.clone().run(link.clone()));

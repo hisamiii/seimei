@@ -26,6 +26,11 @@ const READ_BUDGET: i64 = 300;
 const BUDGET_WINDOW: f64 = 600.0;
 const MAX_TEXT: usize = 2000;
 const MAX_FILES: usize = 10;
+/// Whose a message is, for a card.
+fn whose(m: &Value) -> &'static str {
+    if truthy(&m["own"]) { "your" } else { "someone else's" }
+}
+
 /// Discord's own limit for accounts without Nitro.
 const MAX_FILE: u64 = 10 << 20;
 
@@ -214,31 +219,36 @@ impl Discord {
         if rel.components().any(|c| c.as_os_str().to_string_lossy().starts_with('.')) {
             return Err(format!("{r}: hidden files are not sent"));
         }
-        if let Some(name) = crate::guard::secret_path(&real) {
-            return Err(format!("{r}: that is {name}"));
-        }
         if !real.is_file() {
             return Err(format!("{r}: not a file"));
         }
         Ok(real)
     }
 
-    /// None when the user approved, else what to answer.
-    async fn ask(&self, target: String, detail: String, session: &impl Session) -> Result<Option<Value>, String> {
-        let card = json!({"action": "discord", "target": target, "detail": detail});
-        Ok(match session.card(card).await? {
-            o if o == "approved" => None,
-            o => Some(text(&format!("The user {o} it; nothing was done on Discord."), true)),
-        })
+    /// guard.toml's answer for a call that acts on Discord: None to go on, else what to answer. The card shows what
+    /// exactly goes out; facts: author, whose message it acts on (you or someone else).
+    #[allow(clippy::too_many_arguments)]
+    async fn ask(
+        &self,
+        session: &impl Session,
+        tool: &str,
+        a: &Value,
+        author: Option<&Value>,
+        target: String,
+        detail: String,
+        reads: &[PathBuf],
+    ) -> Option<Value> {
+        let mut about = crate::guard::About { what: target, detail, ..Default::default() };
+        if let Some(m) = author {
+            about.facts.insert("author".into(), json!(if truthy(&m["own"]) { "you" } else { "someone else" }));
+        }
+        super::ask_guard(session, "discord", tool, a, Some(about), reads, "discord").await
     }
 
-    /// Where a message is, and the message, when it is the user's own.
-    async fn own(&self, channel: &str, msg: &str) -> Result<(String, Value), String> {
+    /// Where a message is, and the message.
+    async fn message(&self, channel: &str, msg: &str) -> Result<(String, Value), String> {
         let place = py(&self.link.call("where", 30, json!({"channel": channel})).await?);
         let m = self.link.call("message", 30, json!({"channel": channel, "message": msg})).await?;
-        if !truthy(&m["own"]) {
-            return Err("That message is not yours; only your own messages can be edited or deleted.".into());
-        }
         Ok((place, m))
     }
 
@@ -377,7 +387,7 @@ impl Discord {
             detail += &format!("\n\nFiles: {}", sizes.join(", "));
         }
         let verb = if reply_to.is_some() { "reply on Discord in" } else { "send a Discord message to" };
-        if let Some(no) = self.ask(format!("{verb} {place}"), detail, session).await? {
+        if let Some(no) = self.ask(session, "discord_send", a, None, format!("{verb} {place}"), detail, &paths).await {
             return Ok(no);
         }
         let args = json!({"channel": channel, "text": body, "reply_to": reply_to, "files": files});
@@ -395,13 +405,14 @@ impl Discord {
         if len > MAX_TEXT {
             return Err(format!("Discord takes up to {MAX_TEXT} characters; this is {len}"));
         }
-        let (place, m) = self.own(&channel, &msg).await?;
+        let (place, m) = self.message(&channel, &msg).await?;
         if m["content"].as_str() == Some(body.as_str()) {
             return Ok(text("The message already says that; nothing to change.", false));
         }
         let old = if truthy(&m["content"]) { py(&m["content"]) } else { "(no text)".into() };
         let detail = format!("Before:\n{old}\n\nAfter:\n{body}");
-        if let Some(no) = self.ask(format!("edit your Discord message in {place}"), detail, session).await? {
+        let target = format!("edit {} Discord message in {place}", whose(&m));
+        if let Some(no) = self.ask(session, "discord_edit", a, Some(&m), target, detail, &[]).await {
             return Ok(no);
         }
         self.link.call("edit", 30, json!({"channel": channel, "message": msg, "text": body})).await?;
@@ -410,9 +421,9 @@ impl Discord {
 
     async fn delete(&self, a: &Value, session: &impl Session) -> Result<Value, String> {
         let (channel, msg) = (id(&a["channel"], "channel")?, id(&a["message"], "message")?);
-        let (place, m) = self.own(&channel, &msg).await?;
-        let target = format!("delete your Discord message in {place}");
-        if let Some(no) = self.ask(target, short(&m, MAX_TEXT), session).await? {
+        let (place, m) = self.message(&channel, &msg).await?;
+        let target = format!("delete {} Discord message in {place}", whose(&m));
+        if let Some(no) = self.ask(session, "discord_delete", a, Some(&m), target, short(&m, MAX_TEXT), &[]).await {
             return Ok(no);
         }
         self.link.call("delete", 30, json!({"channel": channel, "message": msg})).await?;
@@ -430,7 +441,7 @@ impl Discord {
         let m = self.link.call("message", 30, json!({"channel": channel, "message": msg})).await?;
         let (target, detail) =
             (format!("react {emoji} on Discord in {place}"), format!("{emoji} on\n{}", short(&m, 300)));
-        if let Some(no) = self.ask(target, detail, session).await? {
+        if let Some(no) = self.ask(session, "discord_react", a, Some(&m), target, detail, &[]).await {
             return Ok(no);
         }
         self.link.call("react", 30, json!({"channel": channel, "message": msg, "emoji": emoji})).await?;
@@ -471,6 +482,11 @@ impl Discord {
 
     /// One tool call, for the session that makes it.
     pub async fn call(&self, tool: &str, a: &Value, session: &impl Session) -> Value {
+        // The calls that act on Discord ask the guard themselves, with what exactly goes out.
+        let acts = ["discord_send", "discord_edit", "discord_delete", "discord_react"].contains(&tool);
+        if !acts && let Some(no) = super::ask_guard(session, "discord", tool, a, None, &[], "discord").await {
+            return no;
+        }
         self.run(tool, a, session).await.unwrap_or_else(|e| text(&e, true))
     }
 }

@@ -61,6 +61,8 @@ async fn browser_cases() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/cases/browser.json");
     let doc: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     let dir = std::env::temp_dir().join(format!("seimei-browser-{}", std::process::id()));
+    let mut env = crate::env::Env::lock();
+    env.example_rules(&dir.join("config"));
     let mut fails = vec![];
     let mut n = 0;
     for (k, sc) in doc["scenarios"].as_array().unwrap().iter().enumerate() {

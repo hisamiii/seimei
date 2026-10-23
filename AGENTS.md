@@ -75,7 +75,7 @@ Docs live in `docs/`: `architecture.md` (processes, state, deploys, tests), `con
 - Headless only: no visible windows, no on-screen emulator (`-no-window` is fine), no real cards or notifications on the user's phone.
 - Test sessions use the test config dir (`~/.local/share/seimei-test/claude`), never the user's. Log it in once with `CLAUDE_CONFIG_DIR=<dir> claude /login`.
 - Shut down what a test started: the QA server (`tests/qa/stop.sh`), gradle, the emulator.
-- The guard matches secret file names anywhere in a command line, so a shell command that edits code naming them is blocked. Edit such code with the Edit tool.
+- The guard's path rules match file names anywhere in a command line, so a shell command that edits code naming a guarded file can be blocked. Edit such code with the Edit tool.
 
 ## Commits
 

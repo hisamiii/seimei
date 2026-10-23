@@ -63,6 +63,9 @@ async fn dsh_shikigami_live() {
     for d in [&state, &work] {
         std::fs::create_dir_all(d).unwrap();
     }
+    // The example's rules: the key read is refused by guard.toml's secrets rule.
+    let mut rules = crate::env::Env::lock();
+    rules.example_rules(&base.join("config"));
     let events = Arc::new(EventLog::open(&state.join("events.jsonl")).unwrap());
     let approvals = Arc::new(Approvals::new(events.clone()));
     let plugins = Arc::new(Plugins::load_at(&toml::Table::new(), &state, env!("CARGO_BIN_EXE_seimei")));

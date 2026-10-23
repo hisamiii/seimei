@@ -55,6 +55,9 @@ async fn permissions_live() {
     let work = work("t64rs");
     let cwd = work.display().to_string();
     let state = live::state("permtest");
+    // The example's rules: the key read is refused and Claude Code's settings take a card, as guard.toml says.
+    let mut rules = crate::env::Env::lock();
+    rules.example_rules(&state.join("config"));
     let events = Arc::new(EventLog::open(&state.join("events.jsonl")).unwrap());
     let approvals = Arc::new(Approvals::new(events.clone()));
     let (pool, heard) = pool(&state.join("a"), "default", &events, &approvals);

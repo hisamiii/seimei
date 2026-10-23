@@ -42,6 +42,7 @@ async fn music_cases() {
     let listener = UnixListener::bind(&sock).unwrap();
     let mut env = crate::env::Env::lock();
     env.set("SEIMEI_QL_SOCK", &sock);
+    env.example_rules(&std::env::temp_dir().join(format!("seimei-ql-rules-{}", std::process::id())));
     let found = Arc::new(Mutex::new(json!([])));
     let sent = Arc::new(Mutex::new(vec![]));
     let (f, s) = (found.clone(), sent.clone());

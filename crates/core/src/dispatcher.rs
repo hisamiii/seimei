@@ -395,6 +395,7 @@ impl Dispatcher {
             .replace("{about}", &self.cfg.about)
             .replace("{grants}", &grants)
             .replace("{plugins}", &plugins.prompt(None))
+            .replace("{guard}", &crate::guard::prompt_section())
     }
 
     /// A resumed session keeps the system prompt it had until its next compaction: when a deploy changed the prompt,

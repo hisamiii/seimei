@@ -1,0 +1,271 @@
+# seimei's guard rules: copy what you want to ~/.config/seimei/guard.toml and take the # off its lines.
+# seimei reads that file again whenever it changes. Only you edit it: the guard refuses any agent's write to it.
+# No file: no rules, and the harness's own permission mode decides everything.
+# A broken file (bad TOML, an unknown key, a rule with no match fields): seimei keeps the last good rules and
+# tells you what is wrong, in the app and in its log.
+#
+# Each [[rule]] has match fields (every one given must hit) and an action.
+#   tool    glob on the tool name: "Bash", "Edit", "mcp__discord__*". {a,b} for alternatives.
+#   paths   globs, ~ is home. "dir/**" is anything below dir; plain "dir" is the folder itself.
+#           A relative glob (".claude/settings.json") matches in any folder.
+#   op      "read", "write" or "exec", or a list of them; the default is all three. Needs paths.
+#           write covers create, edit, move and delete.
+#           Paths come from tool args (Read, Edit, plugin tools that take a file) and from Bash
+#           through the shell parser (redirects, cd, globs, NAME=dir).
+#           rm -r, cp -r or tar on a folder reaches everything below it.
+#           ls, stat and test count as no op. A path in code (python3 -c "...") counts as every op.
+#   argv    Bash: the program, then words that must appear in that order (globs, {a,b})
+#   pipe    Bash: one argv pattern per stage of a pipeline. The last stage also hits when it is fed
+#           a substitution of the earlier ones: bash <(curl ..), sh -c "$(curl ..)".
+#   input   fallback on the tool's input fields: a string is a regex on the field, anything else must be equal
+#   facts   what a built-in plugin knows about the call (below), as globs
+#   action  "deny", "card" or "allow"
+#   message what the agent is told (deny), or the card's title (card) when the plugin has none of its own
+#
+# Precedence: seimei splits a call into pieces. A piece is one path the call touches, with its op,
+# the command that touches it, and the tool. A call that touches no path is one piece.
+# For each piece, the first rule in file order that matches decides.
+# The call as a whole gets the strictest answer of its pieces: deny > card > allow.
+# So an "allow" exception goes above the rule it carves out of.
+# When no rule matches, seimei adds nothing and the harness's own permission mode decides.
+# "allow" never skips the harness's own prompts.
+#
+# A card waits 10 minutes for your answer. A card nobody answers counts as deny.
+#
+# Facts the built-in plugins give:
+#   mcp__desktop__*         desktop = "quit" (ends the session), "close" (a window seimei did not open)
+#                           or "config" (an edit of the window manager's config). Bash commands that
+#                           do the same (niri msg action quit) get the same facts.
+#   mcp__discord__*         author = "you" or "someone else": whose message an edit, delete or react is on
+#   mcp__browser__browser_close   tabs = "theirs" (tabs seimei did not open) or "mine"
+#
+# Built in, whatever this file says: agents cannot change this file, a command nested too deep to
+# check is refused, and the stop key and the login tripwire work as before.
+
+# --- Wiping out: first, so its message is the one told (rm -r ~ reaches the secrets below too) ---
+
+# A recursive delete of home, /home or /. (rm -rf ~/* and rm -rf * in home count: dir/* is dir.)
+#[[rule]]
+#argv    = ["rm", "{-*[rR]*,--recursive}"]
+#paths   = ["~", "/", "/home"]
+#op      = "write"
+#action  = "deny"
+#message = "deleting your home folder or the whole disk"
+
+# --- Secrets: never read or written, through any tool or command ---
+
+# The SSH keys.
+#[[rule]]
+#paths   = ["~/.ssh/**"]
+#op      = ["read", "write"]
+#action  = "deny"
+#message = "your SSH keys"
+
+#[[rule]]
+#paths   = ["~/.gnupg/**"]
+#op      = ["read", "write"]
+#action  = "deny"
+#message = "your GnuPG keys"
+
+#[[rule]]
+#paths   = ["~/.local/share/TelegramDesktop/tdata/**"]
+#op      = ["read", "write"]
+#action  = "deny"
+#message = "the Telegram session"
+
+#[[rule]]
+#paths   = ["~/.local/share/seimei/{,dev/}auth.json"]
+#op      = ["read", "write"]
+#action  = "deny"
+#message = "seimei's login secrets"
+
+#[[rule]]
+#paths   = ["~/.local/share/seimei/{,dev/}unlock"]
+#op      = ["read", "write"]
+#action  = "deny"
+#message = "the screen password"
+
+#[[rule]]
+#paths   = ["~/.local/share/seimei/signing/**"]
+#op      = ["read", "write"]
+#action  = "deny"
+#message = "the app signing key"
+
+#[[rule]]
+#paths   = ["~/.local/share/seimei/firebase/**"]
+#op      = ["read", "write"]
+#action  = "deny"
+#message = "the Firebase key"
+
+#[[rule]]
+#paths   = ["~/.local/share/seimei/{,dev/}push-vapid.pem"]
+#op      = ["read", "write"]
+#action  = "deny"
+#message = "seimei's push signing key"
+
+#[[rule]]
+#paths   = ["~/.local/share/seimei/kitty-rc.conf"]
+#op      = ["read", "write"]
+#action  = "deny"
+#message = "the kitty remote-control password"
+
+#[[rule]]
+#paths   = ["~/.claude/.credentials.json"]
+#op      = ["read", "write"]
+#action  = "deny"
+#message = "the Claude login"
+
+#[[rule]]
+#paths   = ["~/.cloudflared/**"]
+#op      = ["read", "write"]
+#action  = "deny"
+#message = "the tunnel credentials"
+
+#[[rule]]
+#paths   = ["~/.config/gh/hosts.yml"]
+#op      = ["read", "write"]
+#action  = "deny"
+#message = "the GitHub token"
+
+#[[rule]]
+#paths   = ["~/.local/share/keyrings/**"]
+#op      = ["read", "write"]
+#action  = "deny"
+#message = "the keyring"
+
+# --- Commands ---
+
+# A download run as a script: curl .. | sh, bash <(curl ..), eval "$(curl ..)".
+#[[rule]]
+#pipe    = [["{curl,wget,fetch,aria2c,http,https,xh}"], ["{sh,bash,zsh,dash,fish,ksh,eval,source,.}"]]
+#action  = "deny"
+#message = "running a download as a script"
+
+# ...or into code read from stdin: python3 -. (A pipe into python3 -c 'code' is fine, so plain python3 is not here.)
+#[[rule]]
+#pipe    = [["{curl,wget,fetch,aria2c,http,https,xh}"], ["{python*,node,perl,ruby,php,lua}", "-"]]
+#action  = "deny"
+#message = "running a download as a script"
+
+# ...and a download as the program itself: $(curl ..).
+#[[rule]]
+#argv    = ["{$(curl*,$(wget*}"]
+#action  = "deny"
+#message = "running a download as a script"
+
+# Driving kitty by remote control: only you, from the app, type into sessions.
+#[[rule]]
+#argv    = ["{kitty,kitten}", "@"]
+#action  = "deny"
+#message = "driving kitty by remote control"
+
+#[[rule]]
+#argv    = ["kitten", "remote"]
+#action  = "deny"
+#message = "driving kitty by remote control"
+
+#[[rule]]
+#paths   = ["/run/user/*/kitty-*"]
+#action  = "deny"
+#message = "driving kitty by remote control"
+
+# Its variables as a word of their own: grep KITTY_PUBLIC_KEY /proc/*/environ.
+#[[rule]]
+#argv    = ["*", "KITTY_{LISTEN_ON,PUBLIC_KEY}"]
+#action  = "deny"
+#message = "driving kitty by remote control"
+
+# The input fallback: a regex on the command text, for what the parser does not see as a path or a program:
+# the socket inside socat's UNIX-CONNECT:..., its variables, kitty driven from code.
+#[[rule]]
+#tool    = "Bash"
+#input   = { command = '''\$\{?KITTY_(LISTEN_ON|PUBLIC_KEY)\b|["']KITTY_(LISTEN_ON|PUBLIC_KEY)["']|(/run/user/\d+|\$\{?XDG_RUNTIME_DIR\}?)/kitty-|["']kitt(y|en)["']\s*,\s*["'](\+kitten["']\s*,\s*["'])?@["']|\bseimei\.kitty\b|from\s+seimei\s+import\s+[^;\n]*\bkitty\b''' }
+#action  = "deny"
+#message = "driving kitty by remote control"
+
+# --- Claude Code sessions: your card first ---
+
+#[[rule]]
+#argv    = ["claude", "{stop,kill,attach,rm,respawn}"]
+#action  = "card"
+#message = "stop, attach to, delete or restart a session"
+
+# Also from a script or behind a wrapper (doas -u you claude stop x).
+#[[rule]]
+#tool    = "Bash"
+#input   = { command = '''\bclaude\s+(stop|kill|attach|rm|respawn)\b|["']claude["']\s*,\s*["'](stop|kill|attach|rm|respawn|-r|--resume|-c|--continue)["']''' }
+#action  = "card"
+#message = "control a session from a script"
+
+#[[rule]]
+#argv    = ["claude", "{-r,--resume,--resume=*,-c,--continue}"]
+#action  = "card"
+#message = "resume a session"
+
+#[[rule]]
+#argv    = ["{pkill,killall}", "*claude*"]
+#action  = "card"
+#message = "kill claude processes"
+
+# A session's messaging socket: a command writing to it (socat, nc, curl --unix-socket, > redirect).
+# argv = ["*"] leaves out paths in code, which the next rule takes.
+#[[rule]]
+#argv    = ["*"]
+#paths   = ["cc-socks/**"]
+#op      = "write"
+#action  = "card"
+#message = "write to a session socket"
+
+#[[rule]]
+#tool    = "Bash"
+#input   = { command = '''(?s)cc-socks.*(socket\s*\.\s*socket|AF_UNIX|\.connect\s*\(|net\s*\.\s*(connect|createConnection))|(socket\s*\.\s*socket|AF_UNIX|\.connect\s*\(|net\s*\.\s*(connect|createConnection)).*cc-socks''' }
+#action  = "card"
+#message = "write to a session socket"
+
+# Claude Code's settings hold its allow rules: an agent writing them could grant itself anything.
+#[[rule]]
+#paths   = [".claude/settings{,.local}.json"]
+#op      = "write"
+#action  = "card"
+#message = "change Claude Code's permission settings"
+
+# --- The built-in plugins ---
+
+# The desktop: quitting the session, closing a window seimei did not open, editing the WM's config.
+#[[rule]]
+#facts   = { desktop = "{quit,close,config}" }
+#action  = "card"
+#message = "change your desktop"
+
+# Discord: every send, edit, delete and react waits for your OK; others' messages are not touched.
+#[[rule]]
+#tool    = "mcp__discord__discord_{edit,delete}"
+#facts   = { author = "someone else" }
+#action  = "deny"
+#message = "editing or deleting someone else's Discord message"
+
+#[[rule]]
+#tool    = "mcp__discord__discord_{send,edit,delete,react}"
+#action  = "card"
+#message = "act on Discord"
+
+# Music: writing tags and deleting a playlist.
+#[[rule]]
+#tool    = "mcp__music__music"
+#input   = { command = "^(tags|playlist_delete)$" }
+#action  = "card"
+#message = "change your music library"
+
+# The queue: stopping a running GPU/NPU job.
+#[[rule]]
+#tool    = "mcp__queue__queue_control"
+#input   = { action = "^revoke$", kill = true }
+#action  = "card"
+#message = "stop a GPU/NPU job"
+
+# The browser: closing tabs you opened.
+#[[rule]]
+#tool    = "mcp__browser__browser_close"
+#facts   = { tabs = "theirs" }
+#action  = "card"
+#message = "close your browser tabs"
