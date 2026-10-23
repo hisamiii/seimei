@@ -123,7 +123,12 @@ if [ -z "${SEIMEI_DEPLOY_TEST:-}" ]; then
     python3 "$app/browser/install.py" "$app/browser" "$HOME/.mozilla/native-messaging-hosts" \
         "$HOME/.local/share/seimei/seimei-waterfox.xpi" "${XDG_CONFIG_HOME:-$HOME/.config}/seimei/config.toml" >/dev/null
     # The Discord connector: Vencord with the SeimeiConnector plugin, for Vesktop to load from its Vencord Location.
-    "$app/discord/build.sh"
+    # Without pnpm the last build stays in place; the rest of the deploy goes on.
+    if command -v pnpm >/dev/null; then
+        "$app/discord/build.sh"
+    else
+        echo "deploy: no pnpm, the Discord connector build is skipped" >&2
+    fi
     systemctl --user reenable seimei.service seimei-tunnel.service 2>/dev/null
 fi
 
