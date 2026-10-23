@@ -32,7 +32,7 @@ impl Ctx {
         Ctx {
             run: run.map_or_else(|| PathBuf::from(format!("/run/user/{uid}")), PathBuf::from),
             proc: "/proc".into(),
-            home: crate::paths::home().into(),
+            home: crate::paths::home(),
         }
     }
 
