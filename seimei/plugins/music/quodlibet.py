@@ -65,8 +65,12 @@ def describe(cmd: str, r: dict) -> str:
                 f"volume {r['volume']}, {r['queue']} in the queue")
     if cmd == "plugins":
         rows = sorted(r["plugins"], key=lambda p: (not p["enabled"], p["name"].lower()))
+        def settings(p):
+            # Prefixes its settings carry besides its id, like QLScrobbler's scrobbler_*.
+            other = [x for x in p.get("settings") or [] if x != p["id"]]
+            return f" (settings: {'_*, '.join(other)}_*)" if other else ""
         return "\n".join(f"{'[on] ' if p['enabled'] else ''}{p['id']}: {p['name']}" + (f" - {p['description']}" if p["description"] else "")
-                         for p in rows)
+                         + settings(p) for p in rows)
     if cmd == "browse":
         return "\n".join([f"{r['total']} values"] + [f"{v['value']} ({v['songs']})" for v in r["values"]])
     return json.dumps(r, ensure_ascii=False)
@@ -80,7 +84,8 @@ def make_music_tools(approvals, who: str = "seimei", worker: str | None = None) 
           "playlist_create {name, keys|query}; playlist_add {name, keys|query}; playlist_remove {name, keys|query}; "
           "playlist_rename {name, to}; playlist_delete {name} (asks the user); rate {keys|query, rating 0..1}; "
           "tags {keys|query, tags: {tag: value, empty removes}} (writes the files; asks the user); plugins; "
-          "plugin_enable {id, on}; config_get/config_set {option: <plugin id>_<setting>, value}. "
+          "plugin_enable {id, on}; config_get/config_set {option: <prefix>_<setting>, value} (the prefix is the "
+          "plugin's id or one plugins lists under settings, like scrobbler for QLScrobbler). "
           "Songs come back with a key (their file path) to pass on.", {
               "type": "object",
               "properties": {"command": {"type": "string", "enum": COMMANDS},

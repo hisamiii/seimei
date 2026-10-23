@@ -6,12 +6,13 @@ import json
 import os
 import socket
 import struct
+import sys
 import threading
 
 from gi.repository import GLib
 
 from quodlibet import _, app, config
-from quodlibet.plugins import PluginManager
+from quodlibet.plugins import PluginConfig, PluginManager
 from quodlibet.plugins.events import EventPlugin
 
 SOCK = os.environ.get("SEIMEI_QL_SOCK") or os.path.join(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}", "seimei-ql.sock")
@@ -46,6 +47,15 @@ def plugin(pid):
         if p.id == pid:
             return p
     raise ValueError(f"no plugin {pid!r}")
+
+
+def prefixes(p):
+    """The prefixes a plugin's settings carry in [plugins]: its id, the prefix PluginConfigMixin gives it (CONFIG_SECTION,
+    else the lowercased id) and those of its module's PluginConfig, like QLScrobbler's scrobbler_*."""
+    out = [p.id, getattr(p.cls, "CONFIG_SECTION", "") or p.id.lower().replace(" ", "_")]
+    mod = sys.modules.get(p.cls.__module__)
+    out += [v._prefix for v in vars(mod).values() if isinstance(v, PluginConfig)] if mod else []
+    return [x for i, x in enumerate(out) if x and x not in out[:i]]
 
 
 def handle(req):
@@ -146,7 +156,8 @@ def handle(req):
     if cmd == "plugins":
         pm = PluginManager.instance
         return {"plugins": [{"id": p.id, "name": p.name, "enabled": pm.enabled(p),
-                             "description": (p.description or "").split("\n")[0][:200]} for p in pm.plugins]}
+                             "description": (p.description or "").split("\n")[0][:200], "settings": prefixes(p)}
+                            for p in pm.plugins]}
     if cmd == "plugin_enable":
         p = plugin(req["id"])
         if p.id == SeimeiBridge.PLUGIN_ID:
@@ -155,10 +166,11 @@ def handle(req):
         PluginManager.instance.save()
         return {"id": p.id, "enabled": PluginManager.instance.enabled(p)}
     if cmd in ("config_get", "config_set"):
-        # Plugin settings live in [plugins] as <plugin id>_<name>.
+        # Plugin settings live in [plugins] as <prefix>_<name>, a prefix the plugins command lists.
         option = req["option"]
-        if not any(option.startswith(p.id + "_") for p in PluginManager.instance.plugins):
-            raise ValueError("only plugin settings: an option named <plugin id>_<setting>")
+        if option == PluginManager.CONFIG_OPTION or not any(
+                option.startswith(x + "_") for p in PluginManager.instance.plugins for x in prefixes(p)):
+            raise ValueError("only plugin settings: an option named <prefix>_<setting>, a prefix from plugins")
         if cmd == "config_set":
             config.set("plugins", option, str(req["value"]))
             config.save()

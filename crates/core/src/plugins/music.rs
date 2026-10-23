@@ -114,7 +114,12 @@ pub fn describe(cmd: &str, r: &Value) -> String {
                 let on = if truthy(&p["enabled"]) { "[on] " } else { "" };
                 let about =
                     if truthy(&p["description"]) { format!(" - {}", py(&p["description"])) } else { String::new() };
-                format!("{on}{}: {}{about}", py(&p["id"]), py(&p["name"]))
+                // Prefixes its settings carry besides its id, like QLScrobbler's scrobbler_*.
+                let other: Vec<String> =
+                    p["settings"].as_array().into_iter().flatten().map(py).filter(|x| *x != py(&p["id"])).collect();
+                let settings =
+                    if other.is_empty() { String::new() } else { format!(" (settings: {}_*)", other.join("_*, ")) };
+                format!("{on}{}: {}{about}{settings}", py(&p["id"]), py(&p["name"]))
             };
             rows.iter().map(line).collect::<Vec<_>>().join("\n")
         }

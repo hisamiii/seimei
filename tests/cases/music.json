@@ -149,6 +149,45 @@
     ]
    },
    "want": "2 values\nRock (10)\nJazz (3)"
+  },
+  {
+   "name": "plugins: other settings prefixes after the description",
+   "cmd": "plugins",
+   "result": {
+    "plugins": [
+     {
+      "id": "QLScrobbler",
+      "name": "AudioScrobbler Submission",
+      "enabled": true,
+      "description": "scrobbles",
+      "settings": [
+       "QLScrobbler",
+       "qlscrobbler",
+       "scrobbler"
+      ]
+     },
+     {
+      "id": "Title Case",
+      "name": "Title Case",
+      "enabled": false,
+      "description": "",
+      "settings": [
+       "Title Case",
+       "titlecase"
+      ]
+     },
+     {
+      "id": "x",
+      "name": "Xeno",
+      "enabled": false,
+      "description": null,
+      "settings": [
+       "x"
+      ]
+     }
+    ]
+   },
+   "want": "[on] QLScrobbler: AudioScrobbler Submission - scrobbles (settings: qlscrobbler_*, scrobbler_*)\nTitle Case: Title Case (settings: titlecase_*)\nx: Xeno"
   }
  ],
  "cards": [
