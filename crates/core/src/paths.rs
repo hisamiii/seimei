@@ -1,11 +1,10 @@
 //! Paths as the guard reads them: `~` expanded, `..` taken lexically, links followed as far as the path exists.
 
 use std::path::{Component, Path, PathBuf};
-use std::sync::LazyLock;
 
-pub fn home() -> &'static Path {
-    static HOME: LazyLock<PathBuf> = LazyLock::new(|| std::env::var_os("HOME").unwrap_or("/".into()).into());
-    &HOME
+/// The home folder, read each time: tests that set HOME share one process.
+pub fn home() -> PathBuf {
+    std::env::var_os("HOME").unwrap_or("/".into()).into()
 }
 
 /// `~`, `$HOME` or `${HOME}` in front of a path, as the home folder.

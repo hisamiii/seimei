@@ -16,10 +16,8 @@ fn report(fails: &[String], total: usize) {
 
 #[test]
 fn queue_cases() {
-    // SAFETY: the only test in this binary, set before anything reads the environment.
-    unsafe {
-        std::env::set_var("TZ", "UTC");
-    }
+    let mut env = crate::env::Env::lock();
+    env.set("TZ", "UTC");
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/cases/queue.json");
     let doc: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     let names: HashMap<String, String> = serde_json::from_value(doc["names"].clone()).unwrap();
@@ -42,10 +40,7 @@ fn queue_cases() {
 
     let d = std::env::temp_dir().join(format!("seimei-queue-{}", std::process::id()));
     let run = d.join("run");
-    // SAFETY: as above.
-    unsafe {
-        std::env::set_var("XDG_RUNTIME_DIR", &run);
-    }
+    env.set("XDG_RUNTIME_DIR", &run);
     let queue = |lib: &Path| Queue::new(&toml::Table::from_iter([("lib".into(), lib.display().to_string().into())]));
     for c in doc["wrap"].as_array().unwrap() {
         let argv: Vec<String> = serde_json::from_value(c["argv"].clone()).unwrap();

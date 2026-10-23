@@ -334,7 +334,8 @@ pub fn blocked(tool: &str, inp: &Value, cwd: &str) -> Option<String> {
         return None;
     }
     let cmd = inp.get("command").and_then(Value::as_str).unwrap_or("");
-    let h = home().to_string_lossy();
+    let home_dir = home();
+    let h = home_dir.to_string_lossy();
     let flat = cmd.replace("${HOME}", &h).replace("$HOME", &h);
     let all = commands(&flat);
     let Some(cmds) = all.iter().map(Option::as_ref).collect::<Option<Vec<&Cmd>>>() else {
@@ -401,7 +402,7 @@ pub fn blocked(tool: &str, inp: &Value, cwd: &str) -> Option<String> {
             if lit.chars().all(|c| matches!(c, '*' | '?')) {
                 continue;
             }
-            if let Some(name) = secret_word(lit, &[&here, home()]) {
+            if let Some(name) = secret_word(lit, &[&here, &home()]) {
                 return Some(format!("reading {name}"));
             }
         }

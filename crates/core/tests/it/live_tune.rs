@@ -2,12 +2,10 @@
 //! model and effort, mid-turn and idle, and what its turns, reports and metrics show. Run by
 //! tests/live/tunetest_rs.py.
 
-mod live;
-
 use std::sync::Arc;
 use std::time::Duration;
 
-use live::{Checks, pool, transcript, until, work};
+use crate::live::{self, Checks, pool, transcript, until, work};
 use seimei_core::approvals::Approvals;
 use seimei_core::events::EventLog;
 use seimei_core::util::now;

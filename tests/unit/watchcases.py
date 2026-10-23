@@ -1,4 +1,4 @@
-"""tests/cases/watches.json on Python's Watches (crates/core/tests/watches.rs runs it on Rust): watch rules added, fired
+"""tests/cases/watches.json on Python's Watches (crates/core/tests/it/watches.rs runs it on Rust): watch rules added, fired
 by the worker and session listings on the event stream, expired and removed, and what the dispatcher hears."""
 import asyncio
 import json

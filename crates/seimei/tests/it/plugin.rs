@@ -12,8 +12,7 @@ use seimei_core::events::EventLog;
 use seimei_core::plugins::Plugins;
 use serde_json::{Value, json};
 
-mod cqd;
-use cqd::fake_cqd;
+use crate::cqd::fake_cqd;
 
 fn cases(file: &str) -> Value {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/cases").join(file);

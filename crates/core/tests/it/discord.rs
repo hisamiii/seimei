@@ -62,8 +62,9 @@ async fn discord_cases() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/cases/discord.json");
     let doc: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     let dir = std::env::temp_dir().join(format!("seimei-discord-{}", std::process::id()));
-    // Before the plugin looks: it finds ~/Downloads from HOME. This test is alone in its binary.
-    unsafe { std::env::set_var("HOME", dir.join("home")) };
+    // Before the plugin looks: it finds ~/Downloads from HOME.
+    let mut env = crate::env::Env::lock();
+    env.set("HOME", dir.join("home"));
     for (rel, spec) in doc["files"].as_object().unwrap() {
         let p = dir.join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();

@@ -14,11 +14,9 @@ fn session_event_cases() {
     let folder = dir.join("projects/-qa-proj");
     std::fs::create_dir_all(&folder).unwrap();
     std::fs::create_dir_all(dir.join("jobs")).unwrap();
-    // The only test in this binary: nothing else reads the environment meanwhile.
-    unsafe {
-        std::env::set_var("CLAUDE_CONFIG_DIR", &dir);
-        std::env::remove_var("SEIMEI_TEST_SESSIONS");
-    }
+    let mut env = crate::env::Env::lock();
+    env.set("CLAUDE_CONFIG_DIR", &dir);
+    env.remove("SEIMEI_TEST_SESSIONS");
     let mut ev = SessionEvents::default();
     let mut fails = vec![];
     for (i, step) in doc["steps"].as_array().unwrap().iter().enumerate() {

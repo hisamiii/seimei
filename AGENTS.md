@@ -71,7 +71,7 @@ Docs live in `docs/`: `architecture.md` (processes, state, deploys, tests), `con
 ## Tests
 
 - `uv run pytest`: the offline unit group (the default). `-m web`: browser tests against the QA server on :8431 with headless Chrome. `-m live`: headless Claude Code sessions on haiku.
-- `SEIMEI_SERVER=target/debug/seimei uv run pytest -m web` runs the web group against the Rust server. `cargo test` runs the Rust tests, the shared case files included.
+- `SEIMEI_SERVER=target/debug/seimei uv run pytest -m web` runs the web group against the Rust server. `cargo test` runs the Rust tests, the shared case files included. A crate's integration tests are one binary, `tests/it/main.rs` with a module per file (a new file is a new `mod` line there); a test that sets environment variables does it through `env::Env::lock()`, which holds the lock and puts them back.
 - Headless only: no visible windows, no on-screen emulator (`-no-window` is fine), no real cards or notifications on the user's phone.
 - Test sessions use the test config dir (`~/.local/share/seimei-test/claude`), never the user's. Log it in once with `CLAUDE_CONFIG_DIR=<dir> claude /login`.
 - Shut down what a test started: the QA server (`tests/qa/stop.sh`), gradle, the emulator.

@@ -1,12 +1,10 @@
 //! The live permtest on the Rust pool (tests/live/permtest.py is the Python one; its offline half is
-//! tests/approvals.rs): permission modes and cards with haiku shikigami in a scratch folder, a scripted "user"
+//! tests/it/approvals.rs): permission modes and cards with haiku shikigami in a scratch folder, a scripted "user"
 //! answering the cards, nothing reaching a phone. Run by tests/live/permtest_rs.py.
-
-mod live;
 
 use std::sync::{Arc, Mutex};
 
-use live::{Checks, pool, transcript, until, work};
+use crate::live::{self, Checks, pool, transcript, until, work};
 use seimei_core::approvals::Approvals;
 use seimei_core::events::EventLog;
 use seimei_core::workers::{Summon, Worker};

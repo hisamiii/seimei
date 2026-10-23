@@ -1,5 +1,5 @@
 //! tests/cases/views.json, which tests/unit/viewcases.py runs on the Python side: cost, the weekly window, metrics and
-//! the archive. Its own test binary: it sets TZ once for the local-time cases.
+//! the archive. It sets TZ for the local-time cases under the Env lock.
 
 use seimei_core::cost::{PRICES, Spend, Tokens, cost, week_start};
 use seimei_core::{archive, metrics};
@@ -7,8 +7,8 @@ use serde_json::Value;
 
 #[test]
 fn view_cases() {
-    // SAFETY: set before any thread reads the environment; this binary has this one test.
-    unsafe { std::env::set_var("TZ", "UTC") };
+    let mut env = crate::env::Env::lock();
+    env.set("TZ", "UTC");
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/cases/views.json");
     let doc: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     let mut fails = vec![];

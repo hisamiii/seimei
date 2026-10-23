@@ -1,5 +1,5 @@
 //! The client against the real Claude Code on haiku: a turn, a hook, a permission prompt and an in-process MCP tool.
-//! Ignored by default; run with `cargo test -p seimei-proto --test live -- --ignored`. It uses the test config dir
+//! Ignored by default; run with `cargo test -p seimei-proto --test it -- --ignored live::`. It uses the test config dir
 //! (log it in once: `CLAUDE_CONFIG_DIR=<dir> claude /login`), never the user's own.
 
 use std::path::PathBuf;

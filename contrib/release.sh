@@ -11,9 +11,13 @@ cd "$root"
 grep -q "^version = \"$v\"" crates/seimei/Cargo.toml || { echo "crates/seimei/Cargo.toml is not at $v"; exit 1; }
 [ -z "$(git status --porcelain)" ] || { echo "commit first: the release is built from HEAD"; exit 1; }
 asset=seimei-$(uname -m)-linux
-SEIMEI_UPDATE_KEY=$(tail -n 1 contrib/minisign.pub) nice -n 19 cargo build -q --release --locked -p seimei
+# Fully static (musl, mimalloc, vendored openssl): runs on any Linux of this arch. Needs rust-musl and musl (musl-gcc).
+target=$(uname -m)-unknown-linux-musl
+export "CC_$(echo "$target" | tr - _)=musl-gcc"
+SEIMEI_UPDATE_KEY=$(tail -n 1 contrib/minisign.pub) nice -n 19 cargo build -q --release --locked -p seimei --target "$target"
 mkdir -p dist
-cp target/release/seimei "dist/$asset"
+cp "target/$target/release/seimei" "dist/$asset"
+ldd "dist/$asset" 2>&1 | grep -qE "statically linked|not a dynamic executable" || { echo "dist/$asset is not static"; exit 1; }
 [ "$("dist/$asset" version)" = "seimei $v" ] || { echo "the build does not say seimei $v"; exit 1; }
 minisign -S -s "${SEIMEI_MINISIGN_KEY:-$HOME/.minisign/seimei.key}" -m "dist/$asset" -t "seimei $v $asset"
 minisign -V -p contrib/minisign.pub -m "dist/$asset"

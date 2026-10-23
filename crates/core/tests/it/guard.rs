@@ -1,6 +1,6 @@
 //! tests/cases/guard.json against the Rust guard, in a throwaway home with the kinds of files the guard protects (as
-//! tests/test_scripts.py gives the Python runner), so its globs have something to match. Its own test binary: the
-//! guard reads HOME once.
+//! tests/test_scripts.py gives the Python runner), so its globs have something to match. HOME
+//! points there while the Env lock is held.
 
 use std::path::Path;
 
@@ -28,8 +28,8 @@ fn guard_cases() {
         std::fs::write(home.join(format!("big/{i}")), "").unwrap();
     }
     let home = home.canonicalize().unwrap().to_string_lossy().into_owned();
-    // SAFETY: set before any thread reads the environment; this binary has this one test.
-    unsafe { std::env::set_var("HOME", &home) };
+    let mut env = crate::env::Env::lock();
+    env.set("HOME", &home);
 
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/cases/guard.json");
     let doc: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();

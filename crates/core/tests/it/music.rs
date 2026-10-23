@@ -40,10 +40,8 @@ async fn music_cases() {
     let sock = std::env::temp_dir().join(format!("seimei-ql-{}.sock", std::process::id()));
     let _ = std::fs::remove_file(&sock);
     let listener = UnixListener::bind(&sock).unwrap();
-    // SAFETY: the only test in this binary, set before any request.
-    unsafe {
-        std::env::set_var("SEIMEI_QL_SOCK", &sock);
-    }
+    let mut env = crate::env::Env::lock();
+    env.set("SEIMEI_QL_SOCK", &sock);
     let found = Arc::new(Mutex::new(json!([])));
     let sent = Arc::new(Mutex::new(vec![]));
     let (f, s) = (found.clone(), sent.clone());

@@ -3,15 +3,12 @@
 //! the tools reach the fakes and their texts reach the session, with no card. Desktop is left out: its devices are
 //! the real /dev/uinput. Run by tests/live/dispatchertest_rs.py.
 
-mod cqd;
-#[path = "../../core/tests/live/mod.rs"]
-mod live;
-
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::sync::{Arc, Mutex};
 
-use live::{Checks, until, work};
+use crate::cqd;
+use crate::live::{self, Checks, until, work};
 use seimei_core::dispatcher;
 use seimei_core::events::EventLog;
 use seimei_core::plugins::Plugins;
@@ -68,23 +65,22 @@ fn dispatcher_live() {
     let script = format!("#!/bin/sh\necho \"$@\" >> {}\nexit 0\n", played.display());
     std::fs::write(bin.join("playerctl"), script).unwrap();
     std::fs::set_permissions(bin.join("playerctl"), std::fs::Permissions::from_mode(0o755)).unwrap();
-    // SAFETY: set before any thread or session starts. The plugins inherit them through Claude Code: the fake cqd,
-    // the fake Quod Libet bridge, playerctl from bin; no user plugins and no real connector socket.
-    unsafe {
-        std::env::set_var("SEIMEI_CQD_SOCK", &cqd_sock);
-        std::env::set_var("SEIMEI_QL_SOCK", &ql_sock);
-        std::env::set_var("PATH", format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default()));
-        std::env::set_var("XDG_CONFIG_HOME", state.join("cfg"));
-        std::env::set_var("XDG_RUNTIME_DIR", state.join("run"));
-    }
+    // Set before any session starts. The plugins inherit them through Claude Code: the fake cqd, the fake Quod Libet
+    // bridge, playerctl from bin; no user plugins and no real connector socket.
+    let mut env = crate::env::Env::lock();
+    env.set("SEIMEI_CQD_SOCK", &cqd_sock);
+    env.set("SEIMEI_QL_SOCK", &ql_sock);
+    env.set("PATH", format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default()));
+    env.set("XDG_CONFIG_HOME", state.join("cfg"));
+    env.set("XDG_RUNTIME_DIR", state.join("run"));
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
     rt.block_on(run(work, state));
 }
 
 async fn run(work: std::path::PathBuf, state: std::path::PathBuf) {
     let c = Checks::default();
-    let queue: Value = serde_json::from_str(include_str!("../../../tests/cases/queue.json")).unwrap();
-    let music: Value = serde_json::from_str(include_str!("../../../tests/cases/music.json")).unwrap();
+    let queue: Value = serde_json::from_str(include_str!("../../../../tests/cases/queue.json")).unwrap();
+    let music: Value = serde_json::from_str(include_str!("../../../../tests/cases/music.json")).unwrap();
     let cqd_seen = cqd::fake_cqd(state.join("cqd.sock"), queue["describe"][0]["cqd"].clone());
     // The Quod Libet bridge: answers status as music.json says.
     let status = music["describe"][3].clone();

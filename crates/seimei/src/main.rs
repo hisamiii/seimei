@@ -4,6 +4,30 @@
 mod setup;
 mod update;
 
+#[cfg(target_env = "musl")]
+#[global_allocator]
+static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+/// mimalloc keeps freed memory a second and commits whole arenas up front; with THP on that left the server at 2-3x
+/// glibc's RSS. Give memory back at once and commit as used. (Turning THP off instead would go through a prctl every
+/// child inherits.) The option numbers are mimalloc v3's `mi_option_t`.
+#[cfg(target_env = "musl")]
+fn tune_alloc() {
+    const ARENA_EAGER_COMMIT: std::ffi::c_int = 4;
+    const PURGE_DELAY: std::ffi::c_int = 15;
+    unsafe extern "C" {
+        fn mi_option_set(option: std::ffi::c_int, value: std::ffi::c_long);
+    }
+    // SAFETY: mi_option_set only stores the value; mimalloc reads its options on use.
+    unsafe {
+        mi_option_set(ARENA_EAGER_COMMIT, 0);
+        mi_option_set(PURGE_DELAY, 0);
+    }
+}
+
+#[cfg(not(target_env = "musl"))]
+fn tune_alloc() {}
+
 use std::collections::HashSet;
 use std::io::Write;
 use std::sync::Arc;
@@ -111,7 +135,7 @@ fn secret(prompt: &str) -> String {
 fn date(t: &Value, with_time: bool) -> String {
     let Some(secs) = t.as_f64() else { return "never".into() };
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    let s = secs as libc::time_t;
+    let s = secs as i64; // time_t on every 64-bit target, glibc and musl
     unsafe { libc::localtime_r(&s, &mut tm) };
     let d = format!("{:04}-{:02}-{:02}", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday);
     if with_time { format!("{d} {:02}:{:02}", tm.tm_hour, tm.tm_min) } else { d }
@@ -217,6 +241,7 @@ fn account(auth: &Auth, a: &Args, state: &std::path::Path) {
 }
 
 fn main() {
+    tune_alloc();
     let a = args();
     if a.command == "plugin" {
         // Claude Code starts it for a session: an MCP server on stdin and stdout.

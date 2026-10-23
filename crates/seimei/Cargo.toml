@@ -15,6 +15,10 @@ serde_json.workspace = true
 tokio = { workspace = true, features = ["full"] }
 toml = "1.1.8"
 
+# musl's malloc is slow under tokio's many threads; the static release build uses mimalloc.
+[target.'cfg(target_env = "musl")'.dependencies]
+mimalloc = { version = "0.1.52", default-features = false }
+
 [dev-dependencies]
 minisign = "0.10.0"
 

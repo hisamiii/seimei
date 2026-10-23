@@ -2,13 +2,10 @@
 //! session summon granted it, the tools reach a fake cqd, and the kill card names the shikigami. Denied, so cqd never
 //! sees a kill. Run by tests/live/plugintest_rs.py.
 
-mod cqd;
-#[path = "../../core/tests/live/mod.rs"]
-mod live;
-
 use std::sync::{Arc, Mutex};
 
-use live::{Checks, pool_with, transcript, until, work};
+use crate::cqd;
+use crate::live::{self, Checks, pool_with, transcript, until, work};
 use seimei_core::approvals::Approvals;
 use seimei_core::events::EventLog;
 use seimei_core::plugins::Plugins;
@@ -23,11 +20,10 @@ async fn queue_plugin_live() {
     let work = work("t82p4");
     let state = live::state("plugintest");
     let cqd_sock = state.join("cqd.sock");
-    // SAFETY: set before any thread or session starts; the plugin inherits it through Claude Code.
-    unsafe {
-        std::env::set_var("SEIMEI_CQD_SOCK", &cqd_sock);
-    }
-    let cases: Value = serde_json::from_str(include_str!("../../../tests/cases/queue.json")).unwrap();
+    // Set before the session starts; the plugin inherits it through Claude Code.
+    let mut env = crate::env::Env::lock();
+    env.set("SEIMEI_CQD_SOCK", &cqd_sock);
+    let cases: Value = serde_json::from_str(include_str!("../../../../tests/cases/queue.json")).unwrap();
     let seen = cqd::fake_cqd(cqd_sock, cases["describe"][0]["cqd"].clone());
     let events = Arc::new(EventLog::open(&state.join("events.jsonl")).unwrap());
     let approvals = Arc::new(Approvals::new(events.clone()));

@@ -1,4 +1,4 @@
-"""tests/cases/screens.json on Python's screen readers (crates/core/tests/screens.rs runs it on Rust): what seimei reads
+"""tests/cases/screens.json on Python's screen readers (crates/core/tests/it/screens.rs runs it on Rust): what seimei reads
 from a session's screen before it types into it, and whether an option it is about to press is on screen."""
 import json
 import sys

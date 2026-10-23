@@ -1,4 +1,4 @@
-"""tests/cases/sessionevents.json on Python's SessionEvents (crates/core/tests/sessionevents.rs runs it on Rust): what
+"""tests/cases/sessionevents.json on Python's SessionEvents (crates/core/tests/it/sessionevents.rs runs it on Rust): what
 the user's sessions run into, as the lines the dispatcher hears after each scan."""
 import json
 import os
