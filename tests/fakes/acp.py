@@ -9,6 +9,8 @@ each prompt plays the script its "!command" line picks, and what no script takes
   !plan           a plan of three steps, then the same plan with the first two done
   !tool <cmd>     an execute tool call that asks permission first; allowed it runs, rejected it fails
   !dsh <command>  the same, shaped as dsh sends it (kind other, title bash; the request names only the id)
+  !dshcall <title> <json input>
+                  any dsh tool call shaped that way: read, write, mcp__shikigami__ask, ...
   !wait           a turn that runs until the client cancels it (stop reason cancelled)
   !crash          exits mid-turn
   !mcp            tells the MCP servers its session got (names, commands, args, env names)
@@ -111,8 +113,13 @@ def turn(sid: str, text: str) -> str:
             {"content": s, "priority": "medium", "status": st}
             for s, st in zip(steps, ["completed", "in_progress", "pending"])]})
         say(sid, "Planned.")
-    elif cmd in ("!tool", "!dsh"):
-        if cmd == "!tool":
+    elif cmd in ("!tool", "!dsh", "!dshcall"):
+        if cmd == "!dshcall":
+            title, _, raw = rest.partition(" ")
+            call = {"toolCallId": "call_1", "title": title, "kind": "other", "status": "in_progress",
+                    "rawInput": json.loads(raw or "{}")}
+            asked, options = {"toolCallId": "call_1"}, DSH_OPTIONS
+        elif cmd == "!tool":
             call = {"toolCallId": "call_1", "title": f"Run {rest}", "kind": "execute", "status": "pending",
                     "rawInput": {"command": rest}}
             asked, options = call, OPTIONS

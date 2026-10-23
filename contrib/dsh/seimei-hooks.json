@@ -1,0 +1,8 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {"hooks": [{"type": "command", "timeout": 10,
+        "command": "echo '{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"permissionDecision\": \"ask\", \"permissionDecisionReason\": \"seimei checks every call\"}}'"}]}
+    ]
+  }
+}

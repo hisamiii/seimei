@@ -650,7 +650,11 @@ impl Worker {
         if !crate::permissions::MODES.contains(&mode) {
             return Err(format!("mode is one of {}", crate::permissions::MODES.join(", ")));
         }
-        self.claude_only("change its permission mode")?;
+        // An ACP agent's requests meet the mode in seimei (acp_mode), so the record is all there is to change.
+        if self.agent().is_some() {
+            self.mode_chosen(mode);
+            return Ok(());
+        }
         let (done, rx) = oneshot::channel();
         self.cmd(Cmd::SetMode { mode: mode.into(), done });
         rx.await.unwrap_or_else(|_| Err("its session ended".into()))
@@ -1563,6 +1567,16 @@ impl acp::Handler for AcpSide {
                 Some("allow") => return acp::Outcome::Selected(allow),
                 _ => {}
             }
+            let mode = w.mode();
+            let own = [vec!["mcp__shikigami".into()], pool.plugins.allowed(Some(&w.granted()))].concat();
+            match acp_mode(&mode, &tool, &own) {
+                Mode::Allow => return acp::Outcome::Selected(allow),
+                Mode::Deny(why) => {
+                    w.add(json!({"type": "system", "text": format!("Refused {tool} without a card: {why}.")}));
+                    return reject;
+                }
+                Mode::Card => {}
+            }
             let ask = PermissionRequest {
                 tool_name: tool,
                 input,
@@ -1571,7 +1585,7 @@ impl acp::Handler for AcpSide {
                 ..PermissionRequest::default()
             };
             let waiting = |t: Option<String>| w.waiting_card(seq, t);
-            // Claude Code's modes are not the agent's: every request is a card ("default").
+            // acp_mode already applied the session's mode; what is left is a card ("default").
             let d = crate::permissions::can_use(
                 &pool.approvals,
                 &name,
@@ -1582,11 +1596,47 @@ impl acp::Handler for AcpSide {
                 Some(&waiting),
             )
             .await;
+            // A card's "from now on" option (allow edits, bypass) is the session's mode for the next requests.
+            if let Some(m) = d.mode {
+                w.mode_chosen(&m);
+            }
             match d.permission {
                 Permission::Allow { .. } => acp::Outcome::Selected(allow),
                 Permission::Deny { .. } => reject,
             }
         })
+    }
+}
+
+/// What a shikigami's mode makes of an ACP request the guard let through.
+#[derive(Debug, PartialEq)]
+pub enum Mode {
+    Allow,
+    Deny(String),
+    Card,
+}
+
+/// An ACP agent's request under a shikigami's mode (Claude Code's names), as Claude Code would treat the call: its own
+/// tools and reads go on, bypass allows the rest, acceptEdits file edits, and what is left is a card (dontAsk and plan
+/// refuse it instead). A command or file call that came without its command or path is a card even in bypass: the
+/// guard had nothing to check. own: tool name prefixes that never ask (mcp__shikigami, granted plugins).
+pub fn acp_mode(mode: &str, tool: &str, own: &[String]) -> Mode {
+    if own.iter().any(|p| tool == p || tool.starts_with(&format!("{p}__"))) {
+        return Mode::Allow;
+    }
+    // dsh's job tools only read or stop a command that was asked for.
+    if matches!(tool, "Read" | "Grep" | "Glob" | "job_output" | "job_kill") {
+        return Mode::Allow;
+    }
+    if matches!(tool, "execute" | "edit" | "delete" | "move" | "read" | "search" | "fetch" | "tool") {
+        return Mode::Card;
+    }
+    match mode {
+        "bypassPermissions" => Mode::Allow,
+        "acceptEdits" if tool == "Write" => Mode::Allow,
+        "dontAsk" => Mode::Deny("the mode is dontAsk, so only allowed tools run".into()),
+        "plan" => Mode::Deny("the mode is plan: only reads until the plan is approved".into()),
+        _ => Mode::Card,
     }
 }
 

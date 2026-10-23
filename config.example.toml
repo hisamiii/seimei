@@ -56,6 +56,8 @@ enabled = []
 
 # ACP agents a shikigami can run on instead of Claude Code: summon it with harness "acp:<name>". seimei starts the
 # agent and talks the Agent Client Protocol over its stdio; the agent keeps its own login and model settings.
+# Every call of an agent goes through seimei's guard and the shikigami's mode, so the agent must ask before each one:
+# for dsh, add contrib/dsh/ to its acp profile (see contrib/dsh/cordis.patch.yml), or it runs calls unasked.
 # [agents.dsh]
 # command = "dsh"
 # args = ["--profile", "acp"]

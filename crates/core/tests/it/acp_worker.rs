@@ -293,14 +293,47 @@ async fn acp_shikigami() {
     assert!(until(10, || w2.state() == "stopped").await, "{}", w.state());
 
     // 10. What only Claude Code can do.
-    for e in [
-        w.tune(Some("high"), None, "the user").await.err(),
-        w.set_mode("acceptEdits").await.err(),
-        w.hand_over().await.err(),
-        w.release().await.err(),
-    ] {
+    for e in [w.tune(Some("high"), None, "the user").await.err(), w.hand_over().await.err(), w.release().await.err()] {
         assert!(e.as_deref().is_some_and(|e| e.contains("runs on the ACP agent fake")), "{e:?}");
     }
+
+    // Its mode meets each request after the guard, as Claude Code's would: a card only where the mode asks for one.
+    let n = || cards.lock().unwrap().len();
+    let ran = |from| said(&w, from) == ["Ran it (allow-once)."];
+    w.set_mode("bypassPermissions").await.unwrap();
+    assert_eq!(w.mode(), "bypassPermissions");
+    let before = n();
+    let (from, _) = turn(&w, "!dsh echo bypass", "done").await;
+    assert!(ran(from), "{:?}", said(&w, from));
+    let (from, _) = turn(&w, &format!("!dsh {}", blocked_command()), "done").await;
+    assert_eq!(said(&w, from), ["Did not run it (reject-once)."], "bypass does not pass the guard");
+    assert_eq!(n(), before, "bypass: no cards");
+    // A command call without its command: the guard had nothing to read, so a card even in bypass.
+    let (from, _) = turn(&w, "!dshcall bash {}", "done").await;
+    assert_eq!((said(&w, from), n()), (vec!["Did not run it (reject-once).".to_string()], before + 1));
+
+    w.set_mode("acceptEdits").await.unwrap();
+    let (from, _) = turn(&w, r#"!dshcall write {"file_path": "notes.md", "content": "x"}"#, "done").await;
+    assert!(ran(from) && n() == before + 1, "acceptEdits allows an edit");
+    answers.lock().unwrap().push(true);
+    let (from, _) = turn(&w, "!dsh echo edits", "done").await;
+    assert!(ran(from) && n() == before + 2, "acceptEdits: a command is a card");
+
+    w.set_mode("default").await.unwrap();
+    for call in [r#"read {"file_path": "notes.md"}"#, r#"mcp__shikigami__ask {"question": "ok?"}"#, "job_output {}"] {
+        let (from, _) = turn(&w, &format!("!dshcall {call}"), "done").await;
+        assert!(ran(from), "{call}: {:?}", said(&w, from));
+    }
+    assert_eq!(n(), before + 2, "reads and its own tools never ask");
+    let (from, _) = turn(&w, r#"!dshcall write {"file_path": "notes.md", "content": "y"}"#, "done").await;
+    assert_eq!((said(&w, from), n()), (vec!["Did not run it (reject-once).".to_string()], before + 3));
+
+    w.set_mode("dontAsk").await.unwrap();
+    let (from, _) = turn(&w, "!dsh echo quiet", "done").await;
+    assert_eq!((said(&w, from), n()), (vec!["Did not run it (reject-once).".to_string()], before + 3));
+    let refused = log(&w)[from..].iter().any(|e| e["text"] == "Refused Bash without a card: the mode is dontAsk, so only allowed tools run.");
+    assert!(refused, "{:?}", &log(&w)[from..]);
+    w.set_mode("default").await.unwrap();
 
     // 11. Let go, then the next message loads the session: no replayed events, no second prompt.
     w.let_go().await;
@@ -343,6 +376,25 @@ async fn acp_shikigami() {
     assert_eq!(w.get("summary"), json!("The agent failed: the agent exited."));
 
     let _ = std::fs::remove_dir_all(&base);
+}
+
+/// The modes an ACP request meets, by tool class.
+#[test]
+fn acp_modes() {
+    use seimei_core::workers::{Mode, acp_mode};
+    let own = vec!["mcp__shikigami".to_string(), "mcp__music".to_string()];
+    let card = |m: &str, t: &str| acp_mode(m, t, &own) == Mode::Card;
+    let allow = |m: &str, t: &str| acp_mode(m, t, &own) == Mode::Allow;
+    let deny = |m: &str, t: &str| matches!(acp_mode(m, t, &own), Mode::Deny(_));
+    for m in ["default", "acceptEdits", "plan", "dontAsk", "bypassPermissions", "auto"] {
+        assert!(allow(m, "Read") && allow(m, "Grep") && allow(m, "mcp__music__status") && allow(m, "mcp__shikigami"));
+        assert!(card(m, "execute") && card(m, "read"), "{m}: a call without its command or path");
+        assert!(!allow(m, "mcp__musical__x") || m == "bypassPermissions", "{m}: a prefix is a whole server name");
+    }
+    assert!(allow("bypassPermissions", "Bash") && allow("bypassPermissions", "WebFetch"));
+    assert!(allow("acceptEdits", "Write") && card("acceptEdits", "Bash"));
+    assert!(card("default", "Write") && card("default", "Bash") && card("auto", "Bash") && card("", "Bash"));
+    assert!(deny("plan", "Bash") && deny("plan", "Write") && deny("dontAsk", "Bash"));
 }
 
 /// summon lists tools.json's spec as is with nothing to pick, the tool groups and the harness when there are some.
