@@ -1,5 +1,5 @@
 {
- "about": "Claude Code screens and what seimei reads from them before it types into a session (seimei/kitty.py, crates/core/src/kitty.rs); generated from Python.",
+ "about": "Claude Code screens and what seimei reads from them before it types into a session (crates/core/src/kitty.rs).",
  "screens": [
   {
    "name": "fake idle",

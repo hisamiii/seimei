@@ -1,4 +1,4 @@
-//! tests/cases/queue.json, which tests/unit/queuecases.py runs on the Python plugin: the queue tool's text,
+//! tests/cases/queue.json: the queue tool's text,
 //! queue_history's, wrap, env and the queue_wait target check.
 
 use std::collections::HashMap;

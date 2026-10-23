@@ -397,7 +397,7 @@ fn acp_modes() {
 /// summon lists tools.json's spec as is with nothing to pick, the tool groups and the harness when there are some.
 #[test]
 fn summon_options() {
-    let all: Value = serde_json::from_str(include_str!("../../../../tests/cases/tools.json")).unwrap();
+    let all: Value = serde_json::from_str(include_str!("../../data/tools.json")).unwrap();
     let plain = all["tools"].as_array().unwrap().iter().find(|t| t["name"] == "summon").unwrap();
     assert_eq!(&seimei_core::tools::summon_spec(&[], &[]), plain);
     let t = seimei_core::tools::summon_spec(&["music".into()], &["dsh".into()]);

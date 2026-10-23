@@ -1,4 +1,4 @@
-//! tests/cases/workers.json, which tests/unit/workercases.py runs on the Python side: the shikigami helpers.
+//! tests/cases/workers.json: the shikigami helpers.
 
 use seimei_core::tools::{capped, summon_problem};
 use seimei_core::workers::{Batch, Out, first_line, flushed, queue, slug, title_of};
@@ -32,7 +32,7 @@ fn worker_cases() {
         let lines: Vec<String> = c["lines"].as_array().unwrap().iter().map(s).collect();
         check(format!("capped {}", c["full"]), json!(capped(&s(&c["head"]), &lines, &s(&c["full"]))), &c["text"]);
     }
-    // tell names the shikigami by id: the two the Python side made, and an unknown one.
+    // tell names the shikigami by id: the two the case made, and an unknown one.
     let names = [("w1", "runner"), ("w2", "app-tester")];
     for c in doc["batch"].as_array().unwrap() {
         let mut batch = Batch::new();

@@ -1,5 +1,4 @@
-//! The shared case files the Python runners use too (tests/unit/permcases.py): the Rust options() must give the same
-//! answers.
+//! tests/cases/permissions.json: the permission card's options() must give the same answers.
 
 use std::path::Path;
 

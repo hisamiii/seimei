@@ -40,7 +40,7 @@ fun com.android.build.api.dsl.VariantDimension.firebase(pkg: String) {
 android {
     namespace = "com.hisamiowo.seimei"
     // The theme token files the web page uses (#81), read as assets.
-    sourceSets["main"].assets.srcDir("../../seimei/web/themes")
+    sourceSets["main"].assets.srcDir("../../web/themes")
     compileSdk {
         version = release(37) { minorApiLevel = 2 }
     }

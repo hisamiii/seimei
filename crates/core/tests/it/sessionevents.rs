@@ -1,4 +1,4 @@
-//! tests/cases/sessionevents.json, which tests/unit/sessevcases.py runs on the Python side: what the user's sessions
+//! tests/cases/sessionevents.json: what the user's sessions
 //! run into, as the lines the dispatcher hears after each scan.
 
 use std::io::Write;
@@ -40,7 +40,7 @@ fn session_event_cases() {
         let got: Vec<Value> =
             ev.scan(&rows).into_iter().map(|(line, urgent, key)| json!([line, urgent, key])).collect();
         if json!(got) != step["lines"] {
-            fails.push(format!("step {i}: {}\n  Python: {}", json!(got), step["lines"]));
+            fails.push(format!("step {i}: {}\n  want: {}", json!(got), step["lines"]));
         }
     }
     let _ = std::fs::remove_dir_all(&dir);

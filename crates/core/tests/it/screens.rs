@@ -1,4 +1,4 @@
-//! tests/cases/screens.json, which tests/unit/screencases.py runs on the Python side: what seimei reads from a
+//! tests/cases/screens.json: what seimei reads from a
 //! session's screen before it types into it (a draft, a dialog, the rating survey, an open question or permission
 //! prompt) and whether an option it is about to press is on screen.
 
@@ -23,7 +23,7 @@ fn screen_cases() {
             "permission": permission(text)});
         for k in ["dialog", "survey", "draft", "question", "permission"] {
             if got[k] != c[k] {
-                fails.push(format!("{name} {k}: {} (Python: {})", got[k], c[k]));
+                fails.push(format!("{name} {k}: {} (want: {})", got[k], c[k]));
             }
         }
     }

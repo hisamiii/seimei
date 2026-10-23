@@ -1,5 +1,5 @@
 {
- "about": "Discord plugin scenarios: tool calls on one connection, with the connector's replies (or fails) per step and the user's outcome for a card. files is laid out under a temp folder first: home is HOME, state is seimei's state (its uploads). tests/unit/discordcases.py --write fills in the wants from Python. A step's rust holds what the Rust side answers instead, where its guard.toml rules (the example's) differ from the frozen Python plugin.",
+ "about": "Discord plugin scenarios: tool calls on one connection, with the connector's replies (or fails) per step and the user's outcome for a card. files is laid out under a temp folder first: home is HOME, state is seimei's state (its uploads). A step's rust holds the answer instead where the example guard.toml's rules change it.",
  "files": {
   "home/Downloads/a.txt": "hello",
   "home/Downloads/pics/b.png": "PNGDATA",

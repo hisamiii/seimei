@@ -1,5 +1,5 @@
 {
- "about": "The music plugin, run by tests/unit/musiccases.py (Python) and crates/core/tests/music.rs (Rust). describe: the music tool's text for a bridge result. cards: a music call against a fake Quod Libet bridge whose search finds `found`: the card it raises first (null: none) and the request the bridge then gets, the user approving.",
+ "about": "The music plugin, run by crates/core/tests/it/music.rs. describe: the music tool's text for a bridge result. cards: a music call against a fake Quod Libet bridge whose search finds `found`: the card it raises first (null: none) and the request the bridge then gets, the user approving.",
  "describe": [
   {
    "name": "search: two of five, one with nothing tagged",

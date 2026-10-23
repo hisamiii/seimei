@@ -641,8 +641,7 @@ impl Desktop {
         }
         if !self.secret.exists() {
             return Err(
-                "no screen password saved; the user sets one with `uv run python -m seimei screen-password` in a \
-                        terminal on the server"
+                "no screen password saved; the user sets one with `seimei screen-password` in a terminal on the server"
                     .into(),
             );
         }

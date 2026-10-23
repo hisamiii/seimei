@@ -1,35 +1,37 @@
 # Architecture
 
-seimei is one Python process (aiohttp) on the server. It keeps one permanent Claude Code session, the dispatcher,
-and runs worker sessions, the shikigami, next to it. The web page and the Android app talk to it over HTTP. It
-listens on 127.0.0.1 only; a tunnel (Cloudflare Tunnel here, `tailscale serve` works too) brings it to the phone.
+seimei is one Rust binary on the server. It keeps one permanent Claude Code session, the dispatcher, and runs worker
+sessions, the shikigami, next to it. The web page and the Android app talk to it over HTTP. It listens on 127.0.0.1
+only; a tunnel (Cloudflare Tunnel here, `tailscale serve` works too) brings it to the phone.
 
 ```
 phone app / web page ──https──> tunnel ──> 127.0.0.1:8417  seimei
                                                │
             ┌──────────────────────────────────┼──────────────────────────────┐
-            │ server.py (HTTP, SSE stream)     │ events.py (append-only log)  │
-            │ auth.py (password, passkeys,     │ push.py (FCM, Web Push,      │
+            │ server (HTTP, SSE, the web page) │ events.rs (append-only log)  │
+            │ auth.rs (password, passkeys,     │ push.rs (FCM, Web Push,      │
             │   paired phones)                 │   background stream)         │
             ├──────────────────────────────────┴──────────────────────────────┤
-            │ dispatcher.py: one ClaudeSDKClient, resumed across restarts     │
-            │ workers.py:    the shikigami, one ClaudeSDKClient each          │
-            │ guard.py:      one PreToolUse hook on every tool call           │
-            │ permissions.py: Claude Code's permission prompts become cards   │
-            │ sessions.py / adopt.py: the user's own Claude Code sessions     │
+            │ dispatcher.rs: one Claude Code session, resumed across restarts │
+            │ workers.rs:    the shikigami (Claude Code, ACP or Codex)        │
+            │ guard.rs:      one PreToolUse hook on every tool call           │
+            │ permissions.rs: Claude Code's permission prompts become cards   │
+            │ sessions.rs / adopt.rs: the user's own Claude Code sessions     │
             │ plugins/: desktop, discord, browser, music, queue (MCP servers) │
             └─────────────────────────────────────────────────────────────────┘
-                           │ stream-json over stdio
+                           │ stream-json over stdio (crates/proto)
                            ▼
                  the user's installed `claude` (subscription login)
 ```
+
+The workspace: `crates/proto` (the clients for Claude Code's stream-json protocol, ACP and Codex), `crates/core` (state, sessions, the guard, push, the plugins), `crates/server` (HTTP routes; the web page in `web/` is built into the binary), `crates/seimei` (the binary: serve, setup, update and the account commands). `crates/core/data/tools.json` holds seimei's own MCP tools as Claude Code sees them; the descriptions are prompt text.
 
 ## Sessions
 
 - **The dispatcher** ("seimei") is one session that never ends. It resumes the same session id after every restart
   and compacts its own context. The user chats with it; it delegates heavy work to shikigami. Its own tools are an
   in-process MCP server (`mcp__seimei__*`): summon, message, tune, notes, tasks, notify, cards, sessions, files.
-- **Shikigami** are SDK sessions inside seimei, one `ClaudeSDKClient` each, with a name, a folder, a model and an
+- **Shikigami** are worker sessions inside seimei, each on its own Claude Code process (or an ACP or Codex agent), with a name, a folder, a model and an
   effort. Their tools (`mcp__shikigami__*`) let them ask the user and report. When one finishes, fails or asks, the
   dispatcher hears it at its next turn (questions and failures wake it at once). After a restart, running shikigami
   are resumed with a "continue" (capped at 3 per hour). A shikigami can be handed to the user as a terminal session
@@ -71,7 +73,7 @@ A card holds a tool call until the user answers on the phone or the web. Three s
 
 ## Themes
 
-A theme is one token file in `seimei/web/themes/`, built by `contrib/themes.py` from a small palette per side (dark
+A theme is one token file in `web/themes/`, built by `contrib/themes.py` from a small palette per side (dark
 and light). The page sets its tokens as CSS variables (`theme.js`); the app reads the same files as assets
 (`Theme.kt`). Adding a theme is one entry in `contrib/themes.py`. Material You has no fixed colors: the app uses
 Android's wallpaper scheme and sends its seed to `/api/theme`; the page rebuilds the same M3 scheme from that seed with
@@ -80,23 +82,8 @@ server never reads its own wallpaper.
 
 ## Deploys
 
-Production never runs from the working tree. `deploy.sh [rev]` runs as its own transient systemd unit (so the
-restart it ends with cannot cut it off), checks out the commit, syncs dependencies, waits for open cards and an idle
-dispatcher, and restarts the service. The result goes to `deploy/last.json`, which seimei hands to whoever it resumes.
-
-The service runs the Rust server: the deploy builds it in the production checkout (`cargo build --release`, its own
-`target/`) and renames it to `bin/seimei` right before the restart. The Python server still ships alongside and uses
-the same state files, so going back is one command:
-
-    ~/.local/share/seimei-app/contrib/back-to-python.sh
-
-It installs `contrib/seimei-python.service` as `seimei.service`, syncs the venv and restarts. It also leaves
-`deploy/python` in the state folder, which keeps later deploys on Python; delete that file and deploy to go back to
-Rust.
+Production never runs from the working tree. `deploy.sh [rev]` runs as its own transient systemd unit (so the restart it ends with cannot cut it off), checks out the commit in the production checkout, builds the server there (`cargo build --release`, its own `target/`), waits for open cards and an idle dispatcher, renames the build to `bin/seimei` and restarts the service. The result goes to `deploy/last.json`, which seimei hands to whoever it resumes.
 
 ## Tests
 
-`uv run pytest` runs the offline suite; `-m web` adds the browser tests against the QA server on port 8431
-(`tests/qa/start.sh`: seeded state, the server as it runs live, with `tests/fakes/claude.py` in place of Claude Code and
-a fake kitty and terminal; `SEIMEI_SERVER` picks the implementation); `-m live` adds headless haiku sessions. See
-`tests/conftest.py`.
+`cargo test --workspace` runs the offline suite: unit tests, the case files in `tests/cases/` and integration tests against the fakes in `tests/fakes/` (a fake `claude`, ACP agent, Codex and window manager). `tests/live.sh NAME` runs the ignored live tests (headless haiku sessions, dsh, Codex) in a scrubbed environment with the test Claude config dir. `tests/qa/start.sh` starts the QA server on port 8431: seeded state, the debug build as it runs live, with `tests/fakes/claude.py` in place of Claude Code and a fake kitty and terminal; `tests/qa/stop.sh` ends it.

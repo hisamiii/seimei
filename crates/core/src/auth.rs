@@ -1,6 +1,6 @@
 //! Login: a password set on the server, passkeys added after the first login, cookie sessions, and paired phones
-//! running the seimei app, which sign a challenge with a key kept in the phone's keystore. The same auth.json as the
-//! Python seimei; it stays JSON in memory, so fields this side does not know survive a save.
+//! running the seimei app, which sign a challenge with a key kept in the phone's keystore. auth.json stays JSON in
+//! memory, so fields this side does not know survive a save.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;

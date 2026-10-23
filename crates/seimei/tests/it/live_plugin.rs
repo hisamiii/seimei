@@ -1,6 +1,6 @@
 //! The queue plugin from a live haiku shikigami: Claude Code starts `seimei plugin queue` (the built binary) for the
 //! session summon granted it, the tools reach a fake cqd, and the kill card names the shikigami. Denied, so cqd never
-//! sees a kill. Run by tests/live/plugintest_rs.py.
+//! sees a kill. Run by tests/live.sh plugin.
 
 use std::sync::{Arc, Mutex};
 
@@ -13,7 +13,7 @@ use seimei_core::workers::Summon;
 use serde_json::Value;
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "starts a headless claude session; run by tests/live/plugintest_rs.py"]
+#[ignore = "starts a headless claude session; run by tests/live.sh plugin"]
 async fn queue_plugin_live() {
     live::claude_dir();
     let c = Checks::default();

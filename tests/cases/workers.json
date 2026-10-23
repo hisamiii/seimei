@@ -1,5 +1,5 @@
 {
- "about": "Shikigami helpers from seimei/workers.py and seimei/tools.py: slug (a summoned name), title_of (its board title), first_line, summon_problem (why a summon cannot go ahead), capped (a peek's text) and batch (what the dispatcher gets for a burst of tell/notify calls; tell names the shikigami by id, keys collapse).",
+ "about": "Shikigami helpers from workers.rs and tools.rs: slug (a summoned name), title_of (its board title), first_line, summon_problem (why a summon cannot go ahead), capped (a peek's text) and batch (what the dispatcher gets for a burst of tell/notify calls; tell names the shikigami by id, keys collapse).",
  "slug": [
   {
    "name": "NPU DMA",

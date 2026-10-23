@@ -1,4 +1,4 @@
-//! tests/cases/password.json, which seimei/auth.py passes too: which new passwords `seimei passwd` takes.
+//! tests/cases/password.json: which new passwords `seimei passwd` takes.
 
 use seimei_core::auth::password_problem;
 use serde_json::Value;

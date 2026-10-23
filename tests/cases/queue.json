@@ -1,5 +1,5 @@
 {
- "about": "The queue plugin's texts and hooks, run by tests/unit/queuecases.py (Python) and crates/core/tests/queue.rs (Rust). describe: the queue tool's text from a cqd status reply (cqd) or a /proc snapshot (snap). history: queue_history's text from cqd's rows, in UTC. wrap and env: how sessions run under claude-queue ({lib} and {run} are the test's folders). triggers: whether a queue_wait target is valid.",
+ "about": "The queue plugin's texts and hooks, run by crates/core/tests/it/queue.rs. describe: the queue tool's text from a cqd status reply (cqd) or a /proc snapshot (snap). history: queue_history's text from cqd's rows, in UTC. wrap and env: how sessions run under claude-queue ({lib} and {run} are the test's folders). triggers: whether a queue_wait target is valid.",
  "names": {"npu_dma": "shikigami npu-dma", "seimei": "seimei (you)"},
  "describe": [
   {

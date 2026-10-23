@@ -1,6 +1,5 @@
-//! The live permtest on the Rust pool (tests/live/permtest.py is the Python one; its offline half is
-//! tests/it/approvals.rs): permission modes and cards with haiku shikigami in a scratch folder, a scripted "user"
-//! answering the cards, nothing reaching a phone. Run by tests/live/permtest_rs.py.
+//! The live permtest (its offline half is tests/it/approvals.rs): permission modes and cards with haiku shikigami in a scratch folder, a scripted "user"
+//! answering the cards, nothing reaching a phone. Run by tests/live.sh perm.
 
 use std::sync::{Arc, Mutex};
 
@@ -49,7 +48,7 @@ fn answer(a: &Approvals, e: &Value) {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "starts headless claude sessions; run by tests/live/permtest_rs.py"]
+#[ignore = "starts headless claude sessions; run by tests/live.sh perm"]
 async fn permissions_live() {
     let c = Checks::default();
     let work = work("t64rs");

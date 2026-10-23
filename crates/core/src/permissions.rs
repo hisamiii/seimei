@@ -1,6 +1,6 @@
 //! Permission modes, and the buttons of a card for Claude Code's permission prompts (#64). Suggestions stay JSON in
-//! the control protocol's shape and go back as Claude Code sent them; tests/cases/permissions.json holds this and
-//! seimei/permissions.py to the same answers.
+//! the control protocol's shape and go back as Claude Code sent them; tests/cases/permissions.json holds the
+//! answers.
 
 use std::time::Duration;
 

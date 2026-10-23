@@ -1,5 +1,5 @@
 {
- "about": "Browser plugin scenarios: tool calls on one browser, with the connector's replies (or fails) per step and the user's outcome for a card. tests/unit/browsercases.py --write fills in the wants from Python.",
+ "about": "Browser plugin scenarios: tool calls on one browser, with the connector's replies (or fails) per step and the user's outcome for a card.",
  "scenarios": [
   {
    "name": "tabs",

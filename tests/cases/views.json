@@ -1,5 +1,5 @@
 {
- "about": "The read-only views (seimei/cost.py, metrics.py, archive.py): what one API message costs at API prices and which price row it uses, when the weekly window started (times in UTC), one shikigami's metrics, and whether the Agents list hides an item. usd compares to 1e-6.",
+ "about": "The read-only views (cost.rs, metrics.rs, archive.rs): what one API message costs at API prices and which price row it uses, when the weekly window started (times in UTC), one shikigami's metrics, and whether the Agents list hides an item. usd compares to 1e-6.",
  "cost": [
   {
    "model": "claude-fable-5-1-20260101",

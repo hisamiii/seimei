@@ -1,7 +1,6 @@
-"""The codex app-server client against the installed Codex. First every message of the fake runs
-(crates/proto/tests/it/codex.rs), both ways, against the schema this Codex generates (`codex app-server
-generate-json-schema`), so the fake and the client keep up with Codex; then the live run (live_codex.rs) on the user's
-own login, which spends a few turns. --schema-only skips the live run."""
+"""The codex fake against the installed Codex: every message of the fake runs (crates/proto/tests/it/codex.rs), both
+ways, against the schema this Codex generates (`codex app-server generate-json-schema`), so the fake and the client keep
+up with Codex. tests/live.sh codex runs it before the live run."""
 import json
 import os
 import subprocess
@@ -114,8 +113,3 @@ with tempfile.TemporaryDirectory(prefix="seimei-codexschema-") as tmp:
     print(f"{'PASS' if logs and not bad else 'FAIL'} schema: {n} messages in {len(logs)} runs, {len(bad)} off")
     if r.returncode or bad or not logs:
         sys.exit(1)
-
-if "--schema-only" not in sys.argv:
-    r = subprocess.run(["cargo", "test", "-q", "-p", "seimei-proto", "--test", "it", "--", "--ignored", "live_codex::",
-                        "--nocapture"], cwd=ROOT)
-    sys.exit(r.returncode)

@@ -1,6 +1,6 @@
 //! The dispatcher's own tools, served in-process as the `seimei` MCP server: Claude Code sends each JSON-RPC message
-//! as an `mcp_message` control request. tests/cases/tools.json is the server Claude Code sees (initialize and
-//! tools/list, the descriptions being prompt text); the Python server is held to the same file.
+//! as an `mcp_message` control request. data/tools.json is the server Claude Code sees (initialize and
+//! tools/list, the descriptions being prompt text).
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -26,7 +26,7 @@ use crate::watches::{DEFAULT_HOURS, NewRule, TRIGGERS, Watches, mins};
 use crate::workers::{ACTIVE, CONTEXTS, EFFORTS, MODELS, Pool, Summon, Worker};
 
 static SERVER: LazyLock<Value> =
-    LazyLock::new(|| serde_json::from_str(include_str!("../../../tests/cases/tools.json")).expect("tools.json"));
+    LazyLock::new(|| serde_json::from_str(include_str!("../data/tools.json")).expect("tools.json"));
 
 /// More running shikigami than this need the user's OK.
 const MAX_RUNNING: usize = 5;

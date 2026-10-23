@@ -1,14 +1,14 @@
-//! Embeds the web UI (seimei/web) in the binary: `$OUT_DIR/web.rs` lists each file with its bytes.
+//! Embeds the web UI (web/) in the binary: `$OUT_DIR/web.rs` lists each file with its bytes.
 use std::path::{Path, PathBuf};
 
 fn main() {
-    let web = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../seimei/web").canonicalize().expect("seimei/web");
+    let web = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web").canonicalize().expect("web/");
     println!("cargo:rerun-if-changed={}", web.display());
     let mut files: Vec<PathBuf> = vec![];
     let mut stack = vec![web.clone()];
     while let Some(dir) = stack.pop() {
         println!("cargo:rerun-if-changed={}", dir.display());
-        for e in std::fs::read_dir(&dir).expect("seimei/web").flatten() {
+        for e in std::fs::read_dir(&dir).expect("web/").flatten() {
             let p = e.path();
             if p.is_dir() {
                 stack.push(p);

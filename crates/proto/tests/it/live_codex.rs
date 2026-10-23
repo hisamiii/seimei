@@ -41,7 +41,7 @@ async fn turn(c: &mut Client, prompt: &str) -> (String, Vec<String>, Result<Stri
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "starts the real Codex on the user's login; run by hand"]
+#[ignore = "starts the real Codex on the user's login; run by tests/live.sh codex"]
 async fn codex_live() {
     let dir = std::env::temp_dir().join(format!("seimei-codexlive-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

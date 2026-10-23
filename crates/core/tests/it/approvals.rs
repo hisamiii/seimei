@@ -1,4 +1,4 @@
-//! The cards' waits, reminders and chat settling, and the mode ceiling: the offline half of tests/live/permtest.py.
+//! The cards' waits, reminders and chat settling, and the mode ceiling: the offline half of live_perm.rs.
 
 use std::sync::Arc;
 use std::time::Duration;

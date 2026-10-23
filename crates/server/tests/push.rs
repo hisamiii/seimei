@@ -1,6 +1,5 @@
 //! Push against local fakes of Google's token and send endpoints and of a UnifiedPush server: the rules (who gets
-//! what, when; tests/unit/pushtest.py), FCM's JWT and messages (fcmtest.py), and Web Push sends a phone can read
-//! (webpushtest.py).
+//! what, when), FCM's JWT and messages, and Web Push sends a phone can read.
 
 use std::collections::HashSet;
 use std::net::SocketAddr;

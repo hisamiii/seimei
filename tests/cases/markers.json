@@ -1,5 +1,5 @@
 {
- "about": "The dispatcher's reply markers (head: lane markers and re: lines, final or while streaming; None means the start could still be a marker), turn labels (why) and reply quotes (quoted: the chip and the line seimei gets). Generated from seimei/dispatcher.py.",
+ "about": "The dispatcher's reply markers (head: lane markers and re: lines, final or while streaming; None means the start could still be a marker), turn labels (why) and reply quotes (quoted: the chip and the line seimei gets).",
  "head": [
   {
    "text": "Plain reply.",

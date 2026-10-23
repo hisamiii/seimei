@@ -1,5 +1,5 @@
 //! HTTP side: the page, login, the event stream, history, and the write endpoints. Routes, status codes and bodies are
-//! the Python server's (seimei/server.py), so the web page and the phone app talk to either.
+//! the wire protocol the web page and the phone app speak.
 
 #![allow(clippy::result_large_err)] // axum responses as the error side, as handlers return them
 

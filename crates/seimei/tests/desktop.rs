@@ -1,4 +1,4 @@
-//! tests/cases/desktop.json against the Rust desktop plugin, on the same fakes as tests/unit/desktopcases.py: HOME,
+//! tests/cases/desktop.json against the desktop plugin, on fakes: HOME,
 //! XDG_RUNTIME_DIR and PATH point into a temp folder before any thread starts (this test has its own main for that),
 //! the window manager's tools there are tests/fakes/desktop/fakebin.py, the niri group talks to
 //! tests/fakes/desktop/niri.py, and the input devices write their events to a file instead of /dev/uinput. Then
@@ -236,7 +236,7 @@ async fn end_to_end(t: &mut T, g: &Value) {
         Arc::new(Plugins::load_at(&cfg, &state, env!("CARGO_BIN_EXE_seimei")).about("laptop (Arch, niri)"));
     let desk = plugins.desktop.clone().unwrap();
     assert_eq!(desk.b.ctx().run, t.run, "the plugin's desktop is not the test's");
-    let spec = &serde_json::from_str::<Value>(&std::fs::read_to_string(repo().join("tests/cases/tools.json")).unwrap())
+    let spec = &serde_json::from_str::<Value>(&std::fs::read_to_string(repo().join("crates/core/data/tools.json")).unwrap())
         .unwrap()["plugins"]["desktop"]["niri"];
     t.check(
         "desktop prompt",

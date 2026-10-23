@@ -1,5 +1,4 @@
-//! Append-only event log: drives the live stream, scrollback and replay after reconnects. The same events.jsonl as the
-//! Python seimei.
+//! Append-only event log: drives the live stream, scrollback and replay after reconnects.
 
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};

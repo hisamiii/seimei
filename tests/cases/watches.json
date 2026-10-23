@@ -1,5 +1,5 @@
 {
- "about": "Watch rules (seimei/watches.py, crates/core/src/watches.rs); generated from Python. The file starts with the rule in \"start\"; rule ids are W<n> in the order added.",
+ "about": "Watch rules (crates/core/src/watches.rs). The file starts with the rule in \"start\"; rule ids are W<n> in the order added.",
  "start": [
   {
    "id": "wold1",

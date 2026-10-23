@@ -48,14 +48,8 @@ What it is for and its rules."""
 their calls go through Claude Code's permission prompts like any other tool (so "Always allow" works for them), and
 through seimei's guard.
 
-## Writing a built-in plugin
+## Writing a plugin
 
-A built-in plugin is a package under `seimei/plugins/<name>/` with a `Plugin` class on the base in
-`seimei/plugins/__init__.py`. It sets:
+A user plugin is a folder `~/.config/seimei/plugins/<name>/` with a `plugin.toml` (`name`, `command`, `args`, optionally `prompt` for its prompt section and `worker_note` for a line in every shikigami's prompt). Claude Code starts the command as an MCP server on stdio for each session that has the plugin, so it can be written in any language. Its environment carries `SEIMEI_SOCKET` and `SEIMEI_TOKEN`: a plugin raises a card through that socket with the token, and the card names the session it serves.
 
-- `name` and `prompt` (its prompt section);
-- `tools(who, worker)`: the SDK tools, built per session so cards name it;
-- if it guards anything, `check(tool, input)`: returns a card description for calls that need the user's OK.
-
-Optional hooks cover environment and command wrapping (`env`, `wrap`, the queue uses them), spawning and windows (the
-desktop) and a stop key (`halt`). `music` is a small example.
+A built-in plugin lives in `crates/core/src/plugins/<name>.rs` with its `plugin.toml` and `prompt.md` under `plugins/<name>/`, both built into the binary, and its MCP spec under `plugins` in `crates/core/data/tools.json`. It runs as `seimei plugin <name>`; browser, desktop and discord run their tools inside seimei (they share a connector) and their process forwards each call. `music` is a small example.

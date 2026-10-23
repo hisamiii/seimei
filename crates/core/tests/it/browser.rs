@@ -1,4 +1,4 @@
-//! tests/cases/browser.json, which tests/unit/browsercases.py runs on the Python plugin: each scenario's tool calls on
+//! tests/cases/browser.json: each scenario's tool calls on
 //! one browser, a fake connector at its link answering each op with the step's replies (or failing with its fails),
 //! the user deciding each card as the step says. Checks the text, the card and what the connector got.
 

@@ -1,4 +1,4 @@
-//! tests/cases/markers.json, which tests/unit/markercases.py runs on the Python side: the dispatcher's reply markers,
+//! tests/cases/markers.json: the dispatcher's reply markers,
 //! turn labels and reply quotes.
 
 use seimei_core::dispatcher::{head, quoted, why};

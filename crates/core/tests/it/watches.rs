@@ -1,4 +1,4 @@
-//! tests/cases/watches.json, which tests/unit/watchcases.py runs on the Python side: watch rules added, fired by the
+//! tests/cases/watches.json: watch rules added, fired by the
 //! worker and session listings on the event stream, expired and removed, and what the dispatcher hears.
 
 use std::sync::{Arc, Mutex};
@@ -83,7 +83,7 @@ fn watch_cases() {
         got["rules"] = json!(rules);
         for k in ["added", "error", "removed", "text", "told", "rules"] {
             if got.get(k) != step.get(k) {
-                fails.push(format!("step {i} {k}: {}\n  Python: {}", got[k], step[k]));
+                fails.push(format!("step {i} {k}: {}\n  want: {}", got[k], step[k]));
             }
         }
     }

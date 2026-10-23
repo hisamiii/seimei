@@ -1,7 +1,7 @@
 //! Phase 4's dispatcher run: seimei's dispatcher on haiku, wired as the dev server wires it (seimei_server::App),
 //! with the queue, music, browser and discord plugins on fakes. One message asks it for one read-only tool of each;
 //! the tools reach the fakes and their texts reach the session, with no card. Desktop is left out: its devices are
-//! the real /dev/uinput. Run by tests/live/dispatchertest_rs.py.
+//! the real /dev/uinput. Run by tests/live.sh dispatcher.
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -54,7 +54,7 @@ fn discord_op(op: &str) -> Value {
 }
 
 #[test]
-#[ignore = "starts a headless claude session; run by tests/live/dispatchertest_rs.py"]
+#[ignore = "starts a headless claude session; run by tests/live.sh dispatcher"]
 fn dispatcher_live() {
     live::claude_dir();
     let work = work("t82p4d");

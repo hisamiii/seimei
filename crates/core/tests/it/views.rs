@@ -1,4 +1,4 @@
-//! tests/cases/views.json, which tests/unit/viewcases.py runs on the Python side: cost, the weekly window, metrics and
+//! tests/cases/views.json: cost, the weekly window, metrics and
 //! the archive. It sets TZ for the local-time cases under the Env lock.
 
 use seimei_core::cost::{PRICES, Spend, Tokens, cost, week_start};

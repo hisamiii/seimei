@@ -2,7 +2,7 @@
 It creates the locked account seimei-cleantest (no password, no extra groups) through doas, runs `seimei setup` as it,
 checks the service serves on 127.0.0.1 and takes the password setup set, then removes the account and checks nothing
 is left (processes, user units, linger, home, group, runtime dir). The web password is random and lives only in this
-process. Build first with contrib/release.sh's cargo line; run by hand, never from pytest: python3 contrib/cleaninstall.py"""
+process. Build first with contrib/release.sh's cargo line; run by hand: python3 contrib/cleaninstall.py"""
 import json
 import platform
 import secrets

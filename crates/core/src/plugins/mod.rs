@@ -52,12 +52,12 @@ const HOSTED: [&str; 3] = ["browser", "desktop", "discord"];
 const MCP_KEYS: [&str; 6] = ["type", "command", "args", "env", "url", "headers"];
 /// Each built-in's MCP server as Claude Code sees it (initialize and tools/list).
 static SPECS: LazyLock<Value> = LazyLock::new(|| {
-    let all: Value = serde_json::from_str(include_str!("../../../../tests/cases/tools.json")).expect("tools.json");
+    let all: Value = serde_json::from_str(include_str!("../../data/tools.json")).expect("tools.json");
     all["plugins"].clone()
 });
 /// The shikigami's own server (ask, board): in-process for Claude Code, `seimei plugin shikigami` for an ACP agent.
 static OWN: LazyLock<Value> = LazyLock::new(|| {
-    let all: Value = serde_json::from_str(include_str!("../../../../tests/cases/tools.json")).expect("tools.json");
+    let all: Value = serde_json::from_str(include_str!("../../data/tools.json")).expect("tools.json");
     all["shikigami"].clone()
 });
 

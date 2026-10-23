@@ -1,4 +1,4 @@
-//! Phone notifications, following the user's rules (seimei/push.py has the full story). Only two things push:
+//! Phone notifications, following the user's rules. Only two things push:
 //! approval cards waiting (withdrawn once decided) and pings the dispatcher decides to send (a level each, an optional
 //! collapse key, and "reply ready"). Pings and approvals skip a phone with the app open; "reply ready" skips only one
 //! showing the chat. Messages are data-only, so the app builds every notification itself.

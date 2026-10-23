@@ -1,4 +1,4 @@
-//! tests/cases/music.json, which tests/unit/musiccases.py runs on the Python plugin: the music tool's text, and the
+//! tests/cases/music.json: the music tool's text, and the
 //! card a call raises with the request a fake Quod Libet bridge then gets.
 
 use std::collections::HashMap;

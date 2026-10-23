@@ -1,7 +1,7 @@
-//! What the live twins of tests/live/permtest.py and tunetest.py share: a pool wired like the server's, a stand-in
+//! What live_perm.rs and live_tune.rs share: a pool wired like the server's, a stand-in
 //! for the dispatcher that keeps what it hears, and waiting on a condition. They start real headless claude sessions,
-//! so they are ignored by default; tests/live/*_rs.py runs them through pytest's scrubbed environment (its own Claude
-//! config dir, no job variables, auto-memory off).
+//! so they are ignored by default; tests/live.sh runs them in a scrubbed environment (its own Claude config dir, no
+//! job variables, auto-memory off).
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
@@ -34,9 +34,9 @@ impl Listener for Heard {
     fn rate_limit(&self, _info: &Value) {}
 }
 
-/// The test's Claude config dir, which pytest sets; the user's own is never used.
+/// The test's Claude config dir, which tests/live.sh sets; the user's own is never used.
 pub fn claude_dir() -> PathBuf {
-    let dir = std::env::var("CLAUDE_CONFIG_DIR").expect("run through pytest -m live: CLAUDE_CONFIG_DIR is not set");
+    let dir = std::env::var("CLAUDE_CONFIG_DIR").expect("run through tests/live.sh: CLAUDE_CONFIG_DIR is not set");
     let home = std::env::var("HOME").unwrap_or_default();
     assert!(dir != format!("{home}/.claude"), "CLAUDE_CONFIG_DIR is the user's own");
     assert_eq!(std::env::var("CLAUDE_CODE_DISABLE_AUTO_MEMORY").as_deref(), Ok("1"), "auto-memory is on");
@@ -111,7 +111,7 @@ pub async fn until(secs: u64, f: impl Fn() -> bool) -> bool {
     f()
 }
 
-/// PASS/FAIL lines like the Python scripts print, and the count at the end.
+/// PASS/FAIL lines, and the count at the end.
 #[derive(Default)]
 pub struct Checks(Mutex<Vec<bool>>);
 

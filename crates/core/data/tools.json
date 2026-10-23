@@ -1,5 +1,5 @@
 {
- "about": "seimei's own MCP server as Claude Code sees it (no plugins): the initialize result and tools/list. shikigami: a shikigami's own server. plugins: each built-in plugin's server (the Rust one serves it as `seimei plugin <name>`). The descriptions are prompt text. tests/unit/toolcases.py holds the Python server to this; the Rust server serves this file.",
+ "about": "seimei's own MCP server as Claude Code sees it (no plugins): the initialize result and tools/list. shikigami: a shikigami's own server. plugins: each built-in plugin's server (served as `seimei plugin <name>`). The descriptions are prompt text. The server serves this file as is.",
  "initialize": {
   "capabilities": {
    "tools": {

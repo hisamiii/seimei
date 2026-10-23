@@ -1,5 +1,5 @@
-"""Seeds the QA server's state before start.sh launches it (either implementation): workers, chat history, usage,
-the board (--board), the login (--login), and the user's own sessions as `sleep` stand-ins with fake kitty windows.
+"""Seeds the QA server's state before start.sh launches it: workers, chat history, usage,
+the board (--board) and the user's own sessions as `sleep` stand-ins with fake kitty windows.
 Everything lives under tests/qa; nothing here reaches a real Claude session, kitty window or phone."""
 import json, os, subprocess, sys, time, uuid
 from pathlib import Path
@@ -173,7 +173,3 @@ if FRESH:
                                "worker": None, "steps": steps, "since": now - 600, "created": now + i, "updated": now})
     (STATE_ROOT / "dev" / "tasks.json").write_text(json.dumps(b))
 
-
-if "--login" in sys.argv and FRESH:
-    from seimei.auth import Auth
-    Auth(STATE_ROOT / "dev", "http://localhost:8431").set_password("qa-password-123")

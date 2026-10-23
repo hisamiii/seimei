@@ -1,6 +1,6 @@
 //! A live ACP shikigami on dsh (`dsh --profile acp`, its own login and model): a command through a card, a denied one,
 //! a key read the guard refuses, its own ask tool through the built binary, a let-go session resumed, and bypass
-//! running without cards. Ignored by default; run by tests/live/acptest_rs.py, which gives it a temp HOME with a decoy
+//! running without cards. Ignored by default; run by tests/live.sh acp, which gives it a temp HOME with a decoy
 //! key (dsh keeps its own home through DSH_HOME). State and work folders are temp ones, no phone sees a card.
 
 use std::collections::BTreeMap;
@@ -51,13 +51,13 @@ impl Checks {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "starts dsh on its own login and model; run by tests/live/acptest_rs.py"]
+#[ignore = "starts dsh on its own login and model; run by tests/live.sh acp"]
 async fn dsh_shikigami_live() {
     let c = Checks::default();
     // The key it is asked to read is a decoy in a temp home: a gate that failed would leak nothing.
     let key = seimei_core::paths::home().join(".ssh/id_ed25519");
     let decoy = std::fs::read_to_string(&key).unwrap_or_default();
-    assert!(decoy.starts_with("DECOY-"), "run it through tests/live/acptest_rs.py (a temp HOME with a decoy key)");
+    assert!(decoy.starts_with("DECOY-"), "run it through tests/live.sh acp (a temp HOME with a decoy key)");
     let base = std::env::temp_dir().join(format!("seimei-acplive-{}", std::process::id()));
     let (state, work) = (base.join("state"), base.join("work"));
     for d in [&state, &work] {

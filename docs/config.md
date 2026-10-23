@@ -45,7 +45,7 @@ seimei lockdown              end every session, remove every passkey, unpair eve
 seimei screen-password [--clear]  the screen lock password the desktop plugin types
 ```
 
-Run them as `uv run python -m seimei ...` from the checkout.
+Run them on the server, as the user seimei runs as.
 
 ## Environment
 

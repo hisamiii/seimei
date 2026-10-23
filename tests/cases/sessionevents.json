@@ -1,5 +1,5 @@
 {
- "about": "What the user's sessions run into, as the dispatcher hears it (seimei/sessions.py SessionEvents, crates/core/src/sessions.rs); generated from Python. Each step appends transcript rows (in projects/-qa-proj under the config dir), then scans these rows.",
+ "about": "What the user's sessions run into, as the dispatcher hears it (crates/core/src/sessions.rs). Each step appends transcript rows (in projects/-qa-proj under the config dir), then scans these rows.",
  "steps": [
   {
    "write": {

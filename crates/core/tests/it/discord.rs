@@ -1,4 +1,4 @@
-//! tests/cases/discord.json, which tests/unit/discordcases.py runs on the Python plugin: the case's files laid out
+//! tests/cases/discord.json: the case's files laid out
 //! under a temp HOME and state, then each scenario's tool calls on one connection, a fake connector at its link
 //! answering each op with the step's replies (or failing with its fails), the user deciding each card as the step
 //! says. Checks the text, the card and what the connector got.
@@ -108,7 +108,7 @@ async fn discord_cases() {
             });
             for key in ["want", "error", "card", "sent"] {
                 n += 1;
-                // Where Rust's guard.toml answers differ from the frozen Python plugin's: "rust": {"want": ...}.
+                // Where the example guard.toml's answer differs from the step's: "rust": {"want": ...}.
                 if got[key] != *s.pointer(&format!("/rust/{key}")).unwrap_or(&s[key]) {
                     fails.push(format!("{} #{i} {} {key}: {}", sc["name"], s["tool"], got[key]));
                 }

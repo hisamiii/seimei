@@ -1,6 +1,6 @@
 //! Images in both directions: photos from the phone, pictures the dispatcher shows. The original is kept as sent;
 //! chats show a thumbnail (WebP, THUMB px on the long side) made once and cached, and the full-screen viewer and Save
-//! load the original. The same files/ and files/thumbs/ as the Python seimei.
+//! load the original.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

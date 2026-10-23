@@ -1,4 +1,4 @@
-//! tests/cases/tasks.json, which tests/unit/boardcases.py runs on the Python side: the board's store, the tasks tool,
+//! tests/cases/tasks.json: the board's store, the tasks tool,
 //! following shikigami, queues and drift.
 
 use seimei_core::tasks::{Board, Fields, NewTask};

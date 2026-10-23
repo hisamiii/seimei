@@ -1,5 +1,5 @@
 {
- "about": "A permission card's buttons (seimei/permissions.py options): Claude Code's permission_suggestions and the session's ceiling in; the options and what each option answers with (updatedPermissions) out.",
+ "about": "A permission card's buttons (permissions::options): Claude Code's permission_suggestions and the session's ceiling in; the options and what each option answers with (updatedPermissions) out.",
  "cases": [
   {
    "what": "a command with a rule, edits for the session and a broad rule",

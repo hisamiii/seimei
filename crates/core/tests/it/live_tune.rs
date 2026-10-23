@@ -1,6 +1,6 @@
-//! The live tunetest on the Rust pool (tests/live/tunetest.py is the Python one): changing a running shikigami's
+//! The live tunetest: changing a running shikigami's
 //! model and effort, mid-turn and idle, and what its turns, reports and metrics show. Run by
-//! tests/live/tunetest_rs.py.
+//! tests/live.sh tune.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -23,7 +23,7 @@ fn turns(w: &Worker, cwd: &std::path::Path) -> Vec<(String, String)> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "starts headless claude sessions; run by tests/live/tunetest_rs.py"]
+#[ignore = "starts headless claude sessions; run by tests/live.sh tune"]
 async fn tune_live() {
     let c = Checks::default();
     let work = work("t74rs");

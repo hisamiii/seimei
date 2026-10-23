@@ -146,9 +146,9 @@ pub fn agents_from(cfg: Option<&toml::Table>) -> BTreeMap<String, Agent> {
     out
 }
 
-/// The shikigami's own MCP server (ask, board), as tests/cases/tools.json has it.
+/// The shikigami's own MCP server (ask, board), as data/tools.json has it.
 static SERVER: LazyLock<Value> = LazyLock::new(|| {
-    let all: Value = serde_json::from_str(include_str!("../../../tests/cases/tools.json")).expect("tools.json");
+    let all: Value = serde_json::from_str(include_str!("../data/tools.json")).expect("tools.json");
     all["shikigami"].clone()
 });
 

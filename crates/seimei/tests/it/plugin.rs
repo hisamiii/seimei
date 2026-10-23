@@ -19,6 +19,10 @@ fn cases(file: &str) -> Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
+fn tools() -> Value {
+    serde_json::from_str(include_str!("../../../core/data/tools.json")).unwrap()
+}
+
 struct Server {
     child: Child,
     stdin: ChildStdin,
@@ -86,7 +90,7 @@ async fn queue_plugin_over_stdio() {
     assert_eq!(entry["args"], json!(["plugin", "queue"]));
 
     // Blocking stdio: each step runs off the runtime, which serves the card socket meanwhile.
-    let spec = cases("tools.json")["plugins"]["queue"].clone();
+    let spec = tools()["plugins"]["queue"].clone();
     let (env2, sock2) = (env.clone(), cqd_sock.clone());
     let mut srv = tokio::task::spawn_blocking(move || {
         let mut srv = Server::queue(&env2, &sock2);
@@ -232,7 +236,7 @@ async fn music_plugin_over_stdio() {
     let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
     let more = [("SEIMEI_QL_SOCK", sock.display().to_string()), ("PATH", path)];
 
-    let spec = cases("tools.json")["plugins"]["music"].clone();
+    let spec = tools()["plugins"]["music"].clone();
     let want = status["want"].as_str().unwrap().to_string();
     let mut srv = tokio::task::spawn_blocking(move || {
         let mut srv = Server::start("music", &env, &more);
@@ -327,7 +331,7 @@ async fn browser_plugin_forwards_to_seimei() {
     tokio::spawn(plugins.browser.as_ref().unwrap().link.clone().run(link.clone()));
     let seen = connector(link, browser_op);
     let env = plugins.servers("seimei", None, None)["browser"]["env"].as_object().unwrap().clone();
-    let spec = cases("tools.json")["plugins"]["browser"].clone();
+    let spec = tools()["plugins"]["browser"].clone();
     let env2 = env.clone();
     let mut srv = tokio::task::spawn_blocking(move || {
         let mut srv = Server::start("browser", &env2, &[]);
@@ -424,7 +428,7 @@ async fn discord_plugin_forwards_to_seimei() {
     tokio::spawn(plugins.discord.as_ref().unwrap().link.clone().run(link.clone()));
     let seen = connector(link, discord_op);
     let env = plugins.servers("seimei", None, None)["discord"]["env"].as_object().unwrap().clone();
-    let spec = cases("tools.json")["plugins"]["discord"].clone();
+    let spec = tools()["plugins"]["discord"].clone();
     let mut srv = tokio::task::spawn_blocking(move || {
         let mut srv = Server::start("discord", &env, &[]);
         assert_eq!(srv.ask(1, "tools/list", json!({}))["tools"], spec["tools"]);

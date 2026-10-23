@@ -1,16 +1,16 @@
-"""Builds the theme token files (#81): seimei/web/themes/<theme>.json, read by the web page (theme.js) and bundled into
+"""Builds the theme token files (#81): web/themes/<theme>.json, read by the web page (theme.js) and bundled into
 the app (its assets). A theme is a small base palette per side (dark and light); every token the page and the app use
 comes from it, so adding a theme is one more entry here. Material You has no fixed colors: the page and the app derive
 the same tokens from an M3 scheme (theme.js, Theme.kt). Run: python3 contrib/themes.py
 
-The web page builds Material You from a seed with material-color-utilities, vendored as seimei/web/mcu.js. To update
+The web page builds Material You from a seed with material-color-utilities, vendored as web/mcu.js. To update
 it: `npm pack @material/material-color-utilities` into an empty folder, unpack it, and bundle an entry file that
 re-exports Hct, SchemeTonalSpot, argbFromHex and hexFromArgb with `npx esbuild entry.js --bundle --format=esm --minify
 --legal-comments=none`; keep the two header lines and copy the package's LICENSE to mcu.LICENSE."""
 import json
 from pathlib import Path
 
-OUT = Path(__file__).resolve().parents[1] / "seimei/web/themes"
+OUT = Path(__file__).resolve().parents[1] / "web/themes"
 
 
 def rgb(h):
