@@ -2,7 +2,8 @@
 # release.sh VERSION: build seimei VERSION with the update key built in, sign it with minisign and publish it as a
 # GitHub release, the one `seimei update` installs. VERSION must be the version in crates/seimei/Cargo.toml.
 # Once: `minisign -G -p contrib/minisign.pub -s ~/.minisign/seimei.key`, then commit contrib/minisign.pub.
-# minisign asks for the key's password itself; it never passes through here.
+# The key's password goes to minisign on stdin from ~/.config/seimei/minisign.pass (mode 600, outside the repo) when
+# that file is there; otherwise minisign asks for it. It never shows in arguments or output.
 set -eu
 v=${1:?usage: release.sh VERSION}
 root=$(dirname "$(dirname "$(readlink -f "$0")")")
@@ -19,7 +20,14 @@ mkdir -p dist
 cp "target/$target/release/seimei" "dist/$asset"
 ldd "dist/$asset" 2>&1 | grep -qE "statically linked|not a dynamic executable" || { echo "dist/$asset is not static"; exit 1; }
 [ "$("dist/$asset" version)" = "seimei $v" ] || { echo "the build does not say seimei $v"; exit 1; }
-minisign -S -s "${SEIMEI_MINISIGN_KEY:-$HOME/.minisign/seimei.key}" -m "dist/$asset" -t "seimei $v $asset"
+pass=${SEIMEI_MINISIGN_PASS:-$HOME/.config/seimei/minisign.pass}
+sign() { minisign -S -s "${SEIMEI_MINISIGN_KEY:-$HOME/.minisign/seimei.key}" -m "dist/$asset" -t "seimei $v $asset"; }
+if [ -f "$pass" ]; then
+    [ "$(stat -c %a "$pass")" = 600 ] || { echo "$pass must be mode 600"; exit 1; }
+    sign < "$pass"
+else
+    sign
+fi
 minisign -V -p contrib/minisign.pub -m "dist/$asset"
 gh release create "v$v" "dist/$asset" "dist/$asset.minisig" --target "$(git rev-parse HEAD)" --title "seimei $v" \
     --notes "Install or update with \`seimei update\`; the binary is signed with contrib/minisign.pub."
