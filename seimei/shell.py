@@ -23,6 +23,15 @@ def _unwrap(argv: list[str]) -> list[str]:
     return argv
 
 
+def _script_at(argv: list[str]) -> int | None:
+    """Where a shell's command string is: after the first option cluster with a c (-c, -lc, -ec). Codex runs every
+    command as `bash -lc '...'`."""
+    for i, a in enumerate(argv[1:], 1):
+        if len(a) > 1 and a.startswith("-") and not a.startswith("--") and "c" in a:
+            return i + 1 if i + 1 < len(argv) else None
+    return None
+
+
 def split(cmd: str) -> list[str]:
     """The command at its separators (&&, ||, ;, &, |, newline) outside quotes. A heredoc's body is data: it goes."""
     cmd = HEREDOC.sub(lambda m: m.group(3), cmd)
@@ -61,7 +70,7 @@ def commands(cmd: str, depth: int = 0):
         # A heredoc is data, unless a shell runs it: `bash <<EOF`.
         line = cmd[cmd.rfind("\n", 0, m.start()) + 1:m.start()]
         head = _unwrap(line.split())
-        if head and head[0].rsplit("/", 1)[-1] in SHELLS and "-c" not in head:
+        if head and head[0].rsplit("/", 1)[-1] in SHELLS and _script_at(head) is None:
             yield from commands(m.group(4), depth + 1)
     for part in split(SUBSHELL.sub(" ", cmd)):
         try:
@@ -72,8 +81,8 @@ def commands(cmd: str, depth: int = 0):
         if not argv:
             continue
         prog = argv[0].rsplit("/", 1)[-1]
-        if prog in SHELLS and "-c" in argv[1:-1]:
-            yield from commands(argv[argv.index("-c") + 1], depth + 1)
+        if prog in SHELLS and (at := _script_at(argv)) is not None:
+            yield from commands(argv[at], depth + 1)
         elif prog == "eval":
             yield from commands(" ".join(argv[1:]), depth + 1)
         else:

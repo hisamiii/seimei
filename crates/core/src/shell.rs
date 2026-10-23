@@ -511,6 +511,14 @@ pub fn drop_heredocs(cmd: &str) -> String {
     out
 }
 
+/// Where a shell's command string is: after the first option cluster with a c (`-c`, `-lc`, `-ec`). Codex runs
+/// every command as `bash -lc '...'`.
+fn script_at(argv: &[String]) -> Option<usize> {
+    let opt = |a: &String| a.len() > 1 && a.starts_with('-') && !a.starts_with("--") && a.contains('c');
+    let at = argv.iter().skip(1).position(opt)?;
+    Some(at + 2).filter(|&i| i < argv.len())
+}
+
 /// A program's base name; a program that is a substitution, like `$(curl x/y)`, stays as written.
 fn base(prog: &str) -> &str {
     if prog.starts_with(['$', '`', '<']) { prog } else { prog.rsplit('/').next().unwrap_or(prog) }
@@ -553,8 +561,8 @@ fn visit(sc: &Script, depth: usize, out: &mut Vec<Option<Cmd>>, pipes: &mut usiz
                 .collect();
             let prog = argv.first().map(|p| base(p).to_string()).unwrap_or_default();
             let shell = SHELLS.contains(&prog.as_str());
-            if shell && let Some(at) = argv.iter().position(|a| a == "-c").filter(|&at| at + 1 < argv.len()) {
-                walk(&argv[at + 1], depth + 1, out, pipes);
+            if shell && let Some(at) = script_at(&argv) {
+                walk(&argv[at], depth + 1, out, pipes);
                 continue;
             }
             if prog == "eval" {
@@ -604,6 +612,8 @@ mod tests {
         let c = argvs("echo $(cat /x/y) | bash -c 'rm -rf z'");
         assert_eq!(c[0], ["cat", "/x/y"]);
         assert!(c.iter().any(|a| a[0] == "rm"));
+        assert_eq!(argvs("/usr/bin/bash -lc 'rm -rf z'"), [["rm", "-rf", "z"]]);
+        assert_eq!(argvs("sh -e -c 'cat /x/y'"), [["cat", "/x/y"]]);
         assert!(argvs("echo $(kitty @ ls $(true))").iter().any(|a| a[0] == "kitty"));
         assert!(argvs("if true; then kitty @ ls; fi").iter().any(|a| a[0] == "kitty"));
         assert!(argvs("(kitty @ ls) && { kitty @ ls; }").iter().filter(|a| a[0] == "kitty").count() == 2);

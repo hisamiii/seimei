@@ -1330,6 +1330,46 @@
    "cwd": "/home/tester",
    "blocked": true,
    "why": "SSH"
+  },
+  {
+   "tool": "Bash",
+   "input": {
+    "command": "/usr/bin/bash -lc 'cat ${HOME}/.gnupg/pubring.kbx'"
+   },
+   "cwd": "/home/tester",
+   "blocked": true
+  },
+  {
+   "tool": "Bash",
+   "input": {
+    "command": "/usr/bin/bash -lc 'cat ~/.local/share/TelegramD*/tdata/key_datas'"
+   },
+   "cwd": "/home/tester",
+   "blocked": true
+  },
+  {
+   "tool": "Bash",
+   "input": {
+    "command": "/usr/bin/bash -lc 'cd ~/.local/share/TelegramDesktop && tar czf /tmp/t.tgz tdata'"
+   },
+   "cwd": "/home/tester",
+   "blocked": true
+  },
+  {
+   "tool": "Bash",
+   "input": {
+    "command": "/usr/bin/bash -lc 'cd && rm -rf *'"
+   },
+   "cwd": "/tmp",
+   "blocked": true
+  },
+  {
+   "tool": "Bash",
+   "input": {
+    "command": "/usr/bin/bash -lc 'touch made.txt'"
+   },
+   "cwd": "/home/tester/src/x",
+   "blocked": false
   }
  ]
 }
