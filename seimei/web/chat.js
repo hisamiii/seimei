@@ -519,8 +519,18 @@ function shown(ev) {
 
 function limitText(ev) {
   const name = { five_hour: '5-hour', seven_day: 'Weekly' }[ev.window] || ev.window;
-  const what = ev.status === 'rejected' ? 'limit reached' : ev.status === 'allowed' ? 'limit cleared' : 'limit getting close';
-  return `${name} ${what}${ev.resets_at && ev.status !== 'allowed' ? `, resets ${clock(ev.resets_at)}` : ''}`;
+  // A warning comes when usage runs ahead of pace for the window, at any level, so it says how much is used.
+  const used = typeof ev.utilization === 'number' ? `${Math.round(ev.utilization * 100)}% used, ` : '';
+  const what =
+    ev.status === 'rejected' ? 'limit reached' : ev.status === 'allowed' ? 'limit cleared' : `${used}ahead of pace`;
+  return `${name} ${what}${ev.resets_at && ev.status !== 'allowed' ? `, resets ${resets(ev.resets_at)}` : ''}`;
+}
+
+// "16:00" today, "thu 16:00" on another day.
+function resets(t) {
+  const d = new Date(t * 1000);
+  if (d.toDateString() === new Date().toDateString()) return clock(t);
+  return `${d.toLocaleDateString('en', { weekday: 'short' }).toLowerCase()} ${clock(t)}`;
 }
 
 // A system line repeated within this many seconds counts up on the first one instead of showing again.

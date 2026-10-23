@@ -319,13 +319,24 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
 fun limitText(ev: JSONObject): String {
     val name = mapOf("five_hour" to "5-hour", "seven_day" to "Weekly")[ev.str("window")] ?: ev.str("window")
     val status = ev.str("status")
+    // A warning comes when usage runs ahead of pace for the window, at any level, so it says how much is used.
+    val used = if (ev.has("utilization") && !ev.isNull("utilization"))
+        "${Math.round(ev.optDouble("utilization") * 100)}% used, " else ""
     val what = when (status) {
         "rejected" -> "limit reached"
         "allowed" -> "limit cleared"
-        else -> "limit getting close"
+        else -> "${used}ahead of pace"
     }
     val resets = ev.optDouble("resets_at", 0.0)
-    return "$name $what" + if (resets > 0 && status != "allowed") ", resets ${clock(resets)}" else ""
+    return "$name $what" + if (resets > 0 && status != "allowed") ", resets ${resetsAt(resets)}" else ""
+}
+
+/** "16:00" today, "thu 16:00" on another day. */
+fun resetsAt(t: Double): String {
+    val at = Instant.ofEpochMilli((t * 1000).toLong()).atZone(ZoneId.systemDefault())
+    if (at.toLocalDate() == java.time.LocalDate.now()) return clock(t)
+    return at.dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.ENGLISH).lowercase() +
+        " " + clock(t)
 }
 
 fun clock(t: Double): String =
