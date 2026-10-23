@@ -469,7 +469,7 @@ fn update(u: &Value) -> Update {
     }
 }
 
-fn error_text(e: &Value) -> String {
+pub(crate) fn error_text(e: &Value) -> String {
     let m = e["message"].as_str().unwrap_or("unknown error");
     match e.get("data").filter(|d| !d.is_null()) {
         Some(d) => format!("{m} ({})", d.as_str().map_or_else(|| d.to_string(), String::from)),

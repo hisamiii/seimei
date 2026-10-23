@@ -15,10 +15,9 @@ use std::sync::{Arc, LazyLock, Mutex, OnceLock, Weak};
 use std::time::Duration;
 
 use regex::Regex;
-use seimei_proto::acp;
 use seimei_proto::{
     AssistantMessage, BoxFuture, Client, ContentBlock, Handler, HookMatcher, Message, Options, Permission,
-    PermissionRequest, ResultMessage, SystemPrompt, UserContent, UserMessage,
+    PermissionRequest, ResultMessage, SystemPrompt, UserContent, UserMessage, acp, codex,
 };
 use serde_json::{Map, Value, json};
 use tokio::sync::{mpsc, oneshot};
@@ -119,13 +118,15 @@ const SHOWN: [&str; 16] = [
     "tunes",
     "effort_next",
 ];
-/// An ACP agent a shikigami can run on (config [agents.<name>]: command, args, env). It uses its own login: seimei
-/// never handles its keys.
+/// An agent a shikigami can run on (config [agents.<name>]: command, args, env, protocol). It uses its own login:
+/// seimei never handles its keys.
 #[derive(Clone, Debug, Default)]
 pub struct Agent {
     pub command: String,
     pub args: Vec<String>,
     pub env: Vec<(String, String)>,
+    /// "acp" (the default), or "codex" for `codex app-server`.
+    pub protocol: String,
 }
 
 /// The [agents] table: each entry with a command.
@@ -139,7 +140,8 @@ pub fn agents_from(cfg: Option<&toml::Table>) -> BTreeMap<String, Agent> {
         let env = (a.get("env").and_then(|e| e.as_table()).into_iter().flatten())
             .filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_string())))
             .collect();
-        out.insert(name.clone(), Agent { command: expand(command), args: strs(a.get("args")), env });
+        let protocol = a.get("protocol").and_then(|p| p.as_str()).unwrap_or("acp").to_string();
+        out.insert(name.clone(), Agent { command: expand(command), args: strs(a.get("args")), env, protocol });
     }
     out
 }
@@ -727,8 +729,8 @@ struct Session {
     w: Arc<Worker>,
     pool: Arc<Pool>,
     client: Option<Client>,
-    /// Its ACP agent, for a shikigami on one (harness acp:<agent>) instead of Claude Code.
-    acp: Option<acp::Client>,
+    /// Its agent, for a shikigami on one (harness acp:<agent>) instead of Claude Code.
+    acp: Option<AgentConn>,
     /// An ACP turn runs; messages sent meanwhile wait in queued for the next one.
     turn: bool,
     queued: Vec<String>,
@@ -761,7 +763,71 @@ async fn next(client: &mut Option<Client>) -> Option<Message> {
     }
 }
 
-async fn next_acp(client: &mut Option<acp::Client>) -> Option<acp::Event> {
+/// A shikigami's agent: one that speaks ACP, or `codex app-server`. Both say the same events.
+enum AgentConn {
+    Acp(acp::Client),
+    Codex(codex::Client),
+}
+
+impl AgentConn {
+    async fn connect(protocol: &str, opts: acp::Options, handler: Arc<dyn acp::Handler>) -> Result<Self, acp::Error> {
+        Ok(match protocol {
+            "codex" => AgentConn::Codex(codex::Client::connect(opts, handler).await?),
+            _ => AgentConn::Acp(acp::Client::connect(opts, handler).await?),
+        })
+    }
+
+    async fn recv(&mut self) -> Option<acp::Event> {
+        match self {
+            AgentConn::Acp(c) => c.recv().await,
+            AgentConn::Codex(c) => c.recv().await,
+        }
+    }
+
+    fn drain(&mut self) {
+        match self {
+            AgentConn::Acp(c) => c.drain(),
+            AgentConn::Codex(c) => c.drain(),
+        }
+    }
+
+    fn pid(&self) -> Option<u32> {
+        match self {
+            AgentConn::Acp(c) => c.pid(),
+            AgentConn::Codex(c) => c.pid(),
+        }
+    }
+
+    fn session_id(&self) -> &str {
+        match self {
+            AgentConn::Acp(c) => &c.session_id,
+            AgentConn::Codex(c) => &c.session_id,
+        }
+    }
+
+    fn prompt_text(&self, text: &str) -> Result<(), acp::Error> {
+        match self {
+            AgentConn::Acp(c) => c.prompt_text(text),
+            AgentConn::Codex(c) => c.prompt_text(text),
+        }
+    }
+
+    fn cancel(&self) -> Result<(), acp::Error> {
+        match self {
+            AgentConn::Acp(c) => c.cancel(),
+            AgentConn::Codex(c) => c.cancel(),
+        }
+    }
+
+    async fn close(&mut self) {
+        match self {
+            AgentConn::Acp(c) => c.close().await,
+            AgentConn::Codex(c) => c.close().await,
+        };
+    }
+}
+
+async fn next_acp(client: &mut Option<AgentConn>) -> Option<acp::Event> {
     match client {
         Some(c) => c.recv().await,
         None => std::future::pending().await,
@@ -1230,12 +1296,12 @@ impl Session {
             load: started.then(|| str_of(&r["session_id"])),
         };
         let handler: Arc<dyn acp::Handler> = Arc::new(AcpSide { w: self.w.clone() });
-        let mut c = acp::Client::connect(opts, handler).await.map_err(|e| format!("{agent}: {e}"))?;
+        let mut c = AgentConn::connect(&a.protocol, opts, handler).await.map_err(|e| format!("{agent}: {e}"))?;
         // Its log has the history a loaded session replays.
         c.drain();
         self.pool.plugins.root(&name, Some(&self.w.id), c.pid());
         if !started {
-            let sid = c.session_id.clone();
+            let sid = c.session_id().to_string();
             self.w.edit(|r| {
                 r.insert("session_id".into(), json!(sid));
                 r.insert("started".into(), json!(true));

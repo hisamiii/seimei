@@ -4,6 +4,7 @@ mod acp_worker;
 mod approvals;
 mod browser;
 mod cases;
+mod codex_worker;
 mod discord;
 mod env;
 mod guard;

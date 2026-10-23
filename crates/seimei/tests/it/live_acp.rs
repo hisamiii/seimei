@@ -71,7 +71,12 @@ async fn dsh_shikigami_live() {
         plugins,
     };
     let pool = Pool::new(&state, "default", "test machine", parts).unwrap();
-    let dsh = Agent { command: "dsh".into(), args: vec!["--profile".into(), "acp".into()], env: vec![] };
+    let dsh = Agent {
+        command: "dsh".into(),
+        args: vec!["--profile".into(), "acp".into()],
+        env: vec![],
+        protocol: "acp".into(),
+    };
     pool.agents.set(BTreeMap::from([("dsh".to_string(), dsh)])).unwrap();
     tokio::spawn(pool.plugins.clone().listen(approvals.clone()));
     let sock = state.join("plugins.sock");

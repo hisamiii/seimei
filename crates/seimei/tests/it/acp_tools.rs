@@ -61,6 +61,7 @@ async fn acp_own_tools() {
             ("FAKE_ACP_DIR".into(), fake.display().to_string()),
             ("FAKE_ACP_LOG".into(), fake.join("log.jsonl").display().to_string()),
         ],
+        protocol: "acp".into(),
     };
     pool.agents.set(BTreeMap::from([("fake".to_string(), agent)])).unwrap();
     tokio::spawn(pool.plugins.clone().listen(approvals.clone()));

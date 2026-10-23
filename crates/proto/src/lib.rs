@@ -5,10 +5,12 @@
 //! [`Client::recv`] as [`Message`]s; Claude Code's own requests (permission prompts, hooks, in-process MCP tools) go to
 //! a [`Handler`], each on a task of its own that a `control_cancel_request` aborts.
 //!
-//! [`acp`] is the other harness: a client for agents that speak the Agent Client Protocol.
+//! [`acp`] is the other harness: a client for agents that speak the Agent Client Protocol; [`codex`] drives
+//! `codex app-server` the same way.
 
 pub mod acp;
 mod client;
+pub mod codex;
 mod message;
 mod options;
 
