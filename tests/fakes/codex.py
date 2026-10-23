@@ -161,7 +161,7 @@ def play(t: Turn, text: str) -> tuple:
         a = ask("item/permissions/requestApproval", t.p(itemId="p1", environmentId=None, startedAtMs=0,
                                                          cwd=threads[t.thread]["cwd"], reason=None,
                                                          permissions={"network": {"enabled": True}}))
-        b = ask("item/tool/requestUserInput", t.p(itemId="q1", questions=[]))
+        b = ask("item/tool/requestUserInput", t.p(itemId="q1", questions=[], isBlocking=True))
         c = ask("mcpServer/elicitation/request", {"threadId": t.thread, "turnId": t.id, "serverName": "x",
                                                    "mode": "url", "_meta": None, "message": "m", "url": "u",
                                                    "elicitationId": "e"})
@@ -183,7 +183,9 @@ def run_turn(t: Turn, text: str):
 
 
 def thread_obj(tid: str, cwd: str) -> dict:
-    return {"id": tid, "cwd": cwd, "turns": []}
+    return {"id": tid, "sessionId": tid, "cwd": cwd, "turns": [], "cliVersion": "0.0.1", "createdAt": 0,
+            "updatedAt": 0, "ephemeral": False, "modelProvider": "fake", "preview": "", "projectId": None,
+            "source": "appServer", "status": {"type": "idle"}}
 
 
 def open_thread(i, p: dict, method: str):
@@ -201,7 +203,7 @@ def open_thread(i, p: dict, method: str):
     (DIR / "threads").mkdir(parents=True, exist_ok=True)
     f.write_text(json.dumps({"cwd": cwd}))
     send({"id": i, "result": {"thread": thread_obj(tid, cwd), "model": "fake-model", "modelProvider": "fake",
-                              "cwd": cwd, "approvalPolicy": p.get("approvalPolicy"),
+                              "cwd": cwd, "approvalPolicy": p.get("approvalPolicy"), "approvalsReviewer": "user",
                               "sandbox": {"type": "workspaceWrite"}, "reasoningEffort": None}})
 
 
