@@ -140,6 +140,10 @@ finally:
     if uid is not None:
         check("cleanup: no processes after", run(["pgrep", "-u", str(uid)]).returncode == 1)
         check("cleanup: runtime dir gone", root("test", "-e", f"/run/user/{uid}").returncode != 0)
+        # userdel -r leaves temp files; Claude Code keeps /tmp/claude-<uid>. Empty dirs go, anything else is reported.
+        root("find", "/tmp", "/var/tmp", "/dev/shm", "-xdev", "-uid", str(uid), "-type", "d", "-empty", "-delete")
+        left = root("find", "/tmp", "/var/tmp", "/dev/shm", "-xdev", "-uid", str(uid)).stdout.split()
+        check("cleanup: no temp files of its uid", not left, left)
     check("cleanup: port free", not run(["ss", "-ltnH", f"sport = :{PORT}"]).stdout.strip())
     print(json.dumps(nums), flush=True)
     print(f"{sum(res)}/{len(res)} passed", flush=True)
