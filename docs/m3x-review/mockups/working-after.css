@@ -1,0 +1,11 @@
+/* M2, working state: a contained loading indicator where the reply will appear, and a Stop that changes shape, not just icon. */
+.working { gap: 12px; margin-top: 18px; font-size: 15px; font-weight: 500; color: var(--text-2); }
+.working::before { content: none; }
+.working .m3x-loading { width: 40px; height: 40px; }
+.working .m3x-loading > i { width: 30px; height: 30px; }
+
+/* Send is round; while a turn runs Stop shows as a rounded square, so the shape alone says "busy".
+   chat.js swaps two buttons with hidden, so a transition never runs: a keyframe does, since display:none to shown restarts it. */
+#stop { border-radius: var(--shape-lg); animation: stop-in var(--spring-ms) var(--spring); }
+@keyframes stop-in { from { border-radius: 26px; transform: scale(.92); } }
+#stop .square { width: 16px; height: 16px; border-radius: var(--shape-xs); }

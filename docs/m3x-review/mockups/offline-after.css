@@ -1,0 +1,3 @@
+/* M5, offline on an empty chat: the away card replaces the empty-state hello instead of drawing over it.
+   The real fix is this one rule in web/style.css (or hiding #hello where app.js shows #away). */
+body.offline .hello { display: none; }

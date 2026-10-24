@@ -1,0 +1,28 @@
+/* M3, agents list: each group a segmented list on a container, state told by tile shape and color, a real loading indicator for "working". */
+.agroup { gap: 2px; margin-top: 20px; }
+.agroup h2 { padding: 0 16px 8px; font-size: 14px; font-weight: var(--w-emph); letter-spacing: 0; }
+.agroup .agent { background: var(--container); border-radius: var(--shape-xs); min-height: 64px; padding: 10px 16px 10px 10px; }
+.agroup > h2 + .agent { border-top-left-radius: var(--shape-lg-inc); border-top-right-radius: var(--shape-lg-inc); }
+.agroup > .agent:last-child { border-bottom-left-radius: var(--shape-lg-inc); border-bottom-right-radius: var(--shape-lg-inc); }
+.agroup .agent { transition: border-radius var(--spring-fast-ms) var(--spring-fast); }
+.agroup .agent:active { border-radius: var(--shape-lg); }
+
+/* Needs you: the one group that asks for a tap gets the warm container */
+.agroup.ask .agent { background: var(--warn-container); }
+.agroup.ask .agent .top b { font-weight: var(--w-emph); }
+.agent.ask .line { color: var(--on-warn-container); }
+/* The question is the content: up to two lines instead of an ellipsis after 40 characters */
+.agroup.ask .agent .sub { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 20px; }
+.agroup.ask .agent { align-items: flex-start; padding-top: 12px; padding-bottom: 12px; }
+/* Project names neutral: in this list color means state (warm asks, primary works) */
+.agent .proj { color: var(--text-2) !important; }
+.agroup.ask .agent .proj { color: var(--on-warn-container) !important; }
+
+/* Tiles: shape says state. Asking is a filled squircle, working morphs, idle is a circle, done fades back. */
+.tile { width: 44px; height: 44px; transition: border-radius var(--spring-ms) var(--spring); }
+.tile.ask { background: var(--warn); color: var(--on-warn); border-radius: var(--shape-lg); }
+.tile.work { border-radius: 50%; }
+.tile.work .m3x-loading > i { width: 28px; height: 28px; background: var(--c); }
+.tile.idle { border-radius: 50%; }
+.tile.done { border-radius: 50%; background: var(--container-high); }
+.agroup.done .agent { background: color-mix(in srgb, var(--container) 55%, var(--surface-low)); }
