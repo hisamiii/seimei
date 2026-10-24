@@ -3,8 +3,8 @@
 # Production never runs from the working tree, so half-finished edits cannot reach the phone.
 # It builds the Rust server here and swaps the binary in right before the restart.
 #
-# The deploy itself runs as its own transient unit, outside seimei's cgroup and the caller's, so the restart it ends
-# with cannot cut it off, even when a shikigami (which that restart ends) started it. The caller follows it and prints
+# The deploy itself runs detached (a transient unit under systemd, its own session under OpenRC), so the restart it
+# ends with cannot cut it off, even when a shikigami (which that restart ends) started it. The caller follows it and prints
 # its result; the result also stays in $state/deploy/last.json, which seimei hands to whoever it resumes.
 # Tests point it elsewhere with SEIMEI_APP, SEIMEI_STATE, SEIMEI_SERVICE and SEIMEI_DEPLOY_TEST (no installs).
 set -eu
@@ -13,6 +13,8 @@ repo=$(dirname "$(readlink -f "$0")")
 state=${SEIMEI_STATE:-$HOME/.local/share/seimei}
 dir="$state/deploy"
 mkdir -p "$dir"
+systemd=
+[ "$(cat /proc/1/comm 2>/dev/null)" = systemd ] && systemd=1
 
 if [ -z "${SEIMEI_DEPLOY_UNIT:-}" ]; then
     unit="seimei-deploy-$(date +%s)"
@@ -21,7 +23,12 @@ if [ -z "${SEIMEI_DEPLOY_UNIT:-}" ]; then
         eval "val=\${$v:-}"
         [ -n "$val" ] && set -- "$@" --setenv="$v=$val"
     done
-    env -u LD_PRELOAD systemd-run --user --collect --quiet --unit "$unit" "$@" "$repo/deploy.sh" "$rev"
+    if [ -n "$systemd" ]; then
+        env -u LD_PRELOAD systemd-run --user --collect --quiet --unit "$unit" "$@" "$repo/deploy.sh" "$rev"
+    else
+        # No subreaper above it: it goes to init, out of reach of seimei's stop and the caller's process group.
+        SEIMEI_DEPLOY_UNIT=$unit env -u LD_PRELOAD setsid -f "$repo/deploy.sh" "$rev" </dev/null >/dev/null 2>&1
+    fi
     echo "deploying $rev in $unit (log: $dir/$unit.log)"
     # Follow it: the log as it grows, then its result. If the restart ends this caller, the deploy goes on.
     exec python3 - "$dir" "$unit" <<'PY'
@@ -106,10 +113,13 @@ if [ -z "${SEIMEI_DEPLOY_TEST:-}" ]; then
     cp "$app/target/release/seimei" "$app/bin/seimei.new"
     step=install
     status running install
-    units="$HOME/.config/systemd/user"
-    cp --remove-destination "$app/seimei.service" "$units/seimei.service"
-    cp --remove-destination "$app/seimei-tunnel.service" "$units/seimei-tunnel.service"
-    systemctl --user daemon-reload
+    # Under OpenRC the user services live in /etc/user/init.d, outside this checkout.
+    if [ -n "$systemd" ]; then
+        units="$HOME/.config/systemd/user"
+        cp --remove-destination "$app/seimei.service" "$units/seimei.service"
+        cp --remove-destination "$app/seimei-tunnel.service" "$units/seimei-tunnel.service"
+        systemctl --user daemon-reload
+    fi
     # The Waterfox connector: its native-messaging host runs from the production checkout; the extension is packed
     # for the user to install once (about:addons, Install Add-on From File).
     python3 "$app/browser/install.py" "$app/browser" "$HOME/.mozilla/native-messaging-hosts" \
@@ -121,7 +131,7 @@ if [ -z "${SEIMEI_DEPLOY_TEST:-}" ]; then
     else
         echo "deploy: no pnpm, the Discord connector build is skipped" >&2
     fi
-    systemctl --user reenable seimei.service seimei-tunnel.service 2>/dev/null
+    [ -z "$systemd" ] || systemctl --user reenable seimei.service seimei-tunnel.service 2>/dev/null
 fi
 
 # Wait up to 5 minutes for 20 quiet seconds and no open Approve/Deny card, so no turn or held call is cut off.
@@ -150,7 +160,11 @@ status running restart
 if [ -e "$app/bin/seimei.new" ]; then
     mv -f "$app/bin/seimei.new" "$app/bin/seimei"
 fi
-systemctl --user restart "$service"
+if [ -n "$systemd" ]; then
+    systemctl --user restart "$service"
+else
+    rc-service --user "$service" restart
+fi
 line="deployed $(git -C "$app" log --oneline -1)"
 echo "$line"
 status done restart "$line"

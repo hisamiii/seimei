@@ -477,14 +477,24 @@ pub fn describe(snap: &Value) -> String {
         lines.push("(cqd is not running: this view comes from /proc, without ETAs.)".into());
     }
     if holders.iter().any(|h| h["stuck"] == true) {
-        lines.push(
+        lines.push(format!(
             "A stuck holder is usually an app restarted from an agent's shell. It keeps the turn until it quits; ask \
-             the user before closing a window they use. Restart it outside the queue with open_app or `env -u \
-             LD_PRELOAD systemd-run --user --collect <app>`."
-                .into(),
-        );
+             the user before closing a window they use. Restart it outside the queue with open_app or `{}`.",
+            launch()
+        ));
     }
     lines.join("\n")
+}
+
+/// How an agent starts a desktop app outside the queue: a transient systemd unit, or niri's spawn without systemd.
+pub fn launch() -> &'static str {
+    static SYSTEMD: LazyLock<bool> =
+        LazyLock::new(|| std::fs::read_to_string("/proc/1/comm").is_ok_and(|c| c.trim() == "systemd"));
+    if *SYSTEMD {
+        "env -u LD_PRELOAD systemd-run --user --collect <app>"
+    } else {
+        "env -u LD_PRELOAD niri msg action spawn -- <app>"
+    }
 }
 
 /// queue_history's text: one line per past job.
@@ -551,7 +561,7 @@ pub async fn call(tool: &str, a: &Value, session: &impl Session) -> Value {
                 };
                 let about = crate::guard::About {
                     what: format!("stop the GPU/NPU job {what}"),
-                    detail: "SIGTERM to the whole command (its systemd scope)".into(),
+                    detail: "SIGTERM to the whole command (its scope)".into(),
                     ..Default::default()
                 };
                 if let Some(no) = super::ask_guard(session, "queue", tool, a, Some(about), &[], "desktop").await {

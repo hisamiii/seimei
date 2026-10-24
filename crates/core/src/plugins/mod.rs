@@ -215,7 +215,7 @@ impl Plugins {
             let (command, args, _, note) = manifest(text)?;
             let command = if command == "seimei" { exe.to_string() } else { command };
             let mcp = Map::from_iter([("command".into(), json!(command)), ("args".into(), json!(args))]);
-            return Ok(base(mcp, prompt.to_string(), note, true, true));
+            return Ok(base(mcp, prompt.to_string(), note.replace("{launch}", queue::launch()), true, true));
         }
         let folder = dir.join(name);
         if let Ok(text) = std::fs::read_to_string(folder.join("plugin.toml")) {

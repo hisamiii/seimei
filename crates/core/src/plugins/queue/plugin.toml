@@ -4,4 +4,5 @@ command = "seimei"
 args = ["plugin", "queue"]
 prompt = "prompt.md"
 # Every shikigami gets this line while the plugin is on, granted or not: the queue wraps every session.
-worker_note = "Your commands take GPU/NPU turns through claude-queue. To start or restart a desktop app, run it outside the queue with `env -u LD_PRELOAD systemd-run --user --collect <app>`: started straight from your shell, it holds the GPU turn until it quits and stalls everyone else's GPU jobs."
+# {launch} becomes the launcher for this init: systemd-run under systemd, niri's spawn without it.
+worker_note = "Your commands take GPU/NPU turns through claude-queue. To start or restart a desktop app, run it outside the queue with `{launch}`: started straight from your shell, it holds the GPU turn until it quits and stalls everyone else's GPU jobs."
