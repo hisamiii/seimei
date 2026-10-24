@@ -11,6 +11,8 @@ import zipfile
 from pathlib import Path
 
 DEFAULT = "seimei@localhost"
+CONFIG = Path.home() / ".config/seimei/config.toml"
+HOSTS = [Path.home() / ".mozilla/native-messaging-hosts"]
 
 
 def extension_id(config: Path, host: Path) -> str:
@@ -32,6 +34,12 @@ def install(src: Path, hosts: Path, xpi: Path, config: Path) -> str:
     hosts.mkdir(parents=True, exist_ok=True)
     host.write_text(json.dumps({"name": "seimei", "description": "seimei connector", "path": str(src / "host.py"),
                                 "type": "stdio", "allowed_extensions": [eid]}) + "\n")
+    pack(src, eid, xpi)
+    return eid
+
+
+def pack(src: Path, eid: str, xpi: Path) -> None:
+    """The extension as an xpi, with its id set to eid."""
     manifest = json.loads((src / "manifest.json").read_text())
     manifest["browser_specific_settings"]["gecko"]["id"] = eid
     tmp = xpi.with_suffix(".tmp")
@@ -40,7 +48,6 @@ def install(src: Path, hosts: Path, xpi: Path, config: Path) -> str:
         for f in ("background.js", "read.js", "icon.svg"):
             z.write(src / f, f)
     tmp.replace(xpi)
-    return eid
 
 
 if __name__ == "__main__":

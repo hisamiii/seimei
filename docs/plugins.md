@@ -30,6 +30,8 @@ Cards the built-in plugins raise:
 - **discord:** every send, edit and delete.
 - **music:** tag edits and playlist deletes.
 
+The browser extension: deploy.sh writes it to `~/.local/share/seimei/seimei-waterfox.xpi` for a one-time install (about:addons, Install Add-on From File). Firefox builds that enforce signing load only a signed one: `python3 browser/sign.py` has addons.mozilla.org sign the current version unlisted (the API key in `~/.config/amo/amo.env`, a new `version` in `browser/manifest.json` for each signing) and writes `browser/seimei.xpi`, which deploys then install instead.
+
 ## External MCP servers
 
 Any other name in `enabled` is an external MCP server, in the format Claude Code's `mcpServers` takes, plus a prompt
