@@ -21,7 +21,7 @@ T = [
     ("#59", "After the queue", "seimei", "dev", "open", None, None),
     ("", "Back up the signing key", "seimei", "you", "open", None, None),
     # gentoo
-    ("#61", "Kernel 7.3-rc5 rebuild", "gentoo", "gentoo", "running", "9b1e4471", steps(3, True, ["Sync the tree", "Apply the perfopt patches", "Build", "Install and update the EFI entry", "Reboot check"])),
+    ("#61", "Kernel 7.3-rc5 rebuild", "gentoo", "kernel", "running", "4c8d2f10", steps(3, True, ["Sync the tree", "Apply the perfopt patches", "Build", "Install and update the EFI entry", "Reboot check"])),
     ("#62", "Pick a profile for the laptop", "gentoo", "gentoo", "asks", "9b1e4471", None),
     ("#63", "Drop systemd-boot leftovers", "gentoo", "gentoo", "open", None, None),
     ("#64", "Mesa 26.2 bump", "gentoo", "gentoo", "open", None, None),

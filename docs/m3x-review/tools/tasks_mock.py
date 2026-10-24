@@ -129,7 +129,9 @@ for i, p in enumerate(P):
 projs.sort()
 OPEN = "gentoo"
 # One segmented list: an open project's items are rows of the same list, same edges, so the group just grows
-b = ['<div class="tgrp board">']
+# B is the All tasks view of A's switch
+b = ['<div class="tview" role="tablist"><button role="tab">Now</button>'
+     '<button class="on" role="tab" aria-selected="true">All tasks</button></div><div class="tgrp board">']
 for _, _, name, ts in projs:
     is_open = name == OPEN
     b.append(f'<button class="prow{" open" if is_open else ""}" aria-expanded="{str(is_open).lower()}">'

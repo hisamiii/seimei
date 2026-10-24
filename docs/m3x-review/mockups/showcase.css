@@ -1,0 +1,188 @@
+/* The showcase (#142): every screen in the final design. Loaded after the earlier after CSS; this covers what they
+   did not: chat event lines and the report, the question cards, notes, trajectory, the shikigami page, login,
+   offline, the sheets. Built by ../tools/showcase.py. */
+
+/* ---------- Chat: notes are plain centered text, no pill ---------- */
+.note { background: none; padding: 0; border-radius: 0; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--text-3); }
+.note.warn { color: var(--warn); }
+.trig { margin: 8px 0 -4px; font-size: 12px; line-height: 16px; }
+
+/* Event lines (summoned, finished, failed): quiet, like the tool chip, one tap to the shikigami's page */
+.evline {
+  display: inline-flex; align-self: flex-start; align-items: center; gap: 8px; max-width: 100%; min-height: 40px;
+  padding: 8px 8px 8px 16px; border: 0; border-radius: var(--shape-md); background: var(--container);
+  color: var(--text-2); font: 400 14px/20px var(--sans); text-align: left; cursor: pointer;
+  transition: border-radius var(--spring-fast-ms) var(--spring-fast);
+}
+.evline:active { border-radius: var(--shape-lg); }
+.evline > span { min-width: 0; }
+.evline b { color: var(--text); font-weight: 500; }
+.evline small { margin-left: 8px; font-size: 12px; line-height: 16px; color: var(--text-3); }
+.evline svg { flex: none; color: var(--text-3); }
+.evline.failed { background: var(--error-container); color: var(--on-error-container); }
+.evline.failed b { color: var(--on-error-container); }
+.evline.failed small { display: block; margin: 2px 0 0; color: var(--on-error-container); opacity: .85; }
+.evline.failed svg { color: var(--on-error-container); }
+
+/* The report: the event line on top, the report under it, one segmented block; no tile, no badge, no outline */
+.report { align-self: stretch; display: flex; flex-direction: column; gap: 2px; }
+.report .evline { align-self: stretch; border-radius: var(--shape-lg-inc) var(--shape-lg-inc) var(--shape-xs) var(--shape-xs); }
+.report .evline span { flex: 1; }
+.report .rbody {
+  padding: 12px 16px 14px; border-radius: var(--shape-xs) var(--shape-xs) var(--shape-lg-inc) var(--shape-lg-inc);
+  background: var(--container); font-size: 14px; line-height: 20px; color: var(--text);
+}
+.report .rbody p { margin: 0 0 8px; }
+.report .rbody p:last-child { margin: 0; }
+.report .rbody ul { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+.report .rbody code { font-size: 13px; overflow-wrap: anywhere; }
+
+/* Trajectory: "Reply in chat" is a tonal button, not an outline */
+.reply-btn { min-height: 40px; padding: 0 16px; border: 0; border-radius: var(--shape-full); background: var(--tonal); color: var(--on-tonal); font: 500 14px/20px var(--sans); }
+
+/* The activity fold: a count of what happened, centered, 48px */
+.fold { min-height: 40px; padding: 8px 16px; font: 500 12px/16px var(--sans); }
+
+/* ---------- A question in chat: a decision, so tile and card, in the warm container ---------- */
+.wcard.asking { border-radius: var(--shape-xl); padding: 16px; gap: 12px; background: var(--warn-container); box-shadow: none; border: 0; }
+.wcard.asking .head { align-items: center; }
+.wcard.asking .badge {
+  width: 40px; height: 40px; border-radius: var(--shape-md); background: var(--warn); color: var(--on-warn);
+  display: grid; place-items: center;
+}
+.wcard.asking .badge svg { width: 22px; height: 22px; }
+.wcard.asking .title b { font-size: 16px; line-height: 24px; font-weight: var(--w-emph); color: var(--on-warn-container); }
+.wcard.asking .body { font-size: 14px; line-height: 20px; color: var(--on-warn-container); }
+.wcard.asking .body p { margin: 0; }
+.wcard.asking .foot { display: flex; gap: 8px; margin: 4px 0 0; }
+.wcard.asking .foot .btn { flex: 1; min-height: 48px; border-radius: var(--shape-full); font-size: 14px; font-weight: 500; }
+.wcard.asking .foot .btn.tonal { background: color-mix(in srgb, var(--warn) 16%, var(--warn-container)); color: var(--on-warn-container); }
+.wcard.asking .foot .btn.filled { flex: 1.4; background: var(--warn); color: var(--on-warn); font-weight: var(--w-emph); }
+
+/* User bubbles and assistant text on the type scale */
+.msg { font-size: 16px; line-height: 24px; }
+.msg.user { border-radius: var(--shape-lg-inc) var(--shape-lg-inc) var(--shape-xs) var(--shape-lg-inc); }
+
+/* ---------- Shikigami and session page ---------- */
+.sbar .sub i { display: none; }
+.sbar .sub span.work { color: var(--primary); }
+.sbar .handoff { height: 40px; padding: 0 16px; border-radius: var(--shape-full); font: 500 14px/20px var(--sans); position: relative; }
+.sbar .handoff::after { content: ""; position: absolute; inset: -4px 0; }
+.chip .spin { display: none; }
+.chip { min-height: 40px; border-radius: var(--shape-md); font-size: 14px; }
+
+/* The question on the page: warm container like the chat card, no outline, the filled warm tile */
+.qcard { padding: 16px; gap: 12px; border-radius: var(--shape-xl); background: var(--warn-container); box-shadow: none; }
+.qhead { align-items: flex-start; gap: 12px; }
+.qic { width: 40px; height: 40px; border-radius: var(--shape-md); background: var(--warn); color: var(--on-warn); }
+.qt b { font-size: 16px; line-height: 24px; font-weight: 500; color: var(--on-warn-container); }
+.qt small, .qt span { color: var(--on-warn-container); opacity: .85; }
+.qcard .qopts, .qcard .opts { gap: 2px; }
+.qcard .qopt, .qcard .opt { border: 0; border-radius: var(--shape-xs); background: color-mix(in srgb, var(--warn) 10%, var(--warn-container)); min-height: 56px; }
+.qcard .qopt:first-child, .qcard .opt:first-child { border-top-left-radius: var(--shape-lg-inc); border-top-right-radius: var(--shape-lg-inc); }
+.qcard .qopt:last-child, .qcard .opt:last-child { border-bottom-left-radius: var(--shape-lg-inc); border-bottom-right-radius: var(--shape-lg-inc); }
+.qnote { color: var(--on-warn-container); opacity: .85; font-size: 12px; line-height: 16px; }
+
+/* Stop on a working shikigami's page: the same square as in chat */
+#sstop, .scomposer .fab.tonal { border-radius: var(--shape-lg); }
+
+/* ---------- Agents: working is primary, not the project's tint ---------- */
+.tile.work { background: var(--primary-container); }
+.tile.work .m3x-loading > i { background: var(--primary); }
+.tile.idle { background: var(--container-high); color: var(--text-2); }
+
+/* ---------- Login: one mark, no tile behind it, no rules around "or" ---------- */
+.signin .mark { background: none; width: auto; height: auto; color: var(--primary); margin-bottom: 0; }
+.signin h1 { font-size: 28px; line-height: 36px; }
+.signin .sub { font-size: 14px; line-height: 20px; }
+.signin .btn { border-radius: var(--shape-full); font-size: 16px; font-weight: 500; }
+.signin .btn.filled { font-weight: var(--w-emph); }
+.signin input { border-radius: var(--shape-lg); }
+.or::before, .or::after { content: none; }
+.or { justify-content: center; font-size: 12px; line-height: 16px; }
+
+/* ---------- Offline: no second star in a tile; the words and the one action ---------- */
+.away .badge { display: none; }
+.away button { min-height: 48px; padding: 0 24px; font-size: 14px; }
+
+/* ---------- Sheets ---------- */
+.sheet { border-radius: var(--shape-xl) var(--shape-xl) 0 0; }
+.sheet h2.list { font-size: 22px; line-height: 28px; }
+.sheet .usage-note { padding: 0; margin: 4px 0 0; font-size: 14px; line-height: 20px; color: var(--text-3); }
+
+/* Theme: light or dark is a connected button group at 48, the accents 40px swatches with 48px targets */
+.trow { margin: 8px 0; }
+.trl { font-size: 14px; color: var(--text-2); }
+.tseg { border: 0; gap: 2px; border-radius: 0; overflow: visible; }
+.tseg button { min-height: 48px; padding: 0 16px; border-radius: var(--shape-xs); background: var(--container-high); color: var(--text); font: 500 14px/20px var(--sans); }
+.tseg button + button { border-left: 0; }
+.tseg button:first-child { border-radius: var(--shape-full) var(--shape-xs) var(--shape-xs) var(--shape-full); }
+.tseg button:last-child { border-radius: var(--shape-xs) var(--shape-full) var(--shape-full) var(--shape-xs); }
+.tseg button.on { background: var(--primary); color: var(--on-primary); border-radius: var(--shape-full); }
+.ttile { border-radius: var(--shape-xl); }
+.trow:has(.tdots) { flex-direction: column; align-items: flex-start; }
+.tdots { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 4px; }
+.tdot { width: 40px; height: 40px; margin: 4px; }
+.tseed { width: 40px; height: 32px; border: 0; border-radius: var(--shape-sm); }
+
+/* Activity log: one segmented list per day, the decision in words in its tone, no pills, no rules */
+.alist { display: flex; flex-direction: column; gap: 2px; }
+.aday { margin: 16px 0 8px; font-size: 14px; font-weight: var(--w-emph); color: var(--text-2); }
+.arow { border: 0; padding: 12px 16px; gap: 4px; background: var(--container-high); border-radius: var(--shape-xs); }
+.aday + .arow { border-top-left-radius: var(--shape-lg-inc); border-top-right-radius: var(--shape-lg-inc); }
+.arow:has(+ .aday), .arow:last-child { border-bottom-left-radius: var(--shape-lg-inc); border-bottom-right-radius: var(--shape-lg-inc); }
+.atop { font-size: 14px; line-height: 20px; }
+.atop time { font-size: 12px; }
+.atop .tag, .arow.ok .tag, .arow.bad .tag { padding: 0; background: none; border-radius: 0; font-size: 12px; font-weight: 500; }
+.arow.ok .tag { color: var(--ok); }
+.arow.bad { background: var(--error-container); }
+.arow.bad .tag, .arow.bad b, .arow.bad .tool, .arow.bad time { color: var(--on-error-container); }
+.arow.bad code { color: var(--on-error-container); opacity: .85; }
+.arow code { font-size: 13px; line-height: 20px; }
+
+/* Phone app */
+.pblock { gap: 12px; padding: 16px 0 0; }
+.pblock .btn { min-height: 48px; padding: 0 24px; border-radius: var(--shape-full); font-size: 14px; font-weight: 500; display: inline-flex; align-items: center; }
+.psec { margin: 24px 0 8px; font-size: 14px; font-weight: var(--w-emph); color: var(--text-2); }
+.sheet .alist .prow { border: 0; padding: 8px 8px 8px 16px; min-height: 64px; background: var(--container-high); border-radius: var(--shape-xs); }
+.sheet .alist .prow:first-child { border-radius: var(--shape-lg-inc) var(--shape-lg-inc) var(--shape-xs) var(--shape-xs); }
+.sheet .alist .prow:last-child { border-radius: var(--shape-xs) var(--shape-xs) var(--shape-lg-inc) var(--shape-lg-inc); }
+.sheet .alist:has(.prow) { gap: 2px; }
+.ptext { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.ptext b { font-size: 16px; line-height: 24px; font-weight: 500; }
+.ptext span { font-size: 14px; line-height: 20px; color: var(--text-3); }
+.prow .btn.text { min-height: 48px; padding: 0 16px; border-radius: var(--shape-full); }
+
+/* ---------- Menu ---------- */
+.menu { border-radius: var(--shape-lg); }
+.menu button { min-height: 48px; font-size: 14px; }
+
+/* ---------- On the type scale (12/14/16/20/22/28/34): what style.css and the earlier after CSS left between steps ---------- */
+code, .wcard.approval .body.cmd, .arow code, .report .rbody code { font-size: 14px; }
+.wcard.approval .choices.m3x-seg .choice small, .wcard.approval .choices.m3x-seg .choice code { font-size: 12px; }
+.wcard.approval .choices.m3x-seg .choice code { font-size: 12px; }
+.wcard.approval .foot .btn, .working, .prow .btn.text { font-size: 14px; }
+.wcard.approval.settled .foot .left { font-size: 12px; line-height: 16px; color: var(--ok); font-weight: 500; }
+.card h3, #fp-card h3 { font-size: 16px; line-height: 24px; }
+.agent .top b { font-size: 16px; line-height: 24px; }
+.agent time { font-size: 12px; line-height: 16px; }
+.agent .sub, .agent .proj, .agent .line, .agent .sub span { font-size: 14px; line-height: 20px; }
+.sbar h1 { font-size: 22px; line-height: 28px; }
+.sbar .sub, .sbar .sub b, .sbar .sub span { font-size: 12px; line-height: 16px; }
+.sbar .sub b { color: var(--text-2) !important; }
+.sbar .ring span { font-size: 12px; }
+.stl h4, .sthread h4 { font-size: 16px; line-height: 24px; }
+.qopt b { font-size: 14px; line-height: 20px; }
+.qopt small { font-size: 12px; line-height: 16px; }
+.meter .pct { font-size: 34px; line-height: 40px; }
+.meter span, .meter .sub { font-size: 14px; line-height: 20px; }
+.usage-note { font-size: 14px; line-height: 20px; }
+.crow b, .urow b { font-size: 16px; line-height: 24px; }
+.away p { font-size: 16px; line-height: 24px; }
+.card .actions .btn { font-size: 14px; }
+.archrow .txt b { font-size: 16px; line-height: 24px; }
+.archrow .txt span { font-size: 14px; line-height: 20px; }
+.msg.assistant h3, .msg.assistant h4, .msg.assistant h5 { font-size: 16px; line-height: 24px; }
+.msg.assistant code { font-size: 14px; }
+.qt small { font-size: 12px; line-height: 16px; }
+.urow span, .urow time { font-size: 14px; line-height: 20px; }
