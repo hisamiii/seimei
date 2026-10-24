@@ -25,7 +25,7 @@ uv run python -m seimei logout-all        # end every session, takes effect with
 As services:
 
 ```
-ln -s ~/src/seimei/seimei.service ~/src/seimei/seimei-tunnel.service ~/.config/systemd/user/
+ln -s ~/Development/Projects/seimei/seimei.service ~/Development/Projects/seimei/seimei-tunnel.service ~/.config/systemd/user/
 systemctl --user enable --now seimei seimei-tunnel
 ```
 

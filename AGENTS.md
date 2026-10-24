@@ -65,7 +65,7 @@ Docs live in `docs/`: `architecture.md` (processes, state, deploys, tests), `con
 
 ### Local scratchpads
 
-`tmp/` in the repo root is gitignored: use it for notes and raw logs. Big experiment output goes to `~/yah-scratch/<topic>` (delete large outputs after use). Promote only distilled, still-true findings into `docs/`.
+`tmp/` in the repo root is gitignored: use it for notes and raw logs. Big experiment output goes to `~/Development/Scratch/<topic>` (delete large outputs after use). Promote only distilled, still-true findings into `docs/`.
 
 ## Tests
 

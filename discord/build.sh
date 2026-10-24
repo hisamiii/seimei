@@ -4,7 +4,7 @@
 # Vencord stays at the commit in vencord-commit, the one Vesktop had shipped, so only the plugin is new.
 set -eu
 here=$(dirname "$(readlink -f "$0")")
-src="${VENCORD_SRC:-$HOME/src/vencord}"
+src="${VENCORD_SRC:-$HOME/Development/Projects/vencord}"
 out="$HOME/.local/share/seimei/vencord"
 commit=$(cat "$here/vencord-commit")
 [ -d "$src/.git" ] || git clone -q https://github.com/Vendicated/Vencord "$src"
@@ -14,7 +14,7 @@ git -C "$src" checkout -q --detach "$commit"
 mkdir -p "$src/src/userplugins/seimeiConnector"
 cp "$here/seimeiConnector/index.ts" "$here/seimeiConnector/native.ts" "$src/src/userplugins/seimeiConnector/"
 # SlimDiscord (memory purge, from discord-m3/slim) rides along when its source is there.
-slim="${SLIM_DISCORD_SRC:-$HOME/src/discord-m3/slim/plugin/slimDiscord}"
+slim="${SLIM_DISCORD_SRC:-$HOME/Development/Projects/discord-m3/slim/plugin/slimDiscord}"
 if [ -f "$slim/index.ts" ]; then
     mkdir -p "$src/src/userplugins/slimDiscord"
     cp "$slim/index.ts" "$slim/native.ts" "$src/src/userplugins/slimDiscord/"
