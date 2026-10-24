@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Arcticons-style launcher icon: the seiman as white 1-unit round strokes on the 48 grid, no fill. -->
+<!-- To use another variant, replace the paths here; ic_arcticon.xml places this drawing in the icon's safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp" android:height="48dp"
+    android:viewportWidth="48" android:viewportHeight="48">
+    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M20.03,16.51L24.00,4.30L30.84,25.35" />
+    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M30.85,18.60L43.69,18.60L25.78,31.61" />
+    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M32.20,29.54L36.17,41.75L18.26,28.74" />
+    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M22.22,34.20L11.83,41.75L18.67,20.70" />
+    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M14.70,26.15L4.31,18.60L26.45,18.60" />
+</vector>

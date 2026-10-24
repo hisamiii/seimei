@@ -21,10 +21,6 @@
             android:exported="true"
             android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
             <!-- Share to seimei from any app: text and links land in the draft, files as attachments. -->
             <intent-filter android:label="seimei">
                 <action android:name="android.intent.action.SEND" />
@@ -37,6 +33,28 @@
                 <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
+        <!-- The launcher entries: exactly one is enabled, the app icon setting (AppIcon.kt) switches them. -->
+        <activity-alias
+            android:name=".IconDefault"
+            android:targetActivity=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".IconArcticon"
+            android:targetActivity=".MainActivity"
+            android:icon="@drawable/ic_arcticon"
+            android:roundIcon="@drawable/ic_arcticon"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
         <receiver android:name=".InstallResult" android:exported="false" />
         <receiver android:name=".Decide" android:exported="false" />
     </application>

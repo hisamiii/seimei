@@ -25,7 +25,10 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -57,17 +60,9 @@ fun ThemeSheet(vm: Seimei, done: () -> Unit) {
         Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(start = 20.dp, end = 20.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text("Theme", fontSize = 22.sp)
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Light or dark", Modifier.weight(1f), fontSize = 14.sp, color = LocalExtra.current.text2)
-                Row(Modifier.clip(CircleShape).border(1.dp, cs.outline, CircleShape)) {
-                    for ((m, label) in MODES) Text(label,
-                        Modifier.background(if (m == vm.themeMode) cs.secondaryContainer else Color.Transparent)
-                            .clickable { vm.setTheme(mode = m) }.padding(horizontal = 14.dp, vertical = 8.dp)
-                            .semantics { selected = m == vm.themeMode },
-                        fontSize = 13.sp, fontWeight = if (m == vm.themeMode) FontWeight.SemiBold else FontWeight.Medium,
-                        color = if (m == vm.themeMode) cs.onSecondaryContainer else LocalExtra.current.text2)
-                }
-            }
+            Choice("Light or dark", MODES, vm.themeMode) { vm.setTheme(mode = it) }
+            var icon by remember { mutableStateOf(appIcon(ctx)) }
+            Choice("App icon", APP_ICONS, icon) { setAppIcon(ctx, it); icon = it }
             for (pair in THEMES.chunked(2)) Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 for (name in pair) {
                     val usable = name != "material-you" || dynamicColors
@@ -97,6 +92,23 @@ fun ThemeSheet(vm: Seimei, done: () -> Unit) {
                     }
                 }
             }
+        }
+    }
+}
+
+/** A labelled row of pills; [options] are (value, label) pairs. */
+@Composable
+private fun Choice(title: String, options: List<Pair<String, String>>, current: String, pick: (String) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, Modifier.weight(1f), fontSize = 14.sp, color = LocalExtra.current.text2)
+        Row(Modifier.clip(CircleShape).border(1.dp, cs.outline, CircleShape)) {
+            for ((v, label) in options) Text(label,
+                Modifier.background(if (v == current) cs.secondaryContainer else Color.Transparent)
+                    .clickable { pick(v) }.padding(horizontal = 14.dp, vertical = 8.dp)
+                    .semantics { selected = v == current },
+                fontSize = 13.sp, fontWeight = if (v == current) FontWeight.SemiBold else FontWeight.Medium,
+                color = if (v == current) cs.onSecondaryContainer else LocalExtra.current.text2)
         }
     }
 }

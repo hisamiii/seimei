@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Line icon on a transparent background, to sit with an Arcticons icon pack.
+     The 18dp inset maps the 48 grid onto the 72dp of the 108dp layer that a launcher shows. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@android:color/transparent" />
+    <foreground>
+        <inset android:drawable="@drawable/ic_arcticon_lines" android:inset="16.667%" />
+    </foreground>
+    <monochrome>
+        <inset android:drawable="@drawable/ic_arcticon_lines" android:inset="16.667%" />
+    </monochrome>
+</adaptive-icon>
