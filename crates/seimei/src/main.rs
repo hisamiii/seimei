@@ -433,6 +433,9 @@ fn main() {
         };
         axum::serve(listener, seimei_server::router(app)).with_graceful_shutdown(stop).await.unwrap();
     });
+    // A plain drop waits for every blocking thread, and a plugin's socket reader blocks until the plugin hangs up:
+    // seimei would never exit. Tasks still drop here (their children are killed); stuck readers end with the process.
+    rt.shutdown_timeout(Duration::from_secs(5));
 }
 
 /// What the dispatcher reads from the rest at the start of a turn: where the task board and the shikigami disagree,

@@ -106,7 +106,8 @@ pub fn openrc_text(exe: &Path) -> String {
     format!(
         "#!/sbin/openrc-run\n# Written by `seimei setup`.\n\ndescription=\"seimei, the phone-driven dispatcher\"\n\
          supervisor=supervise-daemon\ndirectory=\"${{HOME}}\"\ncommand=\"{}\"\ncommand_args=\"serve\"\n\
-         respawn_delay=5\nrespawn_max=0\n# The key binding that ends a turn: rc-service --user seimei usr1\n\
+         respawn_delay=5\nrespawn_max=0\n# A stop that hangs ends in SIGKILL, not in a server left running.\n\
+         retry=\"TERM/15/KILL/5\"\n# The key binding that ends a turn: rc-service --user seimei usr1\n\
          extra_started_commands=\"usr1\"\n\nusr1() {{\n\tebegin \"Sending USR1 to seimei\"\n\
          \tsupervise-daemon \"${{RC_SVCNAME}}\" --signal USR1\n\teend $?\n}}\n",
         exe.display()

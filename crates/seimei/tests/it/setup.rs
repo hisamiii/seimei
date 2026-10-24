@@ -149,6 +149,7 @@ fn setup_openrc_service() {
     assert!(script.starts_with("#!/sbin/openrc-run\n"), "{script}");
     assert!(script.contains(&format!("command=\"{}\"", env!("CARGO_BIN_EXE_seimei"))), "{script}");
     assert!(script.contains("command_args=\"serve\"") && script.contains("usr1()"), "{script}");
+    assert!(script.contains("retry=\"TERM/15/KILL/5\""), "a hung stop is killed: {script}");
     let mode = std::fs::metadata(h.base.join("cfg/rc/init.d/seimei")).unwrap().permissions().mode();
     assert_eq!(mode & 0o777, 0o755);
     assert_eq!(h.read("services.log"), "rc-update --user add seimei default\nrc-service --user seimei start\n");
