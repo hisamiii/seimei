@@ -2182,6 +2182,27 @@
    },
    "cwd": "/home/tester",
    "action": null
-  }
+  },
+  {"tool": "Bash", "input": {"command": "find ~/.config -name '*.bak'"}, "cwd": "/home/tester", "action": null, "rules": "none"},
+  {"tool": "Bash", "input": {"command": "python3 - <<'EOF'\nimport os\nprint(os.listdir(\"/home/tester/.config\"), os.listdir('/home/tester/.config/seimei'))\nEOF"}, "cwd": "/home/tester", "action": null, "rules": "none"},
+  {"tool": "Bash", "input": {"command": "mkdir -p ~/.config/seimei && printf 'K=v\\n' > ~/.config/seimei/other.env"}, "cwd": "/home/tester", "action": null, "rules": "none"},
+  {"tool": "Bash", "input": {"command": "git -C ~/.config status"}, "cwd": "/home/tester", "action": null, "rules": "none"},
+  {"tool": "Bash", "input": {"command": "du -sh ~/.config/seimei; ls -la ~/.config"}, "cwd": "/home/tester", "action": null, "rules": "none"},
+  {"tool": "Bash", "input": {"command": "cp ~/.config/seimei/guard.toml /tmp/rules.bak && grep rule ~/.config/seimei/guard.toml"}, "cwd": "/home/tester", "action": null, "rules": "none"},
+  {"tool": "Bash", "input": {"command": "mv /tmp/other.env ~/.config/seimei"}, "cwd": "/home/tester", "action": null, "rules": "none"},
+  {"tool": "Write", "input": {"file_path": "/home/tester/.config/seimei/other.env", "content": "K=v\n"}, "cwd": "/home/tester", "action": null, "rules": "none"},
+  {"tool": "Bash", "input": {"command": "echo x > ~/.config/seimei/guard.toml"}, "cwd": "/home/tester", "action": "deny", "why": "guard.toml", "rules": "none"},
+  {"tool": "Bash", "input": {"command": "mv ~/.config/seimei /tmp"}, "cwd": "/home/tester", "action": "deny", "why": "guard.toml", "rules": "none"},
+  {"tool": "Bash", "input": {"command": "mv -t /tmp ~/.config/seimei"}, "cwd": "/home/tester", "action": "deny", "why": "guard.toml", "rules": "none"},
+  {"tool": "Bash", "input": {"command": "rmdir ~/.config/seimei"}, "cwd": "/home/tester", "action": "deny", "why": "guard.toml", "rules": "none"},
+  {"tool": "Bash", "input": {"command": "sed -i s/a/b/ ~/.config/seimei/guard.toml"}, "cwd": "/home/tester", "action": "deny", "why": "guard.toml", "rules": "none"},
+  {"tool": "Edit", "input": {"file_path": "/home/tester/.config/seimei/guard.toml", "old_string": "a", "new_string": "b"}, "cwd": "/home/tester", "action": "deny", "why": "guard.toml", "rules": "none"},
+  {"tool": "Bash", "input": {"command": "rm -f ~/.config/seimei/*"}, "cwd": "/home/tester", "action": "deny", "why": "guard.toml", "rules": "none"},
+  {"tool": "Bash", "input": {"command": "cp /tmp/guard.toml ~/.config/seimei/"}, "cwd": "/home/tester", "action": "deny", "why": "guard.toml", "rules": "none"},
+  {"tool": "Bash", "input": {"command": "ln -sf /tmp/x ~/.config/seimei/guard.toml"}, "cwd": "/home/tester", "action": "deny", "why": "guard.toml", "rules": "none"},
+  {"tool": "Bash", "input": {"command": "truncate -s 0 ~/.config/seimei/guard.toml"}, "cwd": "/home/tester", "action": "deny", "why": "guard.toml", "rules": "none"},
+  {"tool": "Bash", "input": {"command": "printf x | tee -a ~/.config/seimei/guard.toml"}, "cwd": "/home/tester", "action": "deny", "why": "guard.toml", "rules": "none"},
+  {"tool": "Bash", "input": {"command": "python3 -c \"import os; os.remove('guard.toml')\""}, "cwd": "/home/tester", "action": "deny", "why": "guard.toml", "rules": "none"},
+  {"tool": "Bash", "input": {"command": "echo $(echo $(echo $(echo $(echo $(echo $(echo hi))))))"}, "cwd": "/home/tester", "action": "deny", "why": "too deep", "rules": "none"}
  ]
 }

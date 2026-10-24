@@ -43,7 +43,8 @@ plugins).
 - **A broken file** keeps the last good rules, and seimei says so in the chat and the log.
 - **The agents' prompts** list the rules from the file, so an agent knows what is refused or carded.
 - **Built in, whatever the file says:**
-  - no agent writes `guard.toml` or its folder;
+  - no agent writes, replaces, moves or deletes `guard.toml`, or moves or deletes its folder (reading, listing and
+    writing other files there are fine);
   - a command nested too deep to check is refused.
 - **An append-only audit log** of every call.
 

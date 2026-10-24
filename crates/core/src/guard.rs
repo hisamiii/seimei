@@ -1,6 +1,6 @@
 //! seimei's guard, in front of every tool call of the dispatcher and the shikigami. Its rules are the user's, in
 //! guard.toml (contrib/guard.example.toml shows them); seimei ships with none. Built in is only what keeps the rules
-//! the user's: agents cannot change guard.toml, and a command nested too deep to check is refused.
+//! the user's: agents cannot write, move or delete guard.toml, and a command nested too deep to check is refused.
 //! tests/cases/guard.json holds it to its decisions.
 
 use std::collections::{BTreeMap, HashMap};
@@ -827,13 +827,12 @@ pub fn decide(tool: &str, inp: &Value, cwd: &str, facts: &Value, reads: &[PathBu
     best.map(|r| Verdict { action: r.action, message: r.message.clone() })
 }
 
-/// What a write to guard.toml would hit: the file, and the folders it is in below home (moving one of them away takes
-/// the rules with it). Links followed.
-fn rules_targets() -> Vec<PathBuf> {
-    let (file, home) = (realpath(&crate::util::guard_file()), realpath(&home()));
-    let mut out = vec![file.clone()];
-    out.extend(file.ancestors().skip(1).take_while(|d| *d != home && d.starts_with(&home)).map(Path::to_path_buf));
-    out
+/// guard.toml and the folder it is in, as written and with links followed.
+fn rules_targets() -> (Vec<Comps>, Vec<Comps>) {
+    let file = crate::util::guard_file();
+    let real = realpath(&file);
+    let dirs = [&file, &real].map(|f| chars(f.parent().unwrap_or(Path::new("/"))));
+    (vec![chars(&file), chars(&real)], dirs.into())
 }
 
 const RULES_FILE: &str = "guard.toml";
@@ -841,42 +840,40 @@ const RULES_WHY: &str = "changing seimei's guard rules (guard.toml is the user's
 /// Tools that only read: the rest may write wherever their path points.
 const READ_ONLY_TOOLS: [&str; 5] = ["Read", "Grep", "Glob", "NotebookRead", "mcp__seimei__send_file"];
 
-/// Whether a word names guard.toml or a folder it is in: by its last component anywhere (by_name), or as a real path
-/// from each base folder (globs included).
-fn touches_rules(word: &str, bases: &[&Path], targets: &[PathBuf], by_name: bool) -> bool {
-    if word.is_empty() || word.contains(char::is_whitespace) {
-        return false;
-    }
-    let word = expand(word);
-    if by_name && parts(&word).last() == Some(&RULES_FILE) {
-        return true;
-    }
-    if word.contains(['$', '{', '`']) {
-        return false;
-    }
-    bases.iter().any(|b| {
-        let full = normalize(b, &word);
-        if is_glob(&word) {
-            glob_hits(&full).iter().any(|h| targets.contains(&realpath(h)))
-        } else {
-            targets.contains(&realpath(&full))
-        }
-    })
+/// Whether a piece names guard.toml: by its last component anywhere (by_name), or by where it points.
+fn names_rules(p: &Piece, file: &[Comps], by_name: bool) -> bool {
+    (by_name && parts(&p.word).last() == Some(&RULES_FILE)) || p.paths.iter().any(|x| file.contains(x))
 }
 
-/// What seimei refuses whatever guard.toml says: an agent changing guard.toml, and a command nested too deep to check
-/// (which could hide that).
+/// Whether a piece moves or deletes guard.toml's folder (the rules go with it), or puts a guard.toml into it.
+fn empties_rules_dir(p: &Piece, dir: &[Comps]) -> bool {
+    let Some(argv) = p.argv.filter(|_| p.paths.iter().any(|x| dir.contains(x))) else { return false };
+    match argv[0].as_str() {
+        "rm" | "rmdir" => true,
+        // mv moves its sources; the folder as its destination only takes things in.
+        "mv" => {
+            let dest = argv.iter().position(|a| a == "-t").map_or(argv.last(), |i| argv.get(i + 1));
+            dest.is_none_or(|d| expand(d) != p.word)
+        }
+        _ => p.op & WRITE != 0 && argv[1..].iter().any(|a| parts(a).last() == Some(&RULES_FILE)),
+    }
+}
+
+/// What seimei refuses whatever guard.toml says: an agent writing, replacing, moving or deleting guard.toml (its
+/// folder too, which takes it along), and a command nested too deep to check (which could hide that). Naming the
+/// file or its folders is fine: reading, listing, searching.
 pub fn builtin(tool: &str, inp: &Value, cwd: &str) -> Option<String> {
     let cwd = Path::new(cwd);
-    let guarded = rules_targets();
+    let (file, dir) = rules_targets();
     if tool != "Bash" {
         if READ_ONLY_TOOLS.contains(&tool) {
             return None;
         }
-        // A tool that may write gets no path to guard.toml or its folders, whatever its key.
+        // A tool that may write gets no path to guard.toml, whatever its key.
         let values = inp.as_object().into_iter().flatten().filter_map(|(k, v)| Some((k, v.as_str()?)));
         for (k, v) in values {
-            if touches_rules(v, &[cwd], &guarded, PATH_KEYS.contains(&k.as_str())) {
+            let by_name = PATH_KEYS.contains(&k.as_str());
+            if Piece::path(None, v, WRITE, false, &[cwd]).is_some_and(|p| names_rules(&p, &file, by_name)) {
                 return Some(RULES_WHY.into());
             }
         }
@@ -890,39 +887,12 @@ pub fn builtin(tool: &str, inp: &Value, cwd: &str) -> Option<String> {
     let Some(cmds) = all.iter().map(Option::as_ref).collect::<Option<Vec<&Cmd>>>() else {
         return Some("a command nested too deep to check".into());
     };
-    let mut here = cwd.to_path_buf();
-    let mut code = false;
-    for c in cmds {
-        // What is written to, and NAME=value words (where they end up is not known).
-        let fd = |t: &str| t == "-" || t.chars().all(|c| c.is_ascii_digit());
-        let written = c.redirects.iter().filter(|(op, t)| op.contains('>') && !(op.ends_with('&') && fd(t)));
-        if c.assigns.iter().chain(written.map(|(_, t)| t)).any(|v| touches_rules(v, &[cwd, &here], &guarded, true)) {
-            return Some(RULES_WHY.into());
-        }
-        let argv = &c.argv;
-        if argv.is_empty() {
-            continue;
-        }
-        code |= argv.iter().take(3).any(|a| CODE.is_match(a));
-        if !READERS.contains(&argv[0].as_str()) && !METADATA.contains(&argv[0].as_str()) {
-            let words = argv[1..].iter().flat_map(|a| [Some(a.as_str()), a.split_once('=').map(|(_, v)| v)]).flatten();
-            if words.into_iter().any(|w| touches_rules(w, &[&here], &guarded, true)) {
-                return Some(RULES_WHY.into());
-            }
-        }
-        if argv[0] == "cd" {
-            let target = argv[1..].iter().find(|a| !a.starts_with('-')).map_or("~", |a| a.as_str());
-            here = normalize(&here, &expand(target));
-        }
-    }
-    if code {
-        for m in LITERALS.iter().flat_map(|p| p.captures_iter(&flat)) {
-            if !m[1].chars().all(|c| matches!(c, '*' | '?')) && touches_rules(&m[1], &[&here, &home()], &guarded, true) {
-                return Some(RULES_WHY.into());
-            }
-        }
-    }
-    None
+    // What may be written: redirects, writers' operands, NAME=value words and code's string literals (where those
+    // end up is not known).
+    let hit = bash_pieces(&cmds, cwd, &flat)
+        .iter()
+        .any(|p| (p.op & WRITE != 0 && names_rules(p, &file, true)) || empties_rules_dir(p, &dir));
+    hit.then(|| RULES_WHY.into())
 }
 
 /// The guard's answer for a call: the built-in refusals, then guard.toml's rules.
