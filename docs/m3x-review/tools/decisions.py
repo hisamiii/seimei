@@ -64,14 +64,15 @@ EDITS = [
 ]
 
 # The connected button group of the spec: 40px, 2px gap, 8px inner corners, the selected one a full pill, the rest
-# tinted, no check. The busy state of an answer: an indicator before the label, which stays.
+# tinted, no check. The outer corners are 20px, half the height: with 999px the browser scales every radius of the
+# box down to fit, and the 8px inner corners came out square. The busy state of an answer: an indicator before the label, which stays.
 CSS = """
 /* decisions.py */
 .tview, .tseg { gap: 2px; border: 0; }
-.tview button, .tseg button { height: 40px; min-height: 40px; padding: 0 16px; border: 0; border-radius: 8px; background: var(--tonal); color: var(--on-tonal); font: 500 14px/20px var(--sans); }
-.tview button:first-child, .tseg button:first-child { border-radius: 999px 8px 8px 999px; }
-.tview button:last-child, .tseg button:last-child { border-radius: 8px 999px 999px 8px; }
-.tview button.on, .tseg button.on { background: var(--primary); color: var(--on-primary); border-radius: 999px; }
+.tview button, .tseg button { height: 40px; min-height: 40px; padding: 0 16px; border: 0; border-radius: 8px; background: var(--primary-container); color: var(--on-primary-container); font: 500 14px/20px var(--sans); transition: none; }
+.tview button:first-child, .tseg button:first-child { border-radius: 20px 8px 8px 20px; }
+.tview button:last-child, .tseg button:last-child { border-radius: 8px 20px 20px 8px; }
+.tview button.on, .tseg button.on { background: var(--primary); color: var(--on-primary); border-radius: 20px; }
 .btn.busy { gap: 8px; }
 .btn.busy:disabled, .btn.held:disabled { opacity: 1; }
 .btn.held:disabled { opacity: .38; }
