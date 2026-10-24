@@ -1,10 +1,10 @@
 """The showcase contact sheet as a page: every img/showcase/NN-name.png at 1x, a row per part of the app (chat, then
-tasks and agents, then usage, account and offline), the number and name above each, in the app's font. Shoot it at
+tasks and agents, then usage, account and offline, then the BEHAVIOR.md screens), the number and name above each, in the app's font. Shoot it at
 1x for img/showcase/all.png. Usage: showcase_sheet.py IMG_SHOWCASE_DIR OUT_HTML"""
 import glob, html, os, sys
 
 D, OUT = sys.argv[1], sys.argv[2]
-ROWS = [("01", "05"), ("06", "11"), ("12", "17")]
+ROWS = [("01", "05"), ("06", "11"), ("12", "17"), ("18", "22")]
 here = os.path.dirname(os.path.abspath(OUT))
 font = os.path.relpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../../web/fonts"), here)
 rel = os.path.relpath(os.path.abspath(D), here)

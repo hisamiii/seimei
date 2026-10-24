@@ -186,3 +186,18 @@ code, .wcard.approval .body.cmd, .arow code, .report .rbody code { font-size: 14
 .msg.assistant code { font-size: 14px; }
 .qt small { font-size: 12px; line-height: 16px; }
 .urow span, .urow time { font-size: 14px; line-height: 20px; }
+
+/* decisions.py */
+.tview, .tseg { gap: 2px; border: 0; }
+.tview button, .tseg button { height: 40px; min-height: 40px; padding: 0 16px; border: 0; border-radius: 8px; background: var(--tonal); color: var(--on-tonal); font: 500 14px/20px var(--sans); }
+.tview button:first-child, .tseg button:first-child { border-radius: 999px 8px 8px 999px; }
+.tview button:last-child, .tseg button:last-child { border-radius: 8px 999px 999px 8px; }
+.tview button.on, .tseg button.on { background: var(--primary); color: var(--on-primary); border-radius: 999px; }
+.btn.busy { gap: 8px; }
+.btn.busy:disabled, .btn.held:disabled { opacity: 1; }
+.btn.held:disabled { opacity: .38; }
+.btn.busy::before { content: ""; flex: none; width: 16px; height: 16px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin .8s linear infinite; }
+.snack.sc-on { display: flex; }
+.snack.sc-on.sc-chat { bottom: 172px; }
+.jump { position: fixed; right: 16px; bottom: 156px; display: flex; align-items: center; gap: 8px; height: 48px; padding: 0 18px 0 14px; border: 0; border-radius: 16px; background: var(--tonal); color: var(--on-tonal); font: 500 14px/20px var(--sans); box-shadow: 0 2px 6px rgb(0 0 0 / .3); z-index: 5; }
+.jump b { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--primary); color: var(--on-primary); font: 600 12px/20px var(--sans); text-align: center; }

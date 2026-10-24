@@ -193,7 +193,14 @@ The whole app as it would look after the review, before anything gets built: eve
 | 14 | [theme](img/showcase/14-theme.png) | Light or dark as a connected group, the theme tiles, Material You's seed, the accents |
 | 15 | [activity](img/showcase/15-activity.png) | The activity log as one segmented list, the blocked call in the error container |
 | 16 | [phone app](img/showcase/16-phone-app.png) | Download and pair, and the paired phones |
-| 17 | [offline](img/showcase/17-offline.png) | The server gone quiet under a conversation, with "Try now" |
+| 17 | [offline](img/showcase/17-offline.png) | The server out of reach under a conversation, with "Try now" |
+| 18 | [answer sending](img/showcase/18-answer-sending.png) | BEHAVIOR.md: Allow tapped, an indicator in the button, the others held |
+| 19 | [answer failed](img/showcase/19-answer-failed.png) | BEHAVIOR.md: the buttons back, "Couldn't send your answer" with Retry |
+| 20 | [task undo](img/showcase/20-task-undo.png) | BEHAVIOR.md: a task ticked off, "Task done" with Undo until used |
+| 21 | [jump to latest](img/showcase/21-jump-to-latest.png) | BEHAVIOR.md: scrolled up, "Latest" with the count of new rows |
+| 22 | [notification shade](img/showcase/22-notification-shade.png) | BEHAVIOR.md: two approvals grouped, Deny and Allow on each; a question with its options and an inline reply |
+
+Since t16 every screen also carries DECISIONS.md and GLOSSARY.md (one-word state labels, task, Take over and Hand off, contractions, every fact once) and the spec button group (40px, 2px gap, 8px inner corners, the selected one a full pill, the rest tinted, no check), applied by [tools/decisions.py](tools/decisions.py) after `showcase.py`.
 
 How they were made: the QA server (`tests/qa/start.sh`, fake claude) in a seeded world (projects, shikigami, a board, usage and an activity log), its pages saved as DOM dumps, then `tools/showcase.py` applies what the current web code doesn't do yet and links the after CSS (`m3x-tokens.css` and the other after sheets, then `showcase.css` for what only the showcase needs). The two working shikigami really run: the fake claude's `!run` turn hangs on a Bash call, so their tiles, pages and chips are the app's own working state. The Tasks pages are the A and B mockups from above.
 
