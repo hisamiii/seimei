@@ -59,7 +59,8 @@ fn read_tail(path: &Path, n: u64) -> std::io::Result<Vec<u8>> {
     Ok(data)
 }
 
-/// The project a path belongs to: its folder under ~/src or ~/.config, else its top folder under home.
+/// The project a path belongs to: its folder under ~/Development/Projects, ~/Development/Scratch, ~/.config or the
+/// older ~/src, else its top folder under home.
 pub fn project_of(path: &str) -> Option<String> {
     let path = crate::paths::expand(path);
     let rest = path.strip_prefix(&format!("{}/", home().display()))?;
@@ -67,10 +68,12 @@ pub fn project_of(path: &str) -> Option<String> {
     if parts.len() < 2 {
         return None;
     }
-    let top = match parts[0] {
-        "src" | ".config" => parts[1],
-        p if p.starts_with('.') => return None,
-        p => p,
+    let top = match parts.as_slice() {
+        ["Development", "Projects" | "Scratch", p, ..] => p,
+        ["src" | ".config", p, ..] => p,
+        [p, ..] if p.starts_with('.') => return None,
+        [p, ..] => p,
+        [] => return None,
     };
     Some(top.strip_suffix("-scratch").or_else(|| top.strip_suffix("-wt")).unwrap_or(top).to_string())
 }
@@ -251,6 +254,9 @@ mod tests {
         let h = home().display().to_string();
         assert_eq!(project_of(&format!("{h}/src/seimei/x.rs")).as_deref(), Some("seimei"));
         assert_eq!(project_of("~/yah-scratch/t/a").as_deref(), Some("yah"));
+        assert_eq!(project_of(&format!("{h}/Development/Projects/seimei/x.rs")).as_deref(), Some("seimei"));
+        assert_eq!(project_of("~/Development/Scratch/hrxab/a").as_deref(), Some("hrxab"));
+        assert_eq!(project_of("~/Development/x").as_deref(), Some("Development"));
         assert_eq!(project_of(&format!("{h}/.local/x")), None);
         assert_eq!(project_of("/tmp/x/y"), None);
         let v = |s: &str| s.to_string();
