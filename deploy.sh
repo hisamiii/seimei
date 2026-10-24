@@ -8,6 +8,13 @@
 # its result; the result also stays in $state/deploy/last.json, which seimei hands to whoever it resumes.
 # Tests point it elsewhere with SEIMEI_APP, SEIMEI_STATE, SEIMEI_SERVICE and SEIMEI_DEPLOY_TEST (no installs).
 set -eu
+# The detached half gets its unit's name as `--unit NAME`; an argument, since an environment variable would be
+# inherited by whatever that deploy's restart starts.
+inner=
+if [ "${1:-}" = --unit ]; then
+    inner=$2
+    shift 2
+fi
 rev=${1:-main}
 repo=$(dirname "$(readlink -f "$0")")
 state=${SEIMEI_STATE:-$HOME/.local/share/seimei}
@@ -16,18 +23,18 @@ mkdir -p "$dir"
 systemd=
 [ "$(cat /proc/1/comm 2>/dev/null)" = systemd ] && systemd=1
 
-if [ -z "${SEIMEI_DEPLOY_UNIT:-}" ]; then
+if [ -z "$inner" ]; then
     unit="seimei-deploy-$(date +%s)"
-    set -- --setenv=PATH="$PATH" --setenv=SEIMEI_DEPLOY_UNIT="$unit"
+    set -- --setenv=PATH="$PATH"
     for v in SEIMEI_APP SEIMEI_STATE SEIMEI_SERVICE SEIMEI_DEPLOY_TEST; do
         eval "val=\${$v:-}"
         [ -n "$val" ] && set -- "$@" --setenv="$v=$val"
     done
     if [ -n "$systemd" ]; then
-        env -u LD_PRELOAD systemd-run --user --collect --quiet --unit "$unit" "$@" "$repo/deploy.sh" "$rev"
+        env -u LD_PRELOAD systemd-run --user --collect --quiet --unit "$unit" "$@" "$repo/deploy.sh" --unit "$unit" "$rev"
     else
         # No subreaper above it: it goes to init, out of reach of seimei's stop and the caller's process group.
-        SEIMEI_DEPLOY_UNIT=$unit env -u LD_PRELOAD setsid -f "$repo/deploy.sh" "$rev" </dev/null >/dev/null 2>&1
+        env -u LD_PRELOAD setsid -f "$repo/deploy.sh" --unit "$unit" "$rev" </dev/null >/dev/null 2>&1
     fi
     echo "deploying $rev in $unit (log: $dir/$unit.log)"
     # Follow it: the log as it grows, then its result. If the restart ends this caller, the deploy goes on.
@@ -64,9 +71,9 @@ PY
 fi
 
 # From here on: inside the deploy's own unit.
-exec >>"$dir/$SEIMEI_DEPLOY_UNIT.log" 2>&1
+exec >>"$dir/$inner.log" 2>&1
 status() {
-    python3 - "$dir" "$SEIMEI_DEPLOY_UNIT" "$rev" "$@" <<'PY'
+    python3 - "$dir" "$inner" "$rev" "$@" <<'PY'
 import json, os, sys, time
 d, unit, rev, state, step = sys.argv[1:6]
 result = sys.argv[6] if len(sys.argv) > 6 else ""
@@ -165,7 +172,18 @@ fi
 if [ -n "$systemd" ]; then
     systemctl --user restart "$service"
 else
-    rc-service --user "$service" restart
+    # rc-service hands its own environment to the service. This deploy's may come from a shikigami's shell (Claude
+    # Code's and claude-queue's variables), so restart from the desktop session's, or from a minimal one without niri.
+    # niri sets WAYLAND_DISPLAY and NIRI_SOCKET for what it starts, not in its own environment.
+    niri=$(pgrep -u "$(id -u)" -x niri | head -1)
+    if [ -n "$niri" ] && [ -r "/proc/$niri/environ" ]; then
+        xargs -0 -a "/proc/$niri/environ" sh -c 'exec env -i "$@" ${WAYLAND_DISPLAY:+WAYLAND_DISPLAY=$WAYLAND_DISPLAY} \
+            ${NIRI_SOCKET:+NIRI_SOCKET=$NIRI_SOCKET} rc-service --user "$0" restart' "$service"
+    else
+        env -i HOME="$HOME" USER="$USER" LOGNAME="$USER" PATH="$PATH" LANG="${LANG:-C.UTF-8}" \
+            XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-}" \
+            rc-service --user "$service" restart
+    fi
 fi
 line="deployed $(git -C "$app" log --oneline -1)"
 echo "$line"
