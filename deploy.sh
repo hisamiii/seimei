@@ -120,10 +120,12 @@ if [ -z "${SEIMEI_DEPLOY_TEST:-}" ]; then
         cp --remove-destination "$app/seimei-tunnel.service" "$units/seimei-tunnel.service"
         systemctl --user daemon-reload
     fi
-    # The Waterfox connector: its native-messaging host runs from the production checkout; the extension is packed
-    # for the user to install once (about:addons, Install Add-on From File).
-    python3 "$app/browser/install.py" "$app/browser" "$HOME/.mozilla/native-messaging-hosts" \
-        "$HOME/.local/share/seimei/seimei-waterfox.xpi" "${XDG_CONFIG_HOME:-$HOME/.config}/seimei/config.toml" >/dev/null
+    # The browser connector: its native-messaging host runs from the production checkout, listed where Firefox looks
+    # (~/.mozilla, or ~/.config/mozilla with XDG paths); the extension (signed when sign.py made it) is for the user to
+    # install once (about:addons, Install Add-on From File).
+    cfg=${XDG_CONFIG_HOME:-$HOME/.config}
+    python3 "$app/browser/install.py" "$app/browser" "$HOME/.local/share/seimei/seimei-waterfox.xpi" \
+        "$cfg/seimei/config.toml" "$HOME/.mozilla/native-messaging-hosts" "$cfg/mozilla/native-messaging-hosts" >/dev/null
     # The Discord connector: Vencord with the SeimeiConnector plugin, for Vesktop to load from its Vencord Location.
     # Without pnpm the last build stays in place; the rest of the deploy goes on.
     if command -v pnpm >/dev/null; then
