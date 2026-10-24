@@ -2,5 +2,6 @@
 spawn-at-startup "swaylock" "-f" "-c" "1e1e2e"
 
 binds {
-    Mod+Shift+Escape hotkey-overlay-title="Stop seimei" { spawn "systemctl" "--user" "kill" "--kill-whom=main" "--signal=USR1" "seimei"; }
+    // USR1 to seimei's main process: its systemd user unit, or its OpenRC user service when PID 1 is not systemd.
+    Mod+Shift+Escape hotkey-overlay-title="Stop seimei" { spawn "sh" "-c" "if [ \"$(cat /proc/1/comm)\" = systemd ]; then systemctl --user kill --kill-whom=main --signal=USR1 seimei; else rc-service --user seimei usr1; fi"; }
 }
