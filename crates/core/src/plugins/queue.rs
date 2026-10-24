@@ -488,8 +488,7 @@ pub fn describe(snap: &Value) -> String {
 
 /// How an agent starts a desktop app outside the queue: a transient systemd unit, or niri's spawn without systemd.
 pub fn launch() -> &'static str {
-    static SYSTEMD: LazyLock<bool> =
-        LazyLock::new(|| std::fs::read_to_string("/proc/1/comm").is_ok_and(|c| c.trim() == "systemd"));
+    static SYSTEMD: LazyLock<bool> = LazyLock::new(crate::util::systemd);
     if *SYSTEMD {
         "env -u LD_PRELOAD systemd-run --user --collect <app>"
     } else {

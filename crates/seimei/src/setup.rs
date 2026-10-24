@@ -1,14 +1,15 @@
 //! `seimei setup`: the first run. It checks Claude Code, writes config.toml from the example (port, origin, what the
-//! prompts call this machine, the plugins), sets the password and writes a systemd user unit for this binary. What is
-//! already there (a config, a password, a unit) it leaves alone, so running it again is safe. Answers come from stdin,
-//! one line each; an empty line or the end of input takes the default.
+//! prompts call this machine, the plugins), sets the password and writes a service for this binary: a systemd user unit,
+//! or an OpenRC user service when PID 1 is not systemd. What is already there (a config, a password, a service) it
+//! leaves alone, so running it again is safe. Answers come from stdin, one line each; an empty line or the end of input
+//! takes the default.
 
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 use seimei_core::auth::{Auth, password_problem};
-use seimei_core::util::{config_file, data_dir};
+use seimei_core::util::{config_file, config_home, data_dir};
 
 const EXAMPLE: &str = include_str!("../../../config.example.toml");
 
@@ -100,12 +101,73 @@ pub fn unit_text(exe: &Path) -> String {
     )
 }
 
-fn unit_file() -> PathBuf {
-    let base = match std::env::var_os("XDG_CONFIG_HOME") {
-        Some(v) if !v.is_empty() => PathBuf::from(v),
-        _ => PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config"),
-    };
-    base.join("systemd/user/seimei.service")
+/// The OpenRC user service that serves seimei from this binary, like the systemd unit.
+pub fn openrc_text(exe: &Path) -> String {
+    format!(
+        "#!/sbin/openrc-run\n# Written by `seimei setup`.\n\ndescription=\"seimei, the phone-driven dispatcher\"\n\
+         supervisor=supervise-daemon\ndirectory=\"${{HOME}}\"\ncommand=\"{}\"\ncommand_args=\"serve\"\n\
+         respawn_delay=5\nrespawn_max=0\n# The key binding that ends a turn: rc-service --user seimei usr1\n\
+         extra_started_commands=\"usr1\"\n\nusr1() {{\n\tebegin \"Sending USR1 to seimei\"\n\
+         \tsupervise-daemon \"${{RC_SVCNAME}}\" --signal USR1\n\teend $?\n}}\n",
+        exe.display()
+    )
+}
+
+/// Runs each command in turn; true when all of them succeed.
+fn all_ok(cmds: &[&[&str]]) -> bool {
+    cmds.iter().all(|c| Command::new(c[0]).args(&c[1..]).status().is_ok_and(|s| s.success()))
+}
+
+fn systemd_service(exe: &Path) {
+    let unit = config_home().join("systemd/user/seimei.service");
+    if unit.exists() {
+        println!("\n{} exists; leaving it as is.", unit.display());
+        return;
+    }
+    if let Some(dir) = unit.parent() {
+        std::fs::create_dir_all(dir).unwrap_or_else(|e| fail(&format!("{}: {e}", dir.display())));
+    }
+    std::fs::write(&unit, unit_text(exe)).unwrap_or_else(|e| fail(&format!("{}: {e}", unit.display())));
+    println!("\nWrote {}.", unit.display());
+    if yes("Start seimei now and at every login (systemctl --user enable --now seimei)", true) {
+        let ok =
+            all_ok(&[&["systemctl", "--user", "daemon-reload"], &["systemctl", "--user", "enable", "--now", "seimei"]]);
+        println!(
+            "{}",
+            if ok { "seimei is running." } else { "systemctl failed; see `systemctl --user status seimei`." }
+        );
+    } else {
+        println!("Start it later with `systemctl --user enable --now seimei`.");
+    }
+}
+
+fn openrc_service(exe: &Path) {
+    // The user's own scripts: $XDG_CONFIG_HOME/rc/init.d; the system's: /etc/user/init.d.
+    let script = config_home().join("rc/init.d/seimei");
+    if let Some(have) = [script.as_path(), Path::new("/etc/user/init.d/seimei")].into_iter().find(|p| p.exists()) {
+        println!("\n{} exists; leaving it as is.", have.display());
+        return;
+    }
+    if let Some(dir) = script.parent() {
+        std::fs::create_dir_all(dir).unwrap_or_else(|e| fail(&format!("{}: {e}", dir.display())));
+    }
+    std::fs::write(&script, openrc_text(exe)).unwrap_or_else(|e| fail(&format!("{}: {e}", script.display())));
+    std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+        .unwrap_or_else(|e| fail(&format!("{}: {e}", script.display())));
+    println!("\nWrote {}.", script.display());
+    let how = "rc-update --user add seimei default; rc-service --user seimei start";
+    if yes(&format!("Start seimei now and at every login ({how})"), true) {
+        let ok = all_ok(&[
+            &["rc-update", "--user", "add", "seimei", "default"],
+            &["rc-service", "--user", "seimei", "start"],
+        ]);
+        println!(
+            "{}",
+            if ok { "seimei is running." } else { "rc-service failed; see `rc-service --user seimei status`." }
+        );
+    } else {
+        println!("Start it later with `{how}`.");
+    }
 }
 
 pub fn run(read_secret: impl Fn(&str) -> String) {
@@ -203,29 +265,13 @@ pub fn run(read_secret: impl Fn(&str) -> String) {
     }
 
     // The service.
-    let unit = unit_file();
     let exe = std::env::current_exe().unwrap_or_else(|e| fail(&format!("this binary: {e}")));
-    if unit.exists() {
-        println!("\n{} exists; leaving it as is.", unit.display());
+    if seimei_core::util::systemd() {
+        systemd_service(&exe);
+    } else if on_path("rc-service") {
+        openrc_service(&exe);
     } else {
-        if let Some(dir) = unit.parent() {
-            std::fs::create_dir_all(dir).unwrap_or_else(|e| fail(&format!("{}: {e}", dir.display())));
-        }
-        std::fs::write(&unit, unit_text(&exe)).unwrap_or_else(|e| fail(&format!("{}: {e}", unit.display())));
-        println!("\nWrote {}.", unit.display());
-        if yes("Start seimei now and at every login (systemctl --user enable --now seimei)", true) {
-            let ok = Command::new("systemctl").args(["--user", "daemon-reload"]).status().is_ok_and(|s| s.success())
-                && Command::new("systemctl")
-                    .args(["--user", "enable", "--now", "seimei"])
-                    .status()
-                    .is_ok_and(|s| s.success());
-            println!(
-                "{}",
-                if ok { "seimei is running." } else { "systemctl failed; see `systemctl --user status seimei`." }
-            );
-        } else {
-            println!("Start it later with `systemctl --user enable --now seimei`.");
-        }
+        println!("\nNo systemd or OpenRC here: start `{} serve` at login yourself.", exe.display());
     }
     let guard = seimei_core::util::guard_file();
     if !guard.exists() {

@@ -82,7 +82,7 @@ server never reads its own wallpaper.
 
 ## Deploys
 
-Production never runs from the working tree. `deploy.sh [rev]` runs as its own transient systemd unit (so the restart it ends with cannot cut it off), checks out the commit in the production checkout, builds the server there (`cargo build --release`, its own `target/`), waits for open cards and an idle dispatcher, renames the build to `bin/seimei` and restarts the service. The result goes to `deploy/last.json`, which seimei hands to whoever it resumes.
+Production never runs from the working tree. `deploy.sh [rev]` runs detached, as its own transient systemd unit or, when PID 1 is not systemd (OpenRC), in its own session under init (so the restart it ends with cannot cut it off), checks out the commit in the production checkout, builds the server there (`cargo build --release`, its own `target/`), waits for open cards and an idle dispatcher, renames the build to `bin/seimei` and restarts the service. The result goes to `deploy/last.json`, which seimei hands to whoever it resumes.
 
 ## Tests
 

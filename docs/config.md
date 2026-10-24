@@ -51,3 +51,4 @@ Run them on the server, as the user seimei runs as.
 
 - `ANTHROPIC_API_KEY` is dropped at startup: seimei bills the subscription login of the installed `claude`.
 - `CLAUDE_CONFIG_DIR` is honored for Claude Code's config dir (sessions registry, transcripts).
+- `SEIMEI_INIT=systemd` or `openrc` overrides the PID 1 check: which service `seimei setup` writes, and how the queue plugin tells agents to start desktop apps (`systemd-run`, or `niri msg action spawn` without systemd).

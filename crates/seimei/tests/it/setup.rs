@@ -1,5 +1,5 @@
-//! `seimei setup` and `seimei screen-password` on a temp HOME: answers on stdin, a fake `claude --version` and a fake
-//! systemctl that only logs. Nothing reaches the user's config, state or services.
+//! `seimei setup` and `seimei screen-password` on a temp HOME: answers on stdin, a fake `claude --version` and fake
+//! systemctl, rc-update and rc-service that only log. Nothing reaches the user's config, state or services.
 
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
@@ -8,6 +8,8 @@ use std::process::{Command, Output, Stdio};
 
 struct Home {
     base: PathBuf,
+    /// SEIMEI_INIT: which service manager setup writes for.
+    init: &'static str,
 }
 
 impl Home {
@@ -22,8 +24,10 @@ impl Home {
             std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
         };
         script("claude", "echo '2.1.296 (Claude Code)'");
-        script("systemctl", &format!("echo \"$@\" >> {}", base.join("systemctl.log").display()));
-        Home { base }
+        for tool in ["systemctl", "rc-update", "rc-service"] {
+            script(tool, &format!("echo \"{tool} $@\" >> {}", base.join("services.log").display()));
+        }
+        Home { base, init: "systemd" }
     }
 
     fn run(&self, args: &[&str], stdin: &str) -> Output {
@@ -35,6 +39,7 @@ impl Home {
             .env("XDG_CONFIG_HOME", self.base.join("cfg"))
             .env("XDG_DATA_HOME", self.base.join("data"))
             .env("SEIMEI_CLAUDE", self.base.join("bin/claude"))
+            .env("SEIMEI_INIT", self.init)
             .env("PATH", path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -87,7 +92,7 @@ fn setup_first_run_then_again() {
     let unit = h.read("cfg/systemd/user/seimei.service");
     assert!(unit.contains(&format!("ExecStart={} serve", env!("CARGO_BIN_EXE_seimei"))), "{unit}");
     assert!(unit.contains("KillMode=mixed"), "{unit}");
-    assert_eq!(h.read("systemctl.log"), "--user daemon-reload\n--user enable --now seimei\n");
+    assert_eq!(h.read("services.log"), "systemctl --user daemon-reload\nsystemctl --user enable --now seimei\n");
     assert!(h.exists("data/seimei/auth.json"), "a password is stored");
 
     // Again: everything is there, so nothing is asked or changed.
@@ -101,7 +106,7 @@ fn setup_first_run_then_again() {
             && out.contains("seimei.service exists")
     );
     assert_eq!(h.read("cfg/seimei/config.toml"), before);
-    assert_eq!(h.read("systemctl.log").lines().count(), 2, "systemctl is not run again");
+    assert_eq!(h.read("services.log").lines().count(), 2, "systemctl is not run again");
     assert!(out.contains("Open https://seimei.example.net"), "{out}");
 }
 
@@ -116,7 +121,7 @@ fn setup_defaults_and_no_claude() {
     assert_eq!(cfg["server"]["port"].as_integer(), Some(8417));
     assert_eq!(cfg["server"]["origin"].as_str(), Some("http://localhost:8417"));
     assert!(cfg["plugins"]["enabled"].as_array().unwrap().is_empty());
-    assert!(!h.exists("systemctl.log"), "not started");
+    assert!(!h.exists("services.log"), "not started");
     assert!(out.contains("systemctl --user enable --now seimei"), "{out}");
 
     let h = Home::new("noclaude");
@@ -125,6 +130,29 @@ fn setup_defaults_and_no_claude() {
     assert_eq!(o.status.code(), Some(1));
     assert!(text(&o).contains("Claude Code was not found"));
     assert!(!h.exists("cfg/seimei/config.toml"));
+}
+
+#[test]
+fn setup_openrc_service() {
+    let mut h = Home::new("openrc");
+    h.init = "openrc";
+    let o = h.run(&["setup"], "\n\n\n\n\n\n\n\nlong enough\nlong enough\ny\n");
+    let out = text(&o);
+    assert!(o.status.success(), "{out}");
+    if Path::new("/etc/user/init.d/seimei").exists() {
+        // This machine's own service comes first: setup leaves it alone and writes nothing.
+        assert!(out.contains("/etc/user/init.d/seimei exists"), "{out}");
+        assert!(!h.exists("cfg/rc/init.d/seimei") && !h.exists("services.log"));
+        return;
+    }
+    let script = h.read("cfg/rc/init.d/seimei");
+    assert!(script.starts_with("#!/sbin/openrc-run\n"), "{script}");
+    assert!(script.contains(&format!("command=\"{}\"", env!("CARGO_BIN_EXE_seimei"))), "{script}");
+    assert!(script.contains("command_args=\"serve\"") && script.contains("usr1()"), "{script}");
+    let mode = std::fs::metadata(h.base.join("cfg/rc/init.d/seimei")).unwrap().permissions().mode();
+    assert_eq!(mode & 0o777, 0o755);
+    assert_eq!(h.read("services.log"), "rc-update --user add seimei default\nrc-service --user seimei start\n");
+    assert!(!h.exists("cfg/systemd"), "no systemd unit");
 }
 
 #[test]

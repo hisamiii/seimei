@@ -24,6 +24,20 @@ pub fn guard_file() -> PathBuf {
     xdg("XDG_CONFIG_HOME", ".config").join("seimei/guard.toml")
 }
 
+/// XDG_CONFIG_HOME, or ~/.config.
+pub fn config_home() -> PathBuf {
+    xdg("XDG_CONFIG_HOME", ".config")
+}
+
+/// Whether PID 1 is systemd (else OpenRC or another init). SEIMEI_INIT=systemd or =openrc says so instead.
+pub fn systemd() -> bool {
+    match std::env::var("SEIMEI_INIT").as_deref() {
+        Ok("systemd") => true,
+        Ok(i) if !i.is_empty() => false,
+        _ => std::fs::read_to_string("/proc/1/comm").is_ok_and(|c| c.trim() == "systemd"),
+    }
+}
+
 fn xdg(var: &str, fallback: &str) -> PathBuf {
     match std::env::var_os(var) {
         Some(v) if !v.is_empty() => PathBuf::from(v),
