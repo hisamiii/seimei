@@ -385,6 +385,11 @@ const TO_LAST: [&str; 5] = ["cp", "install", "ln", "rsync", "scp"];
 /// Programs that go through a folder given to them whole; and those that do with -r, -R or --recursive.
 const ALWAYS_DEEP: [&str; 4] = ["tar", "zip", "7z", "rg"];
 const DEEP_WITH_FLAG: [&str; 9] = ["rm", "cp", "grep", "chmod", "chown", "chgrp", "rsync", "scp", "zip"];
+/// Programs whose first operand is a pattern, not a path.
+const GREPS: [&str; 6] = ["grep", "egrep", "fgrep", "rg", "ag", "ack"];
+/// find's tests whose value is a name or pattern to match, not a path to open.
+const FIND_TESTS: [&str; 10] =
+    ["-name", "-iname", "-path", "-ipath", "-wholename", "-iwholename", "-regex", "-iregex", "-lname", "-ilname"];
 const READ_TOOLS: [&str; 4] = ["Read", "NotebookRead", "Grep", "Glob"];
 const WRITE_TOOLS: [&str; 4] = ["Write", "Edit", "MultiEdit", "NotebookEdit"];
 const GLOB_LIMIT: usize = 5000;
@@ -508,11 +513,13 @@ struct Piece<'a> {
     /// Where the word points, from each base folder, as written and with links followed.
     paths: Vec<Comps>,
     globs: Vec<Comps>,
+    /// A rule's names count inside the word: an operand opened as it is, not a string literal in code.
+    by_name: bool,
 }
 
 impl<'a> Piece<'a> {
     fn call(argv: Option<&'a [String]>) -> Piece<'a> {
-        Piece { argv, op: 0, deep: false, word: String::new(), paths: vec![], globs: vec![] }
+        Piece { argv, op: 0, deep: false, word: String::new(), paths: vec![], globs: vec![], by_name: false }
     }
 
     /// A path-like word; words with spaces are prose, not paths.
@@ -521,7 +528,7 @@ impl<'a> Piece<'a> {
             return None;
         }
         let word = expand(word);
-        let mut p = Piece { argv, op, deep, word: word.clone(), paths: vec![], globs: vec![] };
+        let mut p = Piece { argv, op, deep, word: word.clone(), paths: vec![], globs: vec![], by_name: true };
         if word.contains(['$', '{', '`']) {
             return Some(p);
         }
@@ -556,7 +563,7 @@ impl<'a> Piece<'a> {
 fn path_hit(pat: &PathPat, p: &Piece) -> bool {
     let have: Vec<Vec<char>> = parts(&p.word).iter().map(|c| c.chars().collect()).collect();
     let named = |seq: &Comps| have.windows(seq.len()).any(|w| w.iter().zip(seq).all(|(n, s)| name_matches(s, n)));
-    if pat.names.iter().any(named) {
+    if p.by_name && pat.names.iter().any(named) {
         return true;
     }
     // A command that goes deep reaches what is below a folder: the rule's fixed folder or one above it.
@@ -675,6 +682,54 @@ fn rule_hits(r: &Rule, call: &Call, piped: bool, p: &Piece) -> bool {
     r.paths.is_empty() || (p.op & r.ops != 0 && !p.word.is_empty() && r.paths.iter().any(|pp| path_hit(pp, p)))
 }
 
+/// Which of a command's words are no paths: grep's pattern and sed's script (the first operand unless -e or -f gave
+/// it), what -e and an option's value hold, find's tests, and what --exclude, --ignore or --include leave out.
+fn not_paths(prog: &str, argv: &[String]) -> Vec<bool> {
+    let mut out = vec![false; argv.len()];
+    let pattern = GREPS.contains(&prog) || prog == "sed";
+    // Short options that take a value: grep -A 3, rg -g '!x', rg -t py.
+    let valued = match prog {
+        "rg" => "ABCmgtTjME",
+        p if GREPS.contains(&p) => "ABCmdD",
+        _ => "",
+    };
+    let mut given = false;
+    for (i, a) in argv.iter().enumerate().skip(1) {
+        let short = SHORT_FLAGS.is_match(a);
+        let last = a.chars().last().unwrap_or(' ');
+        if ["--exclude", "--ignore", "--include", "--glob", "--iglob"].iter().any(|f| a.starts_with(f)) {
+            out[i] = true;
+            if !a.contains('=') && i + 1 < argv.len() {
+                out[i + 1] = true;
+            }
+        } else if pattern && (a == "--regexp" || a == "--expression" || (short && last == 'e')) {
+            given = true;
+            if i + 1 < argv.len() {
+                out[i + 1] = true;
+            }
+        } else if pattern && (a.starts_with("--regexp=") || a.starts_with("--expression=")) {
+            given = true;
+            out[i] = true;
+        } else if pattern && (a == "--file" || a.starts_with("--file=") || (short && last == 'f')) {
+            // The next word is a file of patterns: a path, read.
+            given = true;
+        } else if (short && valued.contains(last)) || (prog == "find" && FIND_TESTS.contains(&a.as_str())) {
+            if i + 1 < argv.len() {
+                out[i + 1] = true;
+            }
+        } else if prog == "find" && matches!(a.as_str(), "!" | "(" | ")") {
+            out[i] = true;
+        }
+    }
+    if pattern && !given {
+        let flag = |a: &String| a.starts_with('-') && !a.contains('=');
+        if let Some(i) = (1..argv.len()).find(|&i| !out[i] && !flag(&argv[i])) {
+            out[i] = true;
+        }
+    }
+    out
+}
+
 /// The pieces of a shell command: each command, and each path it reads, writes or runs.
 fn bash_pieces<'a>(cmds: &[&'a Cmd], cwd: &Path, flat: &str) -> Vec<Piece<'a>> {
     let mut out = vec![];
@@ -725,7 +780,9 @@ fn bash_pieces<'a>(cmds: &[&'a Cmd], cwd: &Path, flat: &str) -> Vec<Piece<'a>> {
         let script = runs && !argv[1..].iter().any(|a| a == "-c" || CODE_FLAG.is_match(a));
         // The code after -c or -e is no path: its literals are looked at below.
         let code_word = |i: usize| runs && (argv[i - 1] == "-c" || CODE_FLAG.is_match(&argv[i - 1]));
-        let positional: Vec<usize> = (1..argv.len()).filter(|&i| !flag(&argv[i]) && !code_word(i)).collect();
+        let skip = not_paths(prog, argv);
+        let positional: Vec<usize> =
+            (1..argv.len()).filter(|&i| !flag(&argv[i]) && !code_word(i) && !skip[i]).collect();
         for &i in &positional {
             let a = &argv[i];
             let op = if READERS.contains(&prog) {
@@ -755,12 +812,18 @@ fn bash_pieces<'a>(cmds: &[&'a Cmd], cwd: &Path, flat: &str) -> Vec<Piece<'a>> {
         }
     }
     if code {
-        // Code builds paths out of string literals: each could be read, written or run, from here or from home.
+        // Code's string literals could be read, written or run: one used whole as a path (from / or ~, or with a
+        // folder in it), from here or from home, or with a rule's names in it (HOME + '/.cloudflared/cert.pem'). A
+        // bare name ("auth.json" in a list of names to skip) points nowhere, and a folder above what a rule holds is
+        // not taken as walked; the guard's own file is still known by name.
         for m in LITERALS.iter().flat_map(|p| p.captures_iter(flat)) {
             let lit = &m[1];
+            let whole = lit.starts_with(['/', '~']) || lit.trim_end_matches('/').contains('/');
             // Wildcards alone name no folder: "***" is a mask, "*" * 40 a rule line.
             if !lit.chars().all(|c| matches!(c, '*' | '?')) {
-                out.extend(Piece::path(None, lit, ANY, false, &[&here, &home()]));
+                let home = home();
+                let bases: &[&Path] = if whole { &[&here, &home] } else { &[] };
+                out.extend(Piece::path(None, lit, ANY, false, bases).map(|p| Piece { by_name: whole, ..p }));
             }
         }
     }

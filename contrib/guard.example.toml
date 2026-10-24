@@ -13,7 +13,10 @@
 #           Paths come from tool args (Read, Edit, plugin tools that take a file) and from Bash
 #           through the shell parser (redirects, cd, globs, NAME=dir).
 #           rm -r, cp -r or tar on a folder reaches everything below it.
-#           ls, stat and test count as no op. A path in code (python3 -c "...") counts as every op.
+#           ls, stat and test count as no op. A path in code (python3 -c "...") counts as every op:
+#           a string used whole ("/x", "~/x", "a/b"), not a bare name like "auth.json".
+#           grep's and rg's pattern, sed's script, find's -name or -path value and what --exclude,
+#           --ignore or --include leave out are no paths.
 #   argv    Bash: the program, then words that must appear in that order (globs, {a,b})
 #   pipe    Bash: one argv pattern per stage of a pipeline. The last stage also hits when it is fed
 #           a substitution of the earlier ones: bash <(curl ..), sh -c "$(curl ..)".
