@@ -903,6 +903,13 @@ val OUTCOME = mapOf("approved" to "Allowed", "denied" to "Denied", "expired" to 
 fun settledText(a: Item.Approval): String {
     val d = a.done
     val o = a.outcome ?: return ""
+    // seimei's AskUserQuestion: what was answered, or that it was left
+    if (a.action == "question") return when (o) {
+        "approved" -> "Answered: " + (d?.chosen?.ifEmpty { null } ?: "“${d?.note.orEmpty()}”")
+        "expired" -> "No answer in time"
+        "denied" -> if (d?.by == "chat") "You answered in the chat" else "Skipped"
+        else -> OUTCOME[o] ?: o
+    }
     return when {
         o == "expired" && a.expires == 0.0 -> "No answer, denied"
         o == "approved" && d?.chosen == "Allow" -> "Allowed once"
@@ -929,7 +936,11 @@ fun optionText(o: Opt): androidx.compose.ui.text.AnnotatedString {
         } else if (o.where.isNotEmpty() && o.label.endsWith(o.where)) {
             append(o.label.dropLast(o.where.length).trim()); append(" ")
             pushStyle(small); append(o.where); pop()
-        } else append(o.label)
+        } else {
+            append(o.label)
+            // A question's option may explain itself
+            if (o.kind == "choice" && o.where.isNotEmpty()) { append(" "); pushStyle(small); append(o.where); pop() }
+        }
     }
 }
 
@@ -963,6 +974,8 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
     var noting by remember(a.aid) { mutableStateOf(false) }
     var note by remember(a.aid) { mutableStateOf("") }
     val message = a.action == "message"
+    // seimei's AskUserQuestion: the options are the answers, the note writes one, Skip leaves it
+    val question = a.action == "question"
     // A permission card (#64) carries Claude Code's choices; a guard card is Approve/Deny.
     val perm = a.options.isNotEmpty()
     // The subtitle names what it touches, not the title again: the session a command names, the file an edit writes.
@@ -1012,12 +1025,13 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
     fun held(key: String) = Modifier.alpha(if (sent && tapped != key) .38f else 1f)
     val who = if (a.subagent) "${a.who}'s subagent" else a.who
     Card(highlight = a.outcome == null, corner = 28.dp, pad = 16.dp) {
-        CardHead(if (a.action == "plan") PLAN else Icons.lock, bg, fg, "$who wants to ${if (message) "message ${a.target}" else a.target}", sub, big = true)
+        CardHead(if (a.action == "plan") PLAN else if (question) Icons.question else Icons.lock, bg, fg,
+            if (question) "$who asks you" else "$who wants to ${if (message) "message ${a.target}" else a.target}", sub, big = true)
         val box = Modifier.fillMaxWidth().heightIn(max = if (a.outcome == null) 220.dp else 80.dp)
         if (perm && a.action == "plan") {
             Box(box.verticalScroll(rememberScrollState())) { Md(a.detail, 14, if (a.outcome == null) cs.onSurface else LocalExtra.current.text2) }
         } else {
-            val mono = !(message || a.action == "discord")
+            val mono = !(message || question || a.action == "discord")
             val text = if (perm && a.action == "edit") diffText(a.detail) else androidx.compose.ui.text.AnnotatedString(a.detail)
             Text(
                 text, fontSize = 13.sp, lineHeight = 19.sp,
@@ -1050,7 +1064,7 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
             // The note goes to the agent with a deny, like the terminal's "tell Claude what to do differently".
             val focus = remember { FocusRequester() }
             LaunchedEffect(Unit) { focus.requestFocus() }
-            TextField(note, { note = it }, Modifier.fillMaxWidth().focusRequester(focus), placeholder = { Text("Note for ${a.who}") }, minLines = 2, maxLines = 5,
+            TextField(note, { note = it }, Modifier.fillMaxWidth().focusRequester(focus), placeholder = { Text(if (question) "Answer ${a.who}" else "Note for ${a.who}") }, minLines = 2, maxLines = 5,
                 shape = RoundedCornerShape(12.dp),
                 colors = TextFieldDefaults.colors(
                     focusedContainerColor = cs.surfaceContainerHigh, unfocusedContainerColor = cs.surfaceContainerHigh,
@@ -1065,11 +1079,15 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
                 Spacer(Modifier.weight(1f))
                 TextButton({ noting = false }, enabled = !sent) { Text("Cancel") }
                 Spacer(Modifier.width(4.dp))
-                Button({ answer(false, "deny", note.trim(), "note") }, enabled = !sent) { Label("note", if (a.action == "plan") "Keep planning" else "Deny with note") }
+                Button({ if (question) answer(true, "other", note.trim(), "note") else answer(false, "deny", note.trim(), "note") }, enabled = !sent) {
+                    Label("note", if (question) "Answer" else if (a.action == "plan") "Keep planning" else "Deny with note")
+                }
             } else {
                 // final/ hides the auto-deny line while the card waits: the buttons say it waits
                 // A full-width group: the main action largest and on the thumb side
-                if (perm) FilledTonalIconButton({ if (!sent) noting = true }, Modifier.size(52.dp).then(held("pen"))) { Icon(PEN, "Add a note", Modifier.size(20.dp)) }
+                if (perm) FilledTonalIconButton({ if (!sent) noting = true }, Modifier.size(52.dp).then(held("pen"))) {
+                    Icon(PEN, if (question) "Write an answer" else "Add a note", Modifier.size(20.dp))
+                }
                 if (perm) Spacer(Modifier.width(8.dp))
                 // Under the finger a button takes 12 corners and widens while the other gives way (final.css, the fast spring)
                 val denyPress = remember { MutableInteractionSource() }
@@ -1085,12 +1103,14 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
                     shape = RoundedCornerShape(denyR), interactionSource = denyPress) {
                     Label("deny", deny?.label ?: "Deny")
                 }
-                Spacer(Modifier.width(8.dp))
-                Button({ answer(true, if (perm) "once" else null, key = "once") }, Modifier.weight(allowW).heightIn(min = 52.dp).then(held("once")),
-                    shape = RoundedCornerShape(allowR), interactionSource = allowPress) {
-                    Icon(Icons.check, null, Modifier.size(20.dp).alpha(if (slow && tapped == "once") 0f else 1f))
+                if (!question) {
                     Spacer(Modifier.width(8.dp))
-                    Label("once", once?.label ?: "Allow")
+                    Button({ answer(true, if (perm) "once" else null, key = "once") }, Modifier.weight(allowW).heightIn(min = 52.dp).then(held("once")),
+                        shape = RoundedCornerShape(allowR), interactionSource = allowPress) {
+                        Icon(Icons.check, null, Modifier.size(20.dp).alpha(if (slow && tapped == "once") 0f else 1f))
+                        Spacer(Modifier.width(8.dp))
+                        Label("once", once?.label ?: "Allow")
+                    }
                 }
             }
         }

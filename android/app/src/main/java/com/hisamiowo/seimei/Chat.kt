@@ -311,7 +311,7 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
                 approvals[aid] = put(Item.Approval(key, aid, ev.str("who"), ev.str("action"), ev.str("target"),
                     ev.str("detail"), ev.optDouble("expires", 0.0).let { if (it.isNaN()) 0.0 else it }, outcomes[aid]?.outcome,
                     ev.optJSONArray("options")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) }.map { o ->
-                        Opt(o.str("id"), o.str("label"), o.str("kind"), o.str("rule"), o.str("where"), o.optBoolean("broad")) } }
+                        Opt(o.str("id"), o.str("label"), o.str("kind"), o.str("rule"), o.str("where").ifEmpty { o.str("sub") }, o.optBoolean("broad")) } }
                         ?: emptyList(),
                     ev.str("sub"), ev.optBoolean("subagent"), outcomes[aid]))
             }

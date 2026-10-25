@@ -794,6 +794,13 @@ impl Push {
 /// fits, else "{who} wants to {verb}" with the rest of the target leading the body, where Android wraps it.
 fn approval_note(a: &Value) -> Value {
     let who = a["who"].as_str().unwrap_or("seimei");
+    let aid = a["aid"].as_str().unwrap_or("");
+    if a["action"] == "question" {
+        // Answered in the app, where the options are: no Allow or Deny in the shade
+        let q = a["detail"].as_str().unwrap_or("");
+        return json!({"kind": "approval", "tag": format!("approval:{aid}"), "group": "approvals", "alert": 1, "tab": "chat",
+                      "title": format!("{who} asks you"), "body": chars(q, 300), "plain": 1});
+    }
     let target = a["target"].as_str().unwrap_or("");
     let target = if a["action"] == "message" { format!("message {target}") } else { target.to_string() };
     let detail = a["detail"].as_str().unwrap_or("");
@@ -810,7 +817,6 @@ fn approval_note(a: &Value) -> Value {
         (false, false) if detail.starts_with(&lead) => detail.to_string(),
         (false, false) => format!("{lead}\n{detail}"),
     };
-    let aid = a["aid"].as_str().unwrap_or("");
     let mut data = json!({"kind": "approval", "tag": format!("approval:{aid}"), "group": "approvals", "alert": 1, "tab": "chat",
                           "title": chars(&title, 120), "body": chars(&body, 300), "aid": aid});
     if let Some(opts) = a.get("options").and_then(Value::as_array) {

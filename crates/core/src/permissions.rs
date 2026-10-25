@@ -253,7 +253,10 @@ pub async fn can_use(
 ) -> Decided {
     let tool = req.tool_name.as_str();
     if tool == "AskUserQuestion" {
-        return deny("Ask the user through seimei instead (your ask tool, or the chat).");
+        return match worker {
+            Some(_) => deny("Ask the user with mcp__shikigami__ask instead, then end your turn."),
+            None => ask(approvals, who, &req.input).await,
+        };
     }
     if mode == "bypassPermissions" {
         // Claude Code still asks in bypass for its own safety checks ("This shell -c script runs rm and could not be
@@ -309,4 +312,59 @@ pub async fn can_use(
         _ if tool == "ExitPlanMode" => deny(&format!("The user wants you to keep planning.{note}")),
         _ => deny(&format!("The user denied this on their phone.{note}")),
     }
+}
+
+/// seimei's AskUserQuestion as chat cards, one per question: its options as buttons, a written answer through the
+/// note, Skip to leave it. The answers go back as the tool's own (updatedInput.answers, question to label), so the
+/// model reads them as the user's choice. A card counts as skipped after DISPATCHER_WAIT.
+async fn ask(approvals: &Approvals, who: &str, input: &Value) -> Decided {
+    let questions = input["questions"].as_array().cloned().unwrap_or_default();
+    let mut answers = Map::new();
+    for q in &questions {
+        let text = q["question"].as_str().unwrap_or("").to_string();
+        let mut opts: Vec<Value> = (q["options"].as_array().into_iter().flatten().enumerate())
+            .map(|(i, o)| {
+                let mut c = json!({"id": format!("c{i}"), "label": o["label"], "kind": "choice"});
+                if let Some(d) = o["description"].as_str().filter(|d| !d.is_empty()) {
+                    c["sub"] = json!(d);
+                }
+                c
+            })
+            .collect();
+        opts.push(json!({"id": "deny", "label": "Skip", "kind": "deny"}));
+        let mut card = json!({"action": "question", "target": "ask you", "detail": text, "tool": "AskUserQuestion",
+            "options": opts});
+        if let Some(h) = q["header"].as_str().filter(|h| !h.is_empty()) {
+            card["sub"] = json!(h);
+        }
+        let answer = approvals.card(card, who, None, Some(Duration::from_secs(DISPATCHER_WAIT)), None).await;
+        let picked = (answer.outcome == "approved")
+            .then(|| match answer.option.as_deref() {
+                Some(id) if id.starts_with('c') => {
+                    let i: usize = id[1..].parse().ok()?;
+                    q["options"][i]["label"].as_str().map(String::from)
+                }
+                _ => None,
+            })
+            .flatten()
+            .or_else(|| answer.note.clone().filter(|_| answer.outcome == "approved"));
+        match picked {
+            Some(a) => {
+                answers.insert(text, json!(a));
+            }
+            None if answer.option.as_deref() == Some("chat") => {
+                return deny(
+                    "The user wrote in the chat instead of answering the question, so it was skipped. Their message \
+                 follows; go by it.",
+                );
+            }
+            None if answer.outcome == "expired" => {
+                return deny("The user did not answer within 30 minutes. Ask again in the chat when it matters.");
+            }
+            None => return deny("The user skipped the question. Go on without it, or ask in the chat."),
+        }
+    }
+    let mut updated = input.clone();
+    updated["answers"] = Value::Object(answers);
+    Decided { permission: Permission::Allow { updated_input: Some(updated), updated_permissions: None }, mode: None }
 }

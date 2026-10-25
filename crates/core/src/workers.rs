@@ -75,8 +75,9 @@ const SHELLS_DONE: &str = "seimei: your background commands have finished. Check
 /// An ACP agent's text chunks are one event; this long without another, what came so far is said.
 const CHUNK_PAUSE: Duration = Duration::from_millis(500);
 /// Built-in tools a shikigami has no use for: scheduling, notebooks, worktree switching, remote triggers, design sync,
-/// and talking to other sessions (its report and ask go through seimei).
-const OFF_TOOLS: [&str; 13] = [
+/// and talking to other sessions or the user directly (its report and ask go through seimei).
+const OFF_TOOLS: [&str; 14] = [
+    "AskUserQuestion",
     "Workflow",
     "NotebookEdit",
     "CronCreate",

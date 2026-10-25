@@ -344,6 +344,7 @@ const PLAN = 'M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01';
 const PEN = 'M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4';
 const OUTCOME = { approved: 'Allowed', denied: 'Denied', restart: 'Canceled by a restart', cancelled: 'Canceled' };
 const ALLOW = 'M5 12.5l4.5 4.5L19 7.5';
+const ASKS = 'M4 5h16v11H9l-5 4zM10 9.2a2 2 0 1 1 2.6 1.9c-.4.2-.6.5-.6.9M12 13.6v.1';
 
 const SUB = { message: 'a session you started', desktop: 'a desktop action', discord: 'a Discord action' };
 
@@ -378,20 +379,24 @@ function choice(o) {
   } else if (o.where && o.label.endsWith(o.where)) {
     b.append(o.label.slice(0, -o.where.length).trim(), ' ', el('small', null, o.where));
   } else b.textContent = o.label;
+  // A question's option may explain itself
+  if (o.kind === 'choice' && o.sub) b.append(' ', el('small', null, o.sub));
   return b;
 }
 
 function approvalCard(ev) {
   const perm = Array.isArray(ev.options);
-  const card = el('div', `wcard approval${perm ? ' perm' : ''}${ev.action === 'plan' ? ' plan' : ''}`);
+  // seimei's AskUserQuestion: the options are the answers, the note writes one, Skip leaves it
+  const question = ev.action === 'question';
+  const card = el('div', `wcard approval${perm ? ' perm' : ''}${ev.action === 'plan' ? ' plan' : ''}${question ? ' question' : ''}`);
   const badge = el('span', 'badge');
-  badge.append(svg(ev.action === 'plan' ? PLAN : LOCK, 18));
+  badge.append(svg(ev.action === 'plan' ? PLAN : question ? ASKS : LOCK, 18));
   const head = el('div', 'head');
   const title = el('div', 'title');
   // Cards from before messages went card-free (2026-10-19) held SendMessage text.
   const message = ev.action === 'message';
   const who = ev.subagent ? `${ev.who}'s subagent` : ev.who;
-  title.append(el('b', null, `${who} wants to ${message ? `message ${ev.target}` : ev.target}`));
+  title.append(el('b', null, question ? `${who} asks you` : `${who} wants to ${message ? `message ${ev.target}` : ev.target}`));
   // The subtitle names what it touches, not the title again (QA D8): the session a command names, the file an edit writes.
   const sub = approvalSub(ev);
   if (sub) title.append(el('span', 'sub', sub));
@@ -401,7 +406,7 @@ function approvalCard(ev) {
   else if (perm && ev.action === 'plan') {
     body = el('div', 'body plan');
     body.innerHTML = md(ev.detail || '');
-  } else body = el('div', `body ${message || ev.action === 'discord' ? 'task' : 'cmd'}`, ev.detail);
+  } else body = el('div', `body ${message || question || ev.action === 'discord' ? 'task' : 'cmd'}`, ev.detail);
   card.append(head, body);
 
   const opts = perm ? ev.options : [{ id: 'deny', label: 'Deny' }, { id: 'once', label: 'Allow' }];
@@ -455,29 +460,31 @@ function approvalCard(ev) {
     // The note goes to the agent with a deny, like the terminal's "tell Claude what to do differently".
     const pen = el('button', 'btn icon sl morph');
     pen.type = 'button';
-    pen.title = 'Add a note';
-    pen.setAttribute('aria-label', 'Add a note');
+    pen.title = question ? 'Write an answer' : 'Add a note';
+    pen.setAttribute('aria-label', pen.title);
     pen.append(svg(PEN, 18));
     buttons.push(pen);
     pen.addEventListener('click', () => {
       const field = el('textarea', 'note');
       field.rows = 2;
-      field.placeholder = `Note for ${ev.who}`;
+      field.placeholder = question ? `Answer ${ev.who}` : `Note for ${ev.who}`;
       const cancel = el('button', 'btn text sl', 'Cancel');
-      const send = el('button', 'btn filled sl', ev.action === 'plan' ? 'Keep planning' : 'Deny with note');
+      const send = el('button', 'btn filled sl', question ? 'Answer' : ev.action === 'plan' ? 'Keep planning' : 'Deny with note');
       cancel.type = send.type = 'button';
       const noteFoot = el('div', 'foot');
       noteFoot.append(el('span', 'left'), cancel, send);
       buttons.push(cancel, send);
       cancel.addEventListener('click', () => { field.remove(); noteFoot.remove(); foot.hidden = false; });
-      send.addEventListener('click', () => answer('deny', 'deny', field.value.trim(), send));
+      send.addEventListener('click', () => (question ? answer('approve', 'other', field.value.trim(), send)
+        : answer('deny', 'deny', field.value.trim(), send)));
       foot.hidden = true;
       card.append(field, noteFoot);
       field.focus();
     });
     foot.append(pen);
   }
-  foot.append(deny, ok);
+  foot.append(deny);
+  if (!question) foot.append(ok);
   card.append(foot);
   card.expires = ev.expires;
   approvals.set(ev.aid, card);
@@ -504,6 +511,10 @@ function settle(done) {
   else if (outcome === 'approved' && done.chosen) text = done.chosen.replace(/^Always allow/, 'Always allowed').replace(/^Allow /, 'Allowed ');
   if (outcome === 'denied' && done.by === 'chat') text = 'Denied: you wrote in the chat';
   else if (outcome === 'denied' && done.note) text = `Denied: “${done.note}”`;
+  if (card.classList.contains('question')) {
+    text = { approved: `Answered: ${done.chosen || `“${done.note || ''}”`}`, expired: 'No answer in time',
+      denied: done.by === 'chat' ? 'You answered in the chat' : 'Skipped' }[outcome] || text;
+  }
   const left = foot.querySelector('.left');
   left.textContent = text;
   left.tabIndex = -1;

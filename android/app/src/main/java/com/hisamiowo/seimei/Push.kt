@@ -96,7 +96,7 @@ object Push {
         val title = d["title"].orEmpty()
         // An approval's body is its command or path: monospace, as in final/ 22
         val body: CharSequence = d["body"].orEmpty().let {
-            if (kind != "approval") it
+            if (kind != "approval" || d["plain"] == "1") it
             else android.text.SpannableString(it).apply { setSpan(android.text.style.TypefaceSpan("monospace"), 0, length, 0) }
         }
         // The lock screen shows only that something came, never the command or the text.

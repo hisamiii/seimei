@@ -374,6 +374,15 @@ async def dispatcher(self: Fake, text: str, images: int):
     elif t == "approve":
         error, _ = await self.tool("Bash", {"command": "claude stop kv-gate"}, "stopped")
         await self.say(f"The card came back {'denied' if error else 'approved'}.")
+    elif t == "askq":
+        # AskUserQuestion: seimei shows it as a card and answers with updatedInput.answers.
+        q = {"questions": [{"question": "Which build should go out with the release?", "header": "Flavor", "multiSelect": False,
+                            "options": [{"label": "foss", "description": "UnifiedPush, no Google"},
+                                        {"label": "fcm", "description": "Firebase push"}]}]}
+        r = await self.ask({"subtype": "can_use_tool", "tool_name": "AskUserQuestion", "input": q, "permission_suggestions": [],
+                            "tool_use_id": f"toolu_{uuid.uuid4().hex[:20]}"})
+        got = (r.get("updatedInput") or {}).get("answers") if r.get("behavior") == "allow" else None
+        await self.say(f"Answers: {json.dumps(got)}" if got else f"No answer: {r.get('message')}")
     elif t == "permseimei":
         out = await self.permission("Bash", {"command": "uv run pytest -q tests/"}, SUGGEST_BASH, "Run the unit tests")
         await self.say(f"Cards came back: {out}")
