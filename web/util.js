@@ -2,6 +2,52 @@
 
 export const $ = (id) => document.getElementById(id);
 export const finePointer = matchMedia('(pointer: fine)').matches;
+const lessMotion = matchMedia('(prefers-reduced-motion: reduce)');
+export const reduced = () => lessMotion.matches;
+// Screen transitions (BEHAVIOR.md 1) use M3's emphasized easings, not springs; reduced motion gets a short fade
+export const EASE_IN = 'cubic-bezier(.05, .7, .1, 1)';
+export const EASE_OUT = 'cubic-bezier(.3, 0, .8, .15)';
+export function enter(node, from, ms = 300) {
+  if (reduced()) return node.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150 });
+  return node.animate([{ transform: from }, { transform: 'none' }], { duration: ms, easing: EASE_IN });
+}
+export function leave(node, to, ms = 200) {
+  if (reduced()) return node.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 100, fill: 'forwards' });
+  return node.animate([{ transform: 'none' }, { transform: to }], { duration: ms, easing: EASE_OUT, fill: 'forwards' });
+}
+
+// The one quiet live region (BEHAVIOR.md 6): a short line when a card arrives, a reply finishes or a card settles
+export function say(text) {
+  const r = document.getElementById('say');
+  if (!r || !text) return;
+  r.textContent = '';
+  requestAnimationFrame(() => { r.textContent = text; });
+}
+
+// An M3 dialog for what can't be undone: a headline that asks, a body, Cancel and a verb
+export function ask({ headline, body, confirm }) {
+  return new Promise((done) => {
+    const d = el('dialog', 'dlg');
+    d.setAttribute('aria-labelledby', 'dlg-h');
+    const h = el('h2', null, headline);
+    h.id = 'dlg-h';
+    const acts = el('div', 'acts');
+    const no = el('button', 'btn text sl', 'Cancel');
+    const yes = el('button', 'btn text sl', confirm);
+    no.type = yes.type = 'button';
+    acts.append(no, yes);
+    d.append(h, el('p', null, body), acts);
+    const back = document.activeElement;
+    const close = (v) => { d.close(); d.remove(); back?.focus?.(); done(v); };
+    no.addEventListener('click', () => close(false));
+    yes.addEventListener('click', () => close(true));
+    d.addEventListener('cancel', (e) => { e.preventDefault(); close(false); });
+    d.addEventListener('click', (e) => { if (e.target === d) close(false); });
+    document.body.append(d);
+    d.showModal();
+    no.focus();
+  });
+}
 
 // Live state; app.js routes stream events into it and the views read it.
 export const S = {
@@ -47,6 +93,14 @@ export function svg(path, size = 16) {
 export const clock = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 export const dayKey = (t) => new Date(t * 1000).toDateString();
 export const home = (p) => (p || '').replace(/^\/home\/[^/]+/, '~');
+// A shikigami's identity: one shape of the M3 Expressive library (m3x.css), the same for a name everywhere
+const SHAPES = ['pentagon', 'clover4', 'cookie9', 'sunny', 'cookie6', 'puffy-diamond', 'gem', 'flower', 'cookie4', 'cookie12', 'clover8'];
+export function shapeOf(name) {
+  let h = 0;
+  for (const c of name || '') h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return SHAPES[h % SHAPES.length];
+}
+export const wearShape = (node, name) => node.style.setProperty('--me', `var(--shape-${shapeOf(name)})`);
 export const plural = (n, one, many) => (n === 1 ? one : `${n} ${many}`);
 
 export function dayLabel(t) {
@@ -162,7 +216,8 @@ export function snack(text, action = null) {
   if (end) log.scrollTop = log.scrollHeight;
   snackPlace();
   clearTimeout(snackTimer);
-  snackTimer = setTimeout(unsnack, action ? 6000 : 4000);
+  // One with an action stays until it's used or the next one replaces it (M3: actionable snackbars don't auto-dismiss)
+  if (!action) snackTimer = setTimeout(unsnack, 4000);
 }
 
 export async function getJSON(path) {

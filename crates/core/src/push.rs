@@ -431,6 +431,8 @@ struct State {
     /// device -> what its app shows: "chat", another tab, or "page" (an agent's page).
     view: HashMap<String, String>,
     approvals: Vec<(String, Value)>,
+    /// Cards with a notification out (approval:<aid>): withdrawn one by one as they settle.
+    shown_approvals: Vec<String>,
     /// The dispatcher's latest message, for "reply ready".
     last_reply: Option<i64>,
     sent: Vec<(String, Data)>,
@@ -660,7 +662,7 @@ impl Push {
                     s.approvals.retain(|(x, _)| *x != a);
                     s.approvals.push((a, ev.clone()));
                 }
-                self.approvals(true);
+                self.approvals(ev["aid"].as_str());
             }
             Some("approval_done") => {
                 let gone = {
@@ -670,14 +672,14 @@ impl Push {
                     s.approvals.len() < before
                 };
                 if gone {
-                    self.approvals(false);
+                    self.approvals(None);
                 }
             }
             // A shikigami's card has waited a while: one more alert for it.
             Some("approval_remind") => {
                 let known = self.st.lock().unwrap().approvals.iter().any(|(x, _)| Some(x) == aid.as_ref());
                 if known {
-                    self.approvals(true);
+                    self.approvals(aid.as_deref());
                 }
             }
             _ => {}
@@ -700,29 +702,25 @@ impl Push {
             .collect()
     }
 
-    fn approvals(self: &Arc<Self>, alert: bool) {
-        let list: Vec<Value> = self.st.lock().unwrap().approvals.iter().map(|(_, a)| a.clone()).collect();
-        if list.is_empty() {
-            self.fire(json!({"kind": "approval", "tag": "approval", "cancel": 1}), 3600, Only::Closed);
-            return;
+    /// One notification per waiting card (BEHAVIOR.md 4), each with its own Allow and Deny: tag approval:<aid> in the
+    /// app's "approvals" group. [only] is the card to (re)send and alert for; the rest stay as they are, and cards
+    /// that settled are withdrawn.
+    fn approvals(self: &Arc<Self>, only: Option<&str>) {
+        let (fresh, gone) = {
+            let mut s = self.st.lock().unwrap();
+            let now: Vec<String> = s.approvals.iter().map(|(a, _)| a.clone()).collect();
+            let gone: Vec<String> = s.shown_approvals.iter().filter(|a| !now.contains(a)).cloned().collect();
+            let fresh: Vec<Value> =
+                s.approvals.iter().filter(|(a, _)| Some(a.as_str()) == only).map(|(_, v)| v.clone()).collect();
+            s.shown_approvals = now;
+            (fresh, gone)
+        };
+        for aid in gone {
+            self.fire(json!({"kind": "approval", "tag": format!("approval:{aid}"), "cancel": 1}), 3600, Only::Closed);
         }
-        let mut data = json!({"kind": "approval", "tag": "approval", "alert": alert as i32, "tab": "chat"});
-        if list.len() == 1 {
-            let a = &list[0];
-            let target = a["target"].as_str().unwrap_or("");
-            let target = if a["action"] == "message" { format!("message {target}") } else { target.to_string() };
-            data["title"] = json!(chars(&format!("{} wants to {target}", a["who"].as_str().unwrap_or("seimei")), 120));
-            data["body"] = json!(chars(a["detail"].as_str().unwrap_or(""), 300));
-            // The app puts Allow/Deny on the notification for a lone card; they settle only this card (audit P2).
-            data["aid"] = a["aid"].clone();
-            if a.get("options").is_some_and(|o| !o.is_null()) {
-                data["perm"] = json!(1);
-            }
-        } else {
-            data["title"] = json!(format!("{} approvals waiting", list.len()));
-            data["body"] = json!(list.iter().map(|a| a["who"].as_str().unwrap_or("")).collect::<Vec<_>>().join(", "));
+        for a in fresh {
+            self.fire(approval_note(&a), 600, Only::Closed);
         }
-        self.fire(data, 600, Only::Closed);
     }
 
     /// A ping the dispatcher chose to send. Returns how many phones it goes to.
@@ -790,6 +788,39 @@ impl Push {
         let want = rec.get("ws")?.as_str()?.to_string();
         same(want.as_bytes(), secret_hash(secret).as_bytes()).then(|| dev.to_string())
     }
+}
+
+/// A card's notification. The title stays under M3's 29 characters where it can: "{who} wants to {target}" when that
+/// fits, else "{who} wants to {verb}" with the rest of the target leading the body, where Android wraps it.
+fn approval_note(a: &Value) -> Value {
+    let who = a["who"].as_str().unwrap_or("seimei");
+    let target = a["target"].as_str().unwrap_or("");
+    let target = if a["action"] == "message" { format!("message {target}") } else { target.to_string() };
+    let detail = a["detail"].as_str().unwrap_or("");
+    let whole = format!("{who} wants to {target}");
+    let (title, lead) = match target.split_once(' ') {
+        Some((verb, rest)) if whole.chars().count() > 28 => (format!("{who} wants to {verb}"), rest.to_string()),
+        _ => (whole, String::new()),
+    };
+    // "run a command": the command in the body says it, "a command" adds nothing
+    let lead = if lead.starts_with("a ") || lead.starts_with("an ") { String::new() } else { lead };
+    let body = match (lead.is_empty(), detail.is_empty()) {
+        (true, _) => detail.to_string(),
+        (false, true) => lead,
+        (false, false) if detail.starts_with(&lead) => detail.to_string(),
+        (false, false) => format!("{lead}\n{detail}"),
+    };
+    let aid = a["aid"].as_str().unwrap_or("");
+    let mut data = json!({"kind": "approval", "tag": format!("approval:{aid}"), "group": "approvals", "alert": 1, "tab": "chat",
+                          "title": chars(&title, 120), "body": chars(&body, 300), "aid": aid});
+    if let Some(opts) = a.get("options").and_then(Value::as_array) {
+        data["perm"] = json!(1);
+        // A rule to remember gives the notification its third action, Always allow
+        if let Some(rule) = opts.iter().find(|o| o["kind"] == "rule") {
+            data["always"] = rule["id"].clone();
+        }
+    }
+    data
 }
 
 #[cfg(test)]

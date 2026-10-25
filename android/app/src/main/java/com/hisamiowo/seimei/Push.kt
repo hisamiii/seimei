@@ -5,6 +5,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.RemoteInput
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -105,32 +106,60 @@ object Push {
             .setOnlyAlertOnce(d["alert"] != "1")
             .setCategory(if (tag == "reply") Notification.CATEGORY_MESSAGE else Notification.CATEGORY_REMINDER)
             .setVisibility(Notification.VISIBILITY_PRIVATE).setPublicVersion(public)
+        d["group"]?.let { n.setGroup(it) }
         val aid = d["aid"]
-        // A lone card gets Allow/Deny: only on an unlocked phone (API 31+), only while the app's session is unlocked.
-        if (aid != null && Build.VERSION.SDK_INT >= 31 && session() != null) {
+        // Each card gets its own Allow and Deny, plus Always allow when it has a rule to remember (at most three
+        // actions): only on an unlocked phone (API 31+), only while the app's session is unlocked.
+        val unlocked = Build.VERSION.SDK_INT >= 31 && session() != null
+        if (aid != null && unlocked) {
             n.addExtras(Bundle().apply { putString("aid", aid) })
             val perm = d["perm"] == "1"
-            for ((approve, label) in listOf(false to "Deny", true to "Allow")) {
+            val acts = listOfNotNull(Triple(false, "Deny", if (perm) "deny" else null), Triple(true, "Allow", if (perm) "once" else null),
+                d["always"]?.let { Triple(true, "Always allow", it) })
+            for ((approve, label, option) in acts) {
                 val pi = PendingIntent.getBroadcast(
-                    ctx, (aid + approve).hashCode(),
-                    Intent(ctx, Decide::class.java).putExtra("aid", aid).putExtra("approve", approve).putExtra("perm", perm),
+                    ctx, (aid + label).hashCode(),
+                    Intent(ctx, Decide::class.java).putExtra("aid", aid).putExtra("approve", approve).putExtra("option", option),
                     PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
                 )
                 n.addAction(Notification.Action.Builder(Icon.createWithResource(ctx, R.drawable.ic_notify), label, pi)
                     .setAuthenticationRequired(true).build())
             }
         }
+        // The reply ping: answer from the shade (RemoteInput), or open the chat
+        if (tag == "reply" && unlocked) {
+            val input = RemoteInput.Builder(Reply.KEY).setLabel("Reply to seimei").build()
+            val pi = PendingIntent.getBroadcast(ctx, "reply".hashCode(), Intent(ctx, Reply::class.java),
+                PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            n.addAction(Notification.Action.Builder(Icon.createWithResource(ctx, R.drawable.ic_notify), "Reply", pi)
+                .addRemoteInput(input).setAuthenticationRequired(true).setAllowGeneratedReplies(false).build())
+            n.addAction(Notification.Action.Builder(Icon.createWithResource(ctx, R.drawable.ic_notify), "Open", open).build())
+        }
         nm.notify(tag, 0, n.build())
+        if (d["group"] != null) summary(ctx, d["group"]!!, kind)
     }
 
-    /** The approval notification, without actions: the app has to be opened (and unlocked) to answer. */
-    fun openToAnswer(ctx: Context, why: String) =
-        show(ctx, mapOf("kind" to "approval", "tag" to "approval", "title" to "Open seimei to answer", "body" to why, "tab" to "chat"))
+    /** A group's summary while two or more of its notifications show ("3 approvals"); gone with the last but one. */
+    private fun summary(ctx: Context, group: String, kind: String) {
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        val n = nm.activeNotifications.count { it.notification.group == group && it.tag != group }
+        if (n < 2) return nm.cancel(group, 0)
+        val title = if (group == "approvals") "$n approvals" else "$n from seimei"
+        nm.notify(group, 0, Notification.Builder(ctx, kind).setSmallIcon(R.drawable.ic_notify).setColor(MAUVE)
+            .setContentTitle(title).setGroup(group).setGroupSummary(true).setOnlyAlertOnce(true).setAutoCancel(true)
+            .setVisibility(Notification.VISIBILITY_PRIVATE).build())
+    }
 
-    /** Withdraws the approval notification if it still shows this card (a newer card may have replaced it). */
+    /** A card's notification, without actions, when the answer from the shade didn't land: the app answers it. */
+    fun openToAnswer(ctx: Context, aid: String, title: String, body: String) =
+        show(ctx, mapOf("kind" to "approval", "tag" to "approval:$aid", "group" to "approvals", "title" to title, "body" to body, "tab" to "chat"))
+
+    /** Withdraws a card's notification (and one from an older server, a lone card under the tag "approval"). */
     fun settled(ctx: Context, aid: String) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
+        nm.cancel("approval:$aid", 0)
         if (nm.activeNotifications.any { it.tag == "approval" && it.notification.extras.getString("aid") == aid }) nm.cancel("approval", 0)
+        summary(ctx, "approvals", "approval")
     }
 
     const val MAUVE = 0xFFCBA6F7.toInt()
@@ -144,21 +173,50 @@ class Decide : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         val aid = intent.getStringExtra("aid") ?: return
         val approve = intent.getBooleanExtra("approve", false)
-        val api = Push.session() ?: return Push.openToAnswer(ctx, "The app is locked.")
+        val api = Push.session() ?: return Push.openToAnswer(ctx, aid, "Couldn't send your answer", "The app is locked. Tap to answer")
         val body = JSONObject().put("decision", if (approve) "approve" else "deny")
-        if (intent.getBooleanExtra("perm", false)) body.put("option", if (approve) "once" else "deny")
+        intent.getStringExtra("option")?.let { body.put("option", it) }
         val done = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 api.post("api/approvals/$aid", body)
                 Push.settled(ctx, aid)
             } catch (e: HttpError) {
-                if (e.code == 409) Push.settled(ctx, aid) else Push.openToAnswer(ctx, "The server said no (${e.code})")
+                if (e.code == 409) Push.settled(ctx, aid) else Push.openToAnswer(ctx, aid, "Answer didn't go through", "Tap to try again")
             } catch (e: IOException) {
-                Push.openToAnswer(ctx, "Couldn't reach the server")
+                Push.openToAnswer(ctx, aid, "Couldn't send your answer", "Couldn't reach the server. Tap to answer")
             } finally {
                 done.finish()
             }
         }
+    }
+}
+
+/** Reply on the reply ping: the typed text goes to the chat as the user's message through the unlocked session, then
+ * the same notification shows what was sent. On failure it keeps the text, so nothing typed is lost. */
+class Reply : BroadcastReceiver() {
+    override fun onReceive(ctx: Context, intent: Intent) {
+        val text = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(KEY)?.toString()?.trim().orEmpty()
+        if (text.isEmpty()) return
+        val api = Push.session()
+        val done = goAsync()
+        CoroutineScope(Dispatchers.IO).launch {
+            val sent = try {
+                api?.post("api/send", JSONObject().put("text", text).put("cid", java.util.UUID.randomUUID().toString())
+                    .put("images", org.json.JSONArray())) != null
+            } catch (e: IOException) {
+                false
+            }
+            val nm = ctx.getSystemService(NotificationManager::class.java)
+            nm.notify("reply", 0, Notification.Builder(ctx, "ping").setSmallIcon(R.drawable.ic_notify).setColor(Push.MAUVE)
+                .setContentTitle(if (sent) "Sent" else "Couldn't send").setContentText(text)
+                .setStyle(Notification.BigTextStyle().bigText(text)).setOnlyAlertOnce(true).setAutoCancel(true)
+                .setTimeoutAfter(if (sent) 8_000 else 0).setVisibility(Notification.VISIBILITY_PRIVATE).build())
+            done.finish()
+        }
+    }
+
+    companion object {
+        const val KEY = "reply"
     }
 }

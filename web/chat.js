@@ -1,6 +1,6 @@
 // The conversation with seimei: rendering events, live text, approval cards, and the composer.
 import { md } from './md.js';
-import { $, S, hooks, el, svg, clock, dayKey, dayLabel, home, plural, post, view, snack, finePointer, toLogin, ICON } from './util.js';
+import { $, S, hooks, el, svg, clock, dayKey, dayLabel, home, plural, post, view, snack, finePointer, toLogin, ICON, wearShape, say, enter } from './util.js';
 import { openWorker } from './agents.js';
 import { renderTasks } from './tasks.js';
 
@@ -19,8 +19,41 @@ let pinned = true;
 export const toBottom = () => {
   log.scrollTop = log.scrollHeight;
   pinned = true;
+  jumpState();
 };
-log.addEventListener('scroll', () => { pinned = nearBottom(); }, { passive: true });
+export const following = () => pinned;
+log.addEventListener('scroll', () => { pinned = nearBottom(); jumpState(); }, { passive: true });
+
+// Jump to latest (BEHAVIOR.md 8): while the reader is scrolled up, a small button above the composer says how many
+// rows came in below; it goes to the newest unanswered card when that sits above the view, else to the end
+let missed = 0;
+const jump = el('button', 'jump sl');
+jump.type = 'button';
+jump.hidden = true;
+jump.append(svg('M12 5v14M6 13l6 6 6-6', 20), el('span', null, 'Latest'), el('b'));
+document.body.append(jump);
+function jumpState() {
+  if (pinned) missed = 0;
+  const show = !pinned && S.lane !== 'k' && log.scrollHeight - log.scrollTop - log.clientHeight > log.clientHeight / 2;
+  jump.hidden = !show;
+  if (!show) return;
+  const b = jump.querySelector('b');
+  b.hidden = !missed;
+  b.textContent = String(missed);
+  jump.setAttribute('aria-label', missed ? `Jump to latest, ${missed} new` : 'Jump to latest');
+  const c = document.getElementById('composer')?.getBoundingClientRect();
+  if (c?.height) jump.style.bottom = `${Math.round(innerHeight - c.top + 28)}px`;
+}
+jump.addEventListener('click', () => {
+  const view = log.getBoundingClientRect();
+  const open = [...(S.lane === 't' ? traj : thread).querySelectorAll('.wcard.approval:not(.settled), .wcard.asking')].pop();
+  if (open && open.getBoundingClientRect().bottom < view.top) {
+    open.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    return;
+  }
+  log.scrollTo({ top: log.scrollHeight, behavior: 'smooth' });
+});
+addEventListener('resize', jumpState);
 // Pictures loading, fonts swapping in and card buttons all grow the thread after it is drawn.
 const grow = new ResizeObserver(() => { if (pinned) log.scrollTop = log.scrollHeight; });
 grow.observe(thread);
@@ -259,6 +292,7 @@ function workerCard(ev) {
   const card = el('div', 'wcard asking');
   card.dataset.worker = ev.worker;
   const badge = el('span', 'badge');
+  wearShape(badge, ev.name);
   badge.append(svg(ASK, 22));
   const head = el('div', 'head');
   const title = el('div', 'title');
@@ -458,6 +492,7 @@ function settle(done) {
   card.querySelectorAll('.foot, .choices, textarea.note').forEach((n) => n !== card.querySelector('.foot') && n.remove());
   const foot = card.querySelector('.foot');
   foot.hidden = false;
+  const had = card.contains(document.activeElement);
   foot.querySelectorAll('button').forEach((b) => b.remove());
   let text = OUTCOME[outcome] || outcome;
   if (outcome === 'expired') text = card.expires ? 'No answer in time, denied' : 'No answer, denied';
@@ -466,7 +501,10 @@ function settle(done) {
   else if (outcome === 'approved' && done.chosen) text = done.chosen.replace(/^Always allow/, 'Always allowed').replace(/^Allow /, 'Allowed ');
   if (outcome === 'denied' && done.by === 'chat') text = 'Denied: you wrote in the chat';
   else if (outcome === 'denied' && done.note) text = `Denied: “${done.note}”`;
-  foot.querySelector('.left').textContent = text;
+  const left = foot.querySelector('.left');
+  left.textContent = text;
+  left.tabIndex = -1;
+  if (had) left.focus();
   render();
 }
 
@@ -879,6 +917,22 @@ export function addEvent(ev) {
   count(ev);
   hello();
   if (stick) toBottom();
+  else if (/^(user|assistant|approval|worker|image)$/.test(ev.type) && inTraj(ev) === (S.lane === 't')) {
+    missed++;
+    jumpState();
+  }
+  say(spoken(ev));
+}
+
+// The line the live region reads for an event: a card that arrives, a reply, a card that settles
+function spoken(ev) {
+  if (ev.type === 'assistant') return 'seimei replied';
+  if (ev.type === 'approval') return `${ev.who || 'seimei'} wants to ${ev.target || ev.action}`;
+  if (ev.type === 'approval_done') return approvals.get(ev.aid)?.querySelector('.foot .left')?.textContent || '';
+  if (ev.type === 'worker' && ev.event === 'asking') return `${ev.name} asks: ${oneSentence(ev.text || '')}`;
+  if (ev.type === 'worker' && ev.event === 'done') return `${ev.name} finished`;
+  if (ev.type === 'worker' && ev.event === 'failed') return `${ev.name} failed`;
+  return '';
 }
 
 // An empty chat greets instead of showing a blank sheet (QA U14); an empty trajectory says what will show.
@@ -923,8 +977,11 @@ function badge() {
   $('lt-traj').setAttribute('aria-label', unseen ? `Trajectory, ${unseen} new` : 'Trajectory');
 }
 
+const LANES = ['c', 't', 'k'];
 export function showLane(lane, goto = null) {
   if (lane !== S.lane) {
+    // Lateral: the incoming lane slides in from the side of its tab
+    const dir = LANES.indexOf(lane) > LANES.indexOf(S.lane) ? 1 : -1;
     scrolls[S.lane] = pinned ? null : log.scrollTop;
     S.lane = lane;
     thread.hidden = lane !== 'c';
@@ -945,6 +1002,8 @@ export function showLane(lane, goto = null) {
       log.scrollTop = scrolls[lane];
       pinned = nearBottom();
     }
+    jumpState();
+    enter({ c: thread, t: traj, k: $('tasks') }[lane], `translateX(${dir * 25}%)`);
   }
   if (lane === 't') markSeen();
   const node = goto && (lane === 't' ? traj : thread).querySelector(`[data-id="${goto}"]`);

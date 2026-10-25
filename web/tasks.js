@@ -3,7 +3,7 @@
 // with a one-line summary; a project opens in place, its done items fold into "N done", paused projects wait
 // behind one row. The user ticks their own tasks (with Undo); a task with a shikigami opens its page. Live: the
 // stream sends the whole board on every change.
-import { $, el, svg, post, keep, snack, clock, plural } from './util.js';
+import { $, el, svg, post, keep, snack, clock, plural, wearShape } from './util.js';
 import { openWorker } from './agents.js';
 
 let board = keep.read('tasks') || { tasks: [], projects: [] };
@@ -105,10 +105,12 @@ function row(t, kind, parts, { tile = true, run = false, cls = '' } = {}) {
   }
   if (tile && kind === 'ask') {
     const tt = el('span', 'tt ask');
+    wearShape(tt, t.owner);
     tt.append(svg(ASK, 20));
     r.append(tt);
   } else if (tile && kind === 'review') {
     const tt = el('span', 'tt review');
+    wearShape(tt, t.owner);
     tt.append(svg(REVIEW, 20));
     r.append(tt);
   } else if (t.owner === 'you') {
@@ -327,4 +329,6 @@ export function renderTasks() {
     return;
   }
   box.replaceChildren(switcher(), ...(view === 'now' ? now(active()) : all()));
+  // One emphasized title on the screen: the running task
+  box.querySelector('.tr.k-run .tl')?.classList.add('emph');
 }

@@ -1,5 +1,22 @@
 package com.hisamiowo.seimei
 
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.draw.alpha
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onSizeChanged
@@ -494,19 +511,28 @@ fun AppScreen(vm: Seimei) {
         vm.snackAction = "Undo"
         snackScope.launch {
             snacks.currentSnackbarData?.dismiss()
-            // With an action, a snackbar stays up until tapped unless given a duration.
-            val shown = snacks.showSnackbar(t, actionLabel = if (undo != null) label else null, duration = SnackbarDuration.Long)
+            // With an action it stays until it's used, replaced, or the user moves on (M3); a plain note goes by itself
+            val shown = snacks.showSnackbar(t, actionLabel = if (undo != null) label else null,
+                duration = if (undo != null) SnackbarDuration.Indefinite else SnackbarDuration.Short)
             if (shown == SnackbarResult.ActionPerformed) undo?.invoke()
         }
     }
+    LaunchedEffect(vm.tab, vm.page == null) { snacks.currentSnackbarData?.dismiss() }
+    val still = reducedMotion()
     Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().imePadding()) {
         Header(vm)
         Box(Modifier.weight(1f)) {
-            when (vm.tab) {
-                "chat" -> if (vm.lane == "k") TasksTab(vm) else ChatTab(vm)
-                "agents" -> AgentsTab(vm)
-                "usage" -> UsageTab(vm)
+            // Top level between nav destinations: the old one fades out, then the new one fades in (BEHAVIOR.md 1)
+            AnimatedContent(vm.tab, transitionSpec = {
+                if (still) EnterTransition.None togetherWith ExitTransition.None
+                else fadeIn(tween(200, delayMillis = 100, easing = LinearOutSlowInEasing)) togetherWith fadeOut(tween(100, easing = FastOutLinearInEasing))
+            }, label = "tab") { tab ->
+                when (tab) {
+                    "chat" -> Lanes(vm, still)
+                    "agents" -> AgentsTab(vm)
+                    "usage" -> UsageTab(vm)
+                }
             }
         }
         Column(Modifier.onSizeChanged { vm.barPx = it.height }) {
@@ -516,12 +542,39 @@ fun AppScreen(vm: Seimei) {
         }
     }
     vm.page?.let { AgentPage(vm, it) }
+    // The one polite live region TalkBack reads: a card that arrives, a reply, a card that settles (BEHAVIOR.md 6)
+    Text(vm.said, Modifier.size(1.dp).alpha(0f).semantics { liveRegion = LiveRegionMode.Polite })
     // Above whatever holds the bottom edge, measured: never over the field
     val above = with(LocalDensity.current) { (if (vm.page != null) vm.pageBarPx else vm.barPx).toDp() } + 8.dp
     SnackbarHost(snacks, Modifier.align(Alignment.BottomCenter).then(if (vm.page != null) Modifier.navigationBarsPadding() else Modifier)
         .imePadding().padding(bottom = above))
     }
     if (vm.about) AboutSheet(vm) { vm.about = false }
+}
+
+/** Chat, Trajectory and Tasks: Lateral, the incoming lane slides in from the side of its tab (emphasized decelerate). */
+@Composable
+private fun Lanes(vm: Seimei, still: Boolean) {
+    val order = "ctk"
+    Column(Modifier.fillMaxSize()) {
+    LaneTabs(vm)
+    AnimatedContent(vm.lane, transitionSpec = {
+        val dir = if (order.indexOf(targetState) > order.indexOf(initialState)) 1 else -1
+        if (still) fadeIn(tween(150)) togetherWith fadeOut(tween(150))
+        else slideInHorizontally(tween(300, easing = EMPHASIZED_DECEL)) { it * dir } togetherWith
+            slideOutHorizontally(tween(300, easing = EMPHASIZED_DECEL)) { -it * dir }
+    }, label = "lane") { l -> if (l == "k") TasksTab(vm) else ChatTab(vm, l) }
+    }
+}
+
+val EMPHASIZED_DECEL = CubicBezierEasing(.05f, .7f, .1f, 1f)
+val EMPHASIZED_ACCEL = CubicBezierEasing(.3f, 0f, .8f, .15f)
+
+/** The top bar's fill: the background at rest, surface-container once the screen has moved off it. */
+@Composable
+fun barColor(vm: Seimei): Color {
+    val cs = MaterialTheme.colorScheme
+    return animateColorAsState(if (vm.lifted && vm.page == null) cs.surfaceContainer else cs.surface, tween(225), label = "bar").value
 }
 
 @Composable
@@ -545,7 +598,7 @@ fun Header(vm: Seimei) {
     if (themes) ThemeSheet(vm) { themes = false }
     var notifications by remember { mutableStateOf(false) }
     if (notifications) NotificationsSheet(vm) { notifications = false }
-    Row(Modifier.statusBarsPadding().fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.background(barColor(vm)).statusBarsPadding().fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer), contentAlignment = Alignment.Center) {
             Glyph(24.dp)
         }

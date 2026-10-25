@@ -142,6 +142,10 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         private set
     /** Which of the two the chat tab shows: "c" (chat) or "t" (trajectory). */
     var lane by mutableStateOf("c")
+    /** The screen has moved off its rest (the chat off its end, a list off its top): the top bar fills (BEHAVIOR.md 8). */
+    var lifted by mutableStateOf(false)
+    /** Where each chat lane was left: first row, its offset, and whether the reader was following the end. */
+    val laneSpot = HashMap<String, Triple<Int, Int, Boolean>>()
     /** The task board (tasks.py): {"tasks": [...], "projects": [...]}, the kept copy until the server sends it. */
     var board by mutableStateOf<JSONObject?>(null)
     /** Board sections opened or shut by hand (project name -> open); the rest follow their default. */
@@ -194,6 +198,22 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     var sent by mutableStateOf(0)
         private set
     val pending = mutableStateListOf<Pending>()
+    /** The line TalkBack reads (one polite live region): a card that arrives, a reply, a card that settles. */
+    var said by mutableStateOf("")
+
+    private fun spoken(ev: JSONObject): String? = when (ev.str("type")) {
+        "assistant" -> "seimei replied"
+        "approval" -> "${ev.str("who").ifEmpty { "seimei" }} wants to ${ev.str("target").ifEmpty { ev.str("action") }}"
+        "approval_done" -> when (ev.str("outcome")) { "approved" -> "Allowed"; "denied" -> "Denied"; else -> "Canceled" }
+        "worker" -> when (ev.str("event")) {
+            "asking" -> "${ev.str("name")} asks: ${firstSentence(ev.str("text"))}"
+            "done" -> "${ev.str("name")} finished"
+            "failed" -> "${ev.str("name")} failed"
+            else -> null
+        }
+        else -> null
+    }
+
     /** A short note for a tap that could not do anything; the screen shows it once. */
     var snack by mutableStateOf<String?>(null)
     /** What the snack's Undo does, set together with snack. */
@@ -704,6 +724,9 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             route(ev)
             publish()
             count(ev)
+            // A card answered here withdraws its notification at once, without waiting for the server's cancel
+            if (type == "approval_done") Push.settled(getApplication(), ev.str("aid"))
+            if (System.currentTimeMillis() / 1000.0 - ev.optDouble("t", 0.0) < 60) spoken(ev)?.let { said = it }
             saveChat()
             // The chat dot is for the conversation; the trajectory keeps its own count.
             if (tab != "chat" && !ev.inTraj() && type in setOf("assistant", "approval", "worker", "image", "file")) unread = true
@@ -1210,16 +1233,18 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     }
 
     /** Answers a card; a permission card (#64) also names its option, and a deny can carry a note for the agent. */
-    fun decide(aid: String, approve: Boolean, option: String? = null, note: String? = null, onFail: () -> Unit) {
+    fun decide(aid: String, approve: Boolean, option: String? = null, note: String? = null, landed: (Boolean) -> Unit = {}, onFail: () -> Unit) {
         viewModelScope.launch {
             try {
                 api.post("api/approvals/$aid", JSONObject().put("decision", if (approve) "approve" else "deny")
                     .apply { option?.let { put("option", it) }; if (!note.isNullOrEmpty()) put("note", note) })
+                landed(true)
             } catch (e: IOException) {
                 // 409: answered elsewhere, the event stream settles the card.
                 if (e is HttpError && e.code == 409) return@launch
+                landed(false)
                 onFail()
-                undo = { decide(aid, approve, option, note, onFail) }
+                undo = { decide(aid, approve, option, note, landed, onFail) }
                 snackAction = "Retry"
                 snack = "Couldn't send your answer"
             }

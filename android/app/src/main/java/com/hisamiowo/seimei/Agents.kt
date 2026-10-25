@@ -1,5 +1,22 @@
 package com.hisamiowo.seimei
 
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.animation.core.Animatable
+import androidx.activity.BackEventCompat
+import androidx.activity.compose.PredictiveBackHandler
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.animation.core.Easing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.buildAnnotatedString
@@ -90,6 +107,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -256,13 +274,17 @@ fun AgentsTab(vm: Seimei) {
         return
     }
     val groups = listOf(Triple("Needs you", PEACH, ask), Triple("Working", MAUVE, work), Triple("Idle", LocalExtraText3, idle))
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp)) {
+    val list = rememberLazyListState()
+    LaunchedEffect(list) { snapshotFlow { list.canScrollBackward }.collect { vm.lifted = it } }
+    LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp)) {
         for ((title, color, list) in groups) {
             if (list.isEmpty()) continue
             item("h-$title") { GroupTitle(title, color) }
             itemsIndexed(list, key = { _, it -> "${it.kind}-${it.id}" }) { i, a ->
                 val shape = segment(i, list.size, if (a.state == "ask") 28.dp else 20.dp, if (a.state == "ask") 8.dp else 4.dp)
-                if (a.state == "idle") SwipeToArchive(a, vm) { AgentRow(a, now, shape = shape) { vm.open(a) } } else AgentRow(a, now, shape = shape) { vm.open(a) }
+                // The screen's one emphasized title: the first shikigami at work
+                val emph = a.state == "work" && i == 0
+                if (a.state == "idle") SwipeToArchive(a, vm) { AgentRow(a, now, shape = shape) { vm.open(a) } } else AgentRow(a, now, shape = shape, emph = emph) { vm.open(a) }
             }
         }
         if (done.isNotEmpty()) {
@@ -304,6 +326,11 @@ fun SwipeToArchive(a: Agent, vm: Seimei, content: @Composable () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val state = rememberSwipeToDismissBoxState()
     val scope = rememberCoroutineScope()
+    // A tick when the swipe crosses the mark where letting go archives (BEHAVIOR.md 7)
+    val haptic = LocalHapticFeedback.current
+    LaunchedEffect(state) {
+        snapshotFlow { state.targetValue }.collect { if (it == SwipeToDismissBoxValue.EndToStart) haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate) }
+    }
     SwipeToDismissBox(
         state,
         backgroundContent = {
@@ -321,7 +348,9 @@ fun SwipeToArchive(a: Agent, vm: Seimei, content: @Composable () -> Unit) {
             scope.launch { state.snapTo(SwipeToDismissBoxValue.Settled) }
         },
     ) {
-        Box(Modifier.clip(RoundedCornerShape(18.dp)).background(cs.surface)) { content() }
+        Box(Modifier.clip(RoundedCornerShape(18.dp)).background(cs.surface).semantics {
+            customActions = listOf(CustomAccessibilityAction(if (a.archived) "Unarchive" else "Archive") { vm.setArchived(a, !a.archived); true })
+        }) { content() }
     }
 }
 
@@ -388,11 +417,42 @@ fun Seimei.open(a: Agent) = if (a.kind == "worker") openWorker(a.id) else openSe
 
 @Composable
 fun GroupTitle(title: String, color: Color) =
-    Text(title, color = color, fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 8.dp))
+    Text(title, color = color, fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 8.dp).semantics { heading() })
 
 /** A row's corners in a segmented group: big outer ones on the group's ends, small ones between the rows. */
 fun segment(i: Int, n: Int, outer: Dp = 20.dp, inner: Dp = 4.dp): Shape =
     RoundedCornerShape(if (i == 0) outer else inner, if (i == 0) outer else inner, if (i == n - 1) outer else inner, if (i == n - 1) outer else inner)
+
+/** The user turned animations off (Remove animations, or animator duration scale 0): motion goes, states stay. */
+@Composable
+fun reducedMotion(): Boolean {
+    val ctx = LocalContext.current
+    return remember { android.provider.Settings.Global.getFloat(ctx.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f }
+}
+
+/** The expressive spatial spring as an easing, the same linear() fit as the web's --spring. */
+val SpringEasing = Easing { t ->
+    val k = floatArrayOf(0f, .103f, .3f, .506f, .684f, .817f, .907f, .962f, .994f, 1.009f, 1.014f, 1.014f, 1.012f, 1.008f, 1.006f, 1.003f, 1f)
+    val x = t * (k.size - 1)
+    val i = x.toInt().coerceAtMost(k.size - 2)
+    k[i] + (k[i + 1] - k[i]) * (x - i)
+}
+
+/** A tile in its owner's identity shape. A working one morphs between that shape and the soft burst and turns slowly,
+ * as on the web (final.css): the morph is its activity indicator. */
+@Composable
+fun ShapeTile(name: String, size: Dp, bg: Color, working: Boolean = false, content: @Composable () -> Unit) {
+    val me = SHAPES.getValue(shapeOf(name))
+    if (!working || reducedMotion()) {
+        Box(Modifier.size(size).clip(PolyShape(me)).background(bg), contentAlignment = Alignment.Center) { content() }
+        return
+    }
+    val run = rememberInfiniteTransition("tile")
+    val t by run.animateFloat(0f, 1f, infiniteRepeatable(tween(2400, easing = SpringEasing), RepeatMode.Reverse), "morph")
+    val turn by run.animateFloat(0f, 360f, infiniteRepeatable(tween(9000, easing = LinearEasing)), "turn")
+    val burst = SHAPES.getValue("soft-burst")
+    Box(Modifier.size(size).graphicsLayer { rotationZ = turn }.clip(PolyShape(me, burst, t)).background(bg), contentAlignment = Alignment.Center) { content() }
+}
 
 @Composable
 fun AgentTile(a: Agent) {
@@ -405,9 +465,19 @@ fun AgentTile(a: Agent) {
         a.bad -> cs.surfaceContainerHigh to cs.error
         else -> cs.surfaceContainerHigh to LocalExtra.current.text2
     }
-    Box(Modifier.size(44.dp).clip(if (a.state == "ask") RoundedCornerShape(16.dp) else CircleShape).background(bg), contentAlignment = Alignment.Center) {
+    // A live one wears its identity shape (a working one morphs it, the morph is its activity); finished ones are circles
+    if (a.state != "done") {
+        val work = a.state == "work"
+        ShapeTile(a.name, 44.dp, if (work) cs.primary else if (a.state == "idle") t.containerHighest else bg, work) {
+            when (a.state) {
+                "ask" -> Icon(Icons.question, null, Modifier.size(20.dp), tint = color)
+                "idle" -> Icon(Icons.clock, null, Modifier.size(20.dp), tint = color)
+            }
+        }
+        return
+    }
+    Box(Modifier.size(44.dp).clip(CircleShape).background(bg), contentAlignment = Alignment.Center) {
         when (a.state) {
-            "work" -> Loader(32.dp, contained = false, color = color)
             "ask" -> Icon(Icons.question, null, Modifier.size(20.dp), tint = color)
             "idle" -> Icon(Icons.clock, null, Modifier.size(20.dp), tint = color)
             else -> Icon(when {
@@ -421,7 +491,7 @@ fun AgentTile(a: Agent) {
 }
 
 @Composable
-fun AgentRow(a: Agent, now: Long, query: String = "", shape: Shape = RoundedCornerShape(20.dp), onClick: () -> Unit) {
+fun AgentRow(a: Agent, now: Long, query: String = "", shape: Shape = RoundedCornerShape(20.dp), emph: Boolean = false, onClick: () -> Unit) {
     val t = LocalTokens.current
     val cs = MaterialTheme.colorScheme
     val ask = a.state == "ask"
@@ -439,7 +509,7 @@ fun AgentRow(a: Agent, now: Long, query: String = "", shape: Shape = RoundedCorn
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // Name and tag take the room left of the time, so the time lines up at the right edge.
                 Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                    Text(a.name, fontSize = 16.sp, lineHeight = 24.sp, fontWeight = if (ask) FontWeight.SemiBold else FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    Text(a.name, fontSize = 16.sp, lineHeight = 24.sp, fontWeight = if (emph) FontWeight.Bold else FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         color = if (ask) t.onWarnContainer else if (a.state == "done" || a.archived) LocalExtra.current.text2 else Color.Unspecified, modifier = Modifier.weight(1f, fill = false))
                 }
                 Spacer(Modifier.width(8.dp))
@@ -505,11 +575,39 @@ fun blocked(pg: Page): String? {
 
 @Composable
 fun AgentPage(vm: Seimei, pg: Page) {
-    BackHandler { if (pg.details) pg.details = false else vm.closePage() }
+    // The details toggle is a state change, not a screen: a plain handler
+    BackHandler(enabled = pg.details) { pg.details = false }
+    // Predictive back (BEHAVIOR.md 2): while the gesture runs the page shrinks toward 90% and leans to the swipe edge
+    // with the 8dp margin and rounded corners; on commit it leaves on emphasized accelerate, on cancel it comes back
+    val back = remember { Animatable(0f) }
+    var edge by remember { mutableStateOf(0) }
+    val scope = rememberCoroutineScope()
+    PredictiveBackHandler(enabled = !pg.details) { events ->
+        try {
+            events.collect { e ->
+                edge = e.swipeEdge
+                back.snapTo(e.progress)
+            }
+            back.animateTo(1f, tween(150, easing = EMPHASIZED_ACCEL))
+            vm.closePage()
+        } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+            scope.launch { back.animateTo(0f, tween(200, easing = EMPHASIZED_DECEL)) }
+            throw e
+        }
+    }
     val cs = MaterialTheme.colorScheme
     val a = if (pg.kind == "worker") fromWorker(pg.row) else fromSession(pg.row, vm.seen)
     var zoom by remember { mutableStateOf<String?>(null) }
-    Surface(Modifier.fillMaxSize(), color = cs.surface) {
+    val p = back.value
+    Surface(Modifier.fillMaxSize().graphicsLayer {
+        val s = 1f - .1f * p
+        scaleX = s
+        scaleY = s
+        translationX = (if (edge == BackEventCompat.EDGE_LEFT) 1 else -1) * 8.dp.toPx() * p
+        shape = RoundedCornerShape(28.dp * p)
+        clip = p > 0f
+        alpha = if (p >= 1f) 0f else 1f
+    }, color = cs.surface) {
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
             Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 4.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(vm::closePage, Modifier.size(48.dp)) { Icon(Icons.back, "Back to agents", Modifier.size(22.dp)) }
@@ -587,43 +685,54 @@ fun QuestionCard(vm: Seimei, pg: Page, ask: JSONObject) {
             sentAt = 0
         }
     }
+    val tk = LocalTokens.current
+    // The warm card of a decision: the asker's shape, the question as the screen's one emphasized title, the options a
+    // segmented list
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(ASK_BG).border(1.5.dp, PEACH, RoundedCornerShape(24.dp)).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(tk.warnContainer).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(34.dp).clip(RoundedCornerShape(11.dp)).background(PEACH.copy(alpha = .18f)), contentAlignment = Alignment.Center) {
-                Icon(Icons.question, null, Modifier.size(18.dp), tint = PEACH)
+        Row(verticalAlignment = Alignment.Top) {
+            ShapeTile(pg.row.str("name"), 40.dp, tk.warn) {
+                Icon(Icons.question, null, Modifier.size(20.dp), tint = tk.onWarn)
             }
-            Spacer(Modifier.width(10.dp))
-            Column {
-                Text(q?.str("question") ?: ask.str("text").ifEmpty { "A question" }, fontSize = 15.5.sp, fontWeight = FontWeight.Medium)
-                if (q != null && q.str("header").isNotEmpty()) Text(q.str("header"), fontSize = 12.5.sp, color = LocalExtra.current.text3)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                // The question's first sentence is its title, the screen's one emphasized line; what follows explains it
+                val text = q?.str("question") ?: ask.str("text").ifEmpty { "A question" }
+                val cut = Regex("(?<=[?.!])\\s").find(text)?.range?.first ?: -1
+                Text(if (cut > 0) text.substring(0, cut) else text, fontSize = 16.sp, lineHeight = 24.sp,
+                    fontWeight = FontWeight.Bold, color = tk.onWarnContainer, modifier = Modifier.semantics { heading() })
+                if (cut > 0) Text(text.substring(cut + 1), fontSize = 14.sp, lineHeight = 20.sp, color = tk.onWarnContainer)
+                if (q != null && q.str("header").isNotEmpty()) Text(q.str("header"), fontSize = 14.sp, lineHeight = 20.sp, color = tk.onWarnContainer.copy(alpha = .82f))
             }
         }
-        if (q != null) {
-            for ((i, o) in q.optJSONArray("options").objects().withIndex()) {
+        if (q != null) Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            val opts = q.optJSONArray("options").objects()
+            for ((i, o) in opts.withIndex()) {
                 val n = i + 1
+                val sh = segment(i, opts.size, 20.dp, 4.dp)
                 Column(
-                    Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(RoundedCornerShape(16.dp))
-                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                        .then(if (picked == n) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp)) else Modifier)
+                    Modifier.fillMaxWidth().heightIn(min = 56.dp).clip(sh)
+                        .background(tk.warn.copy(alpha = .10f).compositeOver(tk.warnContainer))
+                        .then(if (picked == n) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, sh) else Modifier)
                         .clickable(enabled = canTap && picked == 0) {
                             picked = n
                             vm.pageAnswer(n) { ok -> if (ok) sentAt = System.currentTimeMillis() else picked = 0 }
                         }
-                        .padding(horizontal = 14.dp, vertical = 12.dp)
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
                         .alpha(if (canTap || picked == n) 1f else .7f),
+                    verticalArrangement = Arrangement.Center,
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(o.str("label"), fontSize = 14.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                        Text(o.str("label"), fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium, color = tk.onWarnContainer, modifier = Modifier.weight(1f))
                         if (picked == n && sentAt > 0) Text("Sent", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
                     }
-                    if (o.str("description").isNotEmpty()) Text(o.str("description"), fontSize = 12.5.sp, lineHeight = 17.sp, color = LocalExtra.current.text3)
+                    if (o.str("description").isNotEmpty()) Text(o.str("description"), fontSize = 12.sp, lineHeight = 16.sp, color = tk.onWarnContainer.copy(alpha = .82f))
                 }
             }
-            if (!ask.optBoolean("answerable")) Text("Answer on the server", fontSize = 12.sp, color = LocalExtra.current.text3, modifier = Modifier.padding(horizontal = 4.dp))
         }
+        if (q != null && !ask.optBoolean("answerable")) Text("Answer on the server", fontSize = 12.sp, color = tk.onWarnContainer.copy(alpha = .82f), modifier = Modifier.padding(horizontal = 4.dp))
     }
 }
 

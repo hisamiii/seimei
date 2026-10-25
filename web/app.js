@@ -1,6 +1,6 @@
 // The page: the stream from the server, the three tabs, and the header and navigation bar around them.
-import { $, S, hooks, clock, finePointer, viewing, closeView, keep } from './util.js';
-import { render, onDelta, clearLive, addEvent, loadHistory, autosize, waitingApprovals, toBottom, showLane } from './chat.js';
+import { $, S, hooks, clock, finePointer, viewing, closeView, keep, reduced } from './util.js';
+import { render, onDelta, clearLive, addEvent, loadHistory, autosize, waitingApprovals, toBottom, showLane, following, nearBottom } from './chat.js';
 import { setWorkers, setSessions, sheetEvent, agentCounts, showAgents, pageOpen, closePage, archOpen, closeArch } from './agents.js';
 import { setUsage, renderUsage, tone } from './usage.js';
 import { setTasks, loadTasks } from './tasks.js';
@@ -31,6 +31,8 @@ function show(tab) {
   S.tab = tab;
   for (const t of TABS) pages[t].hidden = t !== tab;
   document.body.dataset.tab = tab;
+  // Top level (BEHAVIOR.md 1): the new destination fades in; no slide between nav destinations
+  if (was && was !== tab && !reduced()) pages[tab].animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: 'cubic-bezier(.2, 0, 0, 1)' });
   for (const b of document.querySelectorAll('.nav-item')) {
     const on = b.dataset.tab === tab;
     b.classList.toggle('on', on);
@@ -39,12 +41,23 @@ function show(tab) {
   }
   if (tab === 'chat') {
     S.unread = false;
-    if (was !== 'chat') requestAnimationFrame(toBottom);
+    // Back at the bottom only if the reader was following when they left
+    if (was !== 'chat' && following()) requestAnimationFrame(toBottom);
     if (S.lane === 't') showLane('t');
   } else if (tab === 'agents') showAgents();
   else if (tab === 'usage') renderUsage();
   chrome();
+  lift();
 }
+
+// The top bar fills with surface-container once its screen has moved off its rest: the chat off its end, Agents,
+// Usage and Tasks off their top (M3 app bars on scroll)
+function lift() {
+  const sc = pages[S.tab];
+  const off = S.tab === 'chat' && S.lane !== 'k' ? !nearBottom() : sc.scrollTop > 0;
+  document.body.classList.toggle('lifted', off);
+}
+for (const t of TABS) pages[t].addEventListener('scroll', lift, { passive: true });
 
 // Chat is home: other tabs sit one step of history above it, so the phone's back button returns to the chat.
 function go(tab) {

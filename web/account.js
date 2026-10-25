@@ -1,6 +1,6 @@
 // The account menu: fingerprint login, the phone app and its pairing, the theme, the activity log, and logging out.
 import { deviceName, register, supported } from './passkey.js';
-import { $, el, clock, dayLabel, when, post, getJSON, toLogin, snack } from './util.js';
+import { $, el, clock, dayLabel, when, post, getJSON, toLogin, snack, ask } from './util.js';
 import { main, toBottom } from './chat.js';
 import { sheet, showSheet } from './sheet.js';
 import { openThemes } from './themepick.js';
@@ -178,7 +178,7 @@ async function openPhones() {
     const un = el('button', 'btn text', 'Unpair');
     un.type = 'button';
     un.addEventListener('click', async () => {
-      if (!confirm(`Unpair ${d.name}? It logs out at once and needs a new code to come back.`)) return;
+      if (!await ask({ headline: `Unpair ${d.name}?`, body: 'It needs a new pairing code to come back', confirm: 'Unpair' })) return;
       await post(`api/devices/${encodeURIComponent(d.id)}/revoke`, {}).catch(() => null);
       openPhones();
     });

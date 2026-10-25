@@ -1,5 +1,15 @@
 package com.hisamiowo.seimei
 
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.draw.shadow
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.animation.core.animate
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
@@ -121,11 +131,11 @@ import org.json.JSONObject
 // ---------- the chat list ----------
 
 @Composable
-fun ChatTab(vm: Seimei) {
+fun ChatTab(vm: Seimei, lane: String) {
     // Newest at the bottom: a reversed list keeps the reader pinned to the end while things arrive.
     val state = rememberLazyListState()
     var zoom by remember { mutableStateOf<String?>(null) }
-    val traj = vm.lane == "t"
+    val traj = lane == "t"
     val rows = (if (traj) vm.trail else vm.items).asReversed()
     val scope = rememberCoroutineScope()
     // The list keeps its first visible row in place when rows are added below it, so after a burst of new rows
@@ -153,11 +163,12 @@ fun ChatTab(vm: Seimei) {
         }
     }
     // Rows sit after the away card and the live or working row, when those show.
-    val liveHere = vm.live.isNotEmpty() && vm.liveLane == vm.lane
+    val liveHere = vm.live.isNotEmpty() && vm.liveLane == lane
     val lead = listOf(!vm.online && vm.awaySince != null, liveHere || (vm.online && vm.busy && vm.waiting == 0)).count { it } +
         if (traj) 0 else vm.pending.size
     // A tapped notification names an event; it may sit in either lane.
     LaunchedEffect(vm.focus, rows.size) {
+        if (lane != vm.lane) return@LaunchedEffect
         val id = vm.focus ?: return@LaunchedEffect
         val i = rows.indexOfFirst { it.key == "e$id" }
         if (i >= 0) {
@@ -167,7 +178,9 @@ fun ChatTab(vm: Seimei) {
     }
     // A fold line or an anchor was tapped: go to the row it names and flash it.
     var flashing by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(vm.goto, vm.lane) {
+    LaunchedEffect(vm.goto) {
+        // Only the lane on screen takes it (the one sliding out doesn't)
+        if (lane != vm.lane) return@LaunchedEffect
         val key = vm.goto ?: return@LaunchedEffect
         vm.goto = null
         val i = rows.indexOfFirst { it.key == key }
@@ -178,15 +191,25 @@ fun ChatTab(vm: Seimei) {
         delay(1400)
         flashing = null
     }
-    // Each lane starts at its newest row.
-    LaunchedEffect(vm.lane) {
-        if (vm.goto == null) {
+    // Each lane comes back where it was left; at its newest row if the reader was following then (BEHAVIOR.md 8)
+    LaunchedEffect(Unit) {
+        if (vm.goto != null) return@LaunchedEffect
+        val spot = vm.laneSpot[lane]
+        if (spot == null || spot.third) {
             state.scrollToItem(0)
             follow = true
+        } else {
+            state.scrollToItem(spot.first, spot.second)
+            follow = false
         }
     }
+    DisposableEffect(Unit) { onDispose { vm.laneSpot[lane] = Triple(state.firstVisibleItemIndex, state.firstVisibleItemScrollOffset, follow) } }
+    LaunchedEffect(state) { snapshotFlow { state.canScrollBackward }.collect { vm.lifted = it } }
+    // Rows that came in below since the reader left the end: the jump button counts them
+    var leftAt by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(follow) { leftAt = if (follow) null else rows.firstOrNull()?.key }
+    val missed = leftAt?.let { k -> rows.indexOfFirst { it.key == k }.takeIf { it > 0 } } ?: 0
     Column(Modifier.fillMaxSize()) {
-    LaneTabs(vm)
     Box(Modifier.fillMaxSize()) {
     LazyColumn(
         Modifier.fillMaxSize(),
@@ -215,12 +238,34 @@ fun ChatTab(vm: Seimei) {
     // An empty chat greets instead of showing a blank sheet; an empty trajectory says what will show.
     if (traj && vm.trail.isEmpty() && !vm.hasOlder) Text("Nothing yet",
         Modifier.align(Alignment.Center).padding(horizontal = 48.dp), fontSize = 14.sp, color = LocalExtra.current.text3, textAlign = TextAlign.Center)
-    // Scrolled up: a way back to the end, which also shows that something new may be there.
-    if (!follow) SmallFloatingActionButton(
-        { scope.launch { state.animateScrollToItem(0); follow = true } },
-        Modifier.align(Alignment.BottomEnd).padding(16.dp),
-        containerColor = MaterialTheme.colorScheme.secondaryContainer,
-    ) { Icon(Icons.down, "Jump to the newest") }
+    // Scrolled up: a way back, with how many rows came in below. An unanswered card above the view comes first.
+    if (!follow) {
+        val cs = MaterialTheme.colorScheme
+        Row(
+            Modifier.align(Alignment.BottomEnd).padding(16.dp).height(48.dp).shadow(3.dp, RoundedCornerShape(16.dp)).clip(RoundedCornerShape(16.dp))
+                .background(cs.secondaryContainer)
+                .clickable {
+                    scope.launch {
+                        val open = rows.indexOfFirst { (it is Item.Approval && it.outcome == null) || (it is Item.Worker && it.event == "asking" && it.settled == null) }
+                        val last = state.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                        if (open >= 0 && lead + open > last) state.animateScrollToItem(lead + open)
+                        else {
+                            state.animateScrollToItem(0)
+                            follow = true
+                        }
+                    }
+                }
+                .semantics(mergeDescendants = true) { contentDescription = if (missed > 0) "Jump to latest, $missed new" else "Jump to latest" }
+                .padding(start = 14.dp, end = 18.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(Icons.down, null, Modifier.size(20.dp), tint = cs.onSecondaryContainer)
+            Text("Latest", fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium, color = cs.onSecondaryContainer)
+            if (missed > 0) Box(Modifier.heightIn(min = 20.dp).clip(CircleShape).background(cs.primary).padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {
+                Text("$missed", fontSize = 12.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold, color = cs.onPrimary)
+            }
+        }
+    }
     }
     }
     zoom?.let { Zoom(vm, it) { zoom = null } }
@@ -229,7 +274,7 @@ fun ChatTab(vm: Seimei) {
 /** Chat | Trajectory | Tasks: the conversation, what happened on its own, and seimei's board. */
 @Composable
 fun LaneTabs(vm: Seimei) {
-    Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+    Row(Modifier.fillMaxWidth().background(barColor(vm)).padding(start = 12.dp, end = 12.dp, bottom = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         LaneTab("Chat", vm.lane == "c", 0) { vm.showLane("c") }
         LaneTab("Trajectory", vm.lane == "t", vm.unseen) { vm.showLane("t") }
         LaneTab("Tasks", vm.lane == "k", 0) { vm.showLane("k") }
@@ -290,7 +335,7 @@ fun SwipeReply(onReply: () -> Unit, content: @Composable () -> Unit) {
         rememberDraggableState { d ->
             val was = dx
             dx = (dx - d).coerceIn(0f, mark * 1.3f)
-            if (was < mark && dx >= mark) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            if (was < mark && dx >= mark) haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
         },
         Orientation.Horizontal,
         onDragStopped = {
@@ -300,7 +345,10 @@ fun SwipeReply(onReply: () -> Unit, content: @Composable () -> Unit) {
     )) {
         Icon(Icons.reply, "Reply", Modifier.align(Alignment.CenterEnd).padding(end = 4.dp).size(22.dp)
             .alpha((dx / mark).coerceIn(0f, 1f)), tint = MaterialTheme.colorScheme.primary)
-        Box(Modifier.offset { IntOffset(-dx.roundToInt(), 0) }) { content() }
+        // The swipe has a spoken twin for TalkBack (BEHAVIOR.md 6)
+        Box(Modifier.offset { IntOffset(-dx.roundToInt(), 0) }.semantics {
+            customActions = listOf(CustomAccessibilityAction("Reply") { onReply(); true })
+        }) { content() }
     }
 }
 
@@ -816,11 +864,12 @@ fun QuestionCard(w: Item.Worker, open: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(t.warn), contentAlignment = Alignment.Center) {
+            ShapeTile(w.name, 40.dp, t.warn) {
                 Icon(Icons.question, null, Modifier.size(22.dp), tint = t.onWarn)
             }
             Spacer(Modifier.width(12.dp))
-            Text(w.name, fontSize = 16.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold, color = t.onWarnContainer, modifier = Modifier.weight(1f))
+            // An open question is the screen's one emphasized title
+            Text(w.name, fontSize = 16.sp, lineHeight = 24.sp, fontWeight = if (w.settled == null) FontWeight.Bold else FontWeight.Medium, color = t.onWarnContainer, modifier = Modifier.weight(1f))
             w.settled?.let { Text(it, fontSize = 12.sp, color = t.onWarnContainer.copy(alpha = .8f)) }
         }
         if (w.text.isNotEmpty()) Md(w.text, 14, t.onWarnContainer)
@@ -929,10 +978,14 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
             value = true
         }
     }
+    val haptic = LocalHapticFeedback.current
     fun answer(approve: Boolean, option: String?, note: String? = null, key: String = option ?: "") {
         sent = true
         tapped = key
-        vm.decide(a.aid, approve, option, note) { sent = false }
+        // Confirm once the server took the answer, Reject when it didn't go through (BEHAVIOR.md 7); nothing on the tap
+        vm.decide(a.aid, approve, option, note, landed = { ok ->
+            haptic.performHapticFeedback(if (ok) HapticFeedbackType.Confirm else HapticFeedbackType.Reject)
+        }) { sent = false }
     }
     // The indicator sits over the hidden label, so the button keeps its size.
     @Composable
@@ -1013,11 +1066,23 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
                 // A full-width group: the main action largest and on the thumb side
                 if (perm) FilledTonalIconButton({ noting = true }, Modifier.size(52.dp), enabled = !sent) { Icon(PEN, "Add a note", Modifier.size(20.dp)) }
                 if (perm) Spacer(Modifier.width(8.dp))
-                FilledTonalButton({ answer(false, if (perm) "deny" else null, key = "deny") }, Modifier.weight(1f).heightIn(min = 52.dp), enabled = !sent) {
+                // Under the finger a button takes 12 corners and widens while the other gives way (final.css, the fast spring)
+                val denyPress = remember { MutableInteractionSource() }
+                val allowPress = remember { MutableInteractionSource() }
+                val denyDown by denyPress.collectIsPressedAsState()
+                val allowDown by allowPress.collectIsPressedAsState()
+                val fast = spring<Float>(dampingRatio = .6f, stiffness = 1400f)
+                val denyW by animateFloatAsState(if (allowDown) .8f else if (denyDown) 1.3f else 1f, fast, label = "denyW")
+                val allowW by animateFloatAsState(if (allowDown) 1.9f else if (denyDown) 1.1f else 1.4f, fast, label = "allowW")
+                val denyR by animateDpAsState(if (denyDown) 12.dp else 26.dp, label = "denyR")
+                val allowR by animateDpAsState(if (allowDown) 12.dp else 26.dp, label = "allowR")
+                FilledTonalButton({ answer(false, if (perm) "deny" else null, key = "deny") }, Modifier.weight(denyW).heightIn(min = 52.dp), enabled = !sent,
+                    shape = RoundedCornerShape(denyR), interactionSource = denyPress) {
                     Label("deny", deny?.label ?: "Deny")
                 }
                 Spacer(Modifier.width(8.dp))
-                Button({ answer(true, if (perm) "once" else null, key = "once") }, Modifier.weight(1.4f).heightIn(min = 52.dp), enabled = !sent) {
+                Button({ answer(true, if (perm) "once" else null, key = "once") }, Modifier.weight(allowW).heightIn(min = 52.dp), enabled = !sent,
+                    shape = RoundedCornerShape(allowR), interactionSource = allowPress) {
                     Icon(Icons.check, null, Modifier.size(20.dp).alpha(if (slow && tapped == "once") 0f else 1f))
                     Spacer(Modifier.width(8.dp))
                     Label("once", once?.label ?: "Allow")

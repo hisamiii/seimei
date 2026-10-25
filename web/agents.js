@@ -1,5 +1,5 @@
 // Shikigami and the user's own Claude sessions: the Agents list, and the full-screen page of one of them.
-import { $, S, hooks, el, svg, clock, at as atTime, home, short, when, getJSON, snack, finePointer, toLogin, ICON, keep } from './util.js';
+import { $, S, hooks, el, svg, clock, at as atTime, home, short, when, getJSON, snack, finePointer, toLogin, ICON, keep, wearShape, enter, leave } from './util.js';
 import { Renderer, doing as doingPhrase, elapsed, loader } from './chat.js';
 import { sheet, showSheet, closeSheet } from './sheet.js';
 import { metricFacts } from './usage.js';
@@ -157,8 +157,11 @@ const CLOCK = 'M12 4a8 8 0 1 1 0 16 8 8 0 0 1 0-16zM12 8v4l2.5 2';
 const END = { stopped: 'M7.5 7.5h9v9h-9z', interrupted: 'M4 12a8 8 0 1 0 2.4-5.7M4 4.5v4h4' };
 
 function tile(x) {
-  const t = el('span', `tile ${x.state}${x.bad ? ' bad' : ''}`);
+  // A live one wears its identity shape (a working one morphs it); finished ones are plain circles
+  const live = x.state !== 'done';
+  const t = el('span', `tile${live ? ' sh' : ''} ${x.state}${x.bad ? ' bad' : ''}`);
   t.style.setProperty('--c', tint(x.project));
+  if (live) wearShape(t, x.name);
   if (x.state === 'work') {
     t.append(loader('bare small'));
     return t;
@@ -363,8 +366,10 @@ export function renderAgents() {
     empty.append(el('b', null, 'No shikigami or sessions yet'));
     parts.push(empty);
   }
+  // One emphasized title on the screen: the shikigami at work
   const top = page.scrollTop;
   page.replaceChildren(...parts);
+  page.querySelector('.agent.work .top b')?.classList.add('emph');
   page.scrollTop = top;
 }
 
@@ -470,7 +475,11 @@ function question(ask) {
   ic.append(svg(Q_ICON, 18));
   const t = el('span', 'qt');
   const q = ask.questions?.[0];
-  t.append(el('b', null, q?.question || ask.text || ''));
+  // The question's first sentence is its title (the screen's one emphasized line); what follows explains it
+  const text = q?.question || ask.text || '';
+  const cut = text.search(/(?<=[?.!])\s/);
+  t.append(el('b', null, cut > 0 ? text.slice(0, cut) : text));
+  if (cut > 0) t.append(el('span', 'qrest', text.slice(cut + 1)));
   top.append(ic, t);
   P.qbox.append(top);
   if (q) {
@@ -1037,8 +1046,21 @@ export async function openPage(kind, id) {
   }
 }
 
+// Forward and backward (BEHAVIOR.md 1): the page comes in from the end edge and goes back out to it; focus goes to
+// its title, and back to the row that opened it on close
+let closing = null;
+let opener = null;
 function shown(reopen) {
   head();
+  closing?.cancel();
+  closing = null;
+  if (sp.hidden) {
+    opener = document.activeElement;
+    sp.hidden = false;
+    enter(sp, 'translateX(100%)');
+    P?.title?.setAttribute('tabindex', '-1');
+    P?.title?.focus({ preventScroll: true });
+  }
   sp.hidden = false;
   document.body.classList.add('spage-open');
   if (!reopen && !history.state?.spage) history.pushState({ spage: true }, '');
@@ -1054,7 +1076,16 @@ export function closePage() {
   closeSheet(true);
   P?.files.forEach((a) => a.url && URL.revokeObjectURL(a.url));
   P = null;
-  sp.hidden = true;
-  sp.replaceChildren();
-  document.body.classList.remove('spage-open');
+  const done = () => {
+    closing = null;
+    sp.hidden = true;
+    sp.replaceChildren();
+    document.body.classList.remove('spage-open');
+    if (opener?.isConnected) opener.focus({ preventScroll: true });
+    opener = null;
+  };
+  if (sp.hidden) return done();
+  const out = leave(sp, 'translateX(100%)');
+  closing = out;
+  out.onfinish = () => { if (closing === out) done(); };
 }

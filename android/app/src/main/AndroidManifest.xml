@@ -57,5 +57,6 @@
         </activity-alias>
         <receiver android:name=".InstallResult" android:exported="false" />
         <receiver android:name=".Decide" android:exported="false" />
+        <receiver android:name=".Reply" android:exported="false" />
     </application>
 </manifest>

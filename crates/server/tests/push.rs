@@ -129,28 +129,36 @@ async fn rules_who_gets_what_when() {
     let open_a = p.opened(Some(&a), Box::new(|| true));
     settle().await;
     assert!(took(&f).is_empty(), "no stale question cancel without old state");
-    events.add(json!({"type": "approval", "aid": "a1", "who": "seimei", "action": "bash", "target": "claude stop x",
+    events.add(json!({"type": "approval", "aid": "a1", "who": "seimei", "action": "command", "target": "run a command",
                       "detail": "claude stop x"}));
     settle().await;
     let out = took(&f);
     assert_eq!(toks(&out), ["tokB"], "approval goes to closed phones only");
     assert_eq!((&out[0].1["alert"], &out[0].1["kind"]), (&json!("1"), &json!("approval")));
-    assert_eq!(out[0].1["title"], "seimei wants to claude stop x");
+    // 29 characters is one past M3's limit: the verb stays, the command is the body
+    assert_eq!((&out[0].1["title"], &out[0].1["body"]), (&json!("seimei wants to run"), &json!("claude stop x")));
+    assert_eq!((&out[0].1["tag"], &out[0].1["aid"]), (&json!("approval:a1"), &json!("a1")), "one notification per card");
     assert!(out.iter().all(|(_, x)| x.as_object().unwrap().values().all(Value::is_string)), "all values are strings");
-    events.add(
-        json!({"type": "approval", "aid": "a2", "who": "lapdog", "action": "bash", "target": "rm x", "detail": "rm x"}),
-    );
+    events.add(json!({"type": "approval", "aid": "a2", "who": "lapdog", "action": "edit",
+                      "target": "edit ~/Development/Projects/seimei/web/chat.js", "detail": "a diff"}));
     settle().await;
-    assert_eq!(took(&f).last().unwrap().1["title"], "2 approvals waiting");
+    let out = took(&f);
+    assert_eq!(out.len(), 1, "a second card adds its own, the first stays");
+    let n = &out[0].1;
+    assert_eq!((&n["tag"], &n["group"], &n["alert"]), (&json!("approval:a2"), &json!("approvals"), &json!("1")));
+    // A title past 28 characters keeps the verb; the target leads the body
+    assert_eq!(n["title"], "lapdog wants to edit");
+    assert_eq!(n["body"], "~/Development/Projects/seimei/web/chat.js\na diff");
     events.add(json!({"type": "approval_done", "aid": "a1", "outcome": "approved"}));
     settle().await;
-    let last = took(&f).pop().unwrap().1;
-    assert!(last["alert"] == "0" && last["title"].as_str().unwrap().contains("lapdog"), "one left updates quietly");
+    let out = took(&f);
+    assert_eq!(out.len(), 1);
+    assert_eq!((&out[0].1["tag"], &out[0].1["cancel"]), (&json!("approval:a1"), &json!("1")), "a settled card withdraws only its own");
     events.add(json!({"type": "approval_done", "aid": "a2", "outcome": "denied"}));
     settle().await;
     let out = took(&f);
     assert_eq!(out.len(), 1);
-    assert_eq!((out[0].0.as_str(), &out[0].1["cancel"]), ("tokB", &json!("1")), "none left withdraws");
+    assert_eq!((out[0].0.as_str(), &out[0].1["tag"], &out[0].1["cancel"]), ("tokB", &json!("approval:a2"), &json!("1")), "none left withdraws");
 
     // Finished turns never push on their own.
     p.closed(Some(&a), open_a);

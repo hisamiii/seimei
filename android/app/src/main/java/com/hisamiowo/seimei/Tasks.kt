@@ -1,5 +1,9 @@
 package com.hisamiowo.seimei
 
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -24,6 +28,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,6 +58,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.json.JSONObject
@@ -148,7 +154,6 @@ fun TasksTab(vm: Seimei) {
     var pausedShown by rememberSaveable { mutableStateOf(false) }
     var moreMine by rememberSaveable { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
-        LaneTabs(vm)
         if (b == null || b.tasks.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(if (b == null) "Loading the board…" else "No tasks",
@@ -156,7 +161,9 @@ fun TasksTab(vm: Seimei) {
             }
             return@Column
         }
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp)) {
+        val list = rememberLazyListState()
+        LaunchedEffect(list) { snapshotFlow { list.canScrollBackward }.collect { vm.lifted = it } }
+        LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp)) {
             item(key = "view") { ViewSwitch(view) { view = it } }
             if (view == "now") nowItems(vm, now(b), moreMine) { moreMine = true }
             else allItems(vm, b, doneShown, pausedShown,
@@ -199,10 +206,10 @@ private fun TaskGroupTitle(title: String, n: Int?, color: Color) {
         modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 8.dp).semantics { heading() })
 }
 
-private fun LazyListScope.group(key: String, rows: List<Pair<String, @Composable (Shape) -> Unit>>) {
+private fun LazyListScope.group(key: String, rows: List<Pair<String, @Composable (Shape) -> Unit>>, outer: Dp = 20.dp, inner: Dp = 4.dp) {
     itemsIndexed(rows, key = { _, r -> "$key:${r.first}" }) { i, (_, row) ->
         if (i > 0) Spacer(Modifier.height(2.dp))
-        row(segment(i, rows.size, 20.dp, 4.dp))
+        row(segment(i, rows.size, outer, inner))
     }
 }
 
@@ -216,11 +223,12 @@ private fun LazyListScope.nowItems(vm: Seimei, n: Now, moreMine: Boolean, more: 
             mine.forEach { t -> add(t.id to { s -> TaskRow(vm, t, s, "you", listOf("your task"), warm = true) }) }
             if (n.mine.size > mine.size) add("more" to { s -> More("${n.mine.size - mine.size} more of yours", s, more) })
         }
-        group("n", rows)
+        // Needs you, the hero: its own corner set against the routine groups
+        group("n", rows, 28.dp, 8.dp)
     } else item(key = "clear") { AllClear(vm) }
     if (n.running.isNotEmpty()) {
         item(key = "running") { TaskGroupTitle("Running", n.running.size, MaterialTheme.colorScheme.primary) }
-        group("r", n.running.map { t -> t.id to { s: Shape -> TaskRow(vm, t, s, "run", listOfNotNull(t.owner, t.current), bar = true) } })
+        group("r", n.running.mapIndexed { i, t -> t.id to { s: Shape -> TaskRow(vm, t, s, "run", listOfNotNull(t.owner, t.current), bar = true, emph = i == 0) } })
     }
     if (n.next.isNotEmpty()) {
         item(key = "next") { TaskGroupTitle("Up next", null, LocalExtra.current.text2) }
@@ -277,7 +285,7 @@ private fun LazyListScope.allItems(vm: Seimei, b: Board, doneShown: List<String>
 /** A row: optional tile, title, supporting line, optional bar. Rows inside an open project are set in by their text. */
 @Composable
 private fun TaskRow(vm: Seimei, t: Task, shape: Shape, kind: String, parts: List<String>, warm: Boolean = false, inset: Boolean = false,
-                    bar: Boolean = false, ref: Boolean = false) {
+                    bar: Boolean = false, ref: Boolean = false, emph: Boolean = false) {
     val tk = LocalTokens.current
     val x = LocalExtra.current
     val cs = MaterialTheme.colorScheme
@@ -296,8 +304,7 @@ private fun TaskRow(vm: Seimei, t: Task, shape: Shape, kind: String, parts: List
         val tile = !inset && (kind == "ask" || kind == "review")
         if (tile) {
             val ask = kind == "ask"
-            Box(Modifier.size(40.dp).clip(if (ask) RoundedCornerShape(12.dp) else CircleShape).background(if (ask) tk.warn else cs.primary),
-                contentAlignment = Alignment.Center) {
+            ShapeTile(t.owner, 40.dp, if (ask) tk.warn else cs.primary) {
                 Icon(if (ask) Icons.question else Icons.review, null, Modifier.size(20.dp), tint = if (ask) tk.onWarn else cs.onPrimary)
             }
             Spacer(Modifier.width(16.dp))
@@ -305,7 +312,8 @@ private fun TaskRow(vm: Seimei, t: Task, shape: Shape, kind: String, parts: List
             Tick(vm, t, if (inset) Modifier.padding(end = 8.dp) else Modifier.padding(end = 16.dp))
         }
         Column(Modifier.weight(1f)) {
-            Text(t.title, fontSize = 16.sp, lineHeight = 24.sp, fontWeight = FontWeight.Medium,
+            // The screen's one emphasized title: the running task
+            Text(t.title, fontSize = 16.sp, lineHeight = 24.sp, fontWeight = if (emph) FontWeight.Bold else FontWeight.Medium,
                 color = when { warm -> tk.onWarnContainer; kind == "done" -> x.text3; else -> cs.onSurface },
                 maxLines = if (warm || kind == "ask" || kind == "review") 2 else 1, overflow = TextOverflow.Ellipsis)
             Text(buildAnnotatedString {
@@ -418,10 +426,15 @@ private fun Fold(text: String, shape: Shape, onClick: () -> Unit) {
 @Composable
 private fun AllClear(vm: Seimei) {
     val tk = LocalTokens.current
+    val reduced = reducedMotion()
     val since = remember(vm.board) { vm.board?.let(::board)?.tasks?.maxOfOrNull { it.doneAt }?.takeIf { it > 0 } ?: (System.currentTimeMillis() / 1000.0) }
     Row(Modifier.fillMaxWidth().padding(top = 16.dp).heightIn(min = 68.dp).clip(RoundedCornerShape(28.dp)).background(tk.okContainer)
         .padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(40.dp).clip(CircleShape).background(tk.ok), contentAlignment = Alignment.Center) {
+        // The clover settles into the very sunny shape once, on a short spring
+        val settle = remember { Animatable(if (reduced) 1f else 0f) }
+        LaunchedEffect(Unit) { settle.animateTo(1f, tween(410, easing = SpringEasing)) }
+        Box(Modifier.size(40.dp).clip(PolyShape(SHAPES.getValue("clover4"), SHAPES.getValue("very-sunny"), settle.value)).background(tk.ok),
+            contentAlignment = Alignment.Center) {
             Icon(Icons.check, null, Modifier.size(24.dp), tint = tk.okContainer)
         }
         Spacer(Modifier.width(16.dp))
