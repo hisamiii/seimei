@@ -71,11 +71,14 @@ function loaded(id, ms) {
   });
 }
 
-// A discarded tab has no page to work on: load it first.
-async function awake(t) {
-  if (!t.discarded) return t;
-  await browser.tabs.reload(t.id);
-  await sleep(100);
+// A tab to work in: a discarded one is loaded first, and one still loading gets to finish.
+async function ready(t) {
+  if (t.discarded) {
+    await browser.tabs.reload(t.id);
+    await sleep(100);
+  } else if (t.status !== 'loading') {
+    return t;
+  }
   await loaded(t.id, 30000);
   return tab(t.id);
 }
@@ -175,7 +178,7 @@ const OPS = {
     return Promise.all(tabs.map(async (id) => info(await tab(id), groups)));
   },
   async read({ tab: id, elements }) {
-    const t = await awake(await tab(id));
+    const t = await ready(await tab(id));
     const r = await call(t.id, 0, 'read', { elements: Boolean(elements) });
     if (!elements) return r;
     // Elements in frames, after the top frame's, with the frame in their ref.
@@ -198,7 +201,7 @@ const OPS = {
     return r;
   },
   async act(args) {
-    const t = await awake(await tab(args.tab));
+    const t = await ready(await tab(args.tab));
     const { frame, ref } = parseRef(t.id, args.ref);
     const before = t.url;
     const nav = navigation(t.id);
@@ -229,7 +232,7 @@ const OPS = {
     };
   },
   async wait(args) {
-    const t = await awake(await tab(args.tab));
+    const t = await ready(await tab(args.tab));
     const end = Date.now() + Math.min(Number(args.timeout) || 10, 60) * 1000;
     const t0 = Date.now();
     const status = async () => {
@@ -279,7 +282,7 @@ const OPS = {
     return { ...(await status()), timedOut: true };
   },
   async screenshot(args) {
-    const t = await awake(await tab(args.tab));
+    const t = await ready(await tab(args.tab));
     const { frame, ref } = parseRef(t.id, args.ref);
     if (frame) throw new Error('screenshots of elements inside frames are not supported; take the whole tab');
     const b = await call(t.id, 0, 'box', { ref });
