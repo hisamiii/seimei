@@ -350,6 +350,14 @@ async fn acp_shikigami() {
     let loads = std::fs::read_to_string(fake.join("log.jsonl")).unwrap().matches("\"session/load\"").count();
     assert_eq!(loads, 1);
 
+    // Its process closes a few seconds after a turn ends, and the next message loads the session again.
+    tokio::time::sleep(Duration::from_secs(7)).await;
+    let (from, ok) = turn(&w, "once more", "done").await;
+    assert!(ok);
+    assert_eq!(said(&w, from), ["You said: once more"]);
+    let loads = std::fs::read_to_string(fake.join("log.jsonl")).unwrap().matches("\"session/load\"").count();
+    assert_eq!(loads, 2, "closed after its turn, loaded for the next message");
+
     // A shorter plan in a later session drops the steps the longer one left.
     let (_, ok) = turn(&w, "!short", "done").await;
     assert!(ok);

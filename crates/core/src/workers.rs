@@ -60,8 +60,9 @@ pub const CONTEXTS: [(&str, f64); 3] = [("256k", 256_000.0), ("400k", 400_000.0)
 pub const ACTIVE: [&str; 2] = ["running", "asking"];
 /// How long a started process must stay up before adopt ends the user's session.
 const START_SETTLE: Duration = Duration::from_secs(1);
-/// An idle session's process is closed after this; the next message resumes it.
-const IDLE_DISCONNECT: Duration = Duration::from_secs(600);
+/// A shikigami's process is closed this soon after its turn ends (each idle one holds about 330 MB); the next message
+/// resumes the session, a cold start of about 3 s. The few seconds let the process finish what it writes after its result.
+const IDLE_DISCONNECT: Duration = Duration::from_secs(5);
 /// A turn with nothing to say (a stale task notification replayed on resume) is no report: wait this long for the
 /// real turn before calling the worker done.
 const TRIVIAL_GRACE: Duration = Duration::from_secs(30);
@@ -752,6 +753,8 @@ struct Session {
     turn_text: bool,
     /// Subagents still working in the background: the turn may end before they report back.
     tasks: HashMap<String, String>,
+    /// Background shells still running: they live in its process, so it stays up until they end.
+    shells: HashSet<String>,
     /// /effort commands sent to the session whose own result (no model turn) is not a turn of the task.
     quiet: u32,
     /// TaskCreate calls waiting for their result, which names the step's id.
@@ -856,6 +859,7 @@ impl Session {
             last_text: String::new(),
             turn_text: false,
             tasks: HashMap::new(),
+            shells: HashSet::new(),
             quiet: 0,
             steps: HashMap::new(),
             grace: None,
@@ -884,7 +888,7 @@ impl Session {
                 _ = sleep_until(idle.unwrap_or_else(far)), if idle.is_some() => {
                     // Close an idle session's process; the next message resumes it.
                     self.idle = None;
-                    if !ACTIVE.contains(&self.w.state().as_str()) {
+                    if !ACTIVE.contains(&self.w.state().as_str()) && self.shells.is_empty() {
                         self.close().await;
                     }
                 }
@@ -900,6 +904,7 @@ impl Session {
             c.close().await;
         }
         self.turn = false;
+        self.shells.clear();
     }
 
     /// The stream ended: the claude process is gone.
@@ -1097,10 +1102,17 @@ impl Session {
                 if !kind.contains("bash") && !kind.contains("shell") {
                     let what = s.data["description"].as_str().filter(|d| !d.is_empty()).unwrap_or("a subagent");
                     self.tasks.insert(str_of(&s.data["task_id"]), what.into());
+                } else {
+                    self.shells.insert(str_of(&s.data["task_id"]));
                 }
             }
             Message::System(s) if s.subtype == "task_notification" => {
-                self.tasks.remove(s.data["task_id"].as_str().unwrap_or(""));
+                let id = s.data["task_id"].as_str().unwrap_or("");
+                self.tasks.remove(id);
+                // The last background shell ended: the process may close again.
+                if self.shells.remove(id) && self.shells.is_empty() {
+                    self.idle = Some(Instant::now() + IDLE_DISCONNECT);
+                }
             }
             Message::Assistant(a) => self.assistant(a),
             Message::User(u) => self.user(u),

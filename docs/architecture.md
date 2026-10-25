@@ -33,7 +33,7 @@ The workspace: `crates/proto` (the clients for Claude Code's stream-json protoco
   in-process MCP server (`mcp__seimei__*`): summon, message, tune, notes, tasks, notify, cards, sessions, files.
 - **Shikigami** are worker sessions inside seimei, each on its own Claude Code process (or an ACP or Codex agent), with a name, a folder, a model and an
   effort. Their tools (`mcp__shikigami__*`) let them ask the user and report. When one finishes, fails or asks, the
-  dispatcher hears it at its next turn (questions and failures wake it at once). After a restart, running shikigami
+  dispatcher hears it at its next turn (questions and failures wake it at once). Its process closes a few seconds after its turn ends (an idle one holds about 330 MB), and the next message resumes the session. After a restart, running shikigami
   are resumed with a "continue" (capped at 3 per hour). A shikigami can be handed to the user as a terminal session
   ("Open on server", "Give to me") and taken back ("Hand to seimei").
 - **The user's own sessions** are read from Claude Code's registry (`~/.claude/sessions/*.json`) and transcripts. The
