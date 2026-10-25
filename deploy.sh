@@ -172,6 +172,19 @@ fi
 if [ -n "$systemd" ]; then
     systemctl --user restart "$service"
 else
+    # Out of the shikigami's claude-queue slice first (its cgroup, which setsid does not leave): a supervise-daemon
+    # started from in there freezes with the slice during every bench, the server under it too. The init script puts
+    # the server in a cgroup of its own; this covers a script from before that.
+    cg=$(sed -n 's/^0:://p' /proc/$$/cgroup)
+    top=
+    while [ -n "$cg" ] && [ -O "/sys/fs/cgroup$cg" ]; do
+        top=$cg
+        cg=${cg%/*}
+    done
+    if [ -n "$top" ] && [ -z "${SEIMEI_DEPLOY_TEST:-}" ]; then
+        { mkdir -p "/sys/fs/cgroup$top/seimei-ctl" && echo $$ >"/sys/fs/cgroup$top/seimei-ctl/cgroup.procs"; } 2>/dev/null ||
+            echo "deploy: still in $(sed -n 's/^0:://p' /proc/$$/cgroup)"
+    fi
     # rc-service hands its own environment to the service. This deploy's may come from a shikigami's shell (Claude
     # Code's and claude-queue's variables), so restart from the desktop session's, or from a minimal one without niri.
     # niri sets WAYLAND_DISPLAY and NIRI_SOCKET for what it starts, not in its own environment.
@@ -184,6 +197,71 @@ else
             XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-}" \
             rc-service --user "$service" restart
     fi
+fi
+if [ -z "${SEIMEI_DEPLOY_TEST:-}" ]; then
+    step=verify
+    status running verify
+    # Done only when the new server answers on its port as the service's own process (the unit's main process, or
+    # supervise-daemon's child) outside any claude-queue slice. No server, or one started by hand, fails the deploy.
+    if ! why=$(python3 - "$service" "$systemd" "${XDG_CONFIG_HOME:-$HOME/.config}/seimei/config.toml" <<'PY'
+import os, re, subprocess, sys, time, tomllib, urllib.error, urllib.request
+service, systemd, cfg = sys.argv[1:4]
+try:
+    port = int(tomllib.load(open(cfg, "rb")).get("server", {}).get("port", 8417))
+except (OSError, ValueError):
+    port = 8417
+
+def run(*argv):
+    return subprocess.run(argv, capture_output=True, text=True).stdout.strip()
+
+def service_pid():
+    if systemd:
+        return int(run("systemctl", "--user", "show", "-p", "MainPID", "--value", service) or 0)
+    sup = re.search(rf"^(\d+) supervise-daemon {re.escape(service)} ", run("pgrep", "-af", "supervise-daemon"), re.M)
+    if not sup:
+        return 0
+    kids = open(f"/proc/{sup[1]}/task/{sup[1]}/children").read().split()
+    return int(kids[0]) if kids else 0
+
+def listener():
+    m = re.search(r"pid=(\d+)", run("ss", "-ltnpH", f"sport = :{port}"))
+    return int(m[1]) if m else 0
+
+def answers():
+    try:
+        urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=3).close()
+    except urllib.error.HTTPError:
+        pass
+    except OSError:
+        return False
+    return True
+
+def cgroup(pid):
+    try:
+        return open(f"/proc/{pid}/cgroup").read().strip().removeprefix("0::")
+    except OSError:
+        return "?"
+
+for _ in range(60):
+    pid, held = service_pid(), listener()
+    if pid and held == pid and answers():
+        if "/queue.slice/" in cgroup(pid):
+            print(f"seimei (pid {pid}) runs in a claude-queue slice ({cgroup(pid)}) and freezes with it")
+            sys.exit(1)
+        print(f"seimei is up: pid {pid}, port {port}, cgroup {cgroup(pid)}")
+        sys.exit(0)
+    time.sleep(1)
+who = run("ps", "-o", "pid=,ppid=,args=", "-p", str(held)) if held else "nothing"
+print(f"no seimei of the service after 60 s: the service's process is {pid or 'missing'}, port {port} is held by {who}")
+sys.exit(1)
+PY
+    ); then
+        echo "deploy: FAILED: $why" >&2
+        trap - EXIT
+        status failed verify "$why"
+        exit 1
+    fi
+    echo "$why"
 fi
 line="deployed $(git -C "$app" log --oneline -1)"
 echo "$line"

@@ -103,16 +103,71 @@ pub fn unit_text(exe: &Path) -> String {
 
 /// The OpenRC user service that serves seimei from this binary, like the systemd unit.
 pub fn openrc_text(exe: &Path) -> String {
-    format!(
-        "#!/sbin/openrc-run\n# Written by `seimei setup`.\n\ndescription=\"seimei, the phone-driven dispatcher\"\n\
-         supervisor=supervise-daemon\ndirectory=\"${{HOME}}\"\ncommand=\"{}\"\ncommand_args=\"serve\"\n\
-         respawn_delay=5\nrespawn_max=0\n# A stop that hangs ends in SIGKILL, not in a server left running.\n\
-         retry=\"TERM/15/KILL/5\"\n# The key binding that ends a turn: rc-service --user seimei usr1\n\
-         extra_started_commands=\"usr1\"\n\nusr1() {{\n\tebegin \"Sending USR1 to seimei\"\n\
-         \tsupervise-daemon \"${{RC_SVCNAME}}\" --signal USR1\n\teend $?\n}}\n",
-        exe.display()
-    )
+    OPENRC.replace("{exe}", &exe.display().to_string())
 }
+
+/// Like the unit's own cgroup and KillMode: seimei and its Claude sessions in a cgroup of their own, emptied on stop.
+const OPENRC: &str = r#"#!/sbin/openrc-run
+# Written by `seimei setup`.
+
+description="seimei, the phone-driven dispatcher"
+supervisor=supervise-daemon
+directory="${HOME}"
+command="{exe}"
+command_args="serve"
+respawn_delay=5
+respawn_max=0
+# A stop that hangs ends in SIGKILL, not in a server left running.
+retry="TERM/15/KILL/5"
+# The key binding that ends a turn: rc-service --user seimei usr1
+extra_started_commands="usr1"
+
+usr1() {
+	ebegin "Sending USR1 to seimei"
+	supervise-daemon "${RC_SVCNAME}" --signal USR1
+	eend $?
+}
+
+# The highest cgroup this user owns. seimei gets a leaf of its own under it: started from a shikigami's command, it
+# would sit in that command's claude-queue slice and freeze with it whenever a bench freezes the agents.
+user_cgroup() {
+	local d top=
+	d=$(sed -n 's/^0:://p' /proc/$$/cgroup)
+	while [ -n "$d" ] && [ -O "/sys/fs/cgroup$d" ]; do
+		top=$d
+		d=${d%/*}
+	done
+	[ -n "$top" ] && echo "/sys/fs/cgroup$top"
+}
+
+# Moves this script into the leaf $1 of the user's cgroup.
+enter_cgroup() {
+	local root
+	root=$(user_cgroup) || return 1
+	mkdir -p "$root/$1" && echo $$ > "$root/$1/cgroup.procs"
+}
+
+start_pre() {
+	enter_cgroup seimei || ewarn "seimei stays in $(sed -n 's/^0:://p' /proc/$$/cgroup)"
+	return 0
+}
+
+# Whatever outlived the server (Claude sessions, after a SIGKILL or a freeze) goes with it.
+stop_post() {
+	local root i
+	root=$(user_cgroup) || return 0
+	[ -e "$root/seimei/cgroup.kill" ] || return 0
+	# Out of it first: the stop may come from one of seimei's own sessions.
+	enter_cgroup seimei-ctl || return 0
+	echo 1 > "$root/seimei/cgroup.kill"
+	for i in 1 2 3 4 5 6 7 8 9 10; do
+		grep -q '^populated 0' "$root/seimei/cgroup.events" && return 0
+		sleep 0.5
+	done
+	ewarn "processes are left in $root/seimei"
+	return 0
+}
+"#;
 
 /// Runs each command in turn; true when all of them succeed.
 fn all_ok(cmds: &[&[&str]]) -> bool {
@@ -290,4 +345,17 @@ pub fn run(read_secret: impl Fn(&str) -> String) {
 fn fail(msg: &str) -> ! {
     eprintln!("seimei: {msg}");
     std::process::exit(2)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_openrc_script_parses_and_empties_its_cgroup_on_stop() {
+        let script = super::openrc_text(std::path::Path::new("/opt/seimei/bin/seimei"));
+        assert!(script.contains("command=\"/opt/seimei/bin/seimei\"\n"), "{script}");
+        assert!(script.contains("start_pre()") && script.contains("enter_cgroup seimei ||"), "{script}");
+        assert!(script.contains("stop_post()") && script.contains("/seimei/cgroup.kill"), "{script}");
+        let check = std::process::Command::new("sh").args(["-n", "-c", &script]).output().unwrap();
+        assert!(check.status.success(), "{}", String::from_utf8_lossy(&check.stderr));
+    }
 }

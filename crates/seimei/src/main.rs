@@ -292,6 +292,12 @@ fn main() {
         }
         ([origin.clone()].into(), Some(auth))
     };
+    // The port before anything else: a second server (a respawn while another one runs) has to stop here, before it
+    // replaces the plugin sockets, writes the event log or resumes the shikigami of the one that runs.
+    let rt = tokio::runtime::Runtime::new().expect("a runtime");
+    let listener = rt
+        .block_on(tokio::net::TcpListener::bind(("127.0.0.1", port)))
+        .unwrap_or_else(|e| die(&format!("port {port}: {e}")));
 
     let events = Arc::new(EventLog::open(&state.join("events.jsonl")).unwrap_or_else(|e| die(&format!("events: {e}"))));
     let push = Push::new(
@@ -339,7 +345,6 @@ fn main() {
     let _ = app.pool.agents.set(seimei_core::workers::agents_from(cfg.get("agents").and_then(|a| a.as_table())));
     wire(&app);
 
-    let rt = tokio::runtime::Runtime::new().expect("a runtime");
     rt.block_on(async move {
         app.approvals.startup();
         events.close_open_tools("Interrupted by a restart");
@@ -406,9 +411,6 @@ fn main() {
                 ev.close();
             },
         ));
-        let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
-            .await
-            .unwrap_or_else(|e| die(&format!("port {port}: {e}")));
         let stop = {
             let events = events.clone();
             let dispatcher = app.dispatcher.clone();
