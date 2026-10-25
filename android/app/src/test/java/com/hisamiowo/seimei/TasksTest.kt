@@ -6,56 +6,61 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class TasksTest {
-    private fun task(id: String, project: String, owner: String, state: String, doneAt: Double? = null) =
+    private fun task(id: String, project: String, owner: String, state: String, pos: Int = 0, doneAt: Double? = null) =
         JSONObject().put("id", id).put("title", "t $id").put("project", project).put("owner", owner).put("state", state)
-            .put("done_at", doneAt ?: JSONObject.NULL).put("worker", JSONObject.NULL)
+            .put("done_at", doneAt ?: JSONObject.NULL).put("worker", JSONObject.NULL).put("pos", pos)
 
     private fun project(name: String, paused: Boolean = false) = JSONObject().put("name", name).put("color", JSONObject.NULL).put("paused", paused)
 
-    private val board = JSONObject()
-        .put("projects", JSONArray(listOf(project("held", true), project("mine"), project("work"), project("busy"), project("over"), project("empty"))))
+    private val raw = JSONObject()
+        .put("projects", JSONArray(listOf(project("held", true), project("mine"), project("work"), project("busy"), project("asky"), project("over"), project("empty"))))
         .put("tasks", JSONArray(listOf(
-            task("t1", "held", "mc", "paused"),
-            task("t2", "mine", "you", "open"),
-            task("#3", "work", "dev", "open"),
-            task("#4", "busy", "dev", "open"),
-            task("#5", "busy", "dev", "running"),
-            task("#6", "busy", "dev", "done", 10.0),
-            task("#7", "busy", "dev", "done", 20.0),
-            task("#8", "over", "dev", "done", 5.0),
+            task("t1", "held", "mc", "open"),
+            task("t2", "mine", "you", "open", 1),
+            task("t3", "mine", "you", "open", 2),
+            task("#3", "work", "dev", "open", 3),
+            task("#4", "busy", "dev", "open", 2),
+            task("#5", "busy", "kernel", "running", 1).put("steps", JSONArray(listOf(
+                JSONObject().put("id", "1").put("title", "a").put("state", "completed"),
+                JSONObject().put("id", "2").put("title", "b").put("state", "in_progress"),
+                JSONObject().put("id", "3").put("title", "c").put("state", "pending")))),
+            task("#6", "busy", "dev", "done", doneAt = 10.0),
+            task("#7", "busy", "dev", "done", doneAt = 20.0),
+            task("#8", "over", "dev", "done", doneAt = 5.0),
+            task("#9", "asky", "gentoo", "asks", 1),
+            task("#10", "asky", "gentoo", "review", 2),
         )))
 
     @Test
-    fun orderAndLabels() {
-        val s = sections(board)
-        // Running first, then open, then the user's own, then all done, paused last; projects without tasks drop out.
-        assertEquals(listOf("busy", "work", "mine", "over", "held"), s.map { it.name })
-        assertEquals(listOf("running", "open", "you", "done", "paused"), s.map { it.label })
-    }
-
-    @Test
-    fun asksReviewQueueNextAndSteps() {
-        fun t(id: String, owner: String, state: String, pos: Int) = task(id, "p", owner, state).put("pos", pos)
-        val b = JSONObject()
-            .put("projects", JSONArray(listOf(project("p"), project("q"))))
-            .put("tasks", JSONArray(listOf(
-                t("#1", "dev", "open", 3), t("#2", "dev", "open", 2), t("#3", "dev", "review", 1),
-                t("#4", "mc", "asks", 1).put("steps", JSONArray(listOf(JSONObject().put("id", "1").put("title", "a").put("state", "completed")))),
-                task("#5", "q", "dev", "running").put("pos", 4),
-            )))
-        val s = sections(b)
-        assertEquals(listOf("p" to "asks", "q" to "running"), s.map { it.name to it.label })
-        assertEquals(listOf("#4", "#3", "#2", "#1"), s[0].live.map { it.id })
-        assertEquals(listOf("#2"), s.flatMap { it.live }.filter { it.next }.map { it.id })
-        assertEquals(listOf(Step("a", "completed")), s[0].live[0].steps)
-        assertEquals(true, s[0].live[0].working)
-    }
-
-    @Test
-    fun runningFirstDoneNewestFirst() {
-        val busy = sections(board).first()
+    fun projectsInOrder() {
+        val b = board(raw)
+        // A question first, then running work, then the rest as the server keeps them, all done last; projects without tasks drop out
+        assertEquals(listOf("asky", "busy", "held", "mine", "work", "over"), b.projects.map { it.name })
+        val busy = b.projects.first { it.name == "busy" }
         assertEquals(listOf("#5", "#4"), busy.live.map { it.id })
         assertEquals(listOf("#7", "#6"), busy.done.map { it.id })
-        assertEquals(true, sections(board).first { it.name == "held" }.paused)
+    }
+
+    @Test
+    fun summaries() {
+        val b = board(raw)
+        fun s(name: String) = summary(b.projects.first { it.name == name })
+        assertEquals(listOf("1 question" to "warn", "1 review" to "warn"), s("asky"))
+        assertEquals(listOf("1 running" to "run", "1 open" to ""), s("busy"))
+        assertEquals(listOf("2 for you" to "warn"), s("mine"))
+    }
+
+    @Test
+    fun nowView() {
+        val n = now(board(raw))
+        assertEquals(listOf("#9"), n.asks.map { it.id })
+        assertEquals(listOf("#10"), n.review.map { it.id })
+        assertEquals(listOf("t2", "t3"), n.mine.map { it.id })
+        assertEquals(4, n.needs)
+        assertEquals(listOf("#5"), n.running.map { it.id })
+        assertEquals("b", n.running[0].current)
+        assertEquals(1, n.running[0].stepsDone)
+        // One next per shikigami, never a paused project's
+        assertEquals(listOf("#4"), n.next.map { it.id })
     }
 }

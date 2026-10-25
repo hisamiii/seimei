@@ -1,9 +1,8 @@
 package com.hisamiowo.seimei
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -11,12 +10,16 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -28,108 +31,159 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.json.JSONObject
 
-// The Tasks lane: seimei's board by project, as on the web page (tasks.js). Each project is a section with a thin
-// rule in its Agents-tab tint; done items fold into one "N done" line, paused projects stay shut until opened. The
-// user ticks their own ("you") items; a task with a shikigami opens its page. Each owner's first open item is marked
-// next; a task's steps (its shikigami's own todo list) show under it while it works, folded otherwise.
+// The Tasks lane, as on the web page (tasks.js): two views behind one connected button group. Now: what needs the
+// user (a question, a job to look over, their own tasks), what runs and how far, and each shikigami's next. All
+// tasks: one quiet row per project with a one-line summary; a project opens in place, its done items fold into
+// "N done", paused projects wait behind one row. The user ticks their own tasks (with Undo); a task with a
+// shikigami opens its page.
 
-/** One step of a shikigami's own todo list: pending, in_progress or completed. */
+/** One step of a shikigami's plan for its task: pending, in_progress or completed. */
 data class Step(val title: String, val state: String)
 
-data class Task(val id: String, val title: String, val owner: String, val state: String, val worker: String?,
-                val pos: Int = 0, val steps: List<Step> = emptyList(), val next: Boolean = false) {
+data class Task(val id: String, val title: String, val project: String, val owner: String, val state: String, val worker: String?,
+                val pos: Int = 0, val steps: List<Step> = emptyList(), val doneAt: Double = 0.0) {
     val you get() = owner == "you"
-    /** Steps show by default while it runs or asks. */
-    val working get() = state == "running" || state == "asks"
+    val mine get() = you && state == "open"
+    val stepsDone get() = steps.count { it.state == "completed" }
+    /** The step it's on, if its plan says. */
+    val current get() = steps.firstOrNull { it.state == "in_progress" }?.title
 }
 
-/** How live work sorts within a project (then by its owner's queue). */
-private val ORDER = mapOf("asks" to 0, "running" to 1, "review" to 2, "open" to 3, "paused" to 4)
+/** The Now view: what needs the user, what runs, and each shikigami's next. */
+data class Now(val asks: List<Task>, val review: List<Task>, val mine: List<Task>, val running: List<Task>, val next: List<Task>) {
+    val needs get() = asks.size + review.size + mine.size
+}
 
-/** A project as the board shows it: [label] says on the right how it stands, [live] runs first, [done] newest first. */
-data class Section(val name: String, val color: String?, val paused: Boolean, val label: String, val live: List<Task>, val done: List<Task>)
+/** A project on All tasks: [live] in the order it shows, [done] newest first. */
+data class Project(val name: String, val paused: Boolean, val live: List<Task>, val done: List<Task>)
 
-/** The board's projects in the order they show: what asks first, then running work, paused last, otherwise as the
- * server keeps them. */
-fun sections(board: JSONObject): List<Section> {
-    val tasks = board.optJSONArray("tasks").objects()
-    // Each owner's next item: their first open task in queue order.
-    val nexts = tasks.sortedBy { it.optInt("pos") }.filter { it.str("state") == "open" }.distinctBy { it.str("owner") }.map { it.str("id") }.toSet()
-    fun task(t: JSONObject) = Task(
-        t.str("id"), t.str("title"), t.str("owner"), t.str("state"), t.str("worker").ifEmpty { null }, t.optInt("pos"),
-        t.optJSONArray("steps").objects().map { Step(it.str("title"), it.str("state")) }, t.str("id") in nexts,
-    )
-    return board.optJSONArray("projects").objects().mapNotNull { p ->
+data class Board(val tasks: List<Task>, val projects: List<Project>) {
+    /** Live tasks of projects that aren't paused. */
+    val active get() = projects.filter { !it.paused }.flatMap { p -> p.live.filter { it.state != "paused" } }
+    val nexts get() = nextOf(active).map { it.id }.toSet()
+}
+
+private val ORDER = mapOf("asks" to 0, "review" to 1, "running" to 2)
+
+/** Each shikigami's next: its first open task in queue order. */
+fun nextOf(ts: List<Task>) = ts.sortedBy { it.pos }.filter { it.state == "open" && !it.you }.distinctBy { it.owner }
+
+fun board(b: JSONObject): Board {
+    val tasks = b.optJSONArray("tasks").objects().map { t ->
+        Task(t.str("id"), t.str("title"), t.str("project"), t.str("owner"), t.str("state"), t.str("worker").ifEmpty { null }, t.optInt("pos"),
+            t.optJSONArray("steps").objects().map { Step(it.str("title"), it.str("state")) },
+            t.optDouble("done_at", 0.0).takeIf { !it.isNaN() } ?: 0.0)
+    }
+    fun rank(ts: List<Task>) = when {
+        ts.isEmpty() -> 4
+        ts.any { it.state == "asks" } -> 0
+        ts.any { it.state == "review" } -> 1
+        ts.any { it.state == "running" } -> 2
+        else -> 3
+    }
+    val projects = b.optJSONArray("projects").objects().mapNotNull { p ->
         val name = p.str("name")
-        val ts = tasks.filter { it.str("project") == name }
+        val ts = tasks.filter { it.project == name }
         if (ts.isEmpty()) return@mapNotNull null
-        val live = ts.filter { it.str("state") != "done" }.map(::task).sortedWith(compareBy({ ORDER[it.state] ?: 3 }, { it.pos }))
-        val done = ts.filter { it.str("state") == "done" }.sortedByDescending { it.optDouble("done_at", 0.0).takeIf { d -> !d.isNaN() } ?: 0.0 }.map(::task)
-        val paused = p.optBoolean("paused")
-        val (label, rank) = when {
-            paused -> "paused" to 6
-            live.any { it.state == "asks" } -> "asks" to 0
-            live.any { it.state == "running" } -> "running" to 1
-            live.any { it.state == "review" } -> "review" to 2
-            live.isNotEmpty() && live.all { it.you } -> "you" to 4
-            live.isNotEmpty() -> "open" to 3
-            else -> "done" to 5
-        }
-        rank to Section(name, p.str("color").ifEmpty { null }, paused, label, live, done)
-    }.withIndex().sortedWith(compareBy({ it.value.first }, { it.index })).map { it.value.second }
+        Project(name, p.optBoolean("paused"),
+            ts.filter { it.state != "done" }.sortedWith(compareBy({ ORDER[it.state] ?: 3 }, { it.pos })),
+            ts.filter { it.state == "done" }.sortedByDescending { it.doneAt })
+    }.withIndex().sortedWith(compareBy({ rank(it.value.live) }, { it.index })).map { it.value }
+    return Board(tasks, projects)
 }
 
-private fun colorOf(hex: String?): Color? = hex?.removePrefix("#")?.takeIf { it.length == 6 }?.toLongOrNull(16)?.let { Color(0xFF000000 or it) }
+fun now(b: Board): Now {
+    val ts = b.active.sortedBy { it.pos }
+    return Now(ts.filter { it.state == "asks" }, ts.filter { it.state == "review" }, ts.filter { it.mine },
+        ts.filter { it.state == "running" }, nextOf(ts))
+}
+
+/** A project's summary, in words a person would say: (text, tone) with tone "warn" for what needs the user, "run"
+ * for what runs. */
+fun summary(p: Project): List<Pair<String, String>> {
+    val ts = p.live
+    fun n(f: (Task) -> Boolean) = ts.count(f)
+    return buildList {
+        n { it.state == "asks" }.takeIf { it > 0 }?.let { add((if (it == 1) "1 question" else "$it questions") to "warn") }
+        n { it.state == "review" }.takeIf { it > 0 }?.let { add("$it review" to "warn") }
+        n { it.mine }.takeIf { it > 0 }?.let { add("$it for you" to "warn") }
+        n { it.state == "running" }.takeIf { it > 0 }?.let { add("$it running" to "run") }
+        n { it.state == "open" && !it.you }.takeIf { it > 0 }?.let { add("$it open" to "") }
+    }
+}
 
 @Composable
 fun TasksTab(vm: Seimei) {
-    val b = vm.board
-    val secs = remember(b) { b?.let(::sections).orEmpty() }
-    // Done items shown in full, per project: for this visit only, like the web page.
+    val raw = vm.board
+    val b = remember(raw) { raw?.let(::board) }
+    var view by rememberSaveable { mutableStateOf("now") }
+    // Done items shown in full, per project, and the paused projects: for this visit only, like the web page
     var doneShown by rememberSaveable { mutableStateOf(listOf<String>()) }
-    // Tasks whose steps were opened or shut by hand (they show by default while the task runs or asks).
-    var flipped by rememberSaveable { mutableStateOf(listOf<String>()) }
+    var pausedShown by rememberSaveable { mutableStateOf(false) }
+    var moreMine by rememberSaveable { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
         LaneTabs(vm)
-        if (secs.isEmpty()) {
+        if (b == null || b.tasks.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(if (b == null) "Loading the board…" else "No tasks",
                     Modifier.padding(horizontal = 48.dp), fontSize = 14.sp, color = LocalExtra.current.text3, textAlign = TextAlign.Center)
             }
             return@Column
         }
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 24.dp)) {
-            items(secs, key = { it.name }) { s ->
-                val open = if (vm.boardOpen.has(s.name)) vm.boardOpen.optBoolean(s.name) else !s.paused
-                Project(vm, s, open, s.name in doneShown, first = s === secs.first(), flipped = flipped,
-                    flip = { id -> flipped = if (id in flipped) flipped - id else flipped + id }) {
-                    doneShown = if (s.name in doneShown) doneShown - s.name else doneShown + s.name
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp)) {
+            item(key = "view") { ViewSwitch(view) { view = it } }
+            if (view == "now") nowItems(vm, now(b), moreMine) { moreMine = true }
+            else allItems(vm, b, doneShown, pausedShown,
+                fold = { doneShown = if (it in doneShown) doneShown - it else doneShown + it },
+                paused = { pausedShown = !pausedShown })
+        }
+    }
+}
+
+/** Now / All tasks: a connected button group, 40 tall in a 48 target, 2dp apart, the selected one a full pill. */
+@Composable
+private fun ViewSwitch(view: String, pick: (String) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+        listOf("now" to "Now", "all" to "All tasks").forEachIndexed { i, (k, label) ->
+            val on = k == view
+            val shape = when {
+                on -> CircleShape
+                i == 0 -> RoundedCornerShape(20.dp, 8.dp, 8.dp, 20.dp)
+                else -> RoundedCornerShape(8.dp, 20.dp, 20.dp, 8.dp)
+            }
+            Box(
+                Modifier.weight(1f).height(48.dp).clickable { pick(k) }.semantics { role = Role.Tab; selected = on },
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(Modifier.fillMaxWidth().height(40.dp).clip(shape).background(if (on) cs.primary else cs.primaryContainer), contentAlignment = Alignment.Center) {
+                    Text(label, fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium, color = if (on) cs.onPrimary else cs.onPrimaryContainer)
                 }
             }
         }
@@ -137,146 +191,243 @@ fun TasksTab(vm: Seimei) {
 }
 
 @Composable
-private fun Project(vm: Seimei, s: Section, open: Boolean, showDone: Boolean, first: Boolean, flipped: List<String>,
-                    flip: (String) -> Unit, fold: () -> Unit) {
-    val x = LocalExtra.current
-    val rule = colorOf(s.color) ?: tint(s.name)
-    Column(
-        Modifier.fillMaxWidth().padding(top = if (first) 2.dp else if (open) 14.dp else 2.dp)
-            .drawBehind {
-                val top = (if (open) 12 else 10).dp.toPx()
-                val bottom = (if (open) 8 else 10).dp.toPx()
-                drawRoundRect(rule.copy(alpha = if (open) .55f else .25f), Offset(0f, top), Size(2.dp.toPx(), size.height - top - bottom), CornerRadius(1.dp.toPx()))
+private fun TaskGroupTitle(title: String, n: Int?, color: Color) {
+    Text(buildAnnotatedString {
+        append(title)
+        if (n != null) withStyle(SpanStyle(fontWeight = FontWeight.Normal, color = color.copy(alpha = .75f))) { append("  $n") }
+    }, color = color, fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 8.dp).semantics { heading() })
+}
+
+private fun LazyListScope.group(key: String, rows: List<Pair<String, @Composable (Shape) -> Unit>>) {
+    itemsIndexed(rows, key = { _, r -> "$key:${r.first}" }) { i, (_, row) ->
+        if (i > 0) Spacer(Modifier.height(2.dp))
+        row(segment(i, rows.size, 20.dp, 4.dp))
+    }
+}
+
+private fun LazyListScope.nowItems(vm: Seimei, n: Now, moreMine: Boolean, more: () -> Unit) {
+    if (n.needs > 0) {
+        item(key = "needs") { TaskGroupTitle("Needs you", n.needs, LocalTokens.current.warn) }
+        val mine = if (moreMine) n.mine else n.mine.take(1)
+        val rows = buildList<Pair<String, @Composable (Shape) -> Unit>> {
+            n.asks.forEach { t -> add(t.id to { s -> TaskRow(vm, t, s, "ask", listOf(t.owner, "question"), warm = true) }) }
+            n.review.forEach { t -> add(t.id to { s -> TaskRow(vm, t, s, "review", listOf(t.owner, "review"), warm = true) }) }
+            mine.forEach { t -> add(t.id to { s -> TaskRow(vm, t, s, "you", listOf("your task"), warm = true) }) }
+            if (n.mine.size > mine.size) add("more" to { s -> More("${n.mine.size - mine.size} more of yours", s, more) })
+        }
+        group("n", rows)
+    } else item(key = "clear") { AllClear(vm) }
+    if (n.running.isNotEmpty()) {
+        item(key = "running") { TaskGroupTitle("Running", n.running.size, MaterialTheme.colorScheme.primary) }
+        group("r", n.running.map { t -> t.id to { s: Shape -> TaskRow(vm, t, s, "run", listOfNotNull(t.owner, t.current), bar = true) } })
+    }
+    if (n.next.isNotEmpty()) {
+        item(key = "next") { TaskGroupTitle("Up next", null, LocalExtra.current.text2) }
+        group("x", n.next.map { t -> t.id to { s: Shape -> TaskRow(vm, t, s, "open", listOf(t.owner)) } })
+    }
+}
+
+private fun LazyListScope.allItems(vm: Seimei, b: Board, doneShown: List<String>, pausedShown: Boolean, fold: (String) -> Unit, paused: () -> Unit) {
+    val nexts = b.nexts
+    fun rows(ps: List<Project>) = ps.flatMap { p ->
+        val open = vm.boardOpen.optBoolean(p.name)
+        buildList<Pair<String, @Composable (Shape) -> Unit>> {
+            add("p:${p.name}" to { s -> ProjectRow(p, open, s) { vm.toggleProject(p.name, !open) } })
+            if (!open) return@buildList
+            fun own(t: Task) = if (t.owner == t.project || t.you) emptyList() else listOf(t.owner)
+            p.live.forEach { t ->
+                add(t.id to { s ->
+                    when {
+                        t.state == "asks" -> TaskRow(vm, t, s, "ask", own(t) + "question", inset = true, warm = true, ref = true)
+                        t.state == "review" -> TaskRow(vm, t, s, "review", own(t) + "review", inset = true, ref = true)
+                        t.state == "running" -> TaskRow(vm, t, s, "run", own(t) + (t.current ?: "running"), inset = true, bar = true, ref = true)
+                        t.you -> TaskRow(vm, t, s, "you", listOf(if (t.state == "paused") "paused" else "your task"), inset = true)
+                        else -> TaskRow(vm, t, s, "open", own(t) + (if (t.id in nexts) "next" else if (t.state == "paused") "paused" else "open"),
+                            inset = true, ref = true)
+                    }
+                })
             }
-            .padding(start = 14.dp),
-    ) {
-        Row(
-            Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable { vm.toggleProject(s.name, !open) }
-                .semantics(mergeDescendants = true) { role = Role.Button; stateDescription = if (open) "open" else "shut" }
-                .padding(top = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.chev, null, Modifier.size(18.dp).rotate(if (open) 90f else 0f), tint = x.text3)
-            Spacer(Modifier.width(10.dp))
-            Text(s.name, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = if (s.paused) x.text3 else MaterialTheme.colorScheme.onSurface,
-                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            Text(s.label, fontSize = 12.5.sp, color = if (s.label == "you" || s.label == "asks") x.warn.copy(alpha = .7f) else x.text3.copy(alpha = .8f))
+            if (p.done.isEmpty()) return@buildList
+            val shown = p.name in doneShown
+            if (shown) p.done.forEach { t -> add(t.id to { s -> TaskRow(vm, t, s, "done", own(t) + "done", inset = true, ref = true) }) }
+            add("f:${p.name}" to { s -> Fold(if (shown) "Hide done" else "${p.done.size} done", s) { fold(p.name) } })
         }
-        if (!open) return@Column
-        s.live.forEach {
-            TaskLine(vm, it)
-            Steps(it, it.working != (it.id in flipped)) { flip(it.id) }
+    }
+    group("b", rows(b.projects.filter { !it.paused }))
+    val held = b.projects.filter { it.paused }
+    if (held.isEmpty()) return
+    item(key = "paused") {
+        val n = held.size
+        Column(Modifier.padding(top = 12.dp)) {
+            ProjectRow(Project(if (n == 1) "1 paused project" else "$n paused projects", true, emptyList(), emptyList()), pausedShown,
+                if (pausedShown) segment(0, 2, 20.dp, 4.dp) else RoundedCornerShape(20.dp), sub = held.joinToString(", ") { it.name }, onClick = paused)
         }
-        if (s.done.isEmpty()) return@Column
-        if (showDone) s.done.forEach { TaskLine(vm, it) }
-        Row(Modifier.fillMaxWidth().heightIn(min = 34.dp).clickable(onClick = fold), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.width(32.dp)) { Glyph("done", Modifier.size(18.dp), alpha = .7f) }
-            Text(if (showDone) "hide done" else "${s.done.size} done", fontSize = 13.sp, color = x.text3)
+    }
+    if (pausedShown) {
+        item(key = "paused-gap") { Spacer(Modifier.height(2.dp)) }
+        val rs = rows(held)
+        itemsIndexed(rs, key = { _, r -> "h:${r.first}" }) { i, (_, row) ->
+            if (i > 0) Spacer(Modifier.height(2.dp))
+            row(if (i == rs.size - 1) RoundedCornerShape(4.dp, 4.dp, 20.dp, 20.dp) else RoundedCornerShape(4.dp))
         }
     }
 }
 
+/** A row: optional tile, title, supporting line, optional bar. Rows inside an open project are set in by their text. */
 @Composable
-private fun TaskLine(vm: Seimei, t: Task) {
+private fun TaskRow(vm: Seimei, t: Task, shape: Shape, kind: String, parts: List<String>, warm: Boolean = false, inset: Boolean = false,
+                    bar: Boolean = false, ref: Boolean = false) {
+    val tk = LocalTokens.current
     val x = LocalExtra.current
-    val done = t.state == "done"
-    Row(
-        Modifier.fillMaxWidth().heightIn(min = if (done) 32.dp else 42.dp)
-            .then(if (t.worker != null) Modifier.clickable { vm.openWorker(t.worker) } else Modifier),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // The user's own item: the circle ticks it off, the check takes it back.
-        val g = Modifier.width(32.dp).heightIn(min = if (done) 32.dp else 42.dp)
-        Box(
-            if (t.you) g.clickable { vm.tick(t.id, !done) }.semantics {
-                role = Role.Checkbox
-                contentDescription = if (done) "Reopen ${t.title}" else "Tick off ${t.title}"
-            } else g,
-            contentAlignment = Alignment.CenterStart,
-        ) { Glyph(t.state, Modifier.size(if (done) 15.dp else 18.dp)) }
-        Text(
-            buildAnnotatedString {
-                if (t.id.startsWith("#")) withStyle(SpanStyle(color = x.text3, textDecoration = TextDecoration.None)) { append(t.id + "  ") }
-                append(t.title)
-            },
-            Modifier.weight(1f),
-            fontSize = if (done) 14.sp else 15.5.sp,
-            fontWeight = if (t.working) FontWeight.Medium else FontWeight.Normal,
-            color = when (t.state) {
-                "done" -> x.text3.copy(alpha = .7f)
-                "paused" -> x.text3
-                else -> MaterialTheme.colorScheme.onSurface
-            },
-            textDecoration = if (done) TextDecoration.LineThrough else null,
-            maxLines = 1, overflow = TextOverflow.Ellipsis,
-        )
-        if (t.next) Text("next", Modifier.padding(start = 10.dp).background(MaterialTheme.colorScheme.primary.copy(alpha = .14f), RoundedCornerShape(6.dp))
-            .padding(horizontal = 6.dp), fontSize = 11.5.sp, lineHeight = 18.sp, color = MaterialTheme.colorScheme.primary)
-        Text(t.owner, Modifier.padding(start = if (t.next) 8.dp else 14.dp), fontSize = 13.sp,
-            color = (if (t.you) x.warn else x.text3).copy(alpha = if (done) .45f else if (t.you) .7f else .75f))
-    }
-}
-
-/** A task's steps: a line with the count that folds, then one small line per step while open. */
-@Composable
-private fun Steps(t: Task, open: Boolean, flip: () -> Unit) {
-    if (t.steps.isEmpty()) return
-    val x = LocalExtra.current
-    Row(
-        Modifier.fillMaxWidth().heightIn(min = 28.dp).clickable(onClick = flip)
-            .semantics(mergeDescendants = true) { role = Role.Button; stateDescription = if (open) "open" else "shut" }
-            .padding(start = 32.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(Icons.chev, null, Modifier.size(14.dp).rotate(if (open) 90f else 0f), tint = x.text3)
-        Spacer(Modifier.width(6.dp))
-        Text("${t.steps.count { it.state == "completed" }} of ${t.steps.size} steps", fontSize = 12.5.sp, color = x.text3)
-    }
-    if (!open) return
-    t.steps.forEach { st ->
-        val done = st.state == "completed"
-        Row(Modifier.fillMaxWidth().heightIn(min = 26.dp).padding(start = 32.dp), verticalAlignment = Alignment.CenterVertically) {
-            Glyph(STEP[st.state] ?: "open", Modifier.size(14.dp))
-            Spacer(Modifier.width(10.dp))
-            Text(st.title, fontSize = 13.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                color = when (st.state) { "completed" -> x.text3; "in_progress" -> MaterialTheme.colorScheme.onSurface; else -> x.text2 },
-                textDecoration = if (done) TextDecoration.LineThrough else null)
-        }
-    }
-}
-
-private val STEP = mapOf("completed" to "done", "in_progress" to "running", "pending" to "open")
-
-/** A task's state: an open circle, half full while running, a dot while it asks, a check inside once it waits for
- * review, paused bars, a plain check once done. */
-@Composable
-private fun Glyph(state: String, modifier: Modifier, alpha: Float = 1f) {
     val cs = MaterialTheme.colorScheme
-    val c = when (state) {
-        "running" -> cs.primary
-        "asks" -> LocalExtra.current.warn
-        "review" -> LocalExtra.current.ok
-        "done" -> LocalExtra.current.ok.copy(alpha = .55f * alpha)
-        else -> cs.outline
+    val bg = when {
+        warm -> tk.warnContainer
+        inset -> cs.surfaceContainerHigh
+        else -> cs.surfaceContainer
     }
-    Canvas(modifier) {
-        val u = size.width / 18f
-        val line = Stroke(1.6f * u, cap = StrokeCap.Round)
-        if (state == "done") {
-            val p = Path().apply { moveTo(4f * u, 9.5f * u); lineTo(7.2f * u, 12.7f * u); lineTo(14f * u, 5.8f * u) }
-            drawPath(p, c, style = Stroke(1.8f * u, cap = StrokeCap.Round, join = StrokeJoin.Round))
-            return@Canvas
+    val sub = if (warm) tk.onWarnContainer.copy(alpha = .72f) else x.text3
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = if (inset) 56.dp else 64.dp).clip(shape).background(bg)
+            .then(if (t.worker != null) Modifier.clickable { vm.openWorker(t.worker) } else Modifier)
+            .padding(start = if (inset) 32.dp else 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val tile = !inset && (kind == "ask" || kind == "review")
+        if (tile) {
+            val ask = kind == "ask"
+            Box(Modifier.size(40.dp).clip(if (ask) RoundedCornerShape(12.dp) else CircleShape).background(if (ask) tk.warn else cs.primary),
+                contentAlignment = Alignment.Center) {
+                Icon(if (ask) Icons.question else Icons.review, null, Modifier.size(20.dp), tint = if (ask) tk.onWarn else cs.onPrimary)
+            }
+            Spacer(Modifier.width(16.dp))
+        } else if (t.you) {
+            Tick(vm, t, if (inset) Modifier.padding(end = 8.dp) else Modifier.padding(end = 16.dp))
         }
-        drawCircle(c, 6.5f * u, center, style = line)
-        if (state == "running") drawArc(c, -90f, 180f, true, Offset(4.5f * u, 4.5f * u), Size(9f * u, 9f * u))
-        if (state == "asks") drawCircle(c, 2.3f * u, center)
-        if (state == "review") {
-            val p = Path().apply { moveTo(6.3f * u, 9.2f * u); lineTo(8.2f * u, 11.1f * u); lineTo(11.7f * u, 7.4f * u) }
-            drawPath(p, c, style = Stroke(1.6f * u, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        Column(Modifier.weight(1f)) {
+            Text(t.title, fontSize = 16.sp, lineHeight = 24.sp, fontWeight = FontWeight.Medium,
+                color = when { warm -> tk.onWarnContainer; kind == "done" -> x.text3; else -> cs.onSurface },
+                maxLines = if (warm || kind == "ask" || kind == "review") 2 else 1, overflow = TextOverflow.Ellipsis)
+            Text(buildAnnotatedString {
+                val all = parts + (if (ref && t.id.startsWith("#")) listOf(t.id) else emptyList())
+                all.forEachIndexed { i, p ->
+                    if (i > 0) append(" · ")
+                    if (p == "next" && i == all.indexOf("next")) withStyle(SpanStyle(color = cs.primary)) { append(p) } else append(p)
+                }
+            }, fontSize = 14.sp, lineHeight = 20.sp, color = sub, maxLines = if (warm) 2 else 1, overflow = TextOverflow.Ellipsis)
+            if (bar) StepBar(t)
         }
-        if (state == "paused") {
-            drawLine(c, Offset(7.3f * u, 6.5f * u), Offset(7.3f * u, 11.5f * u), 1.6f * u, StrokeCap.Round)
-            drawLine(c, Offset(10.7f * u, 6.5f * u), Offset(10.7f * u, 11.5f * u), 1.6f * u, StrokeCap.Round)
+    }
+}
+
+/** The user's own task: an empty circle that ticks it off, a check that takes it back. */
+@Composable
+private fun Tick(vm: Seimei, t: Task, modifier: Modifier) {
+    val done = t.state == "done"
+    val tk = LocalTokens.current
+    Box(
+        modifier.size(48.dp).clip(CircleShape).clickable { vm.tick(t.id, !done) }.semantics {
+            role = Role.Checkbox
+            toggleableState = if (done) ToggleableState.On else ToggleableState.Off
+            contentDescription = if (done) "Reopen ${t.title}" else "Tick off ${t.title}"
+        },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (done) Icon(Icons.check, null, Modifier.size(20.dp), tint = tk.ok)
+        else Box(Modifier.size(24.dp).drawBehind {
+            drawCircle(tk.warn, size.minDimension / 2 - 1.dp.toPx(), style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))
+        })
+    }
+}
+
+/** Step progress: the active part, a 4dp gap, the track, and the count in words. */
+@Composable
+private fun StepBar(t: Task) {
+    val cs = MaterialTheme.colorScheme
+    val track = LocalTokens.current.containerHighest
+    val f = if (t.steps.isEmpty()) 0f else t.stepsDone.toFloat() / t.steps.size
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.weight(1f).height(4.dp).drawBehind {
+            val h = size.height
+            val r = CornerRadius(h / 2)
+            val w = size.width * f
+            val gap = if (f > 0f) 4.dp.toPx() else 0f
+            if (w > 0f) drawRoundRect(cs.primary, Offset.Zero, Size(w, h), r)
+            if (size.width - w - gap > 0f) drawRoundRect(track, Offset(w + gap, 0f), Size(size.width - w - gap, h), r)
+        })
+        if (t.steps.isNotEmpty()) {
+            Spacer(Modifier.width(12.dp))
+            Text("${t.stepsDone} of ${t.steps.size}", fontSize = 12.sp, lineHeight = 16.sp, color = LocalExtra.current.text3)
+        }
+    }
+}
+
+@Composable
+private fun ProjectRow(p: Project, open: Boolean, shape: Shape, sub: String? = null, onClick: () -> Unit) {
+    val tk = LocalTokens.current
+    val x = LocalExtra.current
+    val cs = MaterialTheme.colorScheme
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(shape).background(if (open && sub == null) cs.surfaceContainerHigh else cs.surfaceContainer)
+            .clickable(onClick = onClick)
+            .semantics(mergeDescendants = true) { role = Role.Button; stateDescription = if (open) "Open" else "Shut" }
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(p.name, fontSize = 16.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold,
+                color = if (sub != null) x.text2 else cs.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(buildAnnotatedString {
+                if (sub != null) append(sub)
+                else if (p.live.isEmpty()) append(if (p.done.size == 1) "1 done" else "${p.done.size} done")
+                else summary(p).forEachIndexed { i, (s, tone) ->
+                    if (i > 0) append(" · ")
+                    when (tone) {
+                        "warn" -> withStyle(SpanStyle(color = tk.warn, fontWeight = FontWeight.Medium)) { append(s) }
+                        "run" -> withStyle(SpanStyle(color = cs.primary)) { append(s) }
+                        else -> append(s)
+                    }
+                }
+            }, fontSize = 14.sp, lineHeight = 20.sp, color = x.text3, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Icon(if (open) Icons.expand else Icons.chev, null, Modifier.size(20.dp), tint = x.text3)
+    }
+}
+
+@Composable
+private fun More(text: String, shape: Shape, onClick: () -> Unit) {
+    val tk = LocalTokens.current
+    Box(Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(shape).background(tk.warnContainer).clickable(onClick = onClick).padding(horizontal = 16.dp),
+        contentAlignment = Alignment.CenterStart) {
+        Text(text, fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium, color = tk.onWarnContainer)
+    }
+}
+
+@Composable
+private fun Fold(text: String, shape: Shape, onClick: () -> Unit) {
+    val x = LocalExtra.current
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(shape).background(MaterialTheme.colorScheme.surfaceContainerHigh)
+        .clickable(onClick = onClick).padding(start = 32.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.check, null, Modifier.size(18.dp), tint = LocalTokens.current.ok)
+        Spacer(Modifier.width(16.dp))
+        Text(text, fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium, color = x.text3)
+    }
+}
+
+/** In Needs you's place when nothing waits: one row at a needs row's height, on the done tone. */
+@Composable
+private fun AllClear(vm: Seimei) {
+    val tk = LocalTokens.current
+    val since = remember(vm.board) { vm.board?.let(::board)?.tasks?.maxOfOrNull { it.doneAt }?.takeIf { it > 0 } ?: (System.currentTimeMillis() / 1000.0) }
+    Row(Modifier.fillMaxWidth().padding(top = 16.dp).heightIn(min = 68.dp).clip(RoundedCornerShape(28.dp)).background(tk.okContainer)
+        .padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(40.dp).clip(CircleShape).background(tk.ok), contentAlignment = Alignment.Center) {
+            Icon(Icons.check, null, Modifier.size(24.dp), tint = tk.okContainer)
+        }
+        Spacer(Modifier.width(16.dp))
+        Column {
+            Text("All clear", fontSize = 16.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold, color = tk.onOkContainer)
+            Text("Since ${clock(since)}", fontSize = 14.sp, lineHeight = 20.sp, color = tk.onOkContainer)
         }
     }
 }

@@ -170,6 +170,7 @@ object Icons {
     val info = icon("M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v5M12 7.5v.01", stroke = 1.8f)
     val restarted = icon("M4 12a8 8 0 1 0 2.4-5.7M4 4.5v4h4")
     val chev = icon("M9 6l6 6-6 6")
+    val expand = icon("M6 9l6 6 6-6")
     val send = icon("M12 19V5M5.5 11.5 12 5l6.5 6.5", stroke = 2.4f)
     val photo = icon("M6.5 4.5h11a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3h-11a3 3 0 0 1-3-3v-9a3 3 0 0 1 3-3zM9 8.4a1.6 1.6 0 1 0 0 3.2 1.6 1.6 0 1 0 0-3.2zM20.5 15.5l-4.2-4.2a1.5 1.5 0 0 0-2.1 0L5.5 19.5", stroke = 1.8f)
     val more = icon("M12 5.5v.01M12 12v.01M12 18.5v.01")
@@ -202,6 +203,8 @@ object Icons {
     val dash = icon("M7 12h10")
     val back = icon("M15 5l-7 7 7 7")
     val down = icon("M12 5v14M5.5 12.5 12 19l6.5-6.5", stroke = 2.2f)
+    /** A job to look over: a clipboard with a check. */
+    val review = icon("M9 4.5H6.5A1.5 1.5 0 0 0 5 6v13.5A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H15M9.8 3h4.4a.8.8 0 0 1 .8.8v1.4a.8.8 0 0 1-.8.8H9.8a.8.8 0 0 1-.8-.8V3.8a.8.8 0 0 1 .8-.8zM8.5 13.5l2.5 2.5 4.5-4.5")
     val question = icon("M4 5h16v11H9l-5 4zM10 9.2a2 2 0 1 1 2.6 1.9c-.4.2-.6.5-.6.9M12 13.6v.1")
 }
 

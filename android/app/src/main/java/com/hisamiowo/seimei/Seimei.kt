@@ -742,7 +742,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     }
 
     /** The user ticks one of their own items off, or back on; shown at once, confirmed by the board that follows. */
-    fun tick(id: String, done: Boolean) {
+    fun tick(id: String, done: Boolean, offerUndo: Boolean = true) {
         val b = board ?: return
         val shown = JSONObject(b.toString())
         shown.optJSONArray("tasks").objects().firstOrNull { it.str("id") == id }?.let {
@@ -752,6 +752,10 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 api.post("api/tasks/${id.removePrefix("#")}/tick", JSONObject().put("done", done))
+                if (offerUndo) {
+                    undo = { tick(id, !done, false) }
+                    snack = if (done) "Task done" else "Task reopened"
+                }
             } catch (e: IOException) {
                 snack = errorOf(e)
                 loadBoard()
