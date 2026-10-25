@@ -671,7 +671,7 @@
    "class": "user"
   },
   {
-   "text": "[seimei] claude-queue: kernel: amdxdna TDR timeout detected; grants closed until `cq grants on`",
+   "text": "[seimei] claude-queue: kernel: amdgpu 0000:c4:00.0: [drm] *ERROR* GPU reset; grants closed until `cq grants on`",
    "class": "user"
   },
   {
@@ -697,6 +697,14 @@
   {
    "text": "[seimei] Events:\n- claude-queue: q1's command ended but pid 5 still holds npu\n- session \"x\" finished a turn",
    "class": "other"
+  },
+  {
+   "text": "[seimei] claude-queue: kernel: [34321.3] amdxdna 0000:c5:00.1: [drm] *ERROR* aie2_tdr_detect: TDR timeout detected; grants closed until `cq grants on`",
+   "class": "noise"
+  },
+  {
+   "text": "[seimei] claude-queue: kernel: [1200.1] amdgpu 0000:c4:00.0: [drm] *ERROR* ring gfx_0.0.0 timeout; grants closed until `cq grants on`",
+   "class": "user"
   }
  ]
 }

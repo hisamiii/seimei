@@ -300,7 +300,9 @@ pub fn class(text: &str) -> Class {
         .map(|l| l.trim().trim_start_matches("[seimei] ").trim_start_matches("- "))
         .filter(|l| !l.is_empty() && *l != "Events:" && !l.starts_with("Since your last turn"))
         .collect();
-    if lines.iter().any(|l| NEEDS_USER.is_match(l)) {
+    // An NPU (amdxdna) timeout recovers once grants reopen: noise, unlike a GPU fault.
+    let needs = |l: &&str| NEEDS_USER.is_match(l) && !(l.starts_with("claude-queue: ") && l.contains("amdxdna"));
+    if lines.iter().any(needs) {
         Class::User
     } else if !lines.is_empty() && lines.iter().all(|l| NOISE.is_match(l)) {
         Class::Noise
