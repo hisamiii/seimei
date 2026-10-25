@@ -265,6 +265,27 @@ pub fn listening(path: &Path) -> bool {
     std::os::unix::net::UnixStream::connect(path).is_ok()
 }
 
+/// Whether the compositor behind a socket named <...>.<pid>.sock runs inside another session: nested in a window
+/// or headless. Its start environment names a display or a wlroots backend; the user's own compositor has neither.
+pub fn nested(ctx: &Ctx, sock: &Path) -> bool {
+    let name = sock.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let Some(pid) = name.strip_suffix(".sock").and_then(|n| n.rsplit('.').next()).filter(|p| p.parse::<u32>().is_ok())
+    else {
+        return false;
+    };
+    let environ = std::fs::read(ctx.proc.join(pid).join("environ")).unwrap_or_default();
+    environ.split(|b| *b == 0).any(|v| {
+        [&b"WAYLAND_DISPLAY="[..], b"DISPLAY=", b"WLR_BACKENDS="].iter().any(|k| v.starts_with(k) && v.len() > k.len())
+    })
+}
+
+/// The user's compositor socket among prefix*suffix in the runtime dir: the newest listening one that is not nested
+/// (seimei's own displays or a test instance), else the newest listening one.
+pub fn session_socket(ctx: &Ctx, prefix: &str, suffix: &str) -> Option<PathBuf> {
+    let socks: Vec<PathBuf> = newest(&ctx.run, prefix, suffix).into_iter().filter(|p| listening(p)).collect();
+    socks.iter().find(|p| !nested(ctx, p)).or(socks.first()).cloned()
+}
+
 /// Screenshots with grim, which every wlroots-style compositor (niri, sway, Hyprland) serves.
 pub fn grim_screen(env: &Env, scale: f64, quality: i64) -> Result<Vec<u8>, String> {
     let (s, q) = (format!("{scale:.3}"), quality.to_string());

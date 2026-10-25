@@ -1,4 +1,4 @@
-//! sway, through its i3-compatible IPC socket ($SWAYSOCK, or the newest sway-ipc.*.sock).
+//! sway, through its i3-compatible IPC socket ($SWAYSOCK, or the newest sway-ipc.*.sock that is not nested).
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -10,7 +10,9 @@ use std::time::Duration;
 use regex::Regex;
 use serde_json::{Value, json};
 
-use super::backend::{Backend, Ctx, Emit, Env, Ours, grim_region, grim_screen, listening, newest, rect_shot};
+use super::backend::{
+    Backend, Ctx, Emit, Env, Ours, grim_region, grim_screen, listening, nested, rect_shot, session_socket,
+};
 use super::text_of;
 use crate::util::py_json_compact;
 
@@ -87,7 +89,9 @@ impl Sway {
 
     fn socket(&self) -> Option<PathBuf> {
         let env = std::env::var("SWAYSOCK").ok().filter(|s| !s.is_empty()).map(PathBuf::from);
-        env.into_iter().chain(newest(&self.ctx.run, "sway-ipc.", ".sock")).find(|p| listening(p))
+        env.into_iter()
+            .find(|p| listening(p) && !nested(&self.ctx, p))
+            .or_else(|| session_socket(&self.ctx, "sway-ipc.", ".sock"))
     }
 
     fn sock(&self) -> Result<PathBuf, String> {

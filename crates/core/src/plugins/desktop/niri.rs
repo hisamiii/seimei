@@ -9,7 +9,7 @@ use std::time::Duration;
 use regex::Regex;
 use serde_json::{Value, json};
 
-use super::backend::{Backend, Ctx, Emit, Env, Ours, exec, grim_region, grim_screen, listening, newest};
+use super::backend::{Backend, Ctx, Emit, Env, Ours, exec, grim_region, grim_screen, session_socket};
 use crate::util::{py_json_compact, sh_quote};
 
 const QUERIES: [&str; 8] =
@@ -52,7 +52,7 @@ impl Niri {
     }
 
     fn socket(&self) -> Option<PathBuf> {
-        newest(&self.ctx.run, "niri.", ".sock").into_iter().find(|p| listening(p))
+        session_socket(&self.ctx, "niri.", ".sock")
     }
 
     /// One request on niri's socket: "Windows", "Workspaces", "Outputs", "FocusedWindow", "KeyboardLayouts".

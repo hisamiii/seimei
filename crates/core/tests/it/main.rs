@@ -5,6 +5,7 @@ mod approvals;
 mod browser;
 mod cases;
 mod codex_worker;
+mod compositor;
 mod discord;
 mod env;
 mod guard;
