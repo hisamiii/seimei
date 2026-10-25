@@ -565,6 +565,18 @@ impl Dispatcher {
         let _ = self.tx.send(Cmd::Deliver { text: format!("[seimei] {text}"), images: vec![], src: Some(src) });
     }
 
+    /// The user's message for one of their sessions that seimei cannot type into (no kitty remote control): the
+    /// dispatcher passes it on with SendMessage, and the reply stays in the trajectory unless it did not arrive.
+    pub fn relay(&self, name: &str, to: &str, text: &str) {
+        let text = format!(
+            "[seimei] The user sent this from the page of their session \"{name}\", which seimei cannot type into. \
+             Pass it on word for word with SendMessage to {to}, adding nothing. Then say in one line whether it \
+             arrived; if it was held or failed, start with chat: so the user sees it.\n\n{text}"
+        );
+        let src = Source::Event(format!("the user's message for {name}"), Class::Noise);
+        let _ = self.tx.send(Cmd::Deliver { text, images: vec![], src: Some(src) });
+    }
+
     pub fn interrupt(&self) {
         let _ = self.tx.send(Cmd::Interrupt);
     }

@@ -11,7 +11,7 @@ defaults.
 | | `cwd` | `~` | its working folder |
 | | `compact_window` | 400000 | tokens at which its context compacts |
 | `[host]` | `about` | `computer` | how prompts name the machine |
-| `[sessions]` | `terminal` | `kitty -d {cwd} --title {title}` | how a session opens for the user (release, "Open on server") |
+| `[sessions]` | `terminal` | `$TERMINAL`'s or the first one installed (kitty, foot, alacritty, ghostty, wezterm, gnome-terminal, konsole, xfce4-terminal) | how a session opens for the user (release, "Open on server"); the command follows |
 | `[approvals]` | `dispatcher` | `default` | permission mode, by Claude Code's names |
 | | `shikigami` | `default` | permission mode and ceiling for shikigami |
 | `[plugins]` | `enabled` | `[]` | see [plugins.md](plugins.md) |
@@ -46,6 +46,21 @@ seimei screen-password [--clear]  the screen lock password the desktop plugin ty
 ```
 
 Run them on the server, as the user seimei runs as.
+
+## The kitty bridge
+
+The page types into the user's own Claude sessions, and answers their questions, through kitty remote control when
+they run in kitty. `seimei setup` offers it when kitty is installed: it writes `kitty-rc.conf` (a password allowed
+only `ls`, `send-text`, `send-key` and `get-text`) in seimei's data folder, and kitty.conf gets three lines:
+
+```
+allow_remote_control password
+listen_on unix:${XDG_RUNTIME_DIR}/kitty-{kitty_pid}
+include ~/.local/share/seimei/kitty-rc.conf
+```
+
+Without it, a message from the page reaches the session through the dispatcher's SendMessage, and the session's
+questions are answered on the server.
 
 ## Environment
 

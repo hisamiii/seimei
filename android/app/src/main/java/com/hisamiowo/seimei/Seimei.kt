@@ -71,6 +71,8 @@ class Page(val kind: String, val id: String) {
     var live by mutableStateOf<JSONObject?>(null)
     /** Why the app cannot type into this session, or null. */
     var reach by mutableStateOf<String?>(null)
+    /** How a message reaches it: "kitty" (typed), "seimei" (the dispatcher's SendMessage), or null. */
+    var via by mutableStateOf<String?>(null)
     var note by mutableStateOf<String?>(null)
     var draft by mutableStateOf("")
     var files by mutableStateOf<List<Attachment.Doc>>(emptyList())
@@ -1002,6 +1004,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         pg.next = r.optLong("next")
         pg.row = pg.row.merged(r.getJSONObject("session"))
         pg.reach = r.str("reach").ifEmpty { null }
+        pg.via = r.str("via").ifEmpty { null }
         pg.ask = r.optJSONObject("ask")
         pg.live = r.optJSONObject("doing")?.let { d -> JSONObject(d.toString()).put("output", r.optJSONObject("live")?.optJSONArray("output") ?: JSONArray()) }
         val s = pg.row
@@ -1067,7 +1070,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 when {
                     pg.kind == "worker" -> api.post("api/workers/${pg.id}/send", body)
                     ask != null && ask.optBoolean("answerable") -> api.post("api/sessions/${pg.id}/answer", body.put("tool_id", ask.str("tool_id")))
-                    else -> api.post("api/sessions/${pg.id}/send", body)
+                    else -> if (api.post("api/sessions/${pg.id}/send", body).str("via") == "seimei") snack = "seimei passes it on"
                 }
                 pg.note = null
             } catch (e: IOException) {

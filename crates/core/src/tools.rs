@@ -16,7 +16,7 @@ use crate::files::{Files, MAX_BYTES};
 use crate::metrics::WorkerEvents;
 use crate::paths::home;
 use crate::push::Push;
-use crate::sessions::{self, Live};
+use crate::sessions;
 use crate::tasks::Board;
 use crate::transcripts::{project_of, transcript};
 use crate::uploads::Uploads;
@@ -222,13 +222,6 @@ fn writers(pool: &Pool, w: &Worker) -> Option<String> {
 fn upper_first(s: &str) -> String {
     let mut it = s.chars();
     it.next().map(|c| c.to_uppercase().chain(it).collect()).unwrap_or_default()
-}
-
-/// Where SendMessage reaches a session, whatever its name.
-fn address(s: &Live) -> String {
-    let sock = s.rec["messagingSocketPath"].as_str().filter(|p| !p.is_empty()).map(String::from);
-    let uid = unsafe { libc::getuid() };
-    format!("uds:{}", sock.unwrap_or_else(|| format!("/run/user/{uid}/cc-socks/{}.sock", s.pid)))
 }
 
 /// The summon tool as listed: tools.json's, plus a tools option when plugins can be granted and a harness option
@@ -532,7 +525,7 @@ impl Tools {
                 let lines: Vec<String> = (rows.iter())
                     .map(|s| {
                         let head = match self.pool.aliases.of(s) {
-                            Some(a) => format!("{a} = \"{}\" [pid {}, to {}]", s.name, s.pid, address(s)),
+                            Some(a) => format!("{a} = \"{}\" [pid {}, to {}]", s.name, s.pid, s.address()),
                             None => format!("{} [pid {}]", s.name, s.pid),
                         };
                         let mode = sessions::transcript_of(&s.rec).and_then(|p| sessions::mode_of(&p));
@@ -630,7 +623,7 @@ impl Tools {
             }
             let lines: Vec<String> = (all.iter())
                 .map(|al| match aliases.resolve(al, &rows) {
-                    Some(s) => format!("{al} = \"{}\" [pid {}, to {}]", s.name, s.pid, address(s)),
+                    Some(s) => format!("{al} = \"{}\" [pid {}, to {}]", s.name, s.pid, s.address()),
                     None => format!("{al} = (not running)"),
                 })
                 .collect();
@@ -653,7 +646,7 @@ impl Tools {
             return text("An alias is up to 32 letters, digits, dots, dashes or underscores.", true);
         }
         aliases.set(&name, &s);
-        text(&format!("{name} = \"{}\" [pid {}], SendMessage to {}.", s.name, s.pid, address(&s)), false)
+        text(&format!("{name} = \"{}\" [pid {}], SendMessage to {}.", s.name, s.pid, s.address()), false)
     }
 
     /// A running session's last messages, open question and running calls.
@@ -685,7 +678,7 @@ impl Tools {
             sessions::ago(s.since),
             sessions::ago(s.active),
             s.cwd,
-            address(&s)
+            s.address()
         )];
         for q in p["questions"].as_array().into_iter().flatten() {
             lines.push(format!(

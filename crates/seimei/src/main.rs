@@ -339,8 +339,8 @@ fn main() {
             .and_then(|s| s.get("terminal"))
             .and_then(|t| t.as_str())
             .filter(|t| !t.is_empty())
-            .unwrap_or("kitty -d {cwd} --title {title}")
-            .into(),
+            .map(String::from)
+            .unwrap_or_else(|| setup::terminal_default(std::env::var("TERMINAL").ok().as_deref(), setup::on_path).into()),
         plugins: Arc::new(
             Plugins::load(&cfg.get("plugins").and_then(|p| p.as_table()).cloned().unwrap_or_default(), &state)
                 .about(about),

@@ -54,6 +54,15 @@ pub struct Live {
     pub rec: Value,
 }
 
+impl Live {
+    /// Where SendMessage reaches it, whatever its name.
+    pub fn address(&self) -> String {
+        let sock = self.rec["messagingSocketPath"].as_str().filter(|p| !p.is_empty()).map(String::from);
+        let uid = unsafe { libc::getuid() };
+        format!("uds:{}", sock.unwrap_or_else(|| format!("/run/user/{uid}/cc-socks/{}.sock", self.pid)))
+    }
+}
+
 fn s(v: &Value) -> String {
     match v {
         Value::String(s) => s.clone(),

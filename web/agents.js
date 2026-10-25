@@ -485,10 +485,11 @@ function question(ask) {
       b.append(el('b', null, o.label));
       if (o.description) b.append(el('small', null, o.description));
       b.disabled = !ask.answerable || !!P.row.reach;
+      b.hidden = !!P.row.reach;
       b.addEventListener('click', () => answer({ option: i + 1 }, b));
       opts.append(b);
     });
-    if (!ask.answerable) P.qbox.append(el('p', 'qnote', 'Answer on the server'));
+    if (!ask.answerable || P.row.reach) P.qbox.append(el('p', 'qnote', 'Answer on the server'));
   }
   composerState();
   stick(true);
@@ -535,7 +536,7 @@ function note(text, cls = 'error') {
 function blocked() {
   if (P.kind === 'worker') return null;
   const s = P.row;
-  if (s.reach) return s.reach;
+  if (s.reach && (s.via !== 'seimei' || P.ask)) return P.ask ? 'Answer on the server' : s.reach;
   if (P.ask && !P.ask.answerable) return 'Answer on the server';
   if (s.status === 'waiting' && !s.question) return `${s.waiting_text || 'Waiting on the server'}. Answer it there.`;
   return null;
@@ -648,6 +649,7 @@ async function submit(e) {
   }
   files.forEach((a) => a.url && URL.revokeObjectURL(a.url));
   note(null);
+  if (r.via === 'seimei') snack('seimei passes it on');
   composerState();
   stick(true);
   if (P.kind === 'session') poll(true);
@@ -698,7 +700,7 @@ async function poll(soon = false) {
       return openPage('session', p.id);
     }
     p.next = r.next;
-    p.row = { ...p.row, ...r.session, reach: r.reach };
+    p.row = { ...p.row, ...r.session, reach: r.reach, via: r.via };
     add(r.events);
     p.renderer.live(r.doing && { ...r.doing, output: r.live?.output });
     question(r.ask);
@@ -776,7 +778,7 @@ function details() {
   }
   if (actions.childElementCount) body.push(actions);
   if (P.kind === 'worker' && r.task) body.push(taskRow(r.task, r.now));
-  if (P.kind === 'session') body.push(el('p', 'usage-note', r.reach ? r.reach : 'Typed into its terminal on the server'));
+  if (P.kind === 'session') body.push(el('p', 'usage-note', r.via === 'seimei' ? 'seimei passes messages on with Claude Code\'s SendMessage: this terminal can\'t be typed into' : r.reach || 'Typed into its terminal on the server'));
   sheet.body.replaceChildren(...body);
   showSheet('details');
 }
@@ -1021,8 +1023,8 @@ export async function openPage(kind, id) {
   if (kept && P !== p) return;
   if (!r) return kept ? snack('Offline: this is the last copy') : snack("Couldn't reach the server");
   // Drawn anew when there was no copy, or the server says the copy is too old to extend.
-  if (!kept || r.reset) build(kind, id, kind === 'worker' ? { ...r.worker, ...live } : { ...r.session, reach: r.reach });
-  else P.row = kind === 'worker' ? { ...P.row, ...r.worker, ...live } : { ...P.row, ...r.session, reach: r.reach };
+  if (!kept || r.reset) build(kind, id, kind === 'worker' ? { ...r.worker, ...live } : { ...r.session, reach: r.reach, via: r.via });
+  else P.row = kind === 'worker' ? { ...P.row, ...r.worker, ...live } : { ...P.row, ...r.session, reach: r.reach, via: r.via };
   if (kind === 'worker') add(r.events);
   else {
     P.next = r.next;

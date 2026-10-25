@@ -24,6 +24,8 @@ impl Home {
             std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
         };
         script("claude", "echo '2.1.296 (Claude Code)'");
+        // Found first on PATH whatever the machine has: setup offers it as the terminal and the bridge.
+        script("kitty", "exit 0");
         for tool in ["systemctl", "rc-update", "rc-service"] {
             script(tool, &format!("echo \"{tool} $@\" >> {}", base.join("services.log").display()));
         }
@@ -72,9 +74,10 @@ fn text(o: &Output) -> String {
 #[test]
 fn setup_first_run_then_again() {
     let h = Home::new("first");
-    // port, origin, about, five plugins (only music), a too-short password, then a good one twice, start now.
-    let answers =
-        "9100\nhttps://seimei.example.net\ntest box\nn\ny\n\nn\nn\nshort\nshort\ncorrect horse\ncorrect horse\ny\n";
+    // port, origin, about, terminal, five plugins (only music), a too-short password, then a good one twice, the
+    // kitty bridge, start now.
+    let answers = "9100\nhttps://seimei.example.net\ntest box\nfoot -D {cwd} -T {title}\nn\ny\n\nn\nn\nshort\nshort\n\
+                   correct horse\ncorrect horse\ny\ny\n";
     let o = h.run(&["setup"], answers);
     let out = text(&o);
     assert!(o.status.success(), "{out}");
@@ -87,7 +90,12 @@ fn setup_first_run_then_again() {
     assert_eq!(cfg["server"]["origin"].as_str(), Some("https://seimei.example.net"));
     assert_eq!(cfg["host"]["about"].as_str(), Some("test box"));
     assert_eq!(cfg["plugins"]["enabled"].as_array().unwrap(), &[toml::Value::String("music".into())]);
+    assert_eq!(cfg["sessions"]["terminal"].as_str(), Some("foot -D {cwd} -T {title}"));
     assert_eq!(cfg["dispatcher"]["model"].as_str(), Some("opus"), "the rest of the example stays");
+    let rc = h.base.join("data/seimei/kitty-rc.conf");
+    assert!(h.read("data/seimei/kitty-rc.conf").contains("remote_control_password \""), "the bridge's password");
+    assert_eq!(std::fs::metadata(&rc).unwrap().permissions().mode() & 0o777, 0o600);
+    assert!(out.contains(&format!("include {}", rc.display())), "the kitty.conf lines: {out}");
 
     let unit = h.read("cfg/systemd/user/seimei.service");
     assert!(unit.contains(&format!("ExecStart={} serve", env!("CARGO_BIN_EXE_seimei"))), "{unit}");
@@ -104,6 +112,7 @@ fn setup_first_run_then_again() {
         out.contains("config.toml exists")
             && out.contains("A password is set")
             && out.contains("seimei.service exists")
+            && out.contains("the kitty bridge is set up")
     );
     assert_eq!(h.read("cfg/seimei/config.toml"), before);
     assert_eq!(h.read("services.log").lines().count(), 2, "systemctl is not run again");
@@ -113,14 +122,16 @@ fn setup_first_run_then_again() {
 #[test]
 fn setup_defaults_and_no_claude() {
     let h = Home::new("defaults");
-    // Every default (end of input) but the password, and no start.
-    let o = h.run(&["setup"], "\n\n\n\n\n\n\n\nlong enough\nlong enough\nn\n");
+    // Every default (end of input) but the password, no kitty bridge and no start.
+    let o = h.run(&["setup"], "\n\n\n\n\n\n\n\n\nlong enough\nlong enough\nn\nn\n");
     let out = text(&o);
     assert!(o.status.success(), "{out}");
     let cfg: toml::Table = h.read("cfg/seimei/config.toml").parse().unwrap();
     assert_eq!(cfg["server"]["port"].as_integer(), Some(8417));
     assert_eq!(cfg["server"]["origin"].as_str(), Some("http://localhost:8417"));
     assert!(cfg["plugins"]["enabled"].as_array().unwrap().is_empty());
+    assert_eq!(cfg["sessions"]["terminal"].as_str(), Some("kitty -d {cwd} --title {title}"), "the one found");
+    assert!(!h.exists("data/seimei/kitty-rc.conf"));
     assert!(!h.exists("services.log"), "not started");
     assert!(out.contains("systemctl --user enable --now seimei"), "{out}");
 
@@ -136,7 +147,7 @@ fn setup_defaults_and_no_claude() {
 fn setup_openrc_service() {
     let mut h = Home::new("openrc");
     h.init = "openrc";
-    let o = h.run(&["setup"], "\n\n\n\n\n\n\n\nlong enough\nlong enough\ny\n");
+    let o = h.run(&["setup"], "\n\n\n\n\n\n\n\n\nlong enough\nlong enough\nn\ny\n");
     let out = text(&o);
     assert!(o.status.success(), "{out}");
     if Path::new("/etc/user/init.d/seimei").exists() {

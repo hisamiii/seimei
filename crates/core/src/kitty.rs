@@ -19,7 +19,7 @@ use crate::util::{chars, data_dir, sha256_hex, splitlines};
 
 const REOPEN: &str = "This session's kitty was started before remote control was on. Close that kitty window (all \
                       its tabs) and resume the session in a new one to reply from here.";
-const NO_RC: &str = "Remote control is not set up on the server.";
+const NO_RC: &str = "kitty remote control is not set up on the server (`seimei setup` offers it).";
 
 fn re(p: &str) -> Regex {
     Regex::new(p).expect("a valid pattern")

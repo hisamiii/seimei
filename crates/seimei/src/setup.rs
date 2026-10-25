@@ -1,10 +1,11 @@
 //! `seimei setup`: the first run. It checks Claude Code, writes config.toml from the example (port, origin, what the
-//! prompts call this machine, the plugins), sets the password and writes a service for this binary: a systemd user unit,
-//! or an OpenRC user service when PID 1 is not systemd. What is already there (a config, a password, a service) it
+//! prompts call this machine, the terminal sessions open in, the plugins), sets the password, offers the kitty bridge
+//! and writes a service for this binary: a systemd user unit, or an OpenRC user service when PID 1 is not systemd. What is already there (a config, a password, a service) it
 //! leaves alone, so running it again is safe. Answers come from stdin, one line each; an empty line or the end of input
 //! takes the default.
 
 use std::io::Write;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::process::Command;
 
@@ -24,6 +25,36 @@ const PLUGINS: [(&str, &str, &str); 5] = [
     ("browser", "Waterfox or Firefox, through the extension in browser/", "the extension installed"),
     ("discord", "Discord through the Vesktop plugin in discord/", "Vesktop with the plugin"),
 ];
+
+/// Terminals setup knows, each with how it opens in a folder under a title (the command follows).
+const TERMINALS: [(&str, &str); 8] = [
+    ("kitty", "kitty -d {cwd} --title {title}"),
+    ("foot", "foot -D {cwd} -T {title}"),
+    ("alacritty", "alacritty --working-directory {cwd} --title {title} -e"),
+    ("ghostty", "ghostty --working-directory={cwd} --title={title} -e"),
+    ("wezterm", "wezterm start --cwd {cwd} --"),
+    ("gnome-terminal", "gnome-terminal --working-directory={cwd} --title={title} --"),
+    ("konsole", "konsole --workdir {cwd} -p tabtitle={title} -e"),
+    ("xfce4-terminal", "xfce4-terminal --working-directory={cwd} -T {title} -x"),
+];
+
+/// The terminal command to offer: $TERMINAL's when setup knows it, else the first one installed, else kitty's.
+pub fn terminal_default(env_terminal: Option<&str>, installed: impl Fn(&str) -> bool) -> &'static str {
+    let named = env_terminal.and_then(|t| Path::new(t).file_name()).and_then(|n| n.to_str());
+    let known = |name: &str| TERMINALS.iter().find(|(n, _)| *n == name).map(|(_, c)| *c);
+    named
+        .and_then(known)
+        .or_else(|| TERMINALS.iter().find(|(n, _)| installed(n)).map(|(_, c)| *c))
+        .unwrap_or(TERMINALS[0].1)
+}
+
+/// kitty-rc.conf: the remote control password seimei types with, for kitty.conf to include.
+pub fn kitty_rc_text(password: &str) -> String {
+    format!(
+        "# seimei's kitty remote control: only reading the screen and typing, with this password.\n\
+         remote_control_password \"{password}\" ls send-text send-key get-text\n"
+    )
+}
 
 fn ask(question: &str, default: &str) -> String {
     eprint!("{question} [{default}]: ");
@@ -47,7 +78,7 @@ fn yes(question: &str, default: bool) -> bool {
     }
 }
 
-fn on_path(name: &str) -> bool {
+pub fn on_path(name: &str) -> bool {
     std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(name).is_file()))
 }
 
@@ -65,7 +96,7 @@ fn older(version: &str, than: (u32, u32)) -> bool {
 }
 
 /// config.toml from the example, with these answers in place of its defaults.
-pub fn config_text(port: u16, origin: &str, about: &str, enabled: &[&str]) -> String {
+pub fn config_text(port: u16, origin: &str, about: &str, terminal: &str, enabled: &[&str]) -> String {
     let q = |s: &str| toml::Value::String(s.into()).to_string();
     let list = enabled.iter().map(|p| q(p)).collect::<Vec<_>>().join(", ");
     let mut out = String::new();
@@ -80,6 +111,9 @@ pub fn config_text(port: u16, origin: &str, about: &str, enabled: &[&str]) -> St
             }
             l if l.starts_with("about = ") => {
                 format!("about = {}{}", q(about), &l[l.find("    #").unwrap_or(l.len())..])
+            }
+            l if l.starts_with("terminal = ") => {
+                format!("terminal = {}{}", q(terminal), &l[l.find("   #").unwrap_or(l.len())..])
             }
             "enabled = []" => format!("enabled = [{list}]"),
             l => l.into(),
@@ -226,6 +260,42 @@ fn openrc_service(exe: &Path) {
     }
 }
 
+/// The page types into the user's own Claude sessions through kitty remote control, when they run in kitty.
+fn kitty_bridge(state: &Path) {
+    let rc = state.join("kitty-rc.conf");
+    if rc.exists() {
+        println!("\n{} exists; the kitty bridge is set up.", rc.display());
+        return;
+    }
+    if !on_path("kitty") {
+        println!(
+            "\nNo kitty here: messages from the page to your own Claude sessions go through seimei (SendMessage), and \
+             their questions are answered on the server."
+        );
+        return;
+    }
+    if !yes(
+        "\nkitty found. Let the page type into your Claude sessions that run in kitty, and answer their questions",
+        true,
+    ) {
+        return;
+    }
+    let text = kitty_rc_text(&seimei_core::util::token_urlsafe(24));
+    let written = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&rc)
+        .and_then(|mut f| f.write_all(text.as_bytes()));
+    written.unwrap_or_else(|e| fail(&format!("{}: {e}", rc.display())));
+    println!(
+        "Wrote {}. Add these lines to kitty.conf, then open a new kitty window:\n\n  allow_remote_control password\n  \
+         listen_on unix:${{XDG_RUNTIME_DIR}}/kitty-{{kitty_pid}}\n  include {}",
+        rc.display(),
+        rc.display()
+    );
+}
+
 pub fn run(read_secret: impl Fn(&str) -> String) {
     println!("seimei setup: what is already set up stays as it is.\n");
 
@@ -272,6 +342,10 @@ pub fn run(read_secret: impl Fn(&str) -> String) {
         let origin = ask("Origin", &format!("http://localhost:{port}"));
         let about = ask("How should the prompts call this machine (e.g. \"desktop, an Arch box\")", "computer");
         println!(
+            "\nA session you take over from a shikigami opens in a terminal here ({{cwd}} and {{title}} filled in)."
+        );
+        let terminal = ask("Terminal", terminal_default(std::env::var("TERMINAL").ok().as_deref(), on_path));
+        println!(
             "\nPlugins: tool groups on top of the core, each with its own cards. You can change them in config later."
         );
         let mut enabled = vec![];
@@ -290,7 +364,7 @@ pub fn run(read_secret: impl Fn(&str) -> String) {
         if let Some(dir) = cfg_path.parent() {
             std::fs::create_dir_all(dir).unwrap_or_else(|e| fail(&format!("{}: {e}", dir.display())));
         }
-        std::fs::write(&cfg_path, config_text(port, &origin, &about, &enabled))
+        std::fs::write(&cfg_path, config_text(port, &origin, &about, &terminal, &enabled))
             .unwrap_or_else(|e| fail(&format!("{}: {e}", cfg_path.display())));
         println!("Wrote {}.", cfg_path.display());
         origin
@@ -319,6 +393,8 @@ pub fn run(read_secret: impl Fn(&str) -> String) {
             break;
         }
     }
+
+    kitty_bridge(&state);
 
     // The service.
     let exe = std::env::current_exe().unwrap_or_else(|e| fail(&format!("this binary: {e}")));
@@ -357,5 +433,18 @@ mod tests {
         assert!(script.contains("stop_post()") && script.contains("/seimei/cgroup.kill"), "{script}");
         let check = std::process::Command::new("sh").args(["-n", "-c", &script]).output().unwrap();
         assert!(check.status.success(), "{}", String::from_utf8_lossy(&check.stderr));
+    }
+
+    #[test]
+    fn the_terminal_is_detected_and_written() {
+        use super::terminal_default as t;
+        assert_eq!(t(Some("/usr/bin/foot"), |_| false), "foot -D {cwd} -T {title}");
+        assert_eq!(t(Some("st"), |n| n == "konsole"), "konsole --workdir {cwd} -p tabtitle={title} -e");
+        assert_eq!(t(None, |_| false), "kitty -d {cwd} --title {title}");
+        let cfg = super::config_text(8417, "http://localhost:8417", "pc", "foot -D {cwd} -T {title}", &[]);
+        let parsed: toml::Table = cfg.parse().unwrap();
+        assert_eq!(parsed["sessions"]["terminal"].as_str(), Some("foot -D {cwd} -T {title}"));
+        let rc = super::kitty_rc_text("pw");
+        assert!(rc.lines().any(|l| l == "remote_control_password \"pw\" ls send-text send-key get-text"), "{rc}");
     }
 }

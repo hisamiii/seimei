@@ -573,8 +573,9 @@ fun ContextRing(pct: Int?, onClick: () -> Unit) {
 /** Why the composer cannot type into this session, or null. */
 fun blocked(pg: Page): String? {
     if (pg.kind == "worker") return null
-    pg.reach?.let { return it }
     val ask = pg.ask
+    // Without kitty a message still goes through seimei (SendMessage), an answer does not.
+    pg.reach?.let { if (pg.via != "seimei" || ask != null) return if (ask != null) "Answer on the server" else it }
     if (ask != null && !ask.optBoolean("answerable")) return "Answer on the server"
     if (pg.row.str("status") == "waiting" && ask == null) return "${pg.row.str("waiting_text").ifEmpty { "Waiting on the server" }}. Answer it there."
     return null
@@ -714,7 +715,7 @@ fun QuestionCard(vm: Seimei, pg: Page, ask: JSONObject) {
                     fontWeight = FontWeight.Medium, color = tk.onWarnContainer, modifier = Modifier.semantics { heading() })
             }
         }
-        if (q != null) Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        if (q != null && pg.reach == null) Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             val opts = q.optJSONArray("options").objects()
             for ((i, o) in opts.withIndex()) {
                 val n = i + 1
@@ -739,7 +740,7 @@ fun QuestionCard(vm: Seimei, pg: Page, ask: JSONObject) {
                 }
             }
         }
-        if (q != null && !ask.optBoolean("answerable")) Text("Answer on the server", fontSize = 12.sp, color = tk.onWarnContainer.copy(alpha = .82f), modifier = Modifier.padding(horizontal = 4.dp))
+        if (q != null && !canTap) Text("Answer on the server", fontSize = 12.sp, color = tk.onWarnContainer.copy(alpha = .82f), modifier = Modifier.padding(horizontal = 4.dp))
     }
 }
 
@@ -1023,7 +1024,8 @@ fun Details(vm: Seimei, pg: Page) {
                 Text(if (agent.archived) "Unarchive" else "Archive")
             }
             if (pg.kind == "worker" && r.str("task").isNotEmpty()) TaskRow(r.str("task"), r.optJSONObject("now"))
-            if (pg.kind == "session") Text(pg.reach ?: "Messages you send here are typed into this session's window on the server.",
+            if (pg.kind == "session") Text(if (pg.via == "seimei") "seimei passes messages on with Claude Code's SendMessage: this terminal can't be typed into."
+                else pg.reach ?: "Messages you send here are typed into this session's window on the server.",
                 fontSize = 13.sp, color = LocalExtra.current.text3)
         }
     }

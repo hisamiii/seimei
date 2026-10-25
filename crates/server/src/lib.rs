@@ -1411,8 +1411,20 @@ async fn session(
     out["ask"] = json!(ask);
     out["doing"] = b["doing"].clone();
     out["live"] = json!(live);
+    out["via"] = json!(via(&sess, reach.is_none()));
     out["reach"] = json!(reach);
     ok(out)
+}
+
+/// How a message from the page reaches the session: typed into its kitty window, or through the dispatcher's
+/// SendMessage when seimei cannot type into it. None: neither.
+fn via(sess: &Live, typed: bool) -> Option<&'static str> {
+    let to = sess.address();
+    match () {
+        _ if typed => Some("kitty"),
+        _ if Path::new(to.trim_start_matches("uds:")).exists() => Some("seimei"),
+        _ => None,
+    }
 }
 
 /// Hide one of the user's sessions from the list, or bring it back. The session keeps running.
@@ -1432,7 +1444,8 @@ async fn session_archive(State(app): Shared, UrlPath(pid): UrlPath<String>, byte
     ok(json!({"archived": on}))
 }
 
-/// Type the user's message into the session's own kitty window, on their tap in the app.
+/// Type the user's message into the session's own kitty window, on their tap in the app; without one, the
+/// dispatcher passes it on with SendMessage.
 async fn session_send(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes: Bytes) -> Response {
     let (sess, _) = match user_session(&app, &pid).await {
         Ok(found) => found,
@@ -1449,6 +1462,12 @@ async fn session_send(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes: 
     let said = format!("{}{lines}", s(&b, "text").trim());
     if said.trim().is_empty() || said.chars().count() > 20000 {
         return text(StatusCode::BAD_REQUEST, "text, up to 20000 characters");
+    }
+    let pid = sess.pid;
+    let typed = tokio::task::spawn_blocking(move || kitty::reachable(pid).is_none()).await.unwrap_or(false);
+    if via(&sess, typed) == Some("seimei") {
+        app.dispatcher.relay(&sess.name, &sess.address(), said.trim());
+        return ok(json!({"ok": true, "via": "seimei"}));
     }
     match kitty::type_message(sess.pid, said.trim()).await {
         Ok(()) => ok(json!({"ok": true})),
