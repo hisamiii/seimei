@@ -234,7 +234,7 @@ object Icons {
     val read = icon("M6 3h9l4 4v14H6zM14 3v5h5")
     val edit = icon("M4 20h4L19 9l-4-4L4 16zM13 7l4 4")
     val search = icon("M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14zM16 16l4 4")
-    /** Archive (#43): a box with a lid; Icons.archive is a package. */
+    /** Archive: a box with a lid; Icons.archive is a package. */
     val shelf = icon("M3 4h18v4H3zM5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4", stroke = 1.8f)
     val web = icon("M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18")
     val tool = icon("M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-2.4z")

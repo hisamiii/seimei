@@ -65,6 +65,7 @@ const PUBLIC: [(&str, &str); 7] = [
 const DEVICE_PUBLIC: [(&str, &str); 3] =
     [("POST", "/api/devices/claim"), ("POST", "/api/devices/challenge"), ("POST", "/api/devices/login")];
 
+/// The server's shared state: the parts from core plus the web page's files, built once at startup.
 pub struct App {
     pub events: Arc<EventLog>,
     pub auth: Option<Arc<Auth>>,
@@ -116,7 +117,7 @@ impl App {
     pub fn new(setup: Setup) -> std::io::Result<App> {
         let Setup { events, auth, origins, web, state, push, dispatcher: disp, shikigami, terminal, plugins } = setup;
         let state = state.as_path();
-        // Only these Host headers are served: a page using DNS rebinding cannot read the API from the browser (L4).
+        // Only these Host headers are served: a page using DNS rebinding cannot read the API from the browser.
         let mut hosts: HashSet<String> = ["localhost", "127.0.0.1", "::1"].map(String::from).into();
         hosts.extend(origins.iter().filter_map(|o| url::Url::parse(o).ok()?.host_str().map(String::from)));
         let (version, mut assets) = load_web(web.as_deref());
@@ -199,7 +200,7 @@ impl App {
         push.ping(title, text, "urgent", None, false);
     }
 
-    /// Pictures carry their size, so lazy images keep their space before they load (QA B13).
+    /// Pictures carry their size, so lazy images keep their space before they load.
     fn sized<'a>(&self, ev: &'a Value) -> Cow<'a, Value> {
         let mut ev = Cow::Borrowed(ev);
         if ev["type"] == "image"
@@ -296,6 +297,7 @@ fn mime(name: &str) -> &'static str {
 
 type Shared = State<Arc<App>>;
 
+/// Every route, with the login and Origin checks in front of what needs them.
 pub fn router(app: Arc<App>) -> Router {
     let mut r = Router::new()
         .route("/", get(index))
@@ -418,7 +420,7 @@ async fn guard(State(app): Shared, req: Request, next: Next) -> Response {
         if (!app_call && !app.origins.contains(origin)) || content_type(req.headers()) != body_type {
             return text(StatusCode::FORBIDDEN, "forbidden");
         }
-        // Body caps that also hold for chunked bodies (auth audit M2). Uploads cap their own stream.
+        // Body caps that also hold for chunked bodies. Uploads cap their own stream.
         if path != "/api/upload" {
             let cap = if public {
                 PUBLIC_BODY
@@ -543,7 +545,7 @@ async fn passkey_login(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> 
     }
 }
 
-/// Adding a passkey or a phone needs a browser login from the last few minutes (auth audit L2).
+/// Adding a passkey or a phone needs a browser login from the last few minutes.
 fn fresh_login(app: &App, headers: &HeaderMap) -> Result<(), Response> {
     if auth(app).recent(headers) {
         return Ok(());
@@ -680,7 +682,7 @@ async fn logout(State(app): Shared, headers: HeaderMap) -> Response {
     r
 }
 
-/// The Material You seed the phone app last sent from its wallpaper (#81); {} before any did.
+/// The Material You seed the phone app last sent from its wallpaper; {} before any did.
 async fn theme_get(State(app): Shared) -> Response {
     ok(read_json(&app.theme).filter(Value::is_object).unwrap_or(json!({})))
 }
@@ -712,7 +714,7 @@ async fn tasks_view(State(app): Shared) -> Response {
     ok(app.board.lock().unwrap().snapshot())
 }
 
-/// Done tasks older than a day, newest first (#168); q searches id, title, project and owner.
+/// Done tasks older than a day, newest first; q searches id, title, project and owner.
 async fn tasks_archive(State(app): Shared, Query(q): Query<HashMap<String, String>>) -> Response {
     let board = app.board.lock().unwrap();
     let limit = q.get("limit").and_then(|l| l.parse().ok()).unwrap_or(500);
@@ -1305,7 +1307,7 @@ async fn worker_send(State(app): Shared, UrlPath(id): UrlPath<String>, bytes: By
     if let Err(e) = w.send(&said, Some(&shown), chips).await {
         return json_status(StatusCode::CONFLICT, json!({"error": e}));
     }
-    // The main chat says the user answered or messaged it (QA U17); an open "asks" card settles on it (B5).
+    // The main chat says the user answered or messaged it; an open "asks" card settles on it.
     let quote = if shown.is_empty() { "(files)".to_string() } else { seimei_core::util::chars(&shown, 200) };
     app.events.add(json!({"type": "worker", "event": "replied", "worker": w.id, "name": w.name(), "asked": asked,
         "text": quote}));

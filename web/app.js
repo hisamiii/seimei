@@ -101,7 +101,7 @@ function chrome() {
     // The sections and the nav badge say how many work and need you
     s = 'idle';
   }
-  // Away: the other tabs show the last known state, and say so (QA U2).
+  // Away: the other tabs show the last known state, and say so.
   if (S.tab !== 'chat' && !S.online && S.awaySince) {
     s = 'away';
     text = `Offline since ${clock(S.awaySince / 1000)}`;
@@ -112,7 +112,7 @@ function chrome() {
   // Idle and working go without saying in the chat (its working line shows a turn); only problems and asks show.
   $('status').hidden = !text || (S.tab === 'chat' && (s === 'idle' || s === 'working'));
 
-  // What needs the user counts first, in orange; otherwise how many work (QA U4).
+  // What needs the user counts first, in orange; otherwise how many work.
   const count = $('nav-count');
   const n = asks || working;
   count.hidden = !n;

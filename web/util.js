@@ -133,7 +133,7 @@ export const short = (t) => {
 };
 
 // A clock time today, a date before that.
-// "at 10:28 PM" today, "on 18 Oct at 10:28 PM" another day (QA U8).
+// "at 10:28 PM" today, "on 18 Oct at 10:28 PM" another day.
 export function at(t) {
   const d = new Date(t * 1000);
   if (d.toDateString() === new Date().toDateString()) return `at ${clock(t)}`;
@@ -193,7 +193,7 @@ export async function post(path, body) {
   return r.json();
 }
 
-// A short note at the bottom for taps that could not do anything (QA U15).
+// A short note at the bottom for taps that could not do anything.
 let snackTimer = 0;
 // A short message at the bottom; action ({ label, run }) adds a button such as Undo.
 // The snackbar sits above whatever holds the bottom edge, never over the field: an agent page's composer, or the

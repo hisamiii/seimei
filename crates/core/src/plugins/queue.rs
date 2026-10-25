@@ -61,6 +61,7 @@ fn runtime_dir() -> PathBuf {
         .join("claude-queue")
 }
 
+/// Where claude-queue keeps its state: $SEIMEI_QUEUE_DIR, else its runtime folder.
 pub fn queue_dir() -> PathBuf {
     std::env::var_os("SEIMEI_QUEUE_DIR").filter(|d| !d.is_empty()).map(PathBuf::from).unwrap_or_else(runtime_dir)
 }
@@ -853,6 +854,7 @@ impl Watcher {
         true
     }
 
+    /// Follows cqd's event stream for good, reconnecting when cqd restarts.
     pub async fn run(self: Arc<Self>) {
         loop {
             if self.stream().await {

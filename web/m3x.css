@@ -275,7 +275,7 @@ body.offline .hello { display: none; }
 .swipe.swiping .tr { transform: translateX(112px); border-radius: var(--shape-lg); }
 
 /* ===== showcase ===== */
-/* The showcase (#142): every screen in the final design. Loaded after the earlier after CSS; this covers what they
+/* The showcase: every screen in the final design. Loaded after the earlier after CSS; this covers what they
    did not: chat event lines and the report, the question cards, notes, trajectory, the shikigami page, login,
    offline, the sheets. Built by ../tools/showcase.py. */
 

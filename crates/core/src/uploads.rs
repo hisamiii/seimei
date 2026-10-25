@@ -53,9 +53,11 @@ pub fn is_id(id: &str) -> bool {
     id.len() == 32 && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
+/// The upload passed MAX_BYTES (or could not be written).
 #[derive(Debug)]
 pub struct TooLarge;
 
+/// Files the user attaches from the phone, one folder per upload id under the state dir. Old ones are pruned.
 pub struct Uploads {
     dir: PathBuf,
 }
@@ -77,6 +79,7 @@ impl Incoming {
         self.file.as_mut().expect("open").write_all(chunk).map_err(|_| TooLarge)
     }
 
+    /// Keeps the file and returns its upload id.
     pub fn finish(mut self) -> String {
         self.file = None;
         std::mem::take(&mut self.id)
@@ -164,6 +167,7 @@ impl Uploads {
         gone
     }
 
+    /// Prunes old uploads every 6 hours, for good.
     pub async fn run(self: std::sync::Arc<Self>) {
         loop {
             let me = self.clone();
@@ -180,6 +184,7 @@ impl Uploads {
         &self.dir
     }
 
+    /// The file of an upload; None for a malformed id or a missing upload.
     pub fn path(&self, id: &str) -> Option<PathBuf> {
         if !is_id(id) {
             return None;

@@ -1,4 +1,4 @@
-// The theme picker (#81): Menu, then Theme. Each tile is a small chat drawn in its theme's own tokens.
+// The theme picker: Menu, then Theme. Each tile is a small chat drawn in its theme's own tokens.
 import { el } from './util.js';
 import { sheet, showSheet } from './sheet.js';
 import { THEMES, file, tokens, setVars, prefs, set, isDark, phoneSeed, seedOf, onTheme } from './theme.js';

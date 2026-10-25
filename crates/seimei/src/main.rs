@@ -153,7 +153,7 @@ fn account(auth: &Auth, a: &Args, state: &std::path::Path) {
                 die("the two entries differ");
             }
             auth.set_password(&pw);
-            // A new password usually means the old one leaked: whoever used it is logged out too (auth audit L1).
+            // A new password usually means the old one leaked: whoever used it is logged out too.
             if a.keep_sessions {
                 println!("Password set. Logged-in devices stay logged in; `logout-all` ends them.");
             } else {
@@ -283,7 +283,7 @@ fn main() {
     let (origins, auth): (HashSet<String>, Option<Arc<Auth>>) = if a.dev {
         port += 1;
         let origins = [format!("http://localhost:{port}"), format!("http://127.0.0.1:{port}")].into();
-        // The login stays on unless --no-login (auth audit L4: any local process could drive a login-free server).
+        // The login stays on unless --no-login (any local process could drive a login-free server).
         let auth = (!a.no_login).then(|| Arc::new(Auth::new(&state, &format!("http://localhost:{port}"))));
         eprintln!(
             "WARNING seimei: DEV MODE ({}): http://localhost:{port}, state in {}",
@@ -359,7 +359,7 @@ fn main() {
         tokio::spawn(deploy_note(state.clone(), app.dispatcher.clone()));
         tokio::spawn(app.dispatcher.clone().run());
         tokio::spawn(app.pool.clone().sweep());
-        // Done tasks leave the board a day after they are done (#168), even when nothing else changes it.
+        // Done tasks leave the board a day after they are done, even when nothing else changes it.
         let board = app.board.clone();
         tokio::spawn(async move {
             loop {
@@ -434,7 +434,7 @@ fn main() {
                     _ = term.recv() => {},
                     _ = tokio::signal::ctrl_c() => {},
                 }
-                // A reply cut off mid-stream would vanish without a word (QA U3).
+                // A reply cut off mid-stream would vanish without a word.
                 if dispatcher.busy() {
                     let text = "seimei restarted mid-reply; that turn was cut off.";
                     events.add(serde_json::json!({"type": "system", "level": "warn", "text": text}));

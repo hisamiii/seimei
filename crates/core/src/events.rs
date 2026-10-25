@@ -18,6 +18,8 @@ const TURN: [&str; 5] = ["assistant", "tool", "tool_result", "image", "file"];
 /// A stalled client loses its stream past this many queued events; it reconnects and replays from its last id.
 const QUEUE: usize = 2000;
 
+/// The append-only event log (events.jsonl): everything the pages show, with dense ids from 1.
+/// The whole log stays in memory; clients replay from it and then follow live events.
 pub struct EventLog {
     inner: Mutex<Inner>,
     path: PathBuf,
@@ -37,6 +39,7 @@ fn id(ev: &Value) -> i64 {
 }
 
 impl EventLog {
+    /// Loads the log; a line that is not JSON fails the open rather than being skipped.
     pub fn open(path: &Path) -> std::io::Result<EventLog> {
         let mut events = vec![];
         if let Ok(f) = File::open(path) {
@@ -85,6 +88,7 @@ impl EventLog {
         self.inner.lock().unwrap().send(&Arc::new(ev));
     }
 
+    /// Live events from now on, stored and flashed. A subscriber that falls QUEUE events behind is dropped.
     pub fn subscribe(&self) -> mpsc::Receiver<Event> {
         let (tx, rx) = mpsc::channel(QUEUE);
         self.inner.lock().unwrap().subs.push(tx);
@@ -96,6 +100,7 @@ impl EventLog {
         self.inner.lock().unwrap().subs.clear();
     }
 
+    /// The running dispatcher turn, stamped on the events it produces (see Inner::turn).
     pub fn turn(&self) -> Map<String, Value> {
         self.inner.lock().unwrap().turn.clone()
     }
@@ -141,6 +146,7 @@ impl EventLog {
         g.events[start..].to_vec()
     }
 
+    /// Up to `limit` stored events before id `first` (the newest when None), oldest first: the page's scrollback.
     pub fn before(&self, first: Option<i64>, limit: usize) -> Vec<Event> {
         let g = self.inner.lock().unwrap();
         let end = match first {

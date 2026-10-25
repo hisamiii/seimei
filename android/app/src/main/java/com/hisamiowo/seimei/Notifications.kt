@@ -46,7 +46,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-// ---------- Menu, then Notifications (#63): how they reach this phone, and what to change ----------
+// ---------- Menu, then Notifications: how they reach this phone, and what to change ----------
 
 /** How notifications reach this phone, as the sheet's top card says it. */
 data class Route(val title: String, val text: String, val ok: Boolean)

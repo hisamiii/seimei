@@ -1,8 +1,8 @@
-//! The task board (#55, #58): what seimei has queued, who has each item and where it stands, grouped by project.
+//! The task board: what seimei has queued, who has each item and where it stands, grouped by project.
 //! seimei keeps it current with its tasks tool; summon and adopt file a task for each new shikigami, and a linked
 //! task's state follows its shikigami (running, asks, review once it reports). The user ticks their own items off on
 //! the phone. Pages read it whole from /api/tasks and follow it live: every change goes out on the event stream as
-//! {"type": "tasks", ...} (not stored). Done items stay a day, then move to tasks-archive.json (#168): the board stays
+//! {"type": "tasks", ...} (not stored). Done items stay a day, then move to tasks-archive.json: the board stays
 //! short, the archive is searchable (/api/tasks/archive, the tool's archive action), and an update brings one back.
 
 use std::path::{Path, PathBuf};
@@ -17,6 +17,7 @@ use crate::events::EventLog;
 use crate::util::{now, read_json, write_json};
 
 pub const STATES: [&str; 6] = ["open", "running", "asks", "review", "paused", "done"];
+/// The owner of items the user does themselves.
 pub const YOU: &str = "you";
 /// How many done tasks the board keeps per project; older ones go to the archive early.
 const DONE_KEEP: usize = 30;
@@ -62,6 +63,7 @@ fn rank(state: &str) -> usize {
     }
 }
 
+/// A shikigami's own step under the item it works on (its live checklist).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Step {
     pub id: String,
@@ -153,6 +155,7 @@ fn seed() -> Data {
     Data { next: 1, other: 1, tasks: vec![], projects: vec![] }
 }
 
+/// The board in tasks.json; every change is saved and sent to the pages at once.
 pub struct Board {
     path: PathBuf,
     events: Option<Arc<EventLog>>,
@@ -202,6 +205,7 @@ impl Board {
         &self.data.projects
     }
 
+    /// The next free numbers: (#NN, tNN).
     pub fn counters(&self) -> (u64, u64) {
         (self.data.next, self.data.other)
     }
@@ -321,6 +325,7 @@ impl Board {
         self.data.tasks.iter().filter(|t| t.owner == owner).map(|t| t.pos).max().unwrap_or(0)
     }
 
+    /// Adds an item: with `tid` it keeps that #NN, else it takes the next #NN (numbered) or tNN. Fails on a taken id or an unknown state.
     pub fn add(&mut self, new: NewTask) -> Result<Task> {
         let NewTask { title, project, owner, state, worker, numbered, tid } = new;
         valid(state)?;
@@ -409,6 +414,7 @@ impl Board {
         Ok(t)
     }
 
+    /// Makes the project if it is new. An empty color clears it.
     pub fn set_project(&mut self, name: &str, paused: Option<bool>, color: Option<&str>) -> Project {
         let p = self.project(name);
         if let Some(paused) = paused {
@@ -565,7 +571,7 @@ impl Board {
         Ok(i)
     }
 
-    /// A shikigami moves on to one of its own queued items (#79): that one runs and follows it; what it worked on
+    /// A shikigami moves on to one of its own queued items: that one runs and follows it; what it worked on
     /// before goes back to the queue, unless it was shipped.
     pub fn start(&mut self, worker: &str, name: &str, wstate: &str, tid: &str) -> Result<Task> {
         let i = self.own(name, tid)?;
@@ -609,7 +615,7 @@ impl Board {
         Ok(t)
     }
 
-    /// A shikigami deployed or delivered one of its items (#79): it waits in review for seimei's check.
+    /// A shikigami deployed or delivered one of its items: it waits in review for seimei's check.
     pub fn ship(&mut self, worker: &str, name: &str, tid: &str) -> Result<Task> {
         let i = self.own(name, tid)?;
         let t = &mut self.data.tasks[i];

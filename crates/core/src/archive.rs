@@ -11,9 +11,12 @@ use serde_json::{Map, Value, json};
 
 use crate::util::{now, read_json, write_json};
 
+/// An ended item with no mark hides itself this long after its last activity.
 pub const AUTO: f64 = 12.0 * 3600.0;
+/// The worker states that may hide; anything else is still working or waiting.
 pub const ENDED: [&str; 4] = ["done", "failed", "stopped", "interrupted"];
 
+/// Rows the user hid from the Agents list, or showed again, in archive.json. Hiding never stops or deletes anything.
 pub struct Archive {
     path: PathBuf,
     marks: Mutex<Map<String, Value>>,
@@ -47,12 +50,14 @@ impl Archive {
         self.marks.lock().unwrap().get(key).cloned().unwrap_or(Value::Null)
     }
 
+    /// Whether a shikigami's row is hidden now.
     pub fn worker(&self, rec: &Value) -> bool {
         let id = rec["id"].as_str().unwrap_or("");
         let state = rec["state"].as_str().unwrap_or("");
         hidden(&self.mark(&format!("w:{id}")), rec["updated"].as_f64().unwrap_or(0.0), !ENDED.contains(&state), now())
     }
 
+    /// Whether one of the user's own sessions is hidden now.
     pub fn session(&self, s: &Value) -> bool {
         // The status time, not the transcript's mtime: Claude touches an idle session's file without a turn.
         let asking = match &s["question"] {

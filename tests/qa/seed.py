@@ -86,7 +86,7 @@ def seed():
         worker(f"bulk-{i:02d}", "done", cwd=f"{HOME}/src/proj{i}", model=["opus", "sonnet", "haiku"][i % 3],
                summary=f"Finished bulk job {i} with a summary line that is long enough to wrap onto a second line on a phone",
                age=900 + i * 2000, tokens=20000 * (i + 1))
-    # Ended over 12 hours ago: archived on their own (#43).
+    # Ended over 12 hours ago: archived on their own.
     worker("prefill-sweep", "done", cwd=f"{HOME}/src/yah", summary="Report: pp2048 1612 ms at matched clock; GPU held 41 min", age=2 * 86400)
     worker("kv-gate-run", "done", cwd=f"{HOME}/src/yah", summary="Report: long-context gate passed; GPU free after 3 min", age=3 * 86400)
     worker("old-render", "failed", cwd=f"{HOME}/wallpaper/shards", summary="Blender crashed at frame 9", age=20 * 3600)

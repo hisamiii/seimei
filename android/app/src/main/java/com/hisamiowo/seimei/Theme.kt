@@ -12,7 +12,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import org.json.JSONObject
 
-// ---------- themes (#81): the web page's token files (web/themes, bundled as assets), as Compose colors ----------
+// ---------- themes: the web page's token files (web/themes, bundled as assets), as Compose colors ----------
 
 val THEMES = listOf("catppuccin", "rose-pine", "gruvbox", "nord", "material-you")
 

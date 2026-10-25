@@ -976,7 +976,7 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
     val message = a.action == "message"
     // seimei's AskUserQuestion: the options are the answers, the note writes one, Skip leaves it
     val question = a.action == "question"
-    // A permission card (#64) carries Claude Code's choices; a guard card is Approve/Deny.
+    // A permission card carries Claude Code's choices; a guard card is Approve/Deny.
     val perm = a.options.isNotEmpty()
     // The subtitle names what it touches, not the title again: the session a command names, the file an edit writes.
     val sub = when {
@@ -1288,7 +1288,7 @@ fun Composer(vm: Seimei) {
                     Box(Modifier.size(16.dp).clip(RoundedCornerShape(4.dp)).background(cs.onPrimaryContainer))
                 }
             } else {
-                // Offline it stays tappable: send() then says why nothing went out (QA U15).
+                // Offline it stays tappable: send() then says why nothing went out.
                 FilledIconButton(vm::send, Modifier.size(52.dp), enabled = typing,
                     colors = IconButtonDefaults.filledIconButtonColors()) {
                     Icon(Icons.send, "Send", Modifier.size(20.dp))

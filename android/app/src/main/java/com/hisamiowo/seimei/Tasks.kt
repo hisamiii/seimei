@@ -81,7 +81,7 @@ import androidx.compose.material3.TextFieldDefaults
 // The Tasks lane, as on the web page (tasks.js): two views behind one connected button group. Now: what needs the
 // user (a question, a job to look over, their own tasks), what runs and how far, and each shikigami's next. All
 // tasks: one quiet row per project with a one-line summary; a project opens in place, its done items fold into
-// "N done", paused projects wait behind one row, and done work sits in the Archived row (#168): what is older than a
+// "N done", paused projects wait behind one row, and done work sits in the Archived row: what is older than a
 // day leaves the board, projects with only done items fold away into it. The user ticks their own tasks (with Undo);
 // a task with a shikigami opens its page.
 
@@ -331,7 +331,7 @@ private fun LazyListScope.allItems(vm: Seimei, b: Board, doneShown: List<String>
     if (done > 0) item(key = "archived") { archived() }
 }
 
-/** The archive (#168), in the Agents archive's form: every done item, today's from the board and older ones from the
+/** The archive, in the Agents archive's form: every done item, today's from the board and older ones from the
  * server, by the day it was done, searchable. */
 @Composable
 private fun TaskArchive(vm: Seimei, b: Board?) {

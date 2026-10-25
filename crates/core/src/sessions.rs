@@ -338,7 +338,7 @@ pub fn running_output(pid: i64, lines: usize) -> Vec<String> {
     rows[rows.len().saturating_sub(lines)..].to_vec()
 }
 
-/// What Claude Code writes in waitingFor, as a sentence (QA U7).
+/// What Claude Code writes in waitingFor, as a sentence.
 pub fn waiting_text(w: Option<&str>) -> String {
     match w.filter(|w| !w.is_empty()) {
         None => "Waiting on the server".into(),
@@ -444,6 +444,7 @@ pub struct SessionEvents {
 pub type Line = (String, bool, Option<String>);
 
 impl SessionEvents {
+    /// The lines for the dispatcher since the last scan of the same rows.
     pub fn scan(&mut self, rows: &[Value]) -> Vec<Line> {
         let mut out = vec![];
         // Sessions working in an agent's scratch folder are test fixtures, not the user's work.
@@ -644,6 +645,7 @@ impl Watcher {
         Ok(())
     }
 
+    /// Rescans the registry every few seconds, for good.
     pub async fn run(self: Arc<Self>) {
         let mut sig: Option<Vec<Value>> = None;
         loop {

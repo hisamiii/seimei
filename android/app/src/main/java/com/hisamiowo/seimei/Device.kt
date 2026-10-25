@@ -31,7 +31,7 @@ class Prefs(ctx: Context) {
     var keyAuth: Boolean
         get() = p.getBoolean("keyAuth", true)
         set(v) = p.edit().putBoolean("keyAuth", v).apply()
-    /** The theme (#81): one of THEMES; "Material You colors" from before themes carries over. */
+    /** The theme: one of THEMES; "Material You colors" from before themes carries over. */
     var theme: String
         get() = p.getString("theme", null) ?: if (p.getBoolean("dynamicColor", false)) "material-you" else "catppuccin"
         set(v) = p.edit().putString("theme", v).apply()

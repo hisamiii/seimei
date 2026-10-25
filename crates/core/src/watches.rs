@@ -102,6 +102,7 @@ impl Watches {
         }
     }
 
+    /// Adds a rule after checking its trigger and target; Err says what is wrong, for the dispatcher.
     pub fn add(&self, r: NewRule) -> Result<Value, String> {
         let triggers = self.triggers();
         if !triggers.iter().any(|(t, _)| *t == r.trigger) {
@@ -137,6 +138,7 @@ impl Watches {
         rules.len() < n
     }
 
+    /// The rules as text for the dispatcher, with what is left of each one's time.
     pub fn listing(&self) -> String {
         let rules = self.rules.lock().unwrap();
         if rules.is_empty() {

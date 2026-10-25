@@ -64,6 +64,7 @@ static OWN: LazyLock<Value> = LazyLock::new(|| {
 /// Runs a shikigami's own tool for it: (worker id, tool, args) to the tool's result, None for no such worker.
 pub type OwnTools = Box<dyn Fn(&str, &str, &Value) -> Option<Value> + Send + Sync>;
 
+/// One enabled plugin: its MCP server entry and the text it adds to the prompts.
 pub struct Plugin {
     pub name: String,
     /// The server entry for Claude Code, without the session's env.
@@ -76,6 +77,7 @@ pub struct Plugin {
     linked: bool,
 }
 
+/// The enabled plugins, built once from config at startup.
 pub struct Plugins {
     list: Vec<Plugin>,
     pub queue: Option<queue::Queue>,
@@ -347,11 +349,13 @@ impl Plugins {
         self.wanted(groups).filter(|p| p.own).map(|p| format!("mcp__{}", p.name)).collect()
     }
 
+    /// The prompt sections of the plugins in `groups` (all when None).
     pub fn prompt(&self, groups: Option<&[String]>) -> String {
         let parts: Vec<&str> = self.wanted(groups).map(|p| p.prompt.as_str()).filter(|p| !p.is_empty()).collect();
         parts.join("\n\n")
     }
 
+    /// The lines each plugin adds to every shikigami's prompt.
     pub fn worker_notes(&self) -> String {
         let notes: Vec<&str> = self.list.iter().map(|p| p.worker_note.as_str()).filter(|n| !n.is_empty()).collect();
         notes.join("\n")
@@ -375,6 +379,7 @@ impl Plugins {
         if self.queue.is_some() { queue::TRIGGERS.to_vec() } else { vec![] }
     }
 
+    /// Whether a watch rule's plugin trigger and target make sense; Err says why not.
     pub fn check_trigger(&self, trigger: &str, target: &str) -> Result<(), String> {
         self.queue.as_ref().map_or(Ok(()), |q| q.check_trigger(trigger, target))
     }

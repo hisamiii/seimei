@@ -1,4 +1,4 @@
-//! Adopting one of the user's sessions as a shikigami (#34): the same conversation goes on in the background.
+//! Adopting one of the user's sessions as a shikigami: the same conversation goes on in the background.
 //!
 //! At the session's next idle (or now, interrupting it with Esc), its Claude Code process ends and a shikigami resumes
 //! the same session id with a first message saying what happened. The user approves on the stop-a-session card. What

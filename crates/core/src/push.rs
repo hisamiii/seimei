@@ -36,6 +36,7 @@ const SCOPE: &str = "https://www.googleapis.com/auth/firebase.messaging";
 /// Web Push carries at most 4096 bytes; encryption adds 103 (header and tag).
 pub const MAX_PLAIN: usize = 3993;
 
+/// One push as the phone gets it: flat string fields (kind, title, body, tag, tab, ...).
 pub type Data = Map<String, Value>;
 
 fn level_channel(level: &str) -> &'static str {
@@ -46,6 +47,7 @@ fn p256() -> EcGroup {
     EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).expect("P-256")
 }
 
+/// The uncompressed P-256 public point (65 bytes), the form Web Push uses for keys.
 pub fn point(key: &EcKey<impl openssl::pkey::HasPublic>) -> Vec<u8> {
     let mut ctx = BigNumContext::new().expect("bn");
     key.public_key().to_bytes(&p256(), PointConversionForm::UNCOMPRESSED, &mut ctx).expect("point")
@@ -124,6 +126,7 @@ pub fn valid_endpoint(endpoint: &str) -> bool {
     }
 }
 
+/// What auth.json keeps of a background stream's secret: only its hash.
 pub fn secret_hash(secret: &str) -> String {
     sha256_hex(secret.as_bytes())
 }
@@ -150,6 +153,7 @@ impl Fcm {
         }
     }
 
+    /// False without a service account file: FCM phones get nothing then.
     pub fn ready(&self) -> bool {
         self.key_path.exists()
     }
@@ -238,6 +242,7 @@ impl WebPush {
         WebPush { key_path, contact, key: Mutex::new(None), jwts: Mutex::new(HashMap::new()), http: http() }
     }
 
+    /// The VAPID key, made and saved (0600) on first use.
     pub fn key(&self) -> EcKey<Private> {
         let mut k = self.key.lock().unwrap();
         if k.is_none() {
@@ -367,6 +372,7 @@ impl Stream {
         }
     }
 
+    /// Sends to the phone's open sockets, or queues it for ttl seconds until one connects; a newer push with the same tag replaces a queued one.
     pub fn send(&self, dev: &str, data: &Data, ttl: u64) -> &'static str {
         let mut g = self.inner.lock().unwrap();
         let live = g.live.get_mut(dev).filter(|s| !s.is_empty());
@@ -396,6 +402,7 @@ impl Stream {
         self.inner.lock().unwrap().live.iter().filter(|(_, s)| !s.is_empty()).map(|(d, _)| d.clone()).collect()
     }
 
+    /// The tags queued for a phone without an open socket.
     pub fn waiting(&self, dev: &str) -> Vec<String> {
         self.inner
             .lock()
@@ -410,6 +417,7 @@ impl Stream {
 /// Whether one of a phone's event streams is still connected.
 pub type Alive = Box<dyn Fn() -> bool + Send + Sync>;
 
+/// Routes events to the phones' notifications while their app or page is away, and takes them back once seen.
 pub struct Push {
     events: Arc<EventLog>,
     auth: Option<Arc<Auth>>,
@@ -507,6 +515,7 @@ impl Push {
         id
     }
 
+    /// A client stream ended; when it was a phone's last, the phone counts as away from now on.
     pub fn closed(&self, dev: Option<&str>, id: u64) {
         let Some(d) = dev else { return };
         let mut s = self.st.lock().unwrap();
@@ -527,6 +536,7 @@ impl Push {
         }
     }
 
+    /// True while the phone's app or page has a stream open, so pushes wait.
     pub fn is_open(&self, dev: &str) -> bool {
         self.st.lock().unwrap().is_open(dev)
     }
@@ -559,6 +569,7 @@ impl Push {
         }
     }
 
+    /// Whether this phone's push route can work now (FCM needs the service account).
     pub fn can_send(&self, rec: &Value) -> bool {
         match Self::way(rec) {
             "fcm" => self.fcm.ready(),
@@ -641,6 +652,7 @@ impl Push {
 
     // ---------- the event stream ----------
 
+    /// Follows the event log for good; also cancels questions left on the phones by a restart.
     pub async fn run(self: Arc<Self>) {
         let stale = std::mem::take(&mut self.st.lock().unwrap().stale_questions);
         if stale {
@@ -655,6 +667,7 @@ impl Push {
         }
     }
 
+    /// Turns one event into pushes or take-backs. Public for tests.
     pub fn handle(self: &Arc<Self>, ev: &Value) {
         let aid = ev["aid"].as_str().map(String::from);
         match ev["type"].as_str() {

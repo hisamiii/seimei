@@ -229,7 +229,7 @@ class Activity {
     const parts = [...counts].filter(([, n]) => n > 0).map(([name, n]) => phrase(name, n));
     if (now) parts.push(`${doing(now)}…`);
     const text = parts.join(', ') + (this.failed ? ` · ${this.failed} failed` : '');
-    // A failure shows on the collapsed chip too, not only in its row (QA U5).
+    // A failure shows on the collapsed chip too, not only in its row.
     this.chip.classList.toggle('err', this.failed > 0);
     const chev = svg(ICON.chev);
     chev.classList.add('chev');
@@ -317,7 +317,7 @@ function workerCard(ev) {
   return card;
 }
 
-// Long card bodies get "Show more". Measured when the body has a size: a card drawn on a hidden tab has none yet (QA B8).
+// Long card bodies get "Show more". Measured when the body has a size: a card drawn on a hidden tab has none yet.
 const clipWatch = new ResizeObserver((entries) => {
   for (const { target: body } of entries) {
     if (!body.clientHeight) continue;
@@ -397,7 +397,7 @@ function approvalCard(ev) {
   const message = ev.action === 'message';
   const who = ev.subagent ? `${ev.who}'s subagent` : ev.who;
   title.append(el('b', null, question ? `${who} asks you` : `${who} wants to ${message ? `message ${ev.target}` : ev.target}`));
-  // The subtitle names what it touches, not the title again (QA D8): the session a command names, the file an edit writes.
+  // The subtitle names what it touches, not the title again: the session a command names, the file an edit writes.
   const sub = approvalSub(ev);
   if (sub) title.append(el('span', 'sub', sub));
   head.append(badge, title);
@@ -934,7 +934,7 @@ function spoken(ev) {
   return '';
 }
 
-// An empty chat greets instead of showing a blank sheet (QA U14); an empty trajectory says what will show.
+// An empty chat greets instead of showing a blank sheet; an empty trajectory says what will show.
 function hello() {
   const empty = (t) => ![...t.children].some((c) => !c.matches('.older, .note.day, .traj-empty, [hidden]'));
   $('hello').hidden = S.lane !== 'c' || !empty(thread);
@@ -1109,7 +1109,7 @@ function quoteOff() {
 }
 $('quote-x').addEventListener('click', quoteOff);
 
-// The message shows at once, dimmed, until the server echoes it back (QA U1); a failed one offers a retry.
+// The message shows at once, dimmed, until the server echoes it back; a failed one offers a retry.
 const pending = new Map();
 
 function pendingBubble(cid, text, sending, reply) {

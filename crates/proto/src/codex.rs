@@ -85,6 +85,7 @@ impl Shared {
     }
 }
 
+/// One `codex app-server` process over JSON-RPC on stdio, with one thread as its session.
 pub struct Client {
     shared: Arc<Shared>,
     events: mpsc::UnboundedReceiver<Event>,
@@ -99,6 +100,7 @@ pub struct Client {
 }
 
 impl Client {
+    /// Starts the process, initializes it and starts or resumes the thread named in opts.
     pub async fn connect(opts: Options, handler: Arc<dyn Handler>) -> Result<Client, Error> {
         if !opts.cwd.is_dir() {
             return Err(Error::NoFolder(opts.cwd.clone()));
@@ -188,10 +190,12 @@ impl Client {
         self.pid
     }
 
+    /// The next event; None once the process has exited and everything it wrote was read.
     pub async fn recv(&mut self) -> Option<Event> {
         self.events.recv().await
     }
 
+    /// Drops the events already read but not taken, such as the tail of a cancelled turn.
     pub fn drain(&mut self) {
         while self.events.try_recv().is_ok() {}
     }
@@ -230,6 +234,7 @@ impl Client {
         }
     }
 
+    /// One JSON-RPC request; Err(Closed) when the process is gone.
     pub async fn request(&self, method: &str, params: Value) -> Result<Value, Error> {
         let s = &self.shared;
         let n = s.id();

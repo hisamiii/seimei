@@ -21,12 +21,13 @@ use crate::util::{
     write_json,
 };
 
+/// How long a browser login lasts; a paired phone's session is shorter and renews by signing a fresh challenge.
 pub const SESSION_DAYS: f64 = 30.0;
 const CHALLENGE_SECONDS: f64 = 120.0;
-/// OWASP's minimum (auth audit L3): 128 MiB and a few hundred ms per check, one check at a time. Older hashes keep
+/// OWASP's minimum: 128 MiB and a few hundred ms per check, one check at a time. Older hashes keep
 /// their own parameters and are redone at the next good login.
 pub const SCRYPT: (u64, u64, u64) = (1 << 17, 8, 1);
-/// The throttle bounds guessing, so 8 characters are enough (the user's call, 2026-10-19; tests/cases/password.json).
+/// The throttle bounds guessing, so 8 characters are enough (tests/cases/password.json).
 pub const MIN_PASSWORD: usize = 8;
 
 /// Why a new password is refused, or None.
@@ -46,13 +47,16 @@ const MAX_CLAIM_FAILURES: u32 = 10;
 /// The app holds its session in memory and logs in again with the fingerprint each time it opens.
 const DEVICE_SESSION_HOURS: f64 = 12.0;
 const DEVICE_LOGIN: &[u8] = b"seimei device login\n";
-/// Adding a passkey or pairing a phone needs a login this recent: a borrowed session cannot make itself permanent (L2).
+/// Adding a passkey or pairing a phone needs a login this recent: a borrowed session cannot make itself permanent.
 const REAUTH_SECONDS: f64 = 10.0 * 60.0;
-/// Open passkey challenges and device nonces kept at most; past it the oldest go (L5).
+/// Open passkey challenges and device nonces kept at most; past it the oldest go.
 pub const MAX_PENDING: usize = 1000;
 
+/// Called with (title, text) when auth.json changed behind the server (forged entries, a new password or pairing code); the server logs and pushes it.
 pub type Alarm = Box<dyn Fn(&str, &str) + Send + Sync>;
 
+/// The login state in auth.json: the password hash, sessions, passkeys and paired phones.
+/// Every method rereads the file when it changed on disk, so the CLI commands take effect on a running server.
 pub struct Auth {
     path: PathBuf,
     pub origin: String,
@@ -63,7 +67,7 @@ pub struct Auth {
     scrypt: (u64, u64, u64),
     inner: Mutex<Inner>,
     /// One password check at a time: guesses sent in parallel would all pass the lock check before any of them
-    /// counted as a failure (auth audit H1).
+    /// counted as a failure.
     password_lock: tokio::sync::Mutex<()>,
     alarm: Mutex<Option<Alarm>>,
 }
@@ -72,7 +76,7 @@ pub struct Auth {
 struct Inner {
     data: Map<String, Value>,
     mtime: Option<u128>,
-    /// The tripwire (auth audit M1): what this server made or found at startup.
+    /// The tripwire: what this server made or found at startup.
     known: Option<Ids>,
     failures: u32,
     locked_until: f64,
@@ -146,6 +150,7 @@ fn err<T>(s: &str) -> Result<T, AuthError> {
     Err(AuthError(s.into()))
 }
 
+/// Blocks for a few hundred ms and takes 128 MiB at the default parameters: call it off the async threads.
 pub fn scrypt(password: &str, salt: &[u8], (n, r, p): (u64, u64, u64)) -> Vec<u8> {
     let mut out = vec![0; 32];
     openssl::pkcs5::scrypt(password.as_bytes(), salt, n, r, p, 256 << 20, &mut out).expect("scrypt");
@@ -222,6 +227,7 @@ impl Auth {
         *self.alarm.lock().unwrap() = Some(alarm);
     }
 
+    /// No-op until the server sets an alarm.
     pub fn alarm(&self, title: &str, text: &str) {
         if let Some(a) = &*self.alarm.lock().unwrap() {
             a(title, text);
@@ -336,6 +342,7 @@ impl Auth {
 
     // ---------- password ----------
 
+    /// Leaves the sessions alone; `seimei passwd` ends them itself.
     pub fn set_password(&self, password: &str) {
         let salt = random_bytes(16);
         let (n, r, p) = self.scrypt;
@@ -391,6 +398,7 @@ impl Auth {
 
     // ---------- sessions ----------
 
+    /// The token of a new session (a cookie for browsers, a bearer token for phones). Expired sessions are pruned here.
     pub fn new_session(&self, how: &str, agent: &str, device: Option<&str>) -> String {
         let token = token_urlsafe(32);
         let t = now();
@@ -407,6 +415,7 @@ impl Auth {
         token
     }
 
+    /// The token of an `Authorization: Bearer` header, if any.
     pub fn bearer(headers: &HeaderMap) -> Option<String> {
         let h = headers.get("authorization")?.to_str().ok()?;
         let t = h.strip_prefix("Bearer ")?.trim();
@@ -433,6 +442,7 @@ impl Auth {
         Some(s.clone())
     }
 
+    /// True when the request carries a live session token (bearer or cookie).
     pub fn session(&self, headers: &HeaderMap) -> bool {
         self.current(headers).is_some()
     }
@@ -442,6 +452,7 @@ impl Auth {
         self.current(headers)?.get("device")?.as_str().map(String::from)
     }
 
+    /// Logs out the session of this request; unknown tokens are ignored.
     pub fn end_session(&self, headers: &HeaderMap) {
         if let Some(token) = self.token(headers) {
             let mut g = self.lock();
@@ -451,7 +462,7 @@ impl Auth {
         }
     }
 
-    /// A browser session that logged in within REAUTH_SECONDS: needed to add a passkey or pair a phone (L2).
+    /// A browser session that logged in within REAUTH_SECONDS: needed to add a passkey or pair a phone.
     pub fn recent(&self, headers: &HeaderMap) -> bool {
         self.current(headers).is_some_and(|s| {
             s.get("device").is_none()
@@ -460,6 +471,7 @@ impl Auth {
         })
     }
 
+    /// Logs out every browser and phone. Passkeys and paired phones stay.
     pub fn end_all_sessions(&self) {
         let mut g = self.lock();
         g.data.insert("sessions".into(), json!({}));
@@ -518,6 +530,7 @@ impl Auth {
         Some(Passkey::from(cred))
     }
 
+    /// Starts adding a passkey: the WebAuthn options for the browser. The challenge expires after two minutes.
     pub fn register_options(&self) -> Result<Value, AuthError> {
         let w = self.webauthn()?;
         let exclude: Vec<CredentialID> = {
@@ -545,6 +558,7 @@ impl Auth {
         self.lock().challenges.take(c).ok_or_else(|| AuthError("unknown or expired challenge".into()))
     }
 
+    /// Finishes adding a passkey from the browser's answer to register_options.
     pub fn register_verify(&self, credential: &Value, name: &str) -> Result<(), AuthError> {
         let w = self.webauthn()?;
         let Challenge::Register(state) = self.take_challenge(credential)? else {
@@ -566,6 +580,7 @@ impl Auth {
         Ok(())
     }
 
+    /// Starts a passkey login (discoverable, user verification required). The caller makes the session after login_verify.
     pub fn login_options(&self) -> Result<Value, AuthError> {
         let w = self.webauthn()?;
         let (opts, state) = w.start_discoverable_authentication().map_err(|e| AuthError(e.to_string()))?;
@@ -576,6 +591,7 @@ impl Auth {
         Ok(opts["publicKey"].take())
     }
 
+    /// Checks a passkey login against its challenge and the stored key; Ok means the caller may make a session.
     pub fn login_verify(&self, credential: &Value) -> Result<(), AuthError> {
         let w = self.webauthn()?;
         let id = credential["id"].as_str().unwrap_or("").to_string();
@@ -680,6 +696,7 @@ impl Auth {
         self.lock().device(id).cloned()
     }
 
+    /// A one-time nonce the paired phone signs with its keystore key to log in.
     pub fn device_challenge(&self, device: &str) -> Result<String, AuthError> {
         let mut g = self.lock();
         if g.device(device).is_none() {
@@ -690,6 +707,7 @@ impl Auth {
         Ok(nonce)
     }
 
+    /// Checks the phone's signature over a nonce from device_challenge and returns a new phone session token.
     pub fn device_login(&self, device: &str, nonce: &str, signature: &str, agent: &str) -> Result<String, AuthError> {
         let (owner, rec) = {
             let mut g = self.lock();
@@ -804,6 +822,7 @@ impl Auth {
         self.save(&mut g);
     }
 
+    /// Unpairs a phone and ends its sessions; false when no such phone was paired.
     pub fn revoke(&self, device: &str) -> bool {
         let mut g = self.lock();
         let before = g.arr("devices").len();
@@ -850,6 +869,7 @@ impl Drop for Guard<'_> {
     }
 }
 
+/// The value of one cookie in the request's Cookie headers.
 pub fn cookie(headers: &HeaderMap, name: &str) -> Option<String> {
     for h in headers.get_all("cookie") {
         for part in h.to_str().ok()?.split(';') {

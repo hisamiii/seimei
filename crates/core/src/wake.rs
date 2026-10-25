@@ -43,6 +43,7 @@ fn hm(t: f64) -> String {
     Local.timestamp_opt(t as i64, 0).single().map(|t| t.format("%H:%M").to_string()).unwrap_or_default()
 }
 
+/// Checks the clocks every tick; after a suspend the page and the dispatcher hear how long, and what was in flight.
 pub struct WakeWatch {
     events: Arc<EventLog>,
     pool: Arc<Pool>,

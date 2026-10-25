@@ -26,7 +26,7 @@ sealed interface Item {
         /** An "asks" card that something later settled: "Answered" or "Closed". */
         val settled: String? = null,
     ) : Item
-    /** A card: Approve/Deny from the guard and plugins, or (with options) a permission prompt of Claude Code's (#64).
+    /** A card: Approve/Deny from the guard and plugins, or (with options) a permission prompt of Claude Code's.
      * expires is 0 for a shikigami's permission card, which waits. done is the approval_done event once settled. */
     data class Approval(
         override val key: String, val aid: String, val who: String, val action: String, val target: String,

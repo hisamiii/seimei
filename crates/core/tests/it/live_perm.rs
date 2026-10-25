@@ -151,7 +151,7 @@ async fn permissions_live() {
     until(180, || ended(&w) && work.join("e.txt").exists()).await;
     c.check("after Allow edits, Write asks nothing", work.join("e.txt").exists() && n_cards() == n, since(n));
     c.check("its mode shows the change", pool.info(&w.rec())["mode"] == "acceptEdits", pool.info(&w.rec()));
-    // Claude Code's settings take a guard card even with edits allowed (auth audit P3); the scripted user denies it.
+    // Claude Code's settings take a guard card even with edits allowed; the scripted user denies it.
     let n = n_cards();
     let ask = "Use the Write tool to create .claude/settings.local.json with the content {}, then reply done.";
     w.send(ask, None, vec![]).await.unwrap();

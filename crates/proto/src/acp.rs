@@ -201,6 +201,7 @@ type Pending = Arc<Mutex<HashMap<u64, Waiter>>>;
 /// The agent's permission requests still open: their JSON-RPC id and task.
 type Inflight = Arc<Mutex<HashMap<String, (Value, AbortHandle)>>>;
 
+/// One ACP agent process over JSON-RPC on stdio. Dropping it kills the process.
 pub struct Client {
     out: mpsc::UnboundedSender<String>,
     pending: Pending,
@@ -303,6 +304,7 @@ impl Client {
         Ok(())
     }
 
+    /// The process id from spawn time; None when it was gone before that.
     pub fn pid(&self) -> Option<u32> {
         self.pid
     }

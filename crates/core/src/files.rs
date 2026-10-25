@@ -73,6 +73,7 @@ impl Files {
         Ok((name, kind))
     }
 
+    /// The stored file for a name the page sent; None for a name that is not one of ours.
     pub fn path(&self, name: &str) -> Option<PathBuf> {
         let p = self.dir.join(name);
         (valid_name(name) && p.is_file()).then_some(p)

@@ -1,4 +1,4 @@
-"""Builds the theme token files (#81): web/themes/<theme>.json, read by the web page (theme.js) and bundled into
+"""Builds the theme token files: web/themes/<theme>.json, read by the web page (theme.js) and bundled into
 the app (its assets). A theme is a small base palette per side (dark and light); every token the page and the app use
 comes from it, so adding a theme is one more entry here. Material You has no fixed colors: the page and the app derive
 the same tokens from an M3 scheme (theme.js, Theme.kt). Run: python3 contrib/themes.py

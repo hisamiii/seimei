@@ -59,6 +59,7 @@ const EFFORT_SET: [&str; 2] = ["Set effort level", "Effort level"];
 /// 200k where the plan's models hold no more (crate::plan says which it offers).
 pub const CONTEXTS: [(&str, f64); 4] =
     [("200k", 200_000.0), ("256k", 256_000.0), ("400k", 400_000.0), ("1m", 1_000_000.0)];
+/// The states in which a shikigami counts as working.
 pub const ACTIVE: [&str; 2] = ["running", "asking"];
 /// How long a started process must stay up before adopt ends the user's session.
 const START_SETTLE: Duration = Duration::from_secs(1);
@@ -277,6 +278,7 @@ enum Cmd {
     },
 }
 
+/// One shikigami: its record in workers.json, its own event log, and the task that drives its agent process.
 pub struct Worker {
     pub id: String,
     rec: Mutex<Value>,
@@ -398,6 +400,7 @@ impl Worker {
             .collect()
     }
 
+    /// Its system prompt: the shikigami prompt with its name, the machine and the plugins' notes filled in.
     pub fn prompt(&self) -> String {
         let r = self.rec();
         let pool = self.pool();
@@ -503,6 +506,7 @@ impl Worker {
         rx.await.unwrap_or_else(|_| Err("its session ended".into()))
     }
 
+    /// Interrupts its turn and ends its process; returns once that is done.
     pub async fn stop(self: &Arc<Self>) {
         let (done, rx) = oneshot::channel();
         self.cmd(Cmd::Stop { done });
@@ -1892,6 +1896,7 @@ pub trait Listener: Send + Sync {
     fn rate_limit(&self, info: &Value);
 }
 
+/// All shikigami, workers.json and the line of events they send the dispatcher.
 pub struct Pool {
     me: Weak<Pool>,
     /// In workers.json's order.
@@ -2055,6 +2060,7 @@ impl Pool {
         json!({"type": "workers", "list": list, "total": self.workers.lock().unwrap().len()})
     }
 
+    /// Saves workers.json and sends the pages the new list; call it after any change to a record.
     pub fn changed(&self) {
         let recs: Vec<Value> = self.all().iter().map(|w| w.rec()).collect();
         if let Err(e) = write_json(&self.path, &recs) {
@@ -2126,6 +2132,7 @@ impl Pool {
         labels
     }
 
+    /// An event line about one shikigami for the dispatcher. Lines with the same key replace each other; an empty line takes one back.
     pub fn tell(&self, worker: &str, line: &str, urgent: bool, key: Option<&str>) {
         let line = match self.get(worker) {
             Some(w) => format!("shikigami {} ({}) {line}", w.name(), w.id),
@@ -2194,6 +2201,7 @@ impl Pool {
         Ok(())
     }
 
+    /// Starts a new shikigami on its first task. Errors are for the dispatcher: a mode above the config's ceiling, an unknown effort, context, board item, tool group or harness.
     pub async fn summon(&self, s: Summon) -> Result<Arc<Worker>, String> {
         let name = slug(&s.name);
         if let Some(m) = s.mode.as_deref().filter(|m| !crate::permissions::within(m, &self.mode)) {

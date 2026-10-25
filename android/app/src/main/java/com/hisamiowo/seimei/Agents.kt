@@ -202,7 +202,7 @@ data class Agent(
     val since: Double, val line: String, val fresh: Boolean = false, val bad: Boolean = false,
     /** A finished shikigami's end state (stopped, interrupted, ...), for its tile icon. */
     val end: String = "",
-    /** Hidden from the list (#43); find: what the Archived search looks in. */
+    /** Hidden from the list; find: what the Archived search looks in. */
     val archived: Boolean = false,
     val find: List<String> = emptyList(),
 )
@@ -305,7 +305,7 @@ fun AgentsTab(vm: Seimei) {
     }
 }
 
-// ---------- the archive (#43): hidden from the list, never stopped or deleted ----------
+// ---------- the archive: hidden from the list, never stopped or deleted ----------
 
 fun archivedAgents(vm: Seimei): List<Agent> =
     ((vm.allWorkers ?: vm.workers).filter { it.optBoolean("archived") && it.str("state") !in ACTIVE && it.str("state") != "released" }.map(::fromWorker) +
@@ -948,7 +948,7 @@ fun Details(vm: Seimei, pg: Page) {
                 Text(r.str("name"), fontSize = 22.sp, lineHeight = 26.sp)
                 Text(if (pg.kind == "worker") "Shikigami" else "Session ${r.str("kind")}".trim(), fontSize = 13.sp, color = LocalExtra.current.text3)
             }
-            // A permission card it waits on (#64).
+            // A permission card it waits on.
             if (pg.kind == "worker" && r.str("card").isNotEmpty()) Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(cs.primaryContainer).padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically) {
@@ -962,7 +962,7 @@ fun Details(vm: Seimei, pg: Page) {
                 val effort = r.str("effort").ifEmpty { r.str("effort_now") }
                 val effortText = if (r.str("effort_next").isNotEmpty()) "${effort.ifEmpty { "default" }} → ${r.str("effort_next")} at its next turn"
                     else if (effort.isEmpty()) "" else effort + if (pg.kind == "worker" && r.str("effort").isEmpty()) " · default" else ""
-                // Model, effort and permissions of a live shikigami open the Change sheet (#64, #74).
+                // Model, effort and permissions of a live shikigami open the Change sheet.
                 if (pg.kind == "worker" && r.str("state") !in listOf("released", "laptop")) {
                     TuneFact("Model", r.str("model")) { changing = true }
                     TuneFact("Effort", effortText) { changing = true }

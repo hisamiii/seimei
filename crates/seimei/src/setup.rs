@@ -318,6 +318,7 @@ fn kitty_bridge(state: &Path) {
     );
 }
 
+/// The interactive first run; `read_secret` reads the password without echo (tests pass a scripted one).
 pub fn run(read_secret: impl Fn(&str) -> String) {
     println!("seimei setup: what is already set up stays as it is.\n");
 

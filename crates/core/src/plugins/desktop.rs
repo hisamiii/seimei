@@ -196,6 +196,7 @@ impl Desktop {
             .replace("{wait}", if ends.is_empty() { "waits" } else { "wait" })
     }
 
+    /// The windows seimei opened.
     pub fn ours(&self) -> backend::Ours {
         self.ours.lock().unwrap().keys().copied().collect()
     }
@@ -210,6 +211,7 @@ impl Desktop {
         self.ours.lock().unwrap().remove(&wid);
     }
 
+    /// True while the window manager's event stream is connected.
     pub fn up(&self) -> bool {
         self.seen.lock().unwrap().up == Some(true)
     }
@@ -564,6 +566,7 @@ impl Desktop {
 
     // ---------- input ----------
 
+    /// True for a short while after seimei sent keys or clicks, for the bar's indicator.
     pub fn driving(&self) -> bool {
         now() < self.times.lock().unwrap().driving_until
     }

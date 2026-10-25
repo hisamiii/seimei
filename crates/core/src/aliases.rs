@@ -36,6 +36,7 @@ impl Aliases {
         self.map.lock().unwrap().keys().cloned().collect()
     }
 
+    /// Points `alias` at the session, replacing the session's old alias and any alias that differs only in case.
     pub fn set(&self, alias: &str, s: &Live) {
         let mut map = self.map.lock().unwrap();
         let low = alias.to_lowercase();

@@ -56,7 +56,7 @@ sealed interface Attachment {
     }
 }
 
-/** A message shown before the server echoes it back (QA U1); a failed one waits for a retry tap. */
+/** A message shown before the server echoes it back; a failed one waits for a retry tap. */
 class Pending(val cid: String, val text: String, val sending: List<Attachment>, val reply: ReplyTo? = null) {
     var failed by mutableStateOf(false)
 }
@@ -225,7 +225,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     /** The heights of what holds the bottom edge (the composer and navigation bar; a page's composer): snackbars sit above it. */
     var barPx by mutableStateOf(0)
     var pageBarPx by mutableStateOf(0)
-    /** The Archived list (#43) is open, and what it is searched for. */
+    /** The Archived list is open, and what it is searched for. */
     var archOpen by mutableStateOf(false)
     var archQuery by mutableStateOf("")
 
@@ -502,7 +502,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         if (accent != null) { prefs.accent = accent; this.accent = accent }
     }
 
-    /** Hands the server this phone's wallpaper seed, so the web page's Material You matches it (#81). Only when it
+    /** Hands the server this phone's wallpaper seed, so the web page's Material You matches it. Only when it
      * changed: a new wallpaper restarts the app's screen, which comes back through here. */
     private fun sendSeed() {
         val seed = wallpaperSeed(getApplication()) ?: return
@@ -831,7 +831,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** The task archive (#168): done items older than a day, newest first, as the server last sent them. */
+    /** The task archive: done items older than a day, newest first, as the server last sent them. */
     var taskArch by mutableStateOf<List<JSONObject>>(emptyList())
     var taskArchOpen by mutableStateOf(false)
     var taskArchQuery by mutableStateOf("")
@@ -1194,7 +1194,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     }
 
     /** Opens the shikigami in a terminal on the server; null when it worked, else why not. */
-    /** The Change sheet (#64, #74): a new effort, model or permission mode for a shikigami; null when it took. */
+    /** The Change sheet: a new effort, model or permission mode for a shikigami; null when it took. */
     suspend fun workerTune(pg: Page, body: JSONObject): String? = try {
         pg.row = pg.row.merged(api.post("api/workers/${pg.id}/tune", body))
         loadMetrics(pg)
@@ -1307,7 +1307,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Answers a card; a permission card (#64) also names its option, and a deny can carry a note for the agent. */
+    /** Answers a card; a permission card also names its option, and a deny can carry a note for the agent. */
     fun decide(aid: String, approve: Boolean, option: String? = null, note: String? = null, landed: (Boolean) -> Unit = {}, onFail: () -> Unit) {
         viewModelScope.launch {
             try {

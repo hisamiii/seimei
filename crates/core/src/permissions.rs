@@ -1,4 +1,4 @@
-//! Permission modes, and the buttons of a card for Claude Code's permission prompts (#64). Suggestions stay JSON in
+//! Permission modes, and the buttons of a card for Claude Code's permission prompts. Suggestions stay JSON in
 //! the control protocol's shape and go back as Claude Code sent them; tests/cases/permissions.json holds the
 //! answers.
 
@@ -12,6 +12,7 @@ use crate::approvals::Approvals;
 pub const MODES: [&str; 6] = ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"];
 /// seimei's own card counts as denied after this; a shikigami's waits, with one reminder push after REMIND.
 pub const DISPATCHER_WAIT: u64 = 1800;
+/// Seconds before the one reminder push for a shikigami's open card.
 pub const REMIND: u64 = 1800;
 
 /// How much a mode lets through without asking; summon may not go above the ceiling.
@@ -63,6 +64,7 @@ pub fn configured(cfg: &toml::Table, key: &str) -> String {
     }
 }
 
+/// Whether `mode` lets through no more than `ceiling`; unknown modes are never within.
 pub fn within(mode: &str, ceiling: &str) -> bool {
     rank(mode).is_some_and(|r| r <= rank(ceiling).unwrap_or(1))
 }
@@ -101,6 +103,7 @@ fn show(r: &Rule) -> String {
     }
 }
 
+/// A rule that lets through any call of its tool, or any code at all (a whole interpreter or package runner).
 pub fn broad(r: &Rule) -> bool {
     let Some(c) = r.content.filter(|c| !c.is_empty()) else { return true };
     if matches!(c.trim(), "*" | ":*") {

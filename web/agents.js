@@ -153,7 +153,7 @@ setInterval(() => { if (S.tab === 'agents') renderAgents(); }, 30000);
 
 const Q_ICON = 'M4 5h16v11H9l-5 4zM10 9.2a2 2 0 1 1 2.6 1.9c-.4.2-.6.5-.6.9M12 13.6v.1';
 const CLOCK = 'M12 4a8 8 0 1 1 0 16 8 8 0 0 1 0-16zM12 8v4l2.5 2';
-// How a finished shikigami ended, when not by finishing (QA U6).
+// How a finished shikigami ended, when not by finishing.
 const END = { stopped: 'M7.5 7.5h9v9h-9z', interrupted: 'M4 12a8 8 0 1 0 2.4-5.7M4 4.5v4h4' };
 
 function tile(x) {
@@ -228,7 +228,7 @@ function group(title, cls, items, q) {
   return sec;
 }
 
-// ---------- the archive (#43): rows hidden from the list; nothing is stopped or deleted ----------
+// ---------- the archive: rows hidden from the list; nothing is stopped or deleted ----------
 
 const ARCH = 'M3 4h18v4H3zM5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4';
 let archView = false;
@@ -389,7 +389,7 @@ let P = null;
 function ring(pct) {
   const b = el('button', 'ring sl');
   b.type = 'button';
-  // No context figure yet: an info button, not an empty track that reads as a spinner (QA U9).
+  // No context figure yet: an info button, not an empty track that reads as a spinner.
   if (pct == null) {
     b.classList.add('info');
     b.setAttribute('aria-label', 'Details');
@@ -507,7 +507,7 @@ async function answer(body, btn) {
   }
   note(null);
   poll(true);
-  // The keys may not land on the server: if the same question is still open after 10 s, it can be answered again (QA U10).
+  // The keys may not land on the server: if the same question is still open after 10 s, it can be answered again.
   btn?.append(el('span', 'sent', 'Sent'));
   const key = P.askKey;
   setTimeout(() => {
@@ -619,7 +619,7 @@ function sendState() {
   const typing = P.input.value.trim() !== '' || P.files.length > 0;
   P.send.disabled = P.input.disabled || !typing;
   if (P.kind === 'worker') {
-    // Asking: the answer goes through Send (disabled until typed); Stop is in the details sheet (QA U11).
+    // Asking: the answer goes through Send (disabled until typed); Stop is in the details sheet.
     P.stop.hidden = !ACTIVE.has(P.row.state) || P.row.state === 'asking' || typing;
     P.send.hidden = !P.stop.hidden;
   }
@@ -728,16 +728,16 @@ function details() {
   const titles = el('div', 'dhead');
   titles.append(el('h2', null, r.name), el('div', 'sub', P.kind === 'worker' ? 'Shikigami' : `Session ${r.kind || ''}`.trim()));
   body.push(titles);
-  // A permission card it waits on (#64).
+  // A permission card it waits on.
   if (P.kind === 'worker' && r.card) {
     const w = el('div', 'dwait');
     w.append(svg(LOCK, 16), el('span', null, `Needs you: ${r.card.replace(/^wants to /, '').split(':')[0]}`));
     body.push(w);
   }
-  // Facts as a quiet key/value list; what can be done sits below as buttons (QA U12).
+  // Facts as a quiet key/value list; what can be done sits below as buttons.
   const facts = el('dl', 'kv');
   const fact = (k, v, cls) => v && facts.append(el('dt', null, k), el('dd', cls, v));
-  // Model, effort and permissions of a live shikigami open the Change sheet (#64, #74).
+  // Model, effort and permissions of a live shikigami open the Change sheet.
   const tunable = P.kind === 'worker' && !['released', 'laptop'].includes(r.state);
   const tune = (k, v) => {
     if (!tunable) return fact(k, v);

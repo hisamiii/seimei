@@ -26,7 +26,7 @@ export async function account() {
   }
 }
 
-// Adding a passkey or a phone needs a login from the last 10 minutes (auth audit L2).
+// Adding a passkey or a phone needs a login from the last 10 minutes.
 const FRESH = 'Log out and in again first';
 
 async function addPasskey() {

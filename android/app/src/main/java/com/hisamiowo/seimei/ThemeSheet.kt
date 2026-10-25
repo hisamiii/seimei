@@ -47,7 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.height
 
-// ---------- the theme picker (#81): Menu, then Theme; each tile is a small chat in its theme's own tokens ----------
+// ---------- the theme picker: Menu, then Theme; each tile is a small chat in its theme's own tokens ----------
 
 private val MODES = listOf("system" to "System", "light" to "Light", "dark" to "Dark")
 

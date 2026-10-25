@@ -95,7 +95,7 @@ export function metricFacts(m) {
     ['Time', `${span(m.wall)}, busy ${span(m.busy)}`],
     // Asks while it worked, messages after its first done, and whether one asked for more work.
     ['Reopened', rounds],
-    // Effort, model or permissions changed on the way (#74), oldest first.
+    // Effort, model or permissions changed on the way, oldest first.
     ...(m.tunes?.length ? [['Changes', m.tunes.map((x) => `${x.what} at ${new Date(x.t * 1000).toTimeString().slice(0, 5)}`).join(' · ')]] : []),
   ];
 }
@@ -149,7 +149,7 @@ function metricsSection() {
 let cost = null;
 let costAt = 0;
 const open = new Set();
-// Cents only below $100: past that they are noise (QA D13).
+// Cents only below $100: past that they are noise.
 export const usd = (n) => `$${n >= 100 ? Math.round(n).toLocaleString('en-US') : n.toFixed(2)}`;
 export const MODEL = (k) => k.replace(/^claude-/, '').replace(/-(\d+)-(\d+)$/, ' $1.$2').replace(/-(\d+)$/, ' $1')
   .replace(/^./, (c) => c.toUpperCase());

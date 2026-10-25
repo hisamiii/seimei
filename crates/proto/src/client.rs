@@ -131,6 +131,7 @@ pub trait Handler: Send + Sync + 'static {
 type Pending = Arc<Mutex<HashMap<String, oneshot::Sender<Result<Value, String>>>>>;
 type Inflight = Arc<Mutex<HashMap<String, AbortHandle>>>;
 
+/// One Claude Code process in stream-json mode. Requests are control requests with a timeout; messages come from recv.
 pub struct Client {
     out: mpsc::UnboundedSender<String>,
     pending: Pending,
@@ -205,6 +206,7 @@ impl Client {
         Ok(client)
     }
 
+    /// The process id from spawn time; None when it was gone before that.
     pub fn pid(&self) -> Option<u32> {
         self.pid
     }
@@ -268,6 +270,7 @@ impl Client {
         self.request(json!({"subtype": "get_context_usage"}), REQUEST_TIMEOUT).await
     }
 
+    /// Claude Code's own view of its MCP servers, as it answers.
     pub async fn mcp_status(&self) -> Result<Value, Error> {
         self.request(json!({"subtype": "mcp_status"}), REQUEST_TIMEOUT).await
     }
