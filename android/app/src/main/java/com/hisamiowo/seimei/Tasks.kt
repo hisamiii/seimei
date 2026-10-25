@@ -73,18 +73,25 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.foundation.layout.requiredSize
+import androidx.activity.compose.BackHandler
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 
 // The Tasks lane, as on the web page (tasks.js): two views behind one connected button group. Now: what needs the
 // user (a question, a job to look over, their own tasks), what runs and how far, and each shikigami's next. All
 // tasks: one quiet row per project with a one-line summary; a project opens in place, its done items fold into
-// "N done", paused projects wait behind one row. The user ticks their own tasks (with Undo); a task with a
-// shikigami opens its page.
+// "N done", paused projects wait behind one row, and done work sits in the Archived row (#168): what is older than a
+// day leaves the board, projects with only done items fold away into it. The user ticks their own tasks (with Undo);
+// a task with a shikigami opens its page.
 
 /** One step of a shikigami's plan for its task: pending, in_progress or completed. */
 data class Step(val title: String, val state: String)
 
 data class Task(val id: String, val title: String, val project: String, val owner: String, val state: String, val worker: String?,
-                val pos: Int = 0, val steps: List<Step> = emptyList(), val doneAt: Double = 0.0) {
+                val pos: Int = 0, val steps: List<Step> = emptyList(), val doneAt: Double = 0.0,
+                /** Days a parked item (paused, or of a paused project) went untouched, from STALE_DAYS on; else 0. */
+                val stale: Int = 0) {
     val you get() = owner == "you"
     val mine get() = you && state == "open"
     val stepsDone get() = steps.count { it.state == "completed" }
@@ -100,23 +107,35 @@ data class Now(val asks: List<Task>, val review: List<Task>, val mine: List<Task
 /** A project on All tasks: [live] in the order it shows, [done] newest first. */
 data class Project(val name: String, val paused: Boolean, val live: List<Task>, val done: List<Task>)
 
-data class Board(val tasks: List<Task>, val projects: List<Project>) {
+/** [projects] with live work; [folded]: the ones with only done items, gone into the Archived row with [archived] more. */
+data class Board(val tasks: List<Task>, val projects: List<Project>, val folded: List<String> = emptyList(), val archived: Int = 0) {
+    val done get() = tasks.filter { it.state == "done" }
     /** Live tasks of projects that aren't paused. */
     val active get() = projects.filter { !it.paused }.flatMap { p -> p.live.filter { it.state != "paused" } }
     val nexts get() = nextOf(active).map { it.id }.toSet()
 }
 
-private val ORDER = mapOf("asks" to 0, "review" to 1, "running" to 2)
+/** Within a project, a timeline: what waits for a check, the current item, the queue, what is parked. */
+private val ORDER = mapOf("review" to 0, "asks" to 1, "running" to 1, "open" to 2)
+/** A parked item untouched this long gets flagged; seimei asks the user whether it is dead (the server's PAUSED_STALE). */
+private const val STALE_DAYS = 3
+
+fun task(t: JSONObject, held: Set<String> = emptySet(), at: Double = System.currentTimeMillis() / 1000.0): Task {
+    val state = t.str("state")
+    val idle = at - maxOf(t.optDouble("since", 0.0).takeIf { !it.isNaN() } ?: 0.0, t.optDouble("updated", 0.0).takeIf { !it.isNaN() } ?: 0.0)
+    val parked = state != "done" && (state == "paused" || t.str("project") in held)
+    return Task(t.str("id"), t.str("title"), t.str("project"), t.str("owner"), state, t.str("worker").ifEmpty { null }, t.optInt("pos"),
+        t.optJSONArray("steps").objects().map { Step(it.str("title"), it.str("state")) },
+        t.optDouble("done_at", 0.0).takeIf { !it.isNaN() } ?: 0.0,
+        if (parked && idle >= STALE_DAYS * 86400.0) (idle / 86400).toInt() else 0)
+}
 
 /** Each shikigami's next: its first open task in queue order. */
 fun nextOf(ts: List<Task>) = ts.sortedBy { it.pos }.filter { it.state == "open" && !it.you }.distinctBy { it.owner }
 
 fun board(b: JSONObject): Board {
-    val tasks = b.optJSONArray("tasks").objects().map { t ->
-        Task(t.str("id"), t.str("title"), t.str("project"), t.str("owner"), t.str("state"), t.str("worker").ifEmpty { null }, t.optInt("pos"),
-            t.optJSONArray("steps").objects().map { Step(it.str("title"), it.str("state")) },
-            t.optDouble("done_at", 0.0).takeIf { !it.isNaN() } ?: 0.0)
-    }
+    val held = b.optJSONArray("projects").objects().filter { it.optBoolean("paused") }.map { it.str("name") }.toSet()
+    val tasks = b.optJSONArray("tasks").objects().map { task(it, held) }
     fun rank(ts: List<Task>) = when {
         ts.isEmpty() -> 4
         ts.any { it.state == "asks" } -> 0
@@ -132,7 +151,9 @@ fun board(b: JSONObject): Board {
             ts.filter { it.state != "done" }.sortedWith(compareBy({ ORDER[it.state] ?: 3 }, { it.pos })),
             ts.filter { it.state == "done" }.sortedByDescending { it.doneAt })
     }.withIndex().sortedWith(compareBy({ rank(it.value.live) }, { it.index })).map { it.value }
-    return Board(tasks, projects)
+    // A project with only done items folds away into the Archived row
+    val (live, folded) = projects.partition { it.live.isNotEmpty() }
+    return Board(tasks, live, folded.map { it.name }, b.optInt("archived"))
 }
 
 fun now(b: Board): Now {
@@ -152,6 +173,7 @@ fun summary(p: Project): List<Pair<String, String>> {
         n { it.mine }.takeIf { it > 0 }?.let { add("$it for you" to "warn") }
         n { it.state == "running" }.takeIf { it > 0 }?.let { add("$it running" to "run") }
         n { it.state == "open" && !it.you }.takeIf { it > 0 }?.let { add("$it open" to "") }
+        ts.maxOfOrNull { it.stale }?.takeIf { it > 0 }?.let { add("untouched $it days" to "warn") }
     }
 }
 
@@ -164,8 +186,9 @@ fun TasksTab(vm: Seimei) {
     var doneShown by rememberSaveable { mutableStateOf(listOf<String>()) }
     var pausedShown by rememberSaveable { mutableStateOf(false) }
     var moreMine by rememberSaveable { mutableStateOf(false) }
+    if (vm.taskArchOpen) return TaskArchive(vm, b)
     Column(Modifier.fillMaxSize()) {
-        if (b == null || b.tasks.isEmpty()) {
+        if (b == null || (b.tasks.isEmpty() && b.archived == 0)) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(if (b == null) "Loading the board…" else "No tasks",
                     Modifier.padding(horizontal = 48.dp), fontSize = 14.sp, color = LocalExtra.current.text3, textAlign = TextAlign.Center)
@@ -255,27 +278,41 @@ private fun LazyListScope.allItems(vm: Seimei, b: Board, doneShown: List<String>
             add("p:${p.name}" to { s -> ProjectRow(p, open, s) { vm.toggleProject(p.name, !open) } })
             if (!open) return@buildList
             fun own(t: Task) = if (t.owner == t.project || t.you) emptyList() else listOf(t.owner)
+            // Done first, quiet and folded, oldest at the top: the timeline runs down into the current item
+            if (p.done.isNotEmpty()) {
+                val shown = p.name in doneShown
+                add("f:${p.name}" to { s -> Fold(if (shown) "Hide done" else "${p.done.size} done", s) { fold(p.name) } })
+                if (shown) p.done.asReversed().forEach { t -> add(t.id to { s -> TaskRow(vm, t, s, "done", own(t) + "done", inset = true, ref = true) }) }
+            }
             p.live.forEach { t ->
                 add(t.id to { s ->
                     when {
                         t.state == "asks" -> TaskRow(vm, t, s, "ask", own(t) + "question", inset = true, warm = true, ref = true)
                         t.state == "review" -> TaskRow(vm, t, s, "review", own(t) + "review", inset = true, ref = true)
                         t.state == "running" -> TaskRow(vm, t, s, "run", own(t) + (t.current ?: "running"), inset = true, bar = true, ref = true)
+                        t.stale > 0 -> TaskRow(vm, t, s, if (t.you) "you" else "open", own(t) + t.state + "untouched ${t.stale} days",
+                            inset = true, ref = !t.you)
                         t.you -> TaskRow(vm, t, s, "you", listOf(if (t.state == "paused") "paused" else "your task"), inset = true)
                         else -> TaskRow(vm, t, s, "open", own(t) + (if (t.id in nexts) "next" else if (t.state == "paused") "paused" else "open"),
                             inset = true, ref = true)
                     }
                 })
             }
-            if (p.done.isEmpty()) return@buildList
-            val shown = p.name in doneShown
-            if (shown) p.done.forEach { t -> add(t.id to { s -> TaskRow(vm, t, s, "done", own(t) + "done", inset = true, ref = true) }) }
-            add("f:${p.name}" to { s -> Fold(if (shown) "Hide done" else "${p.done.size} done", s) { fold(p.name) } })
         }
     }
     group("b", rows(b.projects.filter { !it.paused }))
     val held = b.projects.filter { it.paused }
-    if (held.isEmpty()) return
+    val done = b.done.size + b.archived
+    val archived = @Composable {
+        ArchivedRow(done, if (b.folded.isEmpty()) "$done done" else "${b.folded.joinToString(", ")}: all done") {
+            vm.taskArchOpen = true
+            vm.loadTaskArch()
+        }
+    }
+    if (held.isEmpty()) {
+        if (done > 0) item(key = "archived") { archived() }
+        return
+    }
     item(key = "paused") {
         val n = held.size
         Column(Modifier.padding(top = 12.dp)) {
@@ -291,12 +328,67 @@ private fun LazyListScope.allItems(vm: Seimei, b: Board, doneShown: List<String>
             row(if (i == rs.size - 1) RoundedCornerShape(4.dp, 4.dp, 20.dp, 20.dp) else RoundedCornerShape(4.dp))
         }
     }
+    if (done > 0) item(key = "archived") { archived() }
+}
+
+/** The archive (#168), in the Agents archive's form: every done item, today's from the board and older ones from the
+ * server, by the day it was done, searchable. */
+@Composable
+private fun TaskArchive(vm: Seimei, b: Board?) {
+    val close = {
+        vm.taskArchOpen = false
+        vm.taskArchQuery = ""
+    }
+    BackHandler(onBack = close)
+    val cs = MaterialTheme.colorScheme
+    val all = remember(b, vm.taskArch) {
+        val old = vm.taskArch.map { task(it) }
+        val ids = old.map { it.id }.toSet()
+        ((b?.done.orEmpty()).filter { it.id !in ids } + old).sortedByDescending { it.doneAt }
+    }
+    val q = vm.taskArchQuery.trim().lowercase()
+    val hits = if (q.isEmpty()) all else all.filter { t -> listOf(t.id, t.title, t.project, t.owner).any { it.lowercase().contains(q) } }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
+        item("ahead") {
+            Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(close, Modifier.size(48.dp)) { Icon(Icons.back, "Back to tasks", Modifier.size(22.dp)) }
+                Text("Archived", Modifier.weight(1f), fontSize = 18.sp, fontWeight = FontWeight.Medium)
+                Text(if (q.isEmpty()) "${all.size}" else "${hits.size} of ${all.size}", fontSize = 13.sp, color = LocalExtra.current.text3,
+                    modifier = Modifier.padding(end = 8.dp))
+            }
+        }
+        item("search") {
+            TextField(vm.taskArchQuery, { vm.taskArchQuery = it }, Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 8.dp), singleLine = true,
+                placeholder = { Text("Search") },
+                leadingIcon = { Icon(Icons.search, null, Modifier.size(20.dp)) },
+                trailingIcon = { if (vm.taskArchQuery.isNotEmpty()) IconButton({ vm.taskArchQuery = "" }) { Icon(Icons.close, "Clear the search", Modifier.size(18.dp)) } },
+                shape = RoundedCornerShape(24.dp),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = cs.surfaceContainerHigh, unfocusedContainerColor = cs.surfaceContainerHigh,
+                    focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
+                ))
+        }
+        if (hits.isEmpty()) item("none") {
+            Text(if (q.isEmpty()) "Nothing done yet. Done items move here a day after." else "No matches",
+                Modifier.fillMaxWidth().padding(32.dp), color = LocalExtra.current.text3, fontSize = 14.sp, textAlign = TextAlign.Center)
+        }
+        // By the day they were done, as the activity log
+        for ((day, ts) in hits.groupBy { dayLabel(it.doneAt) }) {
+            item("d:$day") { TaskGroupTitle(day, null, LocalExtra.current.text2) }
+            group("a:$day", ts.map { t ->
+                t.id to { s: Shape ->
+                    TaskRow(vm, t, s, "done", listOf(t.project) + (if (t.you || t.owner == t.project) emptyList() else listOf(t.owner)),
+                        inset = true, ref = true, pad = 16.dp, q = q)
+                }
+            })
+        }
+    }
 }
 
 /** A row: optional tile, title, supporting line, optional bar. Rows inside an open project are set in by their text. */
 @Composable
 private fun TaskRow(vm: Seimei, t: Task, shape: Shape, kind: String, parts: List<String>, warm: Boolean = false, inset: Boolean = false,
-                    bar: Boolean = false, ref: Boolean = false) {
+                    bar: Boolean = false, ref: Boolean = false, pad: Dp = if (inset) 32.dp else 16.dp, q: String = "") {
     val tk = LocalTokens.current
     val x = LocalExtra.current
     val cs = MaterialTheme.colorScheme
@@ -309,7 +401,7 @@ private fun TaskRow(vm: Seimei, t: Task, shape: Shape, kind: String, parts: List
     Row(
         Modifier.fillMaxWidth().heightIn(min = if (inset) 56.dp else 64.dp).clip(shape).background(bg)
             .then(if (t.worker != null) Modifier.clickable { vm.openWorker(t.worker) } else Modifier)
-            .padding(start = if (inset) 32.dp else 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+            .padding(start = pad, end = 16.dp, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val tile = !inset && (kind == "ask" || kind == "review")
@@ -325,14 +417,21 @@ private fun TaskRow(vm: Seimei, t: Task, shape: Shape, kind: String, parts: List
         Column(Modifier.weight(1f)) {
             // What needs the user has emphasized titles (final/ 06)
             val loud = warm && !inset
-            Text(t.title, fontSize = 16.sp, lineHeight = 24.sp, fontWeight = if (loud) FontWeight.Bold else FontWeight.Medium,
+            val mark = cs.primary.copy(alpha = .3f)
+            val at = if (q.isEmpty()) -1 else t.title.lowercase().indexOf(q)
+            Text(buildAnnotatedString {
+                append(t.title)
+                if (at >= 0) addStyle(SpanStyle(background = mark), at, at + q.length)
+            }, fontSize = 16.sp, lineHeight = 24.sp, fontWeight = if (loud) FontWeight.Bold else FontWeight.Medium,
                 color = when { loud -> tk.onWarnContainer; kind == "done" -> x.text3; else -> cs.onSurface },
                 maxLines = if (warm || kind == "ask" || kind == "review") 2 else 1, overflow = TextOverflow.Ellipsis)
             Text(buildAnnotatedString {
                 val all = parts + (if (ref && t.id.startsWith("#")) listOf(t.id) else emptyList())
                 all.forEachIndexed { i, p ->
                     if (i > 0) append(" · ")
-                    if (p == "next" && i == all.indexOf("next")) withStyle(SpanStyle(color = cs.primary)) { append(p) } else append(p)
+                    if (p == "next" && i == all.indexOf("next")) withStyle(SpanStyle(color = cs.primary)) { append(p) }
+                    else if (p.startsWith("untouched ")) withStyle(SpanStyle(color = tk.warn, fontWeight = FontWeight.Medium)) { append(p) }
+                    else append(p)
                 }
             }, fontSize = 14.sp, lineHeight = 20.sp, color = sub, maxLines = if (warm) 2 else 1, overflow = TextOverflow.Ellipsis)
             if (bar) StepBar(t)

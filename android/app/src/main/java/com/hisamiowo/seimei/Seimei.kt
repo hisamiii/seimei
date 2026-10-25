@@ -788,7 +788,9 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     // ---------- the task board ----------
 
     private fun takeBoard(b: JSONObject) {
+        val moved = b.optInt("archived") != board?.optInt("archived")
         board = b
+        if (taskArchOpen && moved) loadTaskArch()
         val data = b.toString()
         viewModelScope.launch(Dispatchers.IO + NonCancellable) { store.write(Store.TASKS, data) }
     }
@@ -818,9 +820,24 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                     undo = { tick(id, !done, false) }
                     snack = if (done) "Task done" else "Task reopened"
                 }
+                if (taskArchOpen) loadTaskArch()
             } catch (e: IOException) {
                 snack = errorOf(e)
                 loadBoard()
+            }
+        }
+    }
+
+    /** The task archive (#168): done items older than a day, newest first, as the server last sent them. */
+    var taskArch by mutableStateOf<List<JSONObject>>(emptyList())
+    var taskArchOpen by mutableStateOf(false)
+    var taskArchQuery by mutableStateOf("")
+
+    fun loadTaskArch() {
+        viewModelScope.launch {
+            try {
+                taskArch = api.get("api/tasks/archive").optJSONArray("tasks").objects()
+            } catch (e: IOException) {
             }
         }
     }

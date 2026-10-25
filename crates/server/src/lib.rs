@@ -305,6 +305,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/app/seimei.apk", get(apk))
         .route("/api/theme", get(theme_get).post(theme_set))
         .route("/api/tasks", get(tasks_view))
+        .route("/api/tasks/archive", get(tasks_archive))
         .route("/api/tasks/{tid}/tick", post(task_tick))
         .route("/api/presence", post(presence))
         .route("/api/files/{name}", get(file))
@@ -715,6 +716,13 @@ async fn queue_action(bytes: Bytes) -> Response {
 
 async fn tasks_view(State(app): Shared) -> Response {
     ok(app.board.lock().unwrap().snapshot())
+}
+
+/// Done tasks older than a day, newest first (#168); q searches id, title, project and owner.
+async fn tasks_archive(State(app): Shared, Query(q): Query<HashMap<String, String>>) -> Response {
+    let board = app.board.lock().unwrap();
+    let limit = q.get("limit").and_then(|l| l.parse().ok()).unwrap_or(500);
+    ok(json!({"tasks": board.archived(q.get("q").map_or("", String::as_str), limit)}))
 }
 
 /// The user ticks one of their own items off (or back on).

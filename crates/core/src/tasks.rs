@@ -2,11 +2,13 @@
 //! seimei keeps it current with its tasks tool; summon and adopt file a task for each new shikigami, and a linked
 //! task's state follows its shikigami (running, asks, review once it reports). The user ticks their own items off on
 //! the phone. Pages read it whole from /api/tasks and follow it live: every change goes out on the event stream as
-//! {"type": "tasks", ...} (not stored).
+//! {"type": "tasks", ...} (not stored). Done items stay a day, then move to tasks-archive.json (#168): the board stays
+//! short, the archive is searchable (/api/tasks/archive, the tool's archive action), and an update brings one back.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 
+use chrono::TimeZone;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -16,8 +18,14 @@ use crate::util::{now, read_json, write_json};
 
 pub const STATES: [&str; 6] = ["open", "running", "asks", "review", "paused", "done"];
 pub const YOU: &str = "you";
-/// How many done tasks the board keeps per project; older ones drop off.
+/// How many done tasks the board keeps per project; older ones go to the archive early.
 const DONE_KEEP: usize = 30;
+/// How long a done task stays on the board before it moves to the archive.
+pub const DONE_SHOWN: f64 = 24.0 * 3600.0;
+/// How many tasks the archive keeps; the oldest drop off.
+const ARCHIVE_KEEP: usize = 5000;
+/// A paused item (or one of a paused project) untouched this long may be dead: seimei asks the user, once a stretch.
+pub const PAUSED_STALE: f64 = 3.0 * 86400.0;
 /// A linked task's state for each shikigami state: it works, waits on a question, or finished and waits for seimei's
 /// check (failed ones too: seimei looks at those first); a stop or a restart parks it; given to the user, it is
 /// theirs to carry on (release makes them its owner).
@@ -42,10 +50,16 @@ fn follows(wstate: &str) -> Option<&'static str> {
     FOLLOW.iter().find(|f| f.0 == wstate).map(|f| f.1)
 }
 
-/// How live work sorts within a project: what waits on someone first, then what runs, what waits for a check, what
-/// is queued, what is parked.
+/// How work sorts within a project, as a timeline: what is done, what waits for a check, the current item (working or
+/// asking), what is queued, what is parked.
 fn rank(state: &str) -> usize {
-    ["asks", "running", "review", "open", "paused", "done"].iter().position(|s| *s == state).unwrap_or(5)
+    match state {
+        "done" => 0,
+        "review" => 1,
+        "asks" | "running" => 2,
+        "open" => 3,
+        _ => 4,
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -88,6 +102,9 @@ pub struct Task {
     /// Delivered by its shikigami: it stays in review until seimei checks it.
     #[serde(default, skip_serializing_if = "is_false")]
     pub shipped: bool,
+    /// When seimei was last asked whether this paused item is dead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asked: Option<f64>,
     #[serde(flatten)]
     pub other: Map<String, Value>,
 }
@@ -139,13 +156,28 @@ pub struct Board {
     path: PathBuf,
     events: Option<Arc<EventLog>>,
     data: Data,
+    /// Done tasks older than a day, oldest first, in tasks-archive.json next to the board.
+    archive: Vec<Task>,
+}
+
+fn norm(tid: &str) -> String {
+    let tid = tid.trim();
+    if !tid.is_empty() && tid.bytes().all(|b| b.is_ascii_digit()) { format!("#{tid}") } else { tid.into() }
+}
+
+/// Since when nobody touched it.
+fn touched(t: &Task) -> f64 {
+    t.since.unwrap_or(t.updated).max(t.updated)
 }
 
 impl Board {
     /// The board in tasks.json; the seed when there is none (written at once).
     pub fn open(path: &Path, events: Option<Arc<EventLog>>) -> Board {
         let data = read_json(path).and_then(|v| serde_json::from_value(v).ok()).unwrap_or_else(seed);
-        let mut b = Board { path: path.into(), events, data };
+        let archive = read_json(&path.with_file_name("tasks-archive.json"))
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap_or_default();
+        let mut b = Board { path: path.into(), events, data, archive };
         // Boards from before #58: each owner's queue in the order the tasks were added.
         let mut last: std::collections::HashMap<String, u64> = Default::default();
         for t in &mut b.data.tasks {
@@ -155,7 +187,7 @@ impl Board {
             }
             *l = (*l).max(t.pos);
         }
-        if !path.exists() {
+        if !path.exists() || b.sweep(now()) {
             b.save();
         }
         b
@@ -174,7 +206,7 @@ impl Board {
     }
 
     pub fn snapshot(&self) -> Value {
-        json!({"type": "tasks", "tasks": self.data.tasks, "projects": self.data.projects})
+        json!({"type": "tasks", "tasks": self.data.tasks, "projects": self.data.projects, "archived": self.archive.len()})
     }
 
     fn save(&self) {
@@ -184,18 +216,79 @@ impl Board {
         }
     }
 
-    fn changed(&self) {
+    fn save_archive(&self) {
+        let data = serde_json::to_value(&self.archive).expect("the archive serializes");
+        if let Err(e) = write_json(&self.path.with_file_name("tasks-archive.json"), &data, false) {
+            eprintln!("seimei: tasks-archive.json: {e}");
+        }
+    }
+
+    fn changed(&mut self) {
+        self.sweep(now());
         self.save();
         if let Some(ev) = &self.events {
             ev.flash(self.snapshot());
         }
     }
 
+    /// Moves the tasks done more than a day ago to the archive; whether any moved.
+    fn sweep(&mut self, at: f64) -> bool {
+        let old = |t: &Task| t.state == "done" && at - t.done_at.unwrap_or(0.0) > DONE_SHOWN;
+        if !self.data.tasks.iter().any(old) {
+            return false;
+        }
+        let (gone, kept): (Vec<Task>, Vec<Task>) = std::mem::take(&mut self.data.tasks).into_iter().partition(old);
+        self.data.tasks = kept;
+        self.file(gone);
+        true
+    }
+
+    /// Adds these to the archive (saved), and drops the projects left with nothing on the board.
+    fn file(&mut self, mut gone: Vec<Task>) {
+        gone.sort_by(|a, b| a.done_at.unwrap_or(0.0).total_cmp(&b.done_at.unwrap_or(0.0)));
+        self.archive.extend(gone);
+        let over = self.archive.len().saturating_sub(ARCHIVE_KEEP);
+        self.archive.drain(..over);
+        self.save_archive();
+        let tasks = &self.data.tasks;
+        self.data.projects.retain(|p| tasks.iter().any(|t| t.project == p.name));
+    }
+
+    /// The periodic sweep: done tasks whose day ran out leave the board, and the pages hear of it.
+    pub fn tidy(&mut self) {
+        if self.sweep(now()) {
+            self.changed();
+        }
+    }
+
+    /// The archive, newest first: every task whose id, title, project or owner holds `q` (any case), at most `limit`.
+    pub fn archived(&self, q: &str, limit: usize) -> Vec<&Task> {
+        let q = q.trim().to_lowercase();
+        (self.archive.iter().rev())
+            .filter(|t| {
+                q.is_empty() || [&t.id, &t.title, &t.project, &t.owner].iter().any(|f| f.to_lowercase().contains(&q))
+            })
+            .take(limit)
+            .collect()
+    }
+
     fn index(&self, tid: &str) -> Option<usize> {
-        let tid = tid.trim();
-        let tid =
-            if !tid.is_empty() && tid.bytes().all(|b| b.is_ascii_digit()) { format!("#{tid}") } else { tid.into() };
+        let tid = norm(tid);
         self.data.tasks.iter().position(|t| t.id == tid)
+    }
+
+    /// The index of a task on the board, bringing it back from the archive first when it is there.
+    fn live(&mut self, tid: &str) -> Result<usize> {
+        if let Some(i) = self.index(tid) {
+            return Ok(i);
+        }
+        let id = norm(tid);
+        let a = self.archive.iter().position(|t| t.id == id).ok_or_else(|| missing(tid))?;
+        let t = self.archive.remove(a);
+        self.save_archive();
+        self.project(&t.project.clone());
+        self.data.tasks.push(t);
+        Ok(self.data.tasks.len() - 1)
     }
 
     /// A task by its id ("#55", "55" or "t3").
@@ -227,7 +320,7 @@ impl Board {
         valid(state)?;
         let id = if let Some(tid) = tid {
             // seimei's own number for it (a summon whose task starts with #NN): the count goes on after it.
-            if self.find(tid).is_some() {
+            if self.find(tid).is_some() || self.archive.iter().any(|t| t.id == norm(tid)) {
                 return Err(Error::Invalid(format!("{tid} is on the board already")));
             }
             let n: u64 = tid.trim_start_matches('#').parse().map_err(|_| Error::Invalid(format!("{tid} is no #NN")))?;
@@ -258,6 +351,7 @@ impl Board {
             created: at,
             updated: at,
             shipped: false,
+            asked: None,
             other: Map::new(),
         };
         self.data.tasks.push(t.clone());
@@ -268,10 +362,10 @@ impl Board {
 
     /// Changes any of title, project, owner, worker ("" unlinks) and state.
     pub fn update(&mut self, tid: &str, fields: &Fields) -> Result<Task> {
-        let i = self.found(tid)?;
         if let Some(s) = &fields.state {
             valid(s)?;
         }
+        let i = self.live(tid)?;
         if let Some(o) = fields.owner.as_deref().filter(|o| *o != self.data.tasks[i].owner) {
             // To the end of its new owner's queue.
             self.data.tasks[i].pos = self.last(o) + 1;
@@ -296,13 +390,14 @@ impl Board {
             set_state(t, s);
         }
         t.updated = now();
-        let project = t.project.clone();
+        let t = t.clone();
         if fields.project.as_deref().is_some_and(|p| !p.is_empty()) {
-            self.project(&project);
+            self.project(&t.project);
         }
-        self.trim(&project);
+        self.trim(&t.project);
+        // An old done one goes back to the archive here.
         self.changed();
-        Ok(self.data.tasks[self.found(tid)?].clone())
+        Ok(t)
     }
 
     pub fn set_project(&mut self, name: &str, paused: Option<bool>, color: Option<&str>) -> Project {
@@ -320,7 +415,8 @@ impl Board {
 
     /// Drops a task for good (one that will not be done); a project left empty goes with it.
     pub fn remove(&mut self, tid: &str) -> Result<Task> {
-        let t = self.data.tasks.remove(self.found(tid)?);
+        let i = self.live(tid)?;
+        let t = self.data.tasks.remove(i);
         self.trim(&t.project);
         self.changed();
         Ok(t)
@@ -328,7 +424,7 @@ impl Board {
 
     /// The user ticks one of their own items off on the phone, or back on.
     pub fn tick(&mut self, tid: &str, done: bool) -> Result<Task> {
-        let i = self.found(tid)?;
+        let i = self.live(tid)?;
         if self.data.tasks[i].owner != YOU {
             return Err(Error::Refused("Only your own tasks tick off here".into()));
         }
@@ -553,6 +649,30 @@ impl Board {
         Some(format!("[seimei] Board drift: {}{more}.", out[..out.len().min(6)].join("; ")))
     }
 
+    /// Paused items nobody touched for PAUSED_STALE (paused ones, and the live ones of a paused project), as one line
+    /// for seimei to ask the user whether they are dead; each once a stretch (marked asked). None when there are none.
+    pub fn stale_note(&mut self, at: f64) -> Option<String> {
+        let held: Vec<String> = self.data.projects.iter().filter(|p| p.paused).map(|p| p.name.clone()).collect();
+        let mut out = vec![];
+        for t in &mut self.data.tasks {
+            let parked = t.state == "paused" || (t.state != "done" && held.contains(&t.project));
+            if parked && at - touched(t) > PAUSED_STALE && t.asked.is_none_or(|a| at - a > PAUSED_STALE) {
+                t.asked = Some(at);
+                let days = ((at - touched(t)) / 86400.0) as u64;
+                out.push(format!("{} {} ({}, {days} days)", t.id, t.title, t.project));
+            }
+        }
+        if out.is_empty() {
+            return None;
+        }
+        self.save();
+        Some(format!(
+            "[seimei] Paused and untouched for 3+ days: {}. Ask the user whether they are dead (remove them) or still \
+             wanted (an update with just the id keeps one).",
+            out.join("; ")
+        ))
+    }
+
     fn trim(&mut self, project: &str) {
         let mut done: Vec<(f64, usize)> = (self.data.tasks.iter().enumerate())
             .filter(|(_, t)| t.project == project && t.state == "done")
@@ -561,11 +681,11 @@ impl Board {
         if done.len() > DONE_KEEP {
             done.sort_by(|a, b| a.0.total_cmp(&b.0));
             let drop: Vec<usize> = done[..done.len() - DONE_KEEP].iter().map(|d| d.1).collect();
-            let mut i = 0;
-            self.data.tasks.retain(|_| {
-                i += 1;
-                !drop.contains(&(i - 1))
-            });
+            let mut gone = vec![];
+            for (i, t) in std::mem::take(&mut self.data.tasks).into_iter().enumerate() {
+                if drop.contains(&i) { gone.push(t) } else { self.data.tasks.push(t) }
+            }
+            self.file(gone);
         }
         // A project with no tasks left goes too.
         let tasks = &self.data.tasks;
@@ -587,9 +707,11 @@ impl Board {
         out
     }
 
-    /// The board for the dispatcher: per project, live work in queue order, then the last few done.
+    /// The board for the dispatcher: per project as a timeline, the few done today first, then live work (review, the
+    /// current item, the queue); what is older sits in the archive, as a count.
     pub fn text(&self, done_too: bool) -> String {
         let nexts = self.nexts();
+        let at = now();
         let mut out = vec![];
         for p in &self.data.projects {
             let ts: Vec<&Task> = self.data.tasks.iter().filter(|t| t.project == p.name).collect();
@@ -602,6 +724,12 @@ impl Board {
             let paused = if p.paused { " (paused)" } else { "" };
             let color = p.color.as_ref().map(|c| format!(" [color {c}]")).unwrap_or_default();
             out.push(format!("{}{paused}{color}", p.name));
+            if !ended.is_empty() && done_too {
+                // The latest five, oldest first, so the line runs into the current item below
+                let names: Vec<String> = ended.iter().take(5).rev().map(|t| format!("{} {}", t.id, t.title)).collect();
+                let more = if ended.len() > 5 { format!("(+{} earlier) ", ended.len() - 5) } else { String::new() };
+                out.push(format!("  done today: {more}{}", names.join("; ")));
+            }
             live.sort_by_key(|t| (rank(&t.state), t.pos));
             for t in live {
                 let next = if nexts.contains(&t.id) { " (next)" } else { "" };
@@ -609,13 +737,24 @@ impl Board {
                 let done = t.steps.iter().filter(|s| s.state == "completed").count();
                 let steps =
                     if t.steps.is_empty() { String::new() } else { format!(", {done}/{} steps", t.steps.len()) };
-                out.push(format!("  {} {}{next}: {} ({} #{}{worker}{steps})", t.id, t.state, t.title, t.owner, t.pos));
+                let parked = t.state == "paused" || p.paused;
+                let idle = at - touched(t);
+                let stale = if parked && idle > PAUSED_STALE {
+                    format!(", untouched {} days", (idle / 86400.0) as u64)
+                } else {
+                    String::new()
+                };
+                out.push(format!(
+                    "  {} {}{next}: {} ({} #{}{worker}{steps}{stale})",
+                    t.id, t.state, t.title, t.owner, t.pos
+                ));
             }
-            if !ended.is_empty() && done_too {
-                let names: Vec<String> = ended.iter().take(5).map(|t| format!("{} {}", t.id, t.title)).collect();
-                let more = if ended.len() > 5 { format!(" (+{})", ended.len() - 5) } else { String::new() };
-                out.push(format!("  done: {}{more}", names.join("; ")));
-            }
+        }
+        if done_too && !self.archive.is_empty() {
+            out.push(format!(
+                "Archived: {} done more than a day ago (action archive, q to search).",
+                self.archive.len()
+            ));
         }
         if out.is_empty() { "The board is empty.".into() } else { out.join("\n") }
     }
@@ -711,6 +850,26 @@ impl Board {
                 let p = self.set_project(name, a["paused"].as_bool(), a["color"].as_str());
                 let color = p.color.map(|c| format!(", color {c}")).unwrap_or_default();
                 Ok(format!("{}: {}{color}", p.name, if p.paused { "paused" } else { "active" }))
+            }
+            "archive" => {
+                let q = s("q").unwrap_or("");
+                let hits = self.archived(q, 30);
+                if hits.is_empty() {
+                    return Ok(if q.is_empty() {
+                        "The archive is empty.".into()
+                    } else {
+                        format!("Nothing archived matches {q}.")
+                    });
+                }
+                let rows: Vec<String> = (hits.iter())
+                    .map(|t| {
+                        let at = t.done_at.unwrap_or(t.updated) as i64;
+                        let day = chrono::Local.timestamp_opt(at, 0).single().map(|d| d.format("%Y-%m-%d").to_string());
+                        let day = day.unwrap_or_default();
+                        format!("{} {} ({}, {}, done {day})", t.id, t.title, t.project, t.owner)
+                    })
+                    .collect();
+                Ok(rows.join("\n"))
             }
             _ => Ok(self.text(true)),
         }

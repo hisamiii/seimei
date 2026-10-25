@@ -353,6 +353,14 @@ fn main() {
         tokio::spawn(deploy_note(state.clone(), app.dispatcher.clone()));
         tokio::spawn(app.dispatcher.clone().run());
         tokio::spawn(app.pool.clone().sweep());
+        // Done tasks leave the board a day after they are done (#168), even when nothing else changes it.
+        let board = app.board.clone();
+        tokio::spawn(async move {
+            loop {
+                board.lock().unwrap().tidy();
+                tokio::time::sleep(Duration::from_secs(600)).await;
+            }
+        });
         tokio::spawn(app.watcher.clone().run());
         tokio::spawn(app.watches.clone().run(events.clone()));
         tokio::spawn(app.pool.plugins.clone().listen(app.approvals.clone()));
@@ -445,7 +453,7 @@ fn main() {
 fn wire(app: &Arc<seimei_server::App>) {
     let a = app.clone();
     let _ = app.dispatcher.drift.set(Box::new(move || {
-        let board = a.board.lock().unwrap();
+        let mut board = a.board.lock().unwrap();
         // Archived shikigami are out of the picture, unless a task still points at one.
         let workers: Vec<(String, String, String)> = (a.pool.all().iter())
             .map(|w| (w.id.clone(), w.rec()))
@@ -455,7 +463,9 @@ fn wire(app: &Arc<seimei_server::App>) {
                 (id, s("name"), s("state"))
             })
             .collect();
-        board.drift(&workers, seimei_core::util::now())
+        let at = seimei_core::util::now();
+        let lines: Vec<String> = [board.drift(&workers, at), board.stale_note(at)].into_iter().flatten().collect();
+        (!lines.is_empty()).then(|| lines.join("\n"))
     }));
     let a = app.clone();
     let _ = app.dispatcher.recall.set(Box::new(move || {

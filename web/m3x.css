@@ -254,7 +254,7 @@ body.offline .hello { display: none; }
 /* B: one segmented list. Project rows and an open project's items share its edges; items are set in by their text only. */
 .prow { display: flex; align-items: center; gap: 16px; width: 100%; min-height: 64px; padding: 12px 16px; border: 0; color: var(--text); text-align: left; font: inherit; }
 .prow .tl { font-weight: var(--w-emph); }
-.prow .sw { color: var(--warn); font-weight: 500; }
+.prow .sw, .tr .ts .sw { color: var(--warn); font-weight: 500; }
 .prow .sn { color: var(--primary); }
 .prow.open { background: var(--container-high) !important; }
 .tgrp.board > .in { background: var(--container-high); }

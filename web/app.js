@@ -3,7 +3,7 @@ import { $, S, hooks, clock, finePointer, viewing, closeView, keep, reduced } fr
 import { render, onDelta, clearLive, addEvent, loadHistory, autosize, waitingApprovals, toBottom, showLane, following, nearBottom } from './chat.js';
 import { setWorkers, setSessions, sheetEvent, agentCounts, showAgents, pageOpen, closePage, archOpen, closeArch } from './agents.js';
 import { setUsage, renderUsage, tone } from './usage.js';
-import { setTasks, loadTasks } from './tasks.js';
+import { setTasks, loadTasks, tasksArchOpen, closeTasksArch } from './tasks.js';
 import { account } from './account.js';
 import { sheet, closeSheet } from './sheet.js';
 import { init as initTheme, phone as phoneTheme } from './theme.js';
@@ -87,6 +87,7 @@ window.addEventListener('popstate', () => {
   if (pageOpen() && !history.state?.spage) return closePage();
   if (pageOpen()) return;
   if (archOpen() && !history.state?.arch) return closeArch();
+  if (tasksArchOpen() && !history.state?.tarch) return closeTasksArch();
   show(location.hash.slice(1) || 'chat');
 });
 

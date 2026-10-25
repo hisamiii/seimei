@@ -546,7 +546,7 @@
    "_meta": {
     "anthropic/alwaysLoad": true
    },
-   "description": "The user's task board (the Tasks tab next to Chat | Trajectory), yours to keep current. summon and adopt file a task for each new shikigami by themselves (or link the one you name), and a linked task follows its shikigami: running while it works, asks while it waits on a question, review once it reports (finished or failed), paused when stopped or interrupted. A shikigami moves along its own queue itself: it starts an item (running; its previous one goes back to open unless shipped) and ships it (review, and it stays there). You mark it done after checking the report; the shikigami's own todo list shows live as the task's steps. The user's own to-dos are owner 'you' (they tick those off themselves). Each owner's items form a queue: the first open one shows as next. action: list | add | update | done | remove | order | project. add: title, project, owner (a shikigami's name, 'seimei' or 'you'), optional state (open, running, asks, review, paused, done; default open), worker (a shikigami id: tapping the task opens its page; its state then follows it) and numbered (default true: the next #NN; false for the user's to-dos and small items); it goes to the end of its owner's queue. update: id plus any of title, project, owner, state, worker. done: id. remove: id (drops an item that will not be done; an empty project goes too). order: ids, put first in their owners' queues in that order. project: name plus paused (true shuts it on the board) and/or color (#rrggbb, empty for the default tint).",
+   "description": "The user's task board (the Tasks tab next to Chat | Trajectory), yours to keep current. summon and adopt file a task for each new shikigami by themselves (or link the one you name), and a linked task follows its shikigami: running while it works, asks while it waits on a question, review once it reports (finished or failed), paused when stopped or interrupted. A shikigami moves along its own queue itself: it starts an item (running; its previous one goes back to open unless shipped) and ships it (review, and it stays there). You mark it done after checking the report; the shikigami's own todo list shows live as the task's steps. The user's own to-dos are owner 'you' (they tick those off themselves). Each owner's items form a queue: the first open one shows as next. action: list | add | update | done | remove | order | project | archive. list: live work per project, what was done today, and a count of the archive (done items leave the board a day after they are done). add: title, project, owner (a shikigami's name, 'seimei' or 'you'), optional state (open, running, asks, review, paused, done; default open), worker (a shikigami id: tapping the task opens its page; its state then follows it) and numbered (default true: the next #NN; false for the user's to-dos and small items); it goes to the end of its owner's queue. update: id plus any of title, project, owner, state, worker. done: id. remove: id (drops an item that will not be done; an empty project goes too). order: ids, put first in their owners' queues in that order. project: name plus paused (true shuts it on the board) and/or color (#rrggbb, empty for the default tint). archive: optional q, searches the archived items (id, title, project, owner), newest first; an update on an archived id brings it back to the board (an update with just the id also marks a paused item as still wanted).",
    "inputSchema": {
     "properties": {
      "action": {
@@ -558,7 +558,8 @@
        "done",
        "remove",
        "order",
-       "project"
+       "project",
+       "archive"
       ]
      },
      "id": {
@@ -606,6 +607,10 @@
      },
      "color": {
       "type": "string"
+     },
+     "q": {
+      "type": "string",
+      "description": "archive: what to search for"
      }
     },
     "required": [

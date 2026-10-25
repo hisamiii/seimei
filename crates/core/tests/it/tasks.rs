@@ -91,7 +91,13 @@ fn run(s: &Value, seed: &Value, fails: &mut Vec<String>) {
                 let mut data: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
                 for t in data["tasks"].as_array_mut().unwrap() {
                     if t["id"] == a["id"] {
-                        t["since"] = json!(now() - a["since_ago"].as_f64().unwrap());
+                        for (field, ago) in
+                            [("since", "since_ago"), ("updated", "updated_ago"), ("done_at", "done_ago")]
+                        {
+                            if let Some(s) = a[ago].as_f64() {
+                                t[field] = json!(now() - s);
+                            }
+                        }
                     }
                 }
                 std::fs::write(&path, data.to_string()).unwrap();
@@ -106,6 +112,11 @@ fn run(s: &Value, seed: &Value, fails: &mut Vec<String>) {
                     .map(|(id, v)| (id.clone(), v[0].as_str().unwrap().into(), v[1].as_str().unwrap().into()))
                     .collect();
                 Ok(json!(b.drift(&ws, now())))
+            }
+            "stale" => Ok(json!(b.stale_note(now()))),
+            "archived" => {
+                let hits = b.archived(st("q").unwrap_or(""), 100);
+                Ok(json!({"n": hits.len(), "first": hits.first().map(|t| t.id.clone())}))
             }
             "tool" => {
                 let (text, error) = b.tool(a);

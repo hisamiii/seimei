@@ -34,11 +34,30 @@ class TasksTest {
     @Test
     fun projectsInOrder() {
         val b = board(raw)
-        // A question first, then running work, then the rest as the server keeps them, all done last; projects without tasks drop out
-        assertEquals(listOf("asky", "busy", "held", "mine", "work", "over"), b.projects.map { it.name })
+        // A question first, then running work, then the rest as the server keeps them; projects without tasks drop out, and
+        // those with only done items fold away into the Archived row (#168)
+        assertEquals(listOf("asky", "busy", "held", "mine", "work"), b.projects.map { it.name })
+        assertEquals(listOf("over"), b.folded)
+        assertEquals(3, b.done.size)
         val busy = b.projects.first { it.name == "busy" }
         assertEquals(listOf("#5", "#4"), busy.live.map { it.id })
+        // A timeline: what waits for a check before the current item
+        assertEquals(listOf("#10", "#9"), b.projects.first { it.name == "asky" }.live.map { it.id })
         assertEquals(listOf("#7", "#6"), busy.done.map { it.id })
+    }
+
+    @Test
+    fun staleParkedItems() {
+        val at = 1_000_000.0
+        val old = at - 4.5 * 86400
+        // Paused, or live in a paused project, and untouched 3+ days: flagged with the days; fresh or running ones not
+        assertEquals(4, task(task("a", "work", "dev", "paused").put("since", old).put("updated", old), at = at).stale)
+        assertEquals(4, task(task("b", "held", "mc", "open").put("since", old).put("updated", old), setOf("held"), at).stale)
+        assertEquals(0, task(task("c", "work", "dev", "paused").put("since", old).put("updated", at - 3600), at = at).stale)
+        assertEquals(0, task(task("d", "work", "dev", "running").put("since", old).put("updated", old), at = at).stale)
+        val held = JSONObject(raw.toString())
+        held.getJSONArray("tasks").getJSONObject(0).put("since", 1.0).put("updated", 1.0)
+        assertEquals("untouched", summary(board(held).projects.first { it.name == "held" }).last().first.substringBefore(" "))
     }
 
     @Test

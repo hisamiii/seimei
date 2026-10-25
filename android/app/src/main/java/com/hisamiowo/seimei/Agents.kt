@@ -356,7 +356,7 @@ fun SwipeToArchive(a: Agent, vm: Seimei, content: @Composable () -> Unit) {
 }
 
 @Composable
-fun ArchivedRow(n: Int, onClick: () -> Unit) {
+fun ArchivedRow(n: Int, sub: String = "$n shikigami and session${if (n == 1) "" else "s"}", onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().padding(top = 10.dp).heightIn(min = 64.dp).clip(RoundedCornerShape(18.dp)).clickable(onClick = onClick).padding(10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -367,7 +367,7 @@ fun ArchivedRow(n: Int, onClick: () -> Unit) {
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text("Archived", fontSize = 15.5.sp, fontWeight = FontWeight.Medium)
-            Text("$n shikigami and session${if (n == 1) "" else "s"}", fontSize = 13.5.sp, color = LocalExtra.current.text3)
+            Text(sub, fontSize = 13.5.sp, color = LocalExtra.current.text3)
         }
         Icon(Icons.chev, null, Modifier.size(20.dp), tint = LocalExtra.current.text3)
     }

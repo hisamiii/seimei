@@ -172,7 +172,7 @@ function tile(x) {
 }
 
 // The part of a line around a search match, with the match marked.
-function marked(text, q) {
+export function marked(text, q) {
   const i = q ? text.toLowerCase().indexOf(q) : -1;
   if (i < 0) return [text];
   // A match far into the line keeps a few words before it in view; the cut falls between words.

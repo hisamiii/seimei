@@ -1,12 +1,13 @@
 // The Tasks lane, two views behind one connected button group. Now: what needs the user (a question, a job to look
 // over, their own tasks), what runs and how far, and each shikigami's next. All tasks: one quiet row per project
 // with a one-line summary; a project opens in place, its done items fold into "N done", paused projects wait
-// behind one row. The user ticks their own tasks (with Undo); a task with a shikigami opens its page. Live: the
-// stream sends the whole board on every change.
-import { $, el, svg, post, keep, snack, clock, plural, wearShape } from './util.js';
-import { openWorker } from './agents.js';
+// behind one row, and done work sits in the Archived row (#168): what is older than a day leaves the board, projects
+// with only done items fold away into it. The user ticks their own tasks (with Undo); a task with a shikigami opens
+// its page. Live: the stream sends the whole board on every change.
+import { $, el, svg, post, keep, snack, clock, plural, wearShape, getJSON, dayLabel } from './util.js';
+import { openWorker, marked } from './agents.js';
 
-let board = keep.read('tasks') || { tasks: [], projects: [] };
+let board = keep.read('tasks') || { tasks: [], projects: [], archived: 0 };
 const VIEW = 'seimei.tb.view';
 const OPEN = 'seimei.tb.open';
 let view = localStorage.getItem(VIEW) === 'all' ? 'all' : 'now';
@@ -26,10 +27,15 @@ const REVIEW = 'M9 4.5H6.5A1.5 1.5 0 0 0 5 6v13.5A1.5 1.5 0 0 0 6.5 21h11a1.5 1.
 const CHECK = 'M5 12.5l4.5 4.5L19 7.5';
 const RIGHT = 'M9 6l6 6-6 6';
 const DOWN = 'M6 9l6 6 6-6';
+const ARCH = 'M3 4h18v4H3zM5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4';
+// A paused item nobody touched this long gets flagged; seimei asks the user whether it is dead (the server's PAUSED_STALE)
+const STALE = 3 * 86400;
 
 export function setTasks(b) {
-  board = { tasks: b.tasks || [], projects: b.projects || [] };
+  const moved = (b.archived || 0) !== board.archived;
+  board = { tasks: b.tasks || [], projects: b.projects || [], archived: b.archived || 0 };
   keep.write('tasks', board);
+  if (archView && moved) loadArch();
   if (!root().hidden) renderTasks();
 }
 
@@ -93,8 +99,17 @@ function sub(parts, t) {
   return s;
 }
 
+// Days since a parked item (paused, or of a paused project) was touched, when that is STALE or more
+function stale(t) {
+  const parked = t.state === 'paused' || board.projects.some((p) => p.paused && p.name === t.project);
+  const idle = Date.now() / 1000 - Math.max(t.since || 0, t.updated || 0);
+  return t.state !== 'done' && parked && idle >= STALE ? Math.floor(idle / 86400) : 0;
+}
+
+const untouched = (days) => el('span', 'sw', `untouched ${days} days`);
+
 // A row: optional tile, title, supporting line, optional bar
-function row(t, kind, parts, { tile = true, run = false, cls = '' } = {}) {
+function row(t, kind, parts, { tile = true, run = false, cls = '', q = '' } = {}) {
   const r = el('div', `tr k-${kind}${cls}`);
   if (t.worker) {
     r.classList.add('go');
@@ -126,7 +141,9 @@ function row(t, kind, parts, { tile = true, run = false, cls = '' } = {}) {
     r.append(tt);
   }
   const tx = el('span', 'tx');
-  tx.append(el('span', 'tl', t.title), sub(parts, cls ? t : null));
+  const tl = el('span', 'tl');
+  tl.append(...marked(t.title, q));
+  tx.append(tl, sub(parts, cls ? t : null));
   if (run) tx.append(bar(t));
   r.append(tx);
   return r;
@@ -210,7 +227,8 @@ function summary(ts) {
 
 const rank = (ts) => (ts.some((t) => t.state === 'asks') ? 0 : ts.some((t) => t.state === 'review') ? 1
   : ts.some((t) => t.state === 'running') ? 2 : 3);
-const ORDER = { asks: 0, review: 1, running: 2 };
+// Within a project, a timeline: what waits for a check, the current item, the queue, what is parked
+const ORDER = { review: 0, asks: 1, running: 1, open: 2 };
 
 function project(p, live, done, next) {
   const out = [];
@@ -219,7 +237,10 @@ function project(p, live, done, next) {
   b.type = 'button';
   b.setAttribute('aria-expanded', String(open));
   const tx = el('span', 'tx');
-  tx.append(el('span', 'tl', p.name), live.length ? summary(live) : el('span', 'ts', p.paused ? 'paused' : plural(done.length, '1 done', 'done')));
+  const sum = live.length ? summary(live) : el('span', 'ts', p.paused ? 'paused' : plural(done.length, '1 done', 'done'));
+  const days = Math.max(0, ...live.map(stale));
+  if (days) sum.append(sum.childNodes.length ? ' · ' : '', untouched(days));
+  tx.append(el('span', 'tl', p.name), sum);
   const tc = el('span', 'tc');
   tc.append(svg(open ? DOWN : RIGHT, 20));
   b.append(tx, tc);
@@ -232,17 +253,9 @@ function project(p, live, done, next) {
   out.push(b);
   if (!open) return out;
   const own = (t) => (t.owner === t.project || t.owner === 'you' ? [] : [t.owner]);
-  for (const t of [...live].sort((a, b) => (ORDER[a.state] ?? 3) - (ORDER[b.state] ?? 3) || byPos(a, b))) {
-    const o = { tile: false, cls: ' in' };
-    if (t.state === 'asks') out.push(row(t, 'ask', [...own(t), 'question'], o));
-    else if (t.state === 'review') out.push(row(t, 'review', [...own(t), 'review'], o));
-    else if (t.state === 'running') out.push(row(t, 'run', [...own(t), steps(t)?.cur || 'running'], { ...o, run: true }));
-    else if (t.owner === 'you') out.push(row(t, 'you', [t.state === 'paused' ? 'paused' : 'your task'], o));
-    else out.push(row(t, 'open', [...own(t), next.has(t.id) ? el('span', 'nx', 'next') : t.state === 'paused' ? 'paused' : 'open'], o));
-  }
+  // Done first, quiet and folded, oldest at the top: the timeline runs down into the current item
   if (done.length) {
     const shown = doneShown.has(p.name);
-    if (shown) for (const t of done) out.push(row(t, 'done', [...own(t), 'done'], { tile: false, cls: ' in' }));
     const f = el('button', 'tfold in sl');
     f.type = 'button';
     f.setAttribute('aria-expanded', String(shown));
@@ -253,24 +266,39 @@ function project(p, live, done, next) {
       renderTasks();
     });
     out.push(f);
+    if (shown) for (const t of [...done].reverse()) out.push(row(t, 'done', [...own(t), 'done'], { tile: false, cls: ' in' }));
+  }
+  for (const t of [...live].sort((a, b) => (ORDER[a.state] ?? 3) - (ORDER[b.state] ?? 3) || byPos(a, b))) {
+    const o = { tile: false, cls: ' in' };
+    const days = stale(t);
+    if (days) {
+      out.push(row(t, t.owner === 'you' ? 'you' : 'open', [...own(t), t.state === 'paused' ? 'paused' : t.state, untouched(days)], o));
+      continue;
+    }
+    if (t.state === 'asks') out.push(row(t, 'ask', [...own(t), 'question'], o));
+    else if (t.state === 'review') out.push(row(t, 'review', [...own(t), 'review'], o));
+    else if (t.state === 'running') out.push(row(t, 'run', [...own(t), steps(t)?.cur || 'running'], { ...o, run: true }));
+    else if (t.owner === 'you') out.push(row(t, 'you', [t.state === 'paused' ? 'paused' : 'your task'], o));
+    else out.push(row(t, 'open', [...own(t), next.has(t.id) ? el('span', 'nx', 'next') : t.state === 'paused' ? 'paused' : 'open'], o));
   }
   return out;
 }
 
 function all() {
   const next = new Set(nexts(active()).map((t) => t.id));
+  // A project with only done items folds away into the Archived row
   const rows = (ps) => ps.map((p, i) => {
     const ts = board.tasks.filter((t) => t.project === p.name);
     const live = ts.filter((t) => t.state !== 'done');
     const done = ts.filter((t) => t.state === 'done').sort((a, b) => (b.done_at || 0) - (a.done_at || 0));
     return { p, i, live, done, r: live.length ? rank(live) : 4 };
-  }).filter((x) => x.live.length || x.done.length)
+  }).filter((x) => x.live.length)
     .sort((a, b) => a.r - b.r || a.i - b.i)
     .flatMap((x) => project(x.p, x.live, x.done, next));
   const out = [];
   const on = rows(board.projects.filter((p) => !p.paused));
   if (on.length) out.push(group('board', on));
-  const held = board.projects.filter((p) => p.paused && board.tasks.some((t) => t.project === p.name));
+  const held = board.projects.filter((p) => p.paused && board.tasks.some((t) => t.project === p.name && t.state !== 'done'));
   if (held.length) {
     const b = el('button', 'tall quiet sl');
     b.type = 'button';
@@ -282,7 +310,99 @@ function all() {
     out.push(b);
     if (pausedShown) out.push(group('board held', rows(held)));
   }
+  const n = doneCount();
+  if (n) out.push(archRow(n));
   return out;
+}
+
+// ---------- the archive (#168): every done item, today's from the board and older ones from the server ----------
+
+let archView = false;
+let archQuery = '';
+let archList = [];
+
+export const tasksArchOpen = () => archView;
+const doneCount = () => board.archived + board.tasks.filter((t) => t.state === 'done').length;
+
+async function loadArch() {
+  const r = await getJSON('api/tasks/archive');
+  if (r) archList = r.tasks || [];
+  if (archView) renderTasks();
+}
+
+function closeTasksArchQuiet() {
+  archView = false;
+  archQuery = '';
+}
+
+export function closeTasksArch() {
+  closeTasksArchQuiet();
+  renderTasks();
+}
+
+function archRow(n) {
+  const b = el('button', 'archrow sl');
+  b.type = 'button';
+  const t = el('span', 'txt');
+  t.append(el('b', null, 'Archived'));
+  // The projects folded away say where their done items went
+  const gone = board.projects.filter((p) => !board.tasks.some((x) => x.project === p.name && x.state !== 'done'));
+  if (gone.length) t.append(el('span', null, `${gone.map((p) => p.name).join(', ')}: all done`));
+  const tl = el('span', 'tile done');
+  tl.append(svg(ARCH, 20));
+  b.append(tl, t, el('span', 'cnt', String(n)), svg(RIGHT, 20));
+  b.addEventListener('click', () => {
+    archView = true;
+    history.pushState({ tarch: true }, '');
+    renderTasks();
+    root().parentElement.scrollTop = 0;
+    loadArch();
+  });
+  return b;
+}
+
+function archPage() {
+  const seen = new Set(archList.map((t) => t.id));
+  const list = [...board.tasks.filter((t) => t.state === 'done' && !seen.has(t.id)), ...archList]
+    .sort((a, b) => (b.done_at || b.updated || 0) - (a.done_at || a.updated || 0));
+  const q = archQuery.trim().toLowerCase();
+  const hits = q ? list.filter((t) => [t.id, t.title, t.project, t.owner].some((f) => f && f.toLowerCase().includes(q))) : list;
+  const head_ = el('div', 'ahead');
+  const back = el('button', 'back sl');
+  back.type = 'button';
+  back.setAttribute('aria-label', 'Back to tasks');
+  back.append(svg('M15 5l-7 7 7 7', 22));
+  back.addEventListener('click', () => history.back());
+  head_.append(back, el('h2', null, 'Archived'), el('span', 'count', q ? `${hits.length} of ${list.length}` : `${list.length}`));
+  const search = el('label', 'asearch');
+  const input = el('input');
+  input.type = 'search';
+  input.placeholder = 'Search';
+  input.setAttribute('aria-label', 'Search the archive');
+  input.value = archQuery;
+  input.addEventListener('input', () => {
+    archQuery = input.value;
+    const pos = input.selectionStart;
+    renderTasks();
+    const again = root().querySelector('.asearch input');
+    again.focus();
+    again.setSelectionRange(pos, pos);
+  });
+  search.append(svg('M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-3.5-3.5', 20), input);
+  const parts = [head_, search];
+  if (!hits.length) parts.push(el('p', 'tasks-empty', q ? 'No matches' : 'Nothing done yet. Done items move here a day after.'));
+  // By the day they were done, as the activity log
+  let day = null;
+  let rows = [];
+  const flush = () => { if (rows.length) parts.push(head(day), group(null, rows)); rows = []; };
+  for (const t of hits) {
+    const d = dayLabel(t.done_at || t.updated);
+    if (d !== day) { flush(); day = d; }
+    const by = t.owner === 'you' || t.owner === t.project ? [] : [t.owner];
+    rows.push(row(t, 'done', [t.project, ...by], { tile: false, cls: ' in', q }));
+  }
+  flush();
+  return parts;
 }
 
 async function tick(t, undo = true) {
@@ -294,6 +414,7 @@ async function tick(t, undo = true) {
   try {
     await post(`api/tasks/${encodeURIComponent(t.id.replace(/^#/, ''))}/tick`, { done });
     if (undo) snack(done ? 'Task done' : 'Task reopened', { label: 'Undo', run: () => tick(t, false) });
+    if (archView) loadArch();
   } catch {
     snack("Couldn't reach the server");
     loadTasks();
@@ -324,7 +445,13 @@ function switcher() {
 
 export function renderTasks() {
   const box = root();
-  if (!board.tasks.length) {
+  // Back from the archive while another lane was in front
+  if (archView && !history.state?.tarch) closeTasksArchQuiet();
+  if (archView) {
+    box.replaceChildren(...archPage());
+    return;
+  }
+  if (!board.tasks.length && !board.archived) {
     box.replaceChildren(el('p', 'tasks-empty', 'No tasks'));
     return;
   }

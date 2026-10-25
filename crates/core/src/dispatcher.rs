@@ -305,7 +305,7 @@ pub struct Dispatcher {
     busy: AtomicBool,
     tx: mpsc::UnboundedSender<Cmd>,
     rx: std::sync::Mutex<Option<mpsc::UnboundedReceiver<Cmd>>>,
-    /// Where the task board and the shikigami disagree, as one line; set by the wiring.
+    /// Where the task board and the shikigami disagree, and paused items that may be dead; set by the wiring.
     pub drift: OnceLock<Text>,
     /// The open board items and running shikigami, for the block after a compaction; set by the wiring.
     pub recall: OnceLock<Text>,
