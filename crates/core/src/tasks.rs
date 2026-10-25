@@ -212,14 +212,14 @@ impl Board {
 
     fn save(&self) {
         let data = serde_json::to_value(&self.data).expect("the board serializes");
-        if let Err(e) = write_json(&self.path, &data, false) {
+        if let Err(e) = write_json(&self.path, &data) {
             eprintln!("seimei: tasks.json: {e}");
         }
     }
 
     fn save_archive(&self) {
         let data = serde_json::to_value(&self.archive).expect("the archive serializes");
-        if let Err(e) = write_json(&self.path.with_file_name("tasks-archive.json"), &data, false) {
+        if let Err(e) = write_json(&self.path.with_file_name("tasks-archive.json"), &data) {
             eprintln!("seimei: tasks-archive.json: {e}");
         }
     }

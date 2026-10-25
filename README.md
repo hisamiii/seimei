@@ -30,7 +30,7 @@ systemctl --user enable --now seimei seimei-tunnel
 ```
 
 State lives in `~/.local/share/seimei/` (event log, session id, the dispatcher's notes, auth.json).
-It uses the system `claude` binary on the claude.ai login; `ANTHROPIC_API_KEY` is dropped at startup.
+It uses the system `claude` binary: seimei uses your Claude Code login, however you configured it.
 
 ## License
 

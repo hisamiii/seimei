@@ -228,7 +228,7 @@ impl Desktop {
             tokio::spawn(self.clone().offer());
         }
         if snap["windows"].as_array().is_some_and(|w| !w.is_empty()) || !saved.as_ref().is_some_and(truthy) {
-            write_json(&path, &snap, false).map_err(|e| e.to_string())?;
+            write_json(&path, &snap).map_err(|e| e.to_string())?;
         }
         Ok(())
     }

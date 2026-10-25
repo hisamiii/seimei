@@ -40,7 +40,7 @@ impl Archive {
     pub fn set(&self, key: &str, on: bool) -> std::io::Result<()> {
         let mut marks = self.marks.lock().unwrap();
         marks.insert(key.into(), if on { json!({"at": now()}) } else { json!({"kept": now()}) });
-        write_json(&self.path, &*marks, false)
+        write_json(&self.path, &*marks)
     }
 
     fn mark(&self, key: &str) -> Value {

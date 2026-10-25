@@ -315,7 +315,7 @@ impl Auth {
     }
 
     fn save(&self, g: &mut Inner) {
-        if let Err(e) = write_json(&self.path, &g.data, true) {
+        if let Err(e) = write_json(&self.path, &g.data) {
             eprintln!("seimei: auth.json: {e}");
         }
         g.mtime = std::fs::metadata(&self.path)

@@ -160,8 +160,6 @@ impl Client {
             cmd.env_remove(k);
         }
         cmd
-            // Bill the user's subscription login, never an API key that happens to be in the environment.
-            .env_remove("ANTHROPIC_API_KEY")
             .env_remove("CLAUDECODE")
             // What the Python SDK sets: the session registers as an SDK session, as seimei's always have.
             .env("CLAUDE_CODE_ENTRYPOINT", "sdk-py");

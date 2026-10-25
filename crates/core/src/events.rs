@@ -2,6 +2,7 @@
 
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -46,7 +47,7 @@ impl EventLog {
                 }
             }
         }
-        let file = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
+        let file = std::fs::OpenOptions::new().create(true).append(true).mode(0o600).open(path)?;
         let inner = Mutex::new(Inner { events, file, subs: vec![], turn: Map::new() });
         Ok(EventLog { inner, path: path.into() })
     }

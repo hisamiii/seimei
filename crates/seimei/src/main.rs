@@ -266,6 +266,11 @@ fn main() {
         server.get("origin").and_then(|o| o.as_str()).map(String::from).unwrap_or(format!("http://localhost:{port}"));
     let state = if a.dev { data_dir().join("dev") } else { data_dir() };
     std::fs::create_dir_all(&state).unwrap_or_else(|e| die(&format!("{}: {e}", state.display())));
+    // The chat, notes and board are the user's only, also on older installs made 755.
+    for dir in [data_dir(), state.clone()] {
+        std::fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o700))
+            .unwrap_or_else(|e| die(&format!("{}: {e}", dir.display())));
+    }
 
     if a.command == "update" {
         return update::run(a.check, &state);

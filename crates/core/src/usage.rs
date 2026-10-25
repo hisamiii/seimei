@@ -88,7 +88,7 @@ impl Usage {
     }
 
     fn save(&self, d: &Value) {
-        if let Err(e) = write_json(&self.path, d, false) {
+        if let Err(e) = write_json(&self.path, d) {
             eprintln!("seimei: usage.json: {e}");
         }
     }

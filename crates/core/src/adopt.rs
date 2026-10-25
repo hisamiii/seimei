@@ -255,7 +255,7 @@ impl Adopter {
     }
 
     fn save(&self, pending: &Map<String, Value>) {
-        if let Err(e) = write_json(&self.state, pending, false) {
+        if let Err(e) = write_json(&self.state, pending) {
             eprintln!("seimei: saving adopt-pending.json: {e}");
         }
     }

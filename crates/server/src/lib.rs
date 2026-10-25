@@ -686,7 +686,7 @@ async fn theme_set(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> Resp
     };
     let rec = json!({"seed": seed, "from": from, "at": now()});
     if read_json(&app.theme).and_then(|t| t["seed"].as_str().map(String::from)).as_deref() != Some(seed.as_str()) {
-        let _ = write_json(&app.theme, &rec, false);
+        let _ = write_json(&app.theme, &rec);
         let mut ev = rec.clone();
         ev["type"] = json!("theme");
         app.events.flash(ev);

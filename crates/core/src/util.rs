@@ -1,7 +1,7 @@
 //! Small helpers: JSON state files, time, tokens and encodings.
 
 use std::io::Write;
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -53,16 +53,17 @@ pub fn read_json(path: &Path) -> Option<Value> {
     serde_json::from_slice(&std::fs::read(path).ok()?).ok()
 }
 
-/// Atomic write; private files are created 600.
-pub fn write_json(path: &Path, data: &impl Serialize, private: bool) -> std::io::Result<()> {
+/// Atomic write, 600: state is the user's only.
+pub fn write_json(path: &Path, data: &impl Serialize) -> std::io::Result<()> {
     let tmp = path.with_extension("tmp");
     let buf = serde_json::to_vec_pretty(data)?;
     let mut f = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(true)
-        .mode(if private { 0o600 } else { 0o644 })
+        .mode(0o600)
         .open(&tmp)?;
+    f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
     f.write_all(&buf)?;
     drop(f);
     std::fs::rename(&tmp, path)
@@ -309,7 +310,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("seimei-util-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("x.json");
-        write_json(&p, &serde_json::json!({"b": [1, 2], "a": {}}), true).unwrap();
+        write_json(&p, &serde_json::json!({"b": [1, 2], "a": {}})).unwrap();
         assert_eq!(read_json(&p).unwrap(), serde_json::json!({"b": [1, 2], "a": {}}));
         use std::os::unix::fs::PermissionsExt;
         assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);

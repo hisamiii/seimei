@@ -97,7 +97,7 @@ impl Watches {
     }
 
     fn save(&self, rules: &[Value]) {
-        if let Err(e) = write_json(&self.path, &rules, false) {
+        if let Err(e) = write_json(&self.path, &rules) {
             eprintln!("seimei: saving watches: {e}");
         }
     }

@@ -2056,7 +2056,7 @@ impl Pool {
 
     pub fn changed(&self) {
         let recs: Vec<Value> = self.all().iter().map(|w| w.rec()).collect();
-        if let Err(e) = write_json(&self.path, &recs, false) {
+        if let Err(e) = write_json(&self.path, &recs) {
             eprintln!("seimei: saving workers.json: {e}");
         }
         self.events.flash(self.listing());

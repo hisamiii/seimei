@@ -21,7 +21,7 @@ phone app / web page ──https──> tunnel ──> 127.0.0.1:8417  seimei
             └─────────────────────────────────────────────────────────────────┘
                            │ stream-json over stdio (crates/proto)
                            ▼
-                 the user's installed `claude` (subscription login)
+                 the user's installed `claude` (its own login)
 ```
 
 The workspace: `crates/proto` (the clients for Claude Code's stream-json protocol, ACP and Codex), `crates/core` (state, sessions, the guard, push, the plugins), `crates/server` (HTTP routes; the web page in `web/` is built into the binary), `crates/seimei` (the binary: serve, setup, update and the account commands). `crates/core/data/tools.json` holds seimei's own MCP tools as Claude Code sees them; the descriptions are prompt text.
