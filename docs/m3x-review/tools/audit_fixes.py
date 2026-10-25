@@ -20,7 +20,7 @@ Miss -> fix (numbers as in AUDIT.md; P = a pick where the rule left a choice, fo
     attach, swatches, seed, the Now/All tasks group)
  13 activity tags "Allowed", "Blocked: deletes files"
  14 usage section headers in text-2, not primary
- 15 P usage warning moves off warm (round 2: to neutral, see N5); warm is needs you only
+ 15 P usage warning moves off warm (round 3: neutral, on-surface-variant on outline-variant, error at 90%+); warm is needs you only
  16 badge and ring hue on 13 and 21: the PNGs were 256-colour palettes that lost the warm tone; shots are RGB now
  17 fingerprint card: buttons under the title, Set up filled
  18 P Tasks Now: the "All tasks" row goes, the toggle is the way there
@@ -49,7 +49,8 @@ Miss -> fix (numbers as in AUDIT.md; P = a pick where the rule left a choice, fo
  41 "tokens, cost, and questions"
  round 2 (AUDIT-2.md): N1 the chat question card titles the asker, the question its regular body; N2 one dot spacing in
  the headers; N3 one 48 chip; N4 the shade's reply chips name the choices as the body does; N5 no hardcoded theme
- colour: the wave masks the primary, the caution hue is gone (pick 15 now neutral: usage on primary, error at the limit)
+ colour: the wave masks the primary, the caution hue is gone (pick 15 is neutral, see round 3)
+ round 3: R1 usage is neutral, not primary (primary is for working): meters, percentages, the idle nav ring
  aria: "need you", "Chat, trajectory, or tasks", the ring label without a period; the hidden chat lane of the Tasks
  pages (an old QA dump) is emptied
  outside review: contrast (nav pill on primary, snackbar action #7028d9, choice descriptions), bottom tab "seimei"
@@ -244,12 +245,16 @@ CSS = """
 .nav-item.on .ring-ico .t { stroke: color-mix(in srgb, var(--on-primary) 30%, transparent); }
 .nav-item.on .ring-ico .f, #nav-usage.on[data-tone] .ring-ico .f { stroke: var(--on-primary); }
 
-/* 15: no warning hue of its own (round 2: no new color role). Usage is primary until the limit, error at it; the 5-hour note is
-   plain supporting text; warm means needs you */
+/* 15: usage is neutral (round 3, R1): primary is for working (REVIEW 6). Meters, their percentages and the idle nav ring take
+   on-surface-variant on an outline-variant track, error only near the limit (90%+); the 5-hour note is plain supporting text.
+   The app has no outline-variant yet (theme.js maps no outlineVariant), so the mockup mixes it from the theme's own outline */
+:root { --outline-variant: color-mix(in srgb, var(--outline) 45%, var(--surface)); }
 .note.warn { color: var(--text-2); }
-.meter, .meter.ok, .meter.warn { --tone: var(--primary); }
+.meter, .meter.ok, .meter.warn { --tone: var(--text-2); }
 .meter.bad { --tone: var(--error); }
-.ring-ico .f, #nav-usage[data-tone="warn"] .ring-ico .f { stroke: var(--primary); }
+.meter .bar-track::after { background: var(--outline-variant); }
+#nav-usage:not(.on) .ring-ico .t { stroke: var(--outline-variant); opacity: 1; }
+.ring-ico .f, #nav-usage[data-tone="warn"] .ring-ico .f { stroke: var(--text-2); }
 #nav-usage[data-tone="bad"] .ring-ico .f { stroke: var(--error); }
 #nav-usage.on .ring-ico .f { stroke: var(--on-primary); }
 

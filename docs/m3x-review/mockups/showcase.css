@@ -239,12 +239,16 @@ code, .wcard.approval .body.cmd, .arow code, .report .rbody code { font-size: 14
 .nav-item.on .ring-ico .t { stroke: color-mix(in srgb, var(--on-primary) 30%, transparent); }
 .nav-item.on .ring-ico .f, #nav-usage.on[data-tone] .ring-ico .f { stroke: var(--on-primary); }
 
-/* 15: no warning hue of its own (round 2: no new color role). Usage is primary until the limit, error at it; the 5-hour note is
-   plain supporting text; warm means needs you */
+/* 15: usage is neutral (round 3, R1): primary is for working (REVIEW 6). Meters, their percentages and the idle nav ring take
+   on-surface-variant on an outline-variant track, error only near the limit (90%+); the 5-hour note is plain supporting text.
+   The app has no outline-variant yet (theme.js maps no outlineVariant), so the mockup mixes it from the theme's own outline */
+:root { --outline-variant: color-mix(in srgb, var(--outline) 45%, var(--surface)); }
 .note.warn { color: var(--text-2); }
-.meter, .meter.ok, .meter.warn { --tone: var(--primary); }
+.meter, .meter.ok, .meter.warn { --tone: var(--text-2); }
 .meter.bad { --tone: var(--error); }
-.ring-ico .f, #nav-usage[data-tone="warn"] .ring-ico .f { stroke: var(--primary); }
+.meter .bar-track::after { background: var(--outline-variant); }
+#nav-usage:not(.on) .ring-ico .t { stroke: var(--outline-variant); opacity: 1; }
+.ring-ico .f, #nav-usage[data-tone="warn"] .ring-ico .f { stroke: var(--text-2); }
 #nav-usage[data-tone="bad"] .ring-ico .f { stroke: var(--error); }
 #nav-usage.on .ring-ico .f { stroke: var(--on-primary); }
 
