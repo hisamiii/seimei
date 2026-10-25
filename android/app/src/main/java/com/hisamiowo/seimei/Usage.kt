@@ -37,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.json.JSONObject
+import androidx.compose.ui.graphics.compositeOver
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -45,11 +46,8 @@ import java.util.Locale
 val WINDOWS = listOf("five_hour" to "5-hour", "seven_day" to "Weekly")
 
 @Composable
-fun toneColor(u: Double): Color = when {
-    u >= 0.95 -> MaterialTheme.colorScheme.error
-    u >= 0.8 -> LocalExtra.current.warn
-    else -> LocalExtra.current.ok
-}
+/** Usage is neutral (primary is for working); the error tone only near the limit. */
+fun toneColor(u: Double): Color = if (u >= 0.9) MaterialTheme.colorScheme.error else LocalExtra.current.text2
 
 fun tokens(n: Long): String = when {
     n >= 1_000_000_000 -> "%.1fB".format(Locale.US, n / 1e9)
@@ -74,7 +72,7 @@ fun resetText(t: Double): String {
     }
     val d = Instant.ofEpochMilli((t * 1000).toLong()).atZone(ZoneId.systemDefault())
     val at = if (dayOf(t) == java.time.LocalDate.now()) clock(t) else d.format(DateTimeFormatter.ofPattern("EEE HH:mm"))
-    return "resets $at, in $left"
+    return "Resets $at, in $left"
 }
 
 @Composable
@@ -89,23 +87,24 @@ fun UsageTab(vm: Seimei) {
             any = true
             val util = w.optDouble("utilization", 0.0)
             val tone = toneColor(util)
-            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(cs.surfaceContainerLow).padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(cs.surfaceContainer).padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.Bottom) {
-                    Text(label, fontWeight = FontWeight.Medium, fontSize = 15.sp, modifier = Modifier.weight(1f))
-                    Text("${Math.round(util * 100)}%", fontSize = 28.sp, color = tone, style = TNUM)
+                    Text(label, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                    Text("${Math.round(util * 100)}%", fontSize = 34.sp, lineHeight = 40.sp, fontWeight = FontWeight.SemiBold, color = tone, style = TNUM)
                 }
+                // M3X linear progress: the active part, a 4dp gap, the rest of the track; no stop dot
                 LinearProgressIndicator(
-                    progress = { util.toFloat().coerceIn(0f, 1f) }, color = tone, trackColor = cs.surfaceContainerHigh,
-                    strokeCap = StrokeCap.Round, gapSize = 0.dp, drawStopIndicator = {},
+                    progress = { util.toFloat().coerceIn(0f, 1f) }, color = tone, trackColor = LocalTokens.current.outline.copy(alpha = .45f).compositeOver(cs.surface),
+                    strokeCap = StrokeCap.Round, gapSize = 4.dp, drawStopIndicator = {},
                     modifier = Modifier.fillMaxWidth().height(8.dp),
                 )
                 val resets = w.optDouble("resets_at", 0.0)
-                if (resets > 0) Text(resetText(resets), fontSize = 13.sp, color = LocalExtra.current.text3)
+                if (resets > 0) Text(resetText(resets), fontSize = 14.sp, color = LocalExtra.current.text2)
             }
         }
-        val note = if (!any) "No usage reported yet. Claude Code reports it when a session takes a turn."
-        else u?.optDouble("updated", 0.0)?.takeIf { it > 0 }?.let { "Updated ${clock(it)}. Claude Code reports usage when a session takes a turn." }
+        val note = if (!any) "No usage yet"
+        else u?.optDouble("updated", 0.0)?.takeIf { it > 0 }?.let { "Updated ${clock(it)}" }
         note?.let { Text(it, fontSize = 13.sp, color = LocalExtra.current.text3) }
 
         val today = u?.optJSONObject("today")?.optJSONObject("sessions")
@@ -118,7 +117,7 @@ fun UsageTab(vm: Seimei) {
                     val (name, t) = r
                     Column(Modifier.padding(vertical = 10.dp)) {
                         Row {
-                            Text(name, fontWeight = FontWeight.Medium, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                            Text(name.removePrefix("shikigami "), fontWeight = FontWeight.Medium, fontSize = 14.sp, modifier = Modifier.weight(1f))
                             val turns = t.optInt("turns")
                             Text("$turns ${if (turns == 1) "turn" else "turns"}", fontSize = 12.sp, color = LocalExtra.current.text3)
                         }
@@ -200,17 +199,16 @@ fun metricFacts(m: JSONObject): List<Pair<String, String>> {
     val follow = m.optInt("followups")
     val from = listOfNotNull(by.optInt("seimei").takeIf { it > 0 }?.let { "$it from seimei" }, by.optInt("user").takeIf { it > 0 }?.let { "$it from you" })
     val rounds = listOfNotNull(
-        asks.takeIf { it > 0 }?.let { "$it ${if (it == 1) "ask" else "asks"}" },
-        follow.takeIf { it > 0 }?.let { "$it ${if (it == 1) "follow-up" else "follow-ups"} (${from.joinToString(", ")})" },
-        "reopened".takeIf { m.optBoolean("reopened") },
+        if (follow > 0) "${if (follow == 1) "Once" else "$follow times"} (${from.joinToString(", ")})" else "Never",
+        asks.takeIf { it > 0 }?.let { "$it ${if (it == 1) "question" else "questions"}" },
     ).joinToString(" · ")
     return listOf(
-        "Cost" to "${usd(m.optDouble("usd"))} at API prices${if (m.optBoolean("adopted")) ", with its time as your session" else ""}",
+        "Cost" to "${usd(m.optDouble("usd"))}${if (m.optBoolean("adopted")) ", with its time as your session" else ""}",
         "Tokens" to "${tokens(t.optLong("input"))} in · ${tokens(t.optLong("cache_read"))} cache read · " +
             "${tokens(t.optLong("cache_write"))} cache write · ${tokens(t.optLong("output"))} out",
         "Time" to "${span(m.optDouble("wall"))}, busy ${span(m.optDouble("busy"))}",
         // Asks while it worked, messages after its first done, and whether one asked for more work.
-        "Rounds" to rounds.ifEmpty { "one go" },
+        "Reopened" to rounds,
     ) + m.optJSONArray("tunes").objects().let { t ->
         // Effort, model or permissions changed on the way (#74), oldest first.
         if (t.isEmpty()) emptyList() else listOf("Changes" to t.joinToString(" · ") {
@@ -233,8 +231,7 @@ fun MetricsSection(list: List<JSONObject>?) {
         return
     }
     val finished = list.filter { !it.isNull("first_done") }
-    Text("${list.size} shikigami, ${usd(list.sumOf { it.optDouble("usd") })} at API prices. " +
-        "${finished.count { it.optBoolean("reopened") }} of ${finished.size} that finished got more work after.",
+    Text("${usd(list.sumOf { it.optDouble("usd") })} in all · ${finished.count { it.optBoolean("reopened") }} of ${finished.size} reopened",
         fontSize = 13.sp, color = LocalExtra.current.text3)
     var all by remember { mutableStateOf(false) }
     Column {

@@ -60,7 +60,7 @@ fun ThemeSheet(vm: Seimei, done: () -> Unit) {
         Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(start = 20.dp, end = 20.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text("Theme", fontSize = 22.sp)
-            Choice("Light or dark", MODES, vm.themeMode) { vm.setTheme(mode = it) }
+            Choice("", MODES, vm.themeMode) { vm.setTheme(mode = it) }
             var icon by remember { mutableStateOf(appIcon(ctx)) }
             Choice("App icon", APP_ICONS, icon) { setAppIcon(ctx, it); icon = it }
             for (pair in THEMES.chunked(2)) Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {

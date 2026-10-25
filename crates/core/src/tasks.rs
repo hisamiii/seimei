@@ -330,7 +330,7 @@ impl Board {
     pub fn tick(&mut self, tid: &str, done: bool) -> Result<Task> {
         let i = self.found(tid)?;
         if self.data.tasks[i].owner != YOU {
-            return Err(Error::Refused("only your own items can be ticked here".into()));
+            return Err(Error::Refused("Only your own tasks tick off here".into()));
         }
         self.update(tid, &Fields { state: Some(if done { "done" } else { "open" }.into()), ..Fields::default() })
     }

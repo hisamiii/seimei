@@ -1,5 +1,8 @@
 package com.hisamiowo.seimei
 
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onSizeChanged
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.material3.SnackbarHostState
@@ -195,6 +198,7 @@ object Icons {
     val laptop = icon("M5 6.5A1.5 1.5 0 0 1 6.5 5h11A1.5 1.5 0 0 1 19 6.5V15H5zM3 18h18")
     val list = icon("M8 7h11M8 12h11M8 17h7M4.5 7h.01M4.5 12h.01M4.5 17h.01")
     val alert = icon("M12 7v6M12 17v.01")
+    val clock = icon("M12 4a8 8 0 1 1 0 16 8 8 0 0 1 0-16zM12 8v4l2.5 2")
     val dash = icon("M7 12h10")
     val back = icon("M15 5l-7 7 7 7")
     val down = icon("M12 5v14M5.5 12.5 12 19l6.5-6.5", stroke = 2.2f)
@@ -449,12 +453,13 @@ fun LockScreen(vm: Seimei, activity: Activity) {
 data class Status(val s: String, val text: String)
 
 fun status(vm: Seimei): Status = when {
-    !vm.online && vm.awaySince != null -> Status("away", "away since ${clock(vm.awaySince!! / 1000.0)}")
-    !vm.online -> Status("connecting", "connecting")
-    !vm.connected -> Status("starting", "session starting")
-    vm.waiting > 0 -> Status("waiting", "waiting for your OK")
-    vm.busy -> Status("working", "working")
-    else -> Status("idle", "idle")
+    // Offline and an approval have their own cards; the header doesn't repeat them
+    !vm.online && vm.awaySince != null -> Status("away", "")
+    !vm.online -> Status("connecting", "Connecting…")
+    !vm.connected -> Status("starting", "Session starting…")
+    vm.waiting > 0 -> Status("waiting", "")
+    vm.busy -> Status("working", "Working")
+    else -> Status("idle", "")
 }
 
 val TABS = listOf("chat", "agents", "usage")
@@ -501,15 +506,18 @@ fun AppScreen(vm: Seimei) {
                 "usage" -> UsageTab(vm)
             }
         }
-        if (vm.tab == "chat" && vm.lane != "k") Composer(vm)
-        // The keyboard covers the bottom of the screen: while typing, the navigation bar steps aside.
-        if (!WindowInsets.isImeVisible) NavBar(vm)
-    }
-    // Above the composer (chat) and the navigation bar (hidden while typing).
-    val above = (if (vm.tab == "chat" && vm.lane != "k") 76 else 0) + (if (WindowInsets.isImeVisible) 0 else 80) + 8
-    SnackbarHost(snacks, Modifier.align(Alignment.BottomCenter).imePadding().padding(bottom = above.dp))
+        Column(Modifier.onSizeChanged { vm.barPx = it.height }) {
+            if (vm.tab == "chat" && vm.lane != "k") Composer(vm)
+            // The keyboard covers the bottom of the screen: while typing, the navigation bar steps aside.
+            if (!WindowInsets.isImeVisible) NavBar(vm)
+        }
     }
     vm.page?.let { AgentPage(vm, it) }
+    // Above whatever holds the bottom edge, measured: never over the field
+    val above = with(LocalDensity.current) { (if (vm.page != null) vm.pageBarPx else vm.barPx).toDp() } + 8.dp
+    SnackbarHost(snacks, Modifier.align(Alignment.BottomCenter).then(if (vm.page != null) Modifier.navigationBarsPadding() else Modifier)
+        .imePadding().padding(bottom = above))
+    }
     if (vm.about) AboutSheet(vm) { vm.about = false }
 }
 
@@ -519,13 +527,12 @@ fun Header(vm: Seimei) {
     val (working, asks) = agentCounts(vm)
     val (dot, text) = when (vm.tab) {
         "chat" -> st.s to st.text
-        "agents" -> (if (asks > 0) "waiting" else if (working > 0) "working" else "idle") to
-            (listOfNotNull(if (working > 0) "$working working" else null, if (asks > 0) "$asks ${if (asks == 1) "needs" else "need"} you" else null)
-                .joinToString(" · ").ifEmpty { "nothing running" })
+        // The sections and the nav badge say how many work and need you
+        "agents" -> "idle" to ""
         else -> "idle" to ""
     }.let { (d, t) ->
         // Away: the other tabs show the last known state, and say so.
-        if (vm.tab != "chat" && !vm.online && vm.awaySince != null) "away" to "offline since ${clock(vm.awaySince!! / 1000.0)} · last known state"
+        if (vm.tab != "chat" && !vm.online && vm.awaySince != null) "away" to "Offline since ${clock(vm.awaySince!! / 1000.0)}"
         else d to t
     }
     // Idle and working go without saying in the chat (its working line shows a turn); only problems and asks show.
@@ -606,7 +613,7 @@ fun NavBar(vm: Seimei) {
             NavigationBarItem(
                 selected = vm.tab == tab,
                 onClick = { vm.show(tab) },
-                label = { Text(TITLES[tab]!!.replaceFirstChar { it.uppercase() }.let { if (tab == "chat") "Chat" else it }) },
+                label = { Text(TITLES[tab]!!.replaceFirstChar { it.uppercase() }.let { if (tab == "chat") "seimei" else it }) },
                 icon = {
                     val ic = mapOf("chat" to Icons.chat, "agents" to Icons.agents, "usage" to Icons.usage)[tab]!!
                     BadgedBox(badge = {

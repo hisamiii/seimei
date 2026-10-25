@@ -24,8 +24,8 @@ $('passkey').addEventListener('click', async () => {
   $('passkey').disabled = false;
   if (r.ok) return location.reload();
   if (r.cancelled) return;
-  say(r.status === 409 ? 'No fingerprint set up yet. Log in with the password, then add it from the menu.'
-    : 'That did not work. Try again or use the password.');
+  say(r.status === 409 ? 'No fingerprint login here yet. Use the password.'
+    : "That didn't work");
 });
 
 $('pwform').addEventListener('submit', async (e) => {
@@ -36,5 +36,5 @@ $('pwform').addEventListener('submit', async (e) => {
   $('pwbtn').disabled = false;
   if (r.ok) return location.reload();
   $('pw').select();
-  say(r.data.wait ? `Too many tries. Wait ${r.data.wait} s.` : r.status === 401 ? 'Wrong password.' : 'Could not reach the server.');
+  say(r.data.wait ? `Too many tries. Wait ${r.data.wait} s.` : r.status === 401 ? 'Wrong password' : "Couldn't reach the server");
 });

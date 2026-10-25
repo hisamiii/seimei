@@ -12,6 +12,9 @@ import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.foundation.layout.wrapContentHeight
@@ -210,12 +213,7 @@ fun ChatTab(vm: Seimei) {
         }
     }
     // An empty chat greets instead of showing a blank sheet; an empty trajectory says what will show.
-    if (!traj && vm.items.isEmpty() && vm.pending.isEmpty() && !vm.hasOlder && vm.online) Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-        Mark(56)
-        Spacer(Modifier.height(14.dp))
-        Text("Ask seimei anything", fontSize = 17.sp, color = LocalExtra.current.text2)
-    }
-    if (traj && vm.trail.isEmpty() && !vm.hasOlder) Text("Shikigami reports, restarts and what seimei did about them show here.",
+    if (traj && vm.trail.isEmpty() && !vm.hasOlder) Text("Nothing yet",
         Modifier.align(Alignment.Center).padding(horizontal = 48.dp), fontSize = 14.sp, color = LocalExtra.current.text3, textAlign = TextAlign.Center)
     // Scrolled up: a way back to the end, which also shows that something new may be there.
     if (!follow) SmallFloatingActionButton(
@@ -341,7 +339,7 @@ fun Row(item: Item, vm: Seimei, live: JSONObject? = null, onPicture: (String) ->
         is Item.Trig -> TrigRow(item)
         is Item.Note -> NotePill(item.text + if (item.n > 1) "  ×${item.n}" else "", item.level)
         is Item.Activity -> ActivityChip(item, live)
-        is Item.Worker -> WorkerCard(item)
+        is Item.Worker -> WorkerCard(item, vm)
         is Item.Approval -> ApprovalCard(item, vm)
         is Item.Sent -> Column(Modifier.fillMaxWidth()) {
             FileChip(vm, item.file, Modifier.widthIn(max = 320.dp), expired = expired(item.t))
@@ -387,10 +385,10 @@ fun NotePill(text: String, level: String, day: Boolean = false) {
 
 @Composable
 fun Working() {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-        Spacer(Modifier.width(10.dp))
-        Text("Working", fontSize = 14.sp, color = LocalExtra.current.text3)
+    Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Loader(40.dp)
+        Spacer(Modifier.width(12.dp))
+        Text("Working…", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = LocalExtra.current.text2)
     }
 }
 
@@ -399,8 +397,8 @@ fun Away(vm: Seimei) {
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceContainer).padding(16.dp),
     ) {
-        Text("The server is not answering", fontWeight = FontWeight.SemiBold)
-        Text("Since ${clock(vm.awaySince!! / 1000.0)}. It may be asleep or offline; seimei keeps trying.",
+        Text("Can't reach the server", fontWeight = FontWeight.SemiBold)
+        Text("Since ${clock(vm.awaySince!! / 1000.0)}. Reconnects on its own.",
             fontSize = 14.sp, color = LocalExtra.current.text2)
     }
 }
@@ -474,7 +472,7 @@ fun PendingMsg(p: Pending, vm: Seimei) {
     }
 }
 
-val KIND_LABEL = mapOf("pdf" to "PDF", "archive" to "Archive", "audio" to "Audio", "video" to "Video", "image" to "Image",
+val KIND_LABEL = mapOf("pdf" to "PDF", "archive" to "Zip", "audio" to "Audio", "video" to "Video", "image" to "Image",
     "code" to "Code", "text" to "Text")
 
 fun kindIcon(kind: String) = when (kind) {
@@ -711,24 +709,24 @@ fun CallRow(c: Call) {
 // ---------- cards ----------
 
 @Composable
-fun Card(highlight: Boolean = false, content: @Composable () -> Unit) {
+fun Card(highlight: Boolean = false, corner: Dp = 28.dp, pad: Dp = 16.dp, content: @Composable () -> Unit) {
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceContainer)
-            .then(if (highlight) Modifier.border(1.5.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(20.dp)) else Modifier)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(corner)).background(MaterialTheme.colorScheme.surfaceContainer)
+            .then(if (highlight) Modifier.border(1.5.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(corner)) else Modifier)
+            .padding(pad),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) { content() }
 }
 
 @Composable
-fun CardHead(icon: androidx.compose.ui.graphics.vector.ImageVector, bg: Color, fg: Color, title: String, sub: String?, mono: Boolean = false) {
+fun CardHead(icon: androidx.compose.ui.graphics.vector.ImageVector, bg: Color, fg: Color, title: String, sub: String?, mono: Boolean = false, big: Boolean = false) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(30.dp).clip(RoundedCornerShape(10.dp)).background(bg), contentAlignment = Alignment.Center) {
-            Icon(icon, null, Modifier.size(18.dp), tint = fg)
+        Box(Modifier.size(if (big) 40.dp else 30.dp).clip(RoundedCornerShape(if (big) 12.dp else 10.dp)).background(bg), contentAlignment = Alignment.Center) {
+            Icon(icon, null, Modifier.size(if (big) 20.dp else 18.dp), tint = fg)
         }
-        Spacer(Modifier.width(10.dp))
+        Spacer(Modifier.width(if (big) 12.dp else 10.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, lineHeight = 18.sp)
+            Text(title, fontWeight = FontWeight.SemiBold, fontSize = if (big) 16.sp else 14.sp, lineHeight = if (big) 21.sp else 18.sp)
             if (!sub.isNullOrEmpty()) Text(sub, fontSize = 12.sp, color = LocalExtra.current.text3, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 fontFamily = if (mono) FontFamily.Monospace else null)
         }
@@ -738,49 +736,108 @@ fun CardHead(icon: androidx.compose.ui.graphics.vector.ImageVector, bg: Color, f
 val BAD_BG: Color @Composable get() = LocalTokens.current.errorContainer
 val OK_BG: Color @Composable get() = LocalTokens.current.okContainer
 
+/** A quiet line naming a shikigami, one tap from its page: what seimei's own sentence above didn't say. */
 @Composable
-fun WorkerCard(w: Item.Worker) {
+fun EvLine(name: String, rest: String, small: String, failed: Boolean = false, shape: Shape = RoundedCornerShape(12.dp),
+    modifier: Modifier = Modifier, open: () -> Unit) {
     val cs = MaterialTheme.colorScheme
-    val (icon, title) = when (w.event) {
-        "summoned" -> Icons.star to "Summoned ${w.name}"
-        "done" -> Icons.check to "${w.name} finished"
-        "failed" -> Icons.fail to "${w.name} failed"
-        else -> Icons.ask to "${w.name} asks"
+    val fg = if (failed) cs.onErrorContainer else LocalExtra.current.text2
+    Row(
+        modifier.heightIn(min = 48.dp).clip(shape).background(if (failed) cs.errorContainer else cs.surfaceContainer).clickable(onClick = open)
+            .padding(start = if (failed) 20.dp else 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val line = androidx.compose.ui.text.buildAnnotatedString {
+            pushStyle(androidx.compose.ui.text.SpanStyle(color = if (failed) cs.onErrorContainer else cs.onSurface, fontWeight = FontWeight.Medium))
+            append(name); pop()
+            append(rest)
+            if (small.isNotEmpty() && !failed) {
+                pushStyle(androidx.compose.ui.text.SpanStyle(fontSize = 12.sp, color = LocalExtra.current.text3)); append("  $small"); pop()
+            }
+        }
+        Column(if (failed) Modifier.weight(1f) else Modifier.weight(1f, fill = false)) {
+            Text(line, fontSize = 14.sp, lineHeight = 20.sp, color = fg)
+            if (failed && small.isNotEmpty()) Text(small, fontSize = 12.sp, lineHeight = 16.sp, color = fg.copy(alpha = .85f), modifier = Modifier.padding(top = 2.dp))
+        }
+        Spacer(Modifier.width(8.dp))
+        Icon(Icons.chev, null, Modifier.size(20.dp), tint = if (failed) cs.onErrorContainer else LocalExtra.current.text3)
     }
-    val (bg, fg) = when (w.event) {
-        "done" -> cs.surfaceContainerHigh to LocalExtra.current.text3
-        "failed" -> BAD_BG to cs.error
-        else -> cs.primaryContainer to cs.onPrimaryContainer
+}
+
+/** "opus" reads as the product name it is: "Opus · high". */
+fun modelLine(w: Item.Worker) = listOf(w.model.replaceFirstChar { it.uppercase() }, w.effort).filter { it.isNotEmpty() }.joinToString(" · ")
+
+/** The first sentence of a failure, without its period. */
+fun firstSentence(t: String) = t.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty().trim().split(Regex("(?<=[.!?])\\s")).first().removeSuffix(".")
+
+@Composable
+fun WorkerCard(w: Item.Worker, vm: Seimei) {
+    val open = { vm.openWorker(w.worker) }
+    when (w.event) {
+        "summoned" -> EvLine(w.name, "", modelLine(w), open = open)
+        "failed" -> EvLine(w.name, " failed", firstSentence(w.text), failed = true, shape = RoundedCornerShape(28.dp), modifier = Modifier.fillMaxWidth(), open = open)
+        "done" -> Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            EvLine(w.name, " finished", "", shape = RoundedCornerShape(28.dp, 28.dp, 4.dp, 4.dp), modifier = Modifier.fillMaxWidth(), open = open)
+            if (w.text.isNotEmpty()) Clipped(w.key, RoundedCornerShape(4.dp, 4.dp, 28.dp, 28.dp), MaterialTheme.colorScheme.surfaceContainer) {
+                Md(w.text, 14, MaterialTheme.colorScheme.onSurface)
+            }
+        }
+        else -> QuestionCard(w, open)
     }
-    var open by rememberSaveable(w.key) { mutableStateOf(false) }
-    var clipped by remember { mutableStateOf(false) }
-    // The body's full height against the box it shows in: large text clips far below 400 characters.
+}
+
+/** A long body clips with a fade and "Show more": measured, since large text clips far below 400 characters. */
+@Composable
+fun Clipped(key: String, shape: Shape, bg: Color, content: @Composable () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    var open by rememberSaveable(key) { mutableStateOf(false) }
     var full by remember { mutableIntStateOf(0) }
     var shown by remember { mutableIntStateOf(0) }
-    Card(highlight = w.event == "asking" && w.settled == null) {
-        CardHead(icon, bg, fg, title, if (w.event == "summoned") listOf(w.model, w.effort, w.contextCap, home(w.cwd)).filter { it.isNotEmpty() }.joinToString(" · ")
-            else w.settled, mono = w.event == "summoned")
-        if (w.text.isNotEmpty()) {
-            val max = if (open) Int.MAX_VALUE else if (w.event == "summoned") 3 else 6
-            if (w.event == "summoned") Text(w.text, fontSize = 14.sp, color = LocalExtra.current.text2, maxLines = max, overflow = TextOverflow.Ellipsis,
-                onTextLayout = { if (!open) clipped = it.hasVisualOverflow })
-            else Box(Modifier.animateContentSize().heightIn(max = if (open) 10_000.dp else 140.dp).clipToBounds().onSizeChanged { shown = it.height }) {
-                Box(Modifier.wrapContentHeight(Alignment.Top, unbounded = true).onSizeChanged { full = it.height }) { Md(w.text, 14, LocalExtra.current.text2) }
-                if (!open && full > shown) {
-                    Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(28.dp)
-                        .background(Brush.verticalGradient(listOf(Color.Transparent, cs.surfaceContainer))))
-                }
+    Column(Modifier.fillMaxWidth().clip(shape).background(bg).padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 14.dp)) {
+        Box(Modifier.animateContentSize().heightIn(max = if (open) 10_000.dp else 200.dp).clipToBounds().onSizeChanged { shown = it.height }) {
+            Box(Modifier.wrapContentHeight(Alignment.Top, unbounded = true).onSizeChanged { full = it.height }) { content() }
+            if (!open && full > shown) {
+                Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(28.dp).background(Brush.verticalGradient(listOf(Color.Transparent, bg))))
             }
-            if (open || if (w.event == "summoned") clipped else full > shown) {
-                Text(if (open) "Show less" else "Show more", color = cs.primary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { open = !open }.padding(vertical = 12.dp, horizontal = 4.dp))
+        }
+        if (open || full > shown) {
+            Text(if (open) "Show less" else "Show more", color = cs.primary, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(8.dp)).clickable { open = !open }.padding(vertical = 14.dp, horizontal = 4.dp))
+        }
+    }
+}
+
+/** A question: a decision, so the warm card, the asker's name as its title, the answer one tap away. */
+@Composable
+fun QuestionCard(w: Item.Worker, open: () -> Unit) {
+    val t = LocalTokens.current
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(t.warnContainer).clickable(onClick = open).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(t.warn), contentAlignment = Alignment.Center) {
+                Icon(Icons.question, null, Modifier.size(22.dp), tint = t.onWarn)
+            }
+            Spacer(Modifier.width(12.dp))
+            Text(w.name, fontSize = 16.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold, color = t.onWarnContainer, modifier = Modifier.weight(1f))
+            w.settled?.let { Text(it, fontSize = 12.sp, color = t.onWarnContainer.copy(alpha = .8f)) }
+        }
+        if (w.text.isNotEmpty()) Md(w.text, 14, t.onWarnContainer)
+        if (w.settled == null) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(open, Modifier.weight(1f).heightIn(min = 48.dp), colors = ButtonDefaults.buttonColors(
+                containerColor = t.warn.copy(alpha = .16f).compositeOver(t.warnContainer), contentColor = t.onWarnContainer)) {
+                Text("Open ${w.name}", fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Button(open, Modifier.weight(1.4f).heightIn(min = 48.dp), colors = ButtonDefaults.buttonColors(containerColor = t.warn, contentColor = t.onWarn)) {
+                Text("Answer", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }
 }
 
-val OUTCOME = mapOf("approved" to "Approved", "denied" to "Denied", "expired" to "No answer in time, denied",
-    "restart" to "Cancelled by a seimei restart", "cancelled" to "Cancelled")
+val OUTCOME = mapOf("approved" to "Allowed", "denied" to "Denied", "expired" to "No answer in time, denied",
+    "restart" to "Canceled by a restart", "cancelled" to "Canceled")
 
 /** What a settled card says: the rule it allowed, the note sent with a deny, or that a chat message settled it. */
 fun settledText(a: Item.Approval): String {
@@ -788,6 +845,7 @@ fun settledText(a: Item.Approval): String {
     val o = a.outcome ?: return ""
     return when {
         o == "expired" && a.expires == 0.0 -> "No answer, denied"
+        o == "approved" && d?.chosen == "Allow" -> "Allowed once"
         o == "approved" && d != null && d.chosen.isNotEmpty() -> d.chosen.replace(Regex("^Always allow"), "Always allowed").replace(Regex("^Allow "), "Allowed ")
         o == "approved" && a.action == "plan" -> "Went ahead"
         o == "denied" && d?.by == "chat" -> "Denied: you wrote in the chat"
@@ -886,8 +944,8 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
         }
     }
     val who = if (a.subagent) "${a.who}'s subagent" else a.who
-    Card(highlight = a.outcome == null) {
-        CardHead(if (a.action == "plan") PLAN else Icons.lock, bg, fg, "$who wants to ${if (message) "message ${a.target}" else a.target}", sub)
+    Card(highlight = a.outcome == null, corner = 28.dp, pad = 16.dp) {
+        CardHead(if (a.action == "plan") PLAN else Icons.lock, bg, fg, "$who wants to ${if (message) "message ${a.target}" else a.target}", sub, big = true)
         val box = Modifier.fillMaxWidth().heightIn(max = if (a.outcome == null) 220.dp else 80.dp)
         if (perm && a.action == "plan") {
             Box(box.verticalScroll(rememberScrollState())) { Md(a.detail, 14, if (a.outcome == null) cs.onSurface else LocalExtra.current.text2) }
@@ -908,11 +966,16 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
         val deny = a.options.firstOrNull { it.id == "deny" }
         val extra = a.options.filter { it.id != "once" && it.id != "deny" }
         if (a.outcome == null && extra.isNotEmpty() && !noting) {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                for (o in extra) {
-                    Text(optionText(o), fontSize = 14.sp, lineHeight = 20.sp,
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(cs.surfaceContainerHigh)
-                            .clickable(enabled = !sent) { answer(true, o.id) }.padding(horizontal = 12.dp, vertical = 10.dp))
+            // One segmented list: 2dp gaps, 20dp outer and 4dp inner corners; the rule that runs anything wears the warning container
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                for ((n, o) in extra.withIndex()) {
+                    val top = if (n == 0) 20.dp else 4.dp
+                    val bottom = if (n == extra.lastIndex) 20.dp else 4.dp
+                    val t = LocalTokens.current
+                    Text(optionText(o), fontSize = 14.sp, lineHeight = 22.sp, color = if (o.broad) t.onWarnContainer else cs.onSurface,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(top, top, bottom, bottom))
+                            .background(if (o.broad) t.warnContainer else cs.surfaceContainerHigh)
+                            .clickable(enabled = !sent) { answer(true, o.id) }.padding(horizontal = 16.dp, vertical = 13.dp))
                 }
             }
         }
@@ -944,13 +1007,21 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
                             value = minutesLeft(a.expires)
                         }
                     }
-                    Text(if (left > 0) "Auto-denies in $left min" else "Expiring", fontSize = 13.sp, color = LocalExtra.current.text3,
-                        modifier = Modifier.weight(1f))
-                } else Text("Waits for you", fontSize = 13.sp, color = LocalExtra.current.text3, modifier = Modifier.weight(1f))
-                if (perm) IconButton({ noting = true }, enabled = !sent) { Icon(PEN, "Add a note", Modifier.size(20.dp)) }
-                TextButton({ answer(false, if (perm) "deny" else null, key = "deny") }, enabled = !sent) { Label("deny", deny?.label ?: "Deny") }
-                Spacer(Modifier.width(4.dp))
-                Button({ answer(true, if (perm) "once" else null, key = "once") }, enabled = !sent) { Label("once", once?.label ?: "Approve") }
+                    Text(if (left > 0) "Auto-denies in $left min" else "Expiring", fontSize = 12.sp, color = LocalExtra.current.text3,
+                        modifier = Modifier.padding(end = 8.dp))
+                }
+                // A full-width group: the main action largest and on the thumb side
+                if (perm) FilledTonalIconButton({ noting = true }, Modifier.size(52.dp), enabled = !sent) { Icon(PEN, "Add a note", Modifier.size(20.dp)) }
+                if (perm) Spacer(Modifier.width(8.dp))
+                FilledTonalButton({ answer(false, if (perm) "deny" else null, key = "deny") }, Modifier.weight(1f).heightIn(min = 52.dp), enabled = !sent) {
+                    Label("deny", deny?.label ?: "Deny")
+                }
+                Spacer(Modifier.width(8.dp))
+                Button({ answer(true, if (perm) "once" else null, key = "once") }, Modifier.weight(1.4f).heightIn(min = 52.dp), enabled = !sent) {
+                    Icon(Icons.check, null, Modifier.size(20.dp).alpha(if (slow && tapped == "once") 0f else 1f))
+                    Spacer(Modifier.width(8.dp))
+                    Label("once", once?.label ?: "Allow")
+                }
             }
         }
     }

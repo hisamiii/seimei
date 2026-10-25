@@ -342,7 +342,7 @@ fn main() {
     let rt = tokio::runtime::Runtime::new().expect("a runtime");
     rt.block_on(async move {
         app.approvals.startup();
-        events.close_open_tools("Interrupted by a seimei restart.");
+        events.close_open_tools("Interrupted by a restart");
         app.pool.startup();
         app.adopter.startup();
         tokio::spawn(deploy_note(state.clone(), app.dispatcher.clone()));

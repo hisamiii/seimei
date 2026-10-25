@@ -458,7 +458,7 @@ impl Adopter {
                 if matches!(state.as_str(), "running" | "asking") { "It is stopped first, then i" } else { "I" };
             let detail = format!(
                 "{first}t opens in a terminal window on the server ({shown}, in {}) as your session named {name}. It \
-                 stops reporting to seimei and is never resumed by it; tap Hand to seimei on its session page to give \
+                 stops reporting to seimei and is never resumed by it; tap Hand off on its session page to give \
                  it back.",
                 str_of(&w.get("cwd"))
             );
@@ -472,7 +472,7 @@ impl Adopter {
         let win = w.release().await?;
         self.pool
             .events
-            .add(json!({"type": "system", "text": format!("shikigami {name} is now your session on the server.")}));
+            .add(json!({"type": "system", "text": format!("You took over {name}")}));
         let place =
             if win.is_some() { " in a terminal window on the server" } else { " in the window it was already open in" };
         Ok(format!(

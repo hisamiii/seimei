@@ -119,7 +119,7 @@ fun TasksTab(vm: Seimei) {
         LaneTabs(vm)
         if (secs.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(if (b == null) "Loading the board" else "Nothing on the board. seimei adds what it queues here.",
+                Text(if (b == null) "Loading the board…" else "No tasks",
                     Modifier.padding(horizontal = 48.dp), fontSize = 14.sp, color = LocalExtra.current.text3, textAlign = TextAlign.Center)
             }
             return@Column

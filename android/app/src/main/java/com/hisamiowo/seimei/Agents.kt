@@ -1,5 +1,6 @@
 package com.hisamiowo.seimei
 
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -42,6 +43,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -114,12 +118,12 @@ fun stateText(w: JSONObject): String {
     return when (w.str("state")) {
         "starting" -> "Starting"
         "running" -> "Working since $since"
-        "asking" -> "Waiting for your answer"
+        "asking" -> "Needs you"
         "done" -> "Finished $at"
         "failed" -> "Failed $at"
         "stopped" -> "Stopped $at"
         "interrupted" -> "Interrupted $at"
-        "laptop" -> "Open on the server since $since"
+        "laptop" -> "In a terminal on the server since $since"
         "released" -> "Your session since $since"
         else -> w.str("state")
     }
@@ -129,18 +133,20 @@ fun String.cap() = replaceFirstChar { it.uppercase() }
 
 /** What a running shikigami is up to: its latest step. */
 fun workerLine(w: JSONObject): String {
-    val d = w.optJSONObject("doing") ?: return if (w.str("state") == "starting") "Starting" else "Working"
+    val d = w.optJSONObject("doing") ?: return if (w.str("state") == "starting") "Starting" else ""
     if (d.str("text").isNotEmpty()) return d.str("text")
+    // A command is the news itself
+    if (d.str("name") == "Bash" && d.str("summary").isNotEmpty()) return d.str("summary")
     val what = doingPhrase(d.str("name")).cap()
     return if (d.str("summary").isNotEmpty()) "$what: ${d.str("summary")}" else what
 }
 
 /** What a session is up to: its open call and how long it has run. */
 fun sessionLine(d: JSONObject?): String {
-    d ?: return "Working"
-    val what = if (d.str("tool") == "Bash") "running ${d.str("what")}" else "${doingPhrase(d.str("tool"))}: ${d.str("what")}"
+    d ?: return ""
+    val what = if (d.str("tool") == "Bash") d.str("what") else "${doingPhrase(d.str("tool"))}: ${d.str("what")}"
     val since = d.optDouble("since", 0.0)
-    return what.cap() + if (since > 0) " · ${elapsed(since).substringBefore(' ')}" else ""
+    return (if (d.str("tool") == "Bash") what else what.cap()) + if (since > 0) " · ${elapsed(since).substringBefore(' ')}" else ""
 }
 
 /** Seconds ago as now, 5m, 3h, 2d. */
@@ -188,7 +194,7 @@ fun fromWorker(w: JSONObject): Agent {
     return Agent(
         "worker", w.str("id"), w.str("name"), w.str("project"), w.context(), state, w.optDouble("updated", 0.0),
         when (state) {
-            "ask" -> w.str("question").ifEmpty { "Asks a question" }
+            "ask" -> w.str("question")
             "work" -> workerLine(w)
             else -> w.str("summary").ifEmpty { stateText(w) }
         },
@@ -204,10 +210,10 @@ fun fromSession(s: JSONObject, seen: JSONObject): Agent {
     return Agent(
         "session", s.optLong("pid").toString(), s.str("name"), s.str("project"), s.context(), state, s.optDouble("since", 0.0),
         when {
-            q -> s.str("ask").ifEmpty { "Asks a question" }
+            q -> s.str("ask")
             asking -> s.str("waiting_text").ifEmpty { "Waiting on the server" }
             state == "work" -> sessionLine(s.optJSONObject("doing"))
-            else -> s.str("line").ifEmpty { "Idle" }
+            else -> s.str("line")
         },
         fresh = state == "idle" && s.optDouble("active", 0.0) > seen.optDouble(s.str("session_id"), 0.0) + 1,
         archived = s.optBoolean("archived"), find = listOf(s.str("name"), s.str("project"), s.str("line")),
@@ -245,9 +251,7 @@ fun AgentsTab(vm: Seimei) {
     val archived = archivedAgents(vm)
     if (items.isEmpty() && done.isEmpty() && archived.isEmpty()) {
         Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("Nothing running", fontWeight = FontWeight.Medium, fontSize = 16.sp)
-            Spacer(Modifier.size(6.dp))
-            Text("Your Claude sessions on the server and the shikigami seimei summons show up here.", color = LocalExtra.current.text3, fontSize = 14.sp)
+            Text("No shikigami or sessions yet", fontWeight = FontWeight.Medium, fontSize = 16.sp)
         }
         return
     }
@@ -256,14 +260,17 @@ fun AgentsTab(vm: Seimei) {
         for ((title, color, list) in groups) {
             if (list.isEmpty()) continue
             item("h-$title") { GroupTitle(title, color) }
-            items(list, key = { "${it.kind}-${it.id}" }) { a ->
-                if (a.state == "idle") SwipeToArchive(a, vm) { AgentRow(a, now) { vm.open(a) } } else AgentRow(a, now) { vm.open(a) }
+            itemsIndexed(list, key = { _, it -> "${it.kind}-${it.id}" }) { i, a ->
+                val shape = segment(i, list.size, if (a.state == "ask") 28.dp else 20.dp, if (a.state == "ask") 8.dp else 4.dp)
+                if (a.state == "idle") SwipeToArchive(a, vm) { AgentRow(a, now, shape = shape) { vm.open(a) } } else AgentRow(a, now, shape = shape) { vm.open(a) }
             }
         }
         if (done.isNotEmpty()) {
             val shown = if (showAll) done else done.take(15)
-            item("h-done") { GroupTitle("Finished shikigami", LocalExtraText3) }
-            items(shown.map(::fromWorker), key = { "done-${it.id}" }) { a -> SwipeToArchive(a, vm) { AgentRow(a, now) { vm.open(a) } } }
+            item("h-done") { GroupTitle("Finished", LocalExtraText3) }
+            itemsIndexed(shown.map(::fromWorker), key = { _, it -> "done-${it.id}" }) { i, a ->
+                SwipeToArchive(a, vm) { AgentRow(a, now, shape = segment(i, shown.size)) { vm.open(a) } }
+            }
             if (done.size > shown.size) item("all") {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                     TextButton({ showAll = true }) { Text("Show all ${done.size}") }
@@ -358,7 +365,7 @@ fun ArchiveList(vm: Seimei, now: Long) {
         }
         item("search") {
             TextField(vm.archQuery, { vm.archQuery = it }, Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 8.dp), singleLine = true,
-                placeholder = { Text("Search names, tasks and reports") },
+                placeholder = { Text("Search") },
                 leadingIcon = { Icon(Icons.search, null, Modifier.size(20.dp)) },
                 trailingIcon = { if (vm.archQuery.isNotEmpty()) IconButton({ vm.archQuery = "" }) { Icon(Icons.close, "Clear the search", Modifier.size(18.dp)) } },
                 shape = RoundedCornerShape(24.dp),
@@ -368,7 +375,7 @@ fun ArchiveList(vm: Seimei, now: Long) {
                 ))
         }
         if (hits.isEmpty()) item("none") {
-            Text(if (q.isEmpty()) "Nothing archived. Shikigami and idle sessions move here 12 hours after their last activity." else "Nothing archived matches.",
+            Text(if (q.isEmpty()) "Nothing archived. Idle ones move here after 12 hours." else "No matches",
                 Modifier.fillMaxWidth().padding(32.dp), color = LocalExtra.current.text3, fontSize = 14.sp, textAlign = TextAlign.Center)
         }
         items(hits, key = { "arch-${it.kind}-${it.id}" }) { a -> SwipeToArchive(a, vm) { AgentRow(a, now, q) { vm.open(a) } } }
@@ -381,21 +388,28 @@ fun Seimei.open(a: Agent) = if (a.kind == "worker") openWorker(a.id) else openSe
 
 @Composable
 fun GroupTitle(title: String, color: Color) =
-    Text(title, color = color, fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 8.dp, top = 18.dp, bottom = 6.dp))
+    Text(title, color = color, fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 8.dp))
+
+/** A row's corners in a segmented group: big outer ones on the group's ends, small ones between the rows. */
+fun segment(i: Int, n: Int, outer: Dp = 20.dp, inner: Dp = 4.dp): Shape =
+    RoundedCornerShape(if (i == 0) outer else inner, if (i == 0) outer else inner, if (i == n - 1) outer else inner, if (i == n - 1) outer else inner)
 
 @Composable
 fun AgentTile(a: Agent) {
-    val color = when {
-        a.state == "ask" -> PEACH
-        a.bad -> MaterialTheme.colorScheme.error
-        a.state == "done" -> LocalExtra.current.text3
-        else -> tint(a.project)
+    // Shape and tone say the state: a warm squircle asks, the loading indicator works, a circle waits or is done
+    val t = LocalTokens.current
+    val cs = MaterialTheme.colorScheme
+    val (bg, color) = when {
+        a.state == "ask" -> t.warn to t.onWarn
+        a.state == "work" -> cs.primaryContainer to cs.primary
+        a.bad -> cs.surfaceContainerHigh to cs.error
+        else -> cs.surfaceContainerHigh to LocalExtra.current.text2
     }
-    val bg = if (a.state == "done") MaterialTheme.colorScheme.surfaceContainerHigh else color.copy(alpha = .18f)
-    Box(Modifier.size(42.dp).clip(RoundedCornerShape(14.dp)).background(bg), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(44.dp).clip(if (a.state == "ask") RoundedCornerShape(16.dp) else CircleShape).background(bg), contentAlignment = Alignment.Center) {
         when (a.state) {
-            "work" -> CircularProgressIndicator(Modifier.size(20.dp), color = color, strokeWidth = 2.4.dp, trackColor = Color.Transparent)
+            "work" -> Loader(32.dp, contained = false, color = color)
             "ask" -> Icon(Icons.question, null, Modifier.size(20.dp), tint = color)
+            "idle" -> Icon(Icons.clock, null, Modifier.size(20.dp), tint = color)
             else -> Icon(when {
                 a.bad -> Icons.alert
                 a.end == "stopped" -> Icons.stopped
@@ -407,12 +421,17 @@ fun AgentTile(a: Agent) {
 }
 
 @Composable
-fun AgentRow(a: Agent, now: Long, query: String = "", onClick: () -> Unit) {
+fun AgentRow(a: Agent, now: Long, query: String = "", shape: Shape = RoundedCornerShape(20.dp), onClick: () -> Unit) {
+    val t = LocalTokens.current
+    val cs = MaterialTheme.colorScheme
+    val ask = a.state == "ask"
+    Column {
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(RoundedCornerShape(18.dp))
-            .background(if (a.state == "ask") ASK_BG else Color.Transparent).clickable(onClick = onClick)
-            .padding(10.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(shape)
+            .background(if (ask) t.warnContainer else if (a.state == "done") cs.surfaceContainer.copy(alpha = .55f).compositeOver(cs.surfaceContainerLow) else cs.surfaceContainer)
+            .clickable(onClick = onClick)
+            .padding(start = 10.dp, end = 16.dp, top = if (ask) 12.dp else 10.dp, bottom = if (ask) 12.dp else 10.dp),
+        verticalAlignment = if (ask) Alignment.Top else Alignment.CenterVertically,
     ) {
         AgentTile(a)
         Spacer(Modifier.width(14.dp))
@@ -420,33 +439,30 @@ fun AgentRow(a: Agent, now: Long, query: String = "", onClick: () -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // Name and tag take the room left of the time, so the time lines up at the right edge.
                 Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                    Text(a.name, fontSize = 15.5.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        color = if (a.state == "done" || a.archived) LocalExtra.current.text2 else Color.Unspecified, modifier = Modifier.weight(1f, fill = false))
-                    if (a.kind == "worker") {
-                        Spacer(Modifier.width(8.dp))
-                        Text("shikigami", fontSize = 11.sp, color = LocalExtra.current.text2, modifier = Modifier.clip(RoundedCornerShape(50))
-                            .background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(horizontal = 7.dp, vertical = 1.dp))
-                    }
+                    Text(a.name, fontSize = 16.sp, lineHeight = 24.sp, fontWeight = if (ask) FontWeight.SemiBold else FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        color = if (ask) t.onWarnContainer else if (a.state == "done" || a.archived) LocalExtra.current.text2 else Color.Unspecified, modifier = Modifier.weight(1f, fill = false))
                 }
                 Spacer(Modifier.width(8.dp))
-                if (a.fresh) {
-                    Box(Modifier.size(8.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary))
-                    Spacer(Modifier.width(6.dp))
-                }
-                Text(if (a.state == "done") whenText(a.since) else short(a.since).also { now }, fontSize = 12.5.sp, color = LocalExtra.current.text3)
+                // New since you looked: the time in primary, no dot
+                Text(if (a.state == "done") whenText(a.since) else short(a.since).also { now }, fontSize = 12.sp,
+                    color = if (a.fresh) cs.primary else if (ask) t.onWarnContainer.copy(alpha = .8f) else LocalExtra.current.text3,
+                    fontWeight = if (a.fresh) FontWeight.Medium else null)
             }
             Spacer(Modifier.height(3.dp))
             Row {
-                if (a.project.isNotEmpty()) Text("${a.project} · ", fontSize = 13.5.sp, color = tint(a.project), fontWeight = FontWeight.Medium, maxLines = 1)
+                if (a.project.isNotEmpty() && a.project != a.name) Text("${a.project} · ", fontSize = 14.sp, lineHeight = 20.sp,
+                    color = if (ask) t.onWarnContainer else LocalExtra.current.text2, fontWeight = FontWeight.Medium, maxLines = 1)
                 val (line, at) = searchLine(a, query)
                 val mark = MaterialTheme.colorScheme.primary.copy(alpha = .3f)
                 Text(buildAnnotatedString {
                     append(line)
                     if (at >= 0) addStyle(SpanStyle(background = mark), at, at + query.length)
-                }, fontSize = 13.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    color = when (a.state) { "ask" -> PEACH; "work" -> MaterialTheme.colorScheme.onSurface; else -> LocalExtra.current.text3 })
+                }, fontSize = 14.sp, lineHeight = 20.sp, maxLines = if (ask) 2 else 1, overflow = TextOverflow.Ellipsis,
+                    color = when (a.state) { "ask" -> t.onWarnContainer; "work" -> cs.onSurface; else -> LocalExtra.current.text3 })
             }
         }
+    }
+    Spacer(Modifier.height(2.dp))
     }
 }
 
@@ -459,7 +475,7 @@ fun ContextRing(pct: Int?, onClick: () -> Unit) {
     val fill = if (n >= 80) PEACH else LocalExtra.current.text3
     Box(
         Modifier.size(48.dp).clip(CircleShape).clickable(onClick = onClick)
-            .semantics { contentDescription = if (pct == null) "Session details" else "Context $n% used. Session details" },
+            .semantics { contentDescription = if (pct == null) "Details" else "Context $n% used, session details" },
         contentAlignment = Alignment.Center,
     ) {
         // No context figure yet: an info icon, not an empty track that reads as a spinner.
@@ -500,10 +516,7 @@ fun AgentPage(vm: Seimei, pg: Page) {
                 Column(Modifier.weight(1f)) {
                     Text(a.name, fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        val dot = when (a.state) { "work" -> MAUVE; "ask" -> PEACH; else -> LocalTokens.current.outline }
-                        Box(Modifier.size(7.dp).clip(CircleShape).background(dot))
-                        Spacer(Modifier.width(6.dp))
-                        if (a.project.isNotEmpty()) Text("${a.project} · ", fontSize = 13.sp, color = tint(a.project), fontWeight = FontWeight.Medium)
+                        if (a.project.isNotEmpty() && a.project != a.name) Text("${a.project} · ", fontSize = 13.sp, color = tint(a.project), fontWeight = FontWeight.Medium)
                         val word = when (a.state) {
                             "ask" -> "Needs you"
                             "work" -> "Working"
@@ -511,7 +524,7 @@ fun AgentPage(vm: Seimei, pg: Page) {
                             else -> stateText(pg.row)
                         }
                         val ago = short(a.since)
-                        Text(if (a.state == "done" || ago == "now") word else "$word $ago", fontSize = 13.sp,
+                        Text(if (a.state == "done" || ago == "now") word else "$word · $ago", fontSize = 13.sp,
                             color = if (a.state == "ask") PEACH else LocalExtra.current.text3, maxLines = 1)
                     }
                 }
@@ -519,10 +532,9 @@ fun AgentPage(vm: Seimei, pg: Page) {
                 val canHand = if (pg.kind == "worker") pg.row.optBoolean("started", true) && pg.row.str("state") !in setOf("released", "starting")
                     else pg.row.str("kind") in setOf("interactive", "background")
                 if (canHand) FilledTonalButton({ vm.handoff(pg) }, Modifier.heightIn(min = 36.dp).padding(end = 4.dp)
-                    .semantics { contentDescription = if (pg.kind == "worker") "Give ${a.name} to me: it goes on as my own session on the server"
-                        else "Hand ${a.name} to seimei as a shikigami" },
+                    .semantics { contentDescription = if (pg.kind == "worker") "Take over ${a.name}" else "Hand ${a.name} off to seimei" },
                     contentPadding = PaddingValues(horizontal = 12.dp)) {
-                    Text(if (pg.kind == "worker") "Give to me" else "Hand to seimei", fontSize = 13.sp, maxLines = 1)
+                    Text(if (pg.kind == "worker") "Take over" else "Hand off", fontSize = 13.sp, maxLines = 1)
                 }
                 ContextRing(a.context) { pg.details = true }
             }
@@ -533,8 +545,7 @@ fun AgentPage(vm: Seimei, pg: Page) {
             ) {
                 Icon(Icons.shelf, null, Modifier.size(20.dp), tint = LocalExtra.current.text3)
                 Spacer(Modifier.width(12.dp))
-                Text(if (pg.kind == "worker") "Archived. A message wakes it with its full context and puts it back in the list."
-                    else "Archived: hidden from the list, still running. It comes back when it does something.",
+                Text(if (pg.kind == "worker") "Archived. A message brings it back." else "Archived, still running",
                     Modifier.weight(1f).padding(vertical = 6.dp), fontSize = 14.sp, lineHeight = 19.sp, color = LocalExtra.current.text2)
                 TextButton({ vm.setArchived(a, false) }) { Text("Unarchive") }
             }
@@ -553,7 +564,7 @@ fun AgentPage(vm: Seimei, pg: Page) {
                     QuestionCard(vm, pg, JSONObject().put("text", pg.row.str("question")))
                 }
                 items(rows, key = { it.key }, contentType = { it::class }) { Row(it, vm, pg.live) { f -> zoom = f } }
-                if (rows.isEmpty()) item("empty") { NotePill("Nothing here yet.", "") }
+                if (rows.isEmpty()) item("empty") { NotePill("Nothing yet", "") }
             }
             PageComposer(vm, pg, a)
         }
@@ -611,14 +622,7 @@ fun QuestionCard(vm: Seimei, pg: Page, ask: JSONObject) {
                     if (o.str("description").isNotEmpty()) Text(o.str("description"), fontSize = 12.5.sp, lineHeight = 17.sp, color = LocalExtra.current.text3)
                 }
             }
-            val many = (ask.optJSONArray("questions")?.length() ?: 0) > 1
-            Text(
-                if (!ask.optBoolean("answerable")) "Answer ${if (many) "these" else "this one"} on the server: ${if (many) "several questions at once" else "pick any"} works there only."
-                else "Something else? Answer in your own words below.",
-                fontSize = 12.5.sp, color = LocalExtra.current.text3, modifier = Modifier.padding(horizontal = 4.dp),
-            )
-        } else {
-            Text("Answer below.", fontSize = 12.5.sp, color = LocalExtra.current.text3, modifier = Modifier.padding(horizontal = 4.dp))
+            if (!ask.optBoolean("answerable")) Text("Answer on the server", fontSize = 12.sp, color = LocalExtra.current.text3, modifier = Modifier.padding(horizontal = 4.dp))
         }
     }
 }
@@ -630,7 +634,7 @@ fun PageComposer(vm: Seimei, pg: Page, a: Agent) {
     var menu by remember { mutableStateOf(false) }
     val cs = MaterialTheme.colorScheme
     val why = blocked(pg)
-    Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 10.dp)) {
+    Column(Modifier.fillMaxWidth().onSizeChanged { vm.pageBarPx = it.height }.padding(start = 12.dp, end = 12.dp, bottom = 10.dp)) {
         val note = pg.note ?: why
         if (note != null) Text(note, fontSize = 13.sp, color = if (pg.note != null) cs.error else LocalExtra.current.text3,
             modifier = Modifier.padding(start = 4.dp, end = 4.dp, bottom = 8.dp))
@@ -664,7 +668,7 @@ fun PageComposer(vm: Seimei, pg: Page, a: Agent) {
                 value = pg.draft,
                 onValueChange = { pg.draft = it },
                 enabled = why == null,
-                placeholder = { Text(if (why != null) "Can't reply from here right now" else if (pg.ask != null) "Your answer…" else if (pg.kind == "worker" && a.archived) "Message $name to wake it" else "Message $name", maxLines = 1) },
+                placeholder = { Text(if (why != null) "Can't reply from here right now" else if (pg.ask != null) "Your answer" else "Message $name", maxLines = 1) },
                 leadingIcon = {
                     Box {
                         IconButton({ menu = true }, enabled = why == null) { Icon(Icons.attach, "Attach photos or files") }
@@ -728,11 +732,10 @@ fun TuneFact(key: String, value: String, onClick: () -> Unit) {
 
 val EFFORTS = listOf("low", "medium", "high", "xhigh", "max")
 val MODELS = listOf("opus", "sonnet", "haiku")
-val MODE_LABEL = mapOf("plan" to "Plan first", "default" to "Ask", "acceptEdits" to "Allow edits", "auto" to "Auto",
+val MODE_LABEL = mapOf("plan" to "Plan first", "default" to "Ask first", "acceptEdits" to "Allow edits", "auto" to "Auto",
     "dontAsk" to "Only what's allowed", "bypassPermissions" to "Bypass")
-val MODE_NOTE = mapOf("plan" to "It plans, you OK the plan, then it works.", "default" to "What Claude Code would ask comes to you as a card.",
-    "acceptEdits" to "File edits go through; commands still ask.", "auto" to "Claude Code decides what is safe; the rest asks.",
-    "dontAsk" to "Only what your rules allow; nothing asks.", "bypassPermissions" to "Nothing asks. seimei's guard still applies.")
+val MODE_NOTE = mapOf("acceptEdits" to "Commands still ask", "auto" to "Claude Code decides", "dontAsk" to "Never asks",
+    "bypassPermissions" to "The guard still applies")
 
 @Composable
 fun Pills(values: List<String>, on: String, pick: (String) -> Unit) {
@@ -763,7 +766,7 @@ fun ChangeSheet(vm: Seimei, pg: Page, done: () -> Unit) {
     Pills(EFFORTS, effort) { effort = it }
     Text("Model", fontSize = 13.sp, color = LocalExtra.current.text3)
     Pills(MODELS, model) { model = it }
-    Text("Takes effect at its next turn, without restarting the task. A new effort keeps the cache; a new model rebuilds it once.",
+    Text("From its next turn. A new model rebuilds the cache once.",
         fontSize = 13.sp, lineHeight = 18.sp, color = LocalExtra.current.text3)
     Text("Permissions", fontSize = 13.sp, color = LocalExtra.current.text3)
     val shown = listOf("plan", "default", "acceptEdits", "bypassPermissions").let { if (r.str("mode") in it) it else it.take(3) + r.str("mode") + it.last() }
@@ -823,14 +826,14 @@ fun Details(vm: Seimei, pg: Page) {
                 verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.lock, null, Modifier.size(16.dp), tint = cs.onPrimaryContainer)
                 Spacer(Modifier.width(8.dp))
-                Text("Waits for your OK: ${r.str("card").removePrefix("wants to ").substringBefore(':')}", fontSize = 14.sp, color = cs.onPrimaryContainer)
+                Text("Needs you: ${r.str("card").removePrefix("wants to ").substringBefore(':')}", fontSize = 14.sp, color = cs.onPrimaryContainer)
             }
             // Facts as a quiet key/value list; what can be done sits below as full-width tonal buttons.
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Fact("Folder", home(r.str("cwd")), mono = true)
                 val effort = r.str("effort").ifEmpty { r.str("effort_now") }
                 val effortText = if (r.str("effort_next").isNotEmpty()) "${effort.ifEmpty { "default" }} → ${r.str("effort_next")} at its next turn"
-                    else if (effort.isEmpty()) "" else effort + if (pg.kind == "worker" && r.str("effort").isEmpty()) " (default)" else ""
+                    else if (effort.isEmpty()) "" else effort + if (pg.kind == "worker" && r.str("effort").isEmpty()) " · default" else ""
                 // Model, effort and permissions of a live shikigami open the Change sheet (#64, #74).
                 if (pg.kind == "worker" && r.str("state") !in listOf("released", "laptop")) {
                     TuneFact("Model", r.str("model")) { changing = true }
@@ -868,9 +871,9 @@ fun Details(vm: Seimei, pg: Page) {
                 }, Modifier.fillMaxWidth().heightIn(min = 48.dp), enabled = !sending) {
                     Icon(Icons.laptop, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text(if (armed) "Stop it and open on server" else "Open on server")
+                    Text(if (armed) "Stop it and open in a terminal" else "Open in a terminal")
                 }
-                error?.let { Text("Could not open it: $it", fontSize = 13.sp, color = cs.error) }
+                error?.let { Text("Couldn't open it: $it", fontSize = 13.sp, color = cs.error) }
             }
             if (pg.kind == "worker" && state in ACTIVE) {
                 FilledTonalButton({

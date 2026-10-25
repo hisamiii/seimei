@@ -1,0 +1,507 @@
+/* The M3 Expressive layer, on top of style.css: tokens, then the screens of docs/m3x-review/img/final/.
+   Ported from the mockup CSS (docs/m3x-review/mockups), in their load order. */
+
+/* ===== m3x-tokens ===== */
+/* M3 Expressive tokens for seimei: a proposal, loaded after web/style.css by the *-after mockups.
+   Colors stay the theme's own (theme.js sets them); this adds the shape scale, emphasized type and spring motion.
+   Values from REFERENCE.md; the springs are linear() fits of the Compose MotionScheme.expressive() springs (../tools/springs.py). */
+:root {
+  /* Shape scale (dp = CSS px). The ~30 radii in style.css would map onto these. */
+  --shape-xs: 4px;
+  --shape-sm: 8px;
+  --shape-md: 12px;
+  --shape-lg: 16px;
+  --shape-lg-inc: 20px;
+  --shape-xl: 28px;
+  --shape-xl-inc: 32px;
+  --shape-xxl: 48px;
+  --shape-full: 999px;
+
+  /* Emphasized type: same size, heavier weight (Google Sans Flex has the axis) */
+  --w-regular: 400;
+  --w-emph: 600;
+
+  /* Spatial springs (they overshoot: position, size, shape) */
+  --spring-fast: linear(0, .177, .491, .785, .977, 1.072, 1.093, 1.076, 1.046, 1.019, 1.001, .993, .991, .993, .996, .998, 1);
+  --spring-fast-ms: 370ms;
+  --spring: linear(0, .103, .3, .506, .684, .817, .907, .962, .994, 1.009, 1.014, 1.014, 1.012, 1.008, 1.006, 1.003, 1);
+  --spring-ms: 410ms;
+  --spring-slow-ms: 570ms;
+
+  /* Effects springs (no overshoot: color, opacity) */
+  --effects-fast: linear(0, .269, .585, .788, .897, .951, .978, .99, .995, .998, 1);
+  --effects-fast-ms: 155ms;
+  --effects: linear(0, .241, .548, .757, .876, .938, .97, .986, .993, .997, 1);
+  --effects-ms: 225ms;
+
+  /* Touch */
+  --target: 48px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --spring-fast: linear(0, 1); --spring: linear(0, 1); --spring-fast-ms: 1ms; --spring-ms: 1ms; --spring-slow-ms: 1ms; }
+}
+
+/* Segmented list: rows of one group touch with 2px gaps, big outer and small inner corners */
+.m3x-seg { display: flex; flex-direction: column; gap: 2px; }
+.m3x-seg > * { border-radius: var(--shape-xs); background: var(--container); }
+.m3x-seg > :first-child { border-top-left-radius: var(--shape-lg-inc); border-top-right-radius: var(--shape-lg-inc); }
+.m3x-seg > :last-child { border-bottom-left-radius: var(--shape-lg-inc); border-bottom-right-radius: var(--shape-lg-inc); }
+
+/* Shape morph on press: round at rest, squarer under the finger, springing back */
+.morph { transition: border-radius var(--spring-fast-ms) var(--spring-fast); }
+.morph:active { border-radius: var(--shape-md); }
+
+/* No bare status dots: state reads as words, in the tone of the text or its container, or as the loading indicator
+   where something works. The nav badge (a count or a small badge on an icon) is not one of these and stays. */
+.status .dot { display: none; }
+.status[data-s="working"] { color: var(--primary); }
+.status[data-s="starting"] { color: var(--warn); }
+.trig::before, .working::before, .li .trail.fresh::before, .agent time.fresh::before { content: none; }
+.li .trail.fresh, .agent time.fresh { color: var(--primary); font-weight: 500; }
+
+/* ===== approval-after ===== */
+/* M1, approval card: decisions in thumb reach, 48px targets, risk you can see before you tap. */
+.wcard.approval { border-radius: var(--shape-xl); padding: 16px; gap: 12px; }
+.wcard.approval .head { align-items: center; }
+/* A title alone centers on its tile; with a subtitle the two lines start at the tile's top */
+.wcard.approval .head:has(.sub) { align-items: flex-start; }
+.wcard.approval .badge { width: 40px; height: 40px; border-radius: var(--shape-md); }
+.wcard.approval .title b { font-size: 16px; font-weight: var(--w-emph); line-height: 1.3; }
+.wcard.approval .title { flex: 1; }
+.wcard.approval .head:has(.sub) .title { padding-top: 1px; }
+.wcard.approval .sub { font-size: 13px; }
+
+.wcard.approval .body.cmd, .wcard.approval .body.plan { border-radius: var(--shape-lg); padding: 12px 14px; background: var(--surface-lowest); }
+
+/* Rule choices: one segmented list, full-width 48px rows */
+.wcard.approval .choices.m3x-seg { gap: 2px; }
+.wcard.approval .choices.m3x-seg .choice {
+  min-height: var(--target); border: 0; border-radius: var(--shape-xs); background: var(--container-high); padding: 13px 16px;
+  font-size: 14px; line-height: 22px;
+  transition: border-radius var(--spring-fast-ms) var(--spring-fast), background-color var(--effects-ms) var(--effects);
+}
+.wcard.approval .choices.m3x-seg .choice:first-child { border-radius: var(--shape-lg-inc) var(--shape-lg-inc) var(--shape-xs) var(--shape-xs); }
+.wcard.approval .choices.m3x-seg .choice:last-child { border-radius: var(--shape-xs) var(--shape-xs) var(--shape-lg-inc) var(--shape-lg-inc); }
+.wcard.approval .choices.m3x-seg .choice code { background: var(--container-highest); }
+.wcard.approval .choices.m3x-seg .choice:active { border-radius: var(--shape-lg); }
+/* The rule that lets the agent run anything wears the warning container and an icon, not just orange words at the end */
+.wcard.approval .choices.m3x-seg .choice:has(.warn) { background: var(--warn-container); color: var(--on-warn-container); padding-left: 44px; position: relative; }
+.wcard.approval .choices.m3x-seg .choice:has(.warn)::before {
+  content: ""; position: absolute; left: 14px; top: 50%; width: 20px; height: 20px; margin-top: -10px; background: var(--warn);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3 2 20h20zM12 10v4M12 17v.1'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3 2 20h20zM12 10v4M12 17v.1'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.wcard.approval .choices.m3x-seg .choice:has(.warn) small { color: inherit; opacity: .8; }
+.wcard.approval .choices.m3x-seg .choice:has(.warn) small.warn { color: var(--warn); opacity: 1; font-weight: 500; }
+.wcard.approval .choices.m3x-seg .choice:has(.warn) code { background: color-mix(in srgb, var(--warn) 16%, transparent); }
+
+/* Foot: a full-width button group, the main action largest and on the thumb side */
+.wcard.approval .foot { margin: 4px 0 0; gap: 8px; min-height: 0; }
+.wcard.approval:not(.settled) .foot .left { display: none; } /* the buttons say it waits; settled cards keep their result line */
+.wcard.approval .foot .btn { min-height: 52px; padding: 0 18px; border-radius: var(--shape-full); font-size: 15px; font-weight: 500; white-space: nowrap; }
+.wcard.approval .foot .btn.icon { flex: none; width: 52px; height: 52px; border-radius: var(--shape-lg); background: var(--container-high); color: var(--text-2); }
+.wcard.approval .foot .btn.tonal { flex: 1 1 auto; }
+.wcard.approval .foot .btn.filled { flex: 1.4 1 auto; font-weight: var(--w-emph); }
+.wcard.approval .foot .btn.morph:active { border-radius: var(--shape-md); }
+
+/* ===== working-after ===== */
+/* M2, working state: a contained loading indicator where the reply will appear, and a Stop that changes shape, not just icon. */
+.working { gap: 12px; margin-top: 18px; font-size: 15px; font-weight: 500; color: var(--text-2); }
+.working::before { content: none; }
+.working .loader { width: 40px; height: 40px; }
+.working .loader > i { width: 30px; height: 30px; }
+
+/* Send is round; while a turn runs Stop shows as a rounded square, so the shape alone says "busy".
+   chat.js swaps two buttons with hidden, so a transition never runs: a keyframe does, since display:none to shown restarts it. */
+#stop { border-radius: var(--shape-lg); animation: stop-in var(--spring-ms) var(--spring); }
+@keyframes stop-in { from { border-radius: 26px; transform: scale(.92); } }
+#stop .square { width: 16px; height: 16px; border-radius: var(--shape-xs); }
+
+/* ===== agents-after ===== */
+/* M3, agents list: each group a segmented list on a container, state told by tile shape and color, a real loading indicator for "working". */
+.agroup { gap: 2px; margin-top: 20px; }
+.agroup h2 { padding: 0 16px 8px; font-size: 14px; font-weight: var(--w-emph); letter-spacing: 0; }
+.agroup .agent { background: var(--container); border-radius: var(--shape-xs); min-height: 64px; padding: 10px 16px 10px 10px; }
+.agroup > h2 + .agent { border-top-left-radius: var(--shape-lg-inc); border-top-right-radius: var(--shape-lg-inc); }
+.agroup > .agent:last-child { border-bottom-left-radius: var(--shape-lg-inc); border-bottom-right-radius: var(--shape-lg-inc); }
+.agroup .agent { transition: border-radius var(--spring-fast-ms) var(--spring-fast); }
+.agroup .agent:active { border-radius: var(--shape-lg); }
+
+/* Needs you: the one group that asks for a tap gets the warm container */
+.agroup.ask .agent { background: var(--warn-container); }
+.agroup.ask .agent .top b { font-weight: var(--w-emph); }
+.agent.ask .line { color: var(--on-warn-container); }
+/* The question is the content: up to two lines instead of an ellipsis after 40 characters */
+.agroup.ask .agent .sub { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 20px; }
+.agroup.ask .agent { align-items: flex-start; padding-top: 12px; padding-bottom: 12px; }
+/* Project names neutral: in this list color means state (warm asks, primary works) */
+.agent .proj { color: var(--text-2) !important; }
+.agroup.ask .agent .proj { color: var(--on-warn-container) !important; }
+
+/* Tiles: shape says state. Asking is a filled squircle, working morphs, idle is a circle, done fades back. */
+.tile { width: 44px; height: 44px; transition: border-radius var(--spring-ms) var(--spring); }
+.tile.ask { background: var(--warn); color: var(--on-warn); border-radius: var(--shape-lg); }
+.tile.work { border-radius: 50%; }
+.tile.work .loader > i { width: 28px; height: 28px; background: var(--c); }
+.tile.idle { border-radius: 50%; }
+.tile.done { border-radius: 50%; background: var(--container-high); }
+.agroup.done .agent { background: color-mix(in srgb, var(--container) 55%, var(--surface-low)); }
+
+/* ===== usage-after ===== */
+/* M4, usage: the two numbers you came for read first, M3X progress with a gap and no stop dot, lists as segmented groups. */
+.page .meter { border-radius: var(--shape-xl); padding: 18px 20px 16px; gap: 10px; background: var(--container); }
+.meter b { font-size: 16px; font-weight: var(--w-emph); }
+.meter .pct { font-size: 40px; line-height: 44px; font-weight: var(--w-emph); letter-spacing: -.01em; }
+
+/* Active part, a 4px gap, then the rest of the track (M3X linear progress, determinate; the stop dot is left out, see the no-dots rule) */
+.meter .bar-track { display: flex; height: 8px; background: none; overflow: visible; }
+.meter .bar-track i { flex: none; border-radius: var(--shape-full); }
+.meter .bar-track::after {
+  content: ""; flex: 1; margin-left: 4px; border-radius: var(--shape-full);
+  background: var(--container-highest);
+}
+
+.usage-h { margin: 14px 0 0; padding: 0 16px; font-size: 14px; font-weight: var(--w-emph); color: var(--primary); }
+.usage-note { padding: 0 16px; }
+
+/* Rows as one segmented list each */
+.ulist { gap: 2px; }
+.urow, .crow { background: var(--container); border: 0; border-radius: var(--shape-xs); padding: 12px 16px; }
+.crow { min-height: 64px; }
+.urow:first-child, .crow:first-of-type { border-top-left-radius: var(--shape-lg-inc); border-top-right-radius: var(--shape-lg-inc); }
+.urow:last-child, .crow:last-of-type { border-bottom-left-radius: var(--shape-lg-inc); border-bottom-right-radius: var(--shape-lg-inc); }
+.crow .amt { font-size: 22px; font-weight: var(--w-emph); }
+.crow b, .urow b { font-size: 15px; }
+
+/* ===== offline-after ===== */
+/* M5, offline on an empty chat: the away card replaces the empty-state hello instead of drawing over it.
+   The real fix is this one rule in web/style.css (or hiding #hello where app.js shows #away). */
+body.offline .hello { display: none; }
+
+/* ===== showcase ===== */
+/* The showcase (#142): every screen in the final design. Loaded after the earlier after CSS; this covers what they
+   did not: chat event lines and the report, the question cards, notes, trajectory, the shikigami page, login,
+   offline, the sheets. Built by ../tools/showcase.py. */
+
+/* ---------- Chat: notes are plain centered text, no pill ---------- */
+.note { background: none; padding: 0; border-radius: 0; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--text-3); }
+.note.warn { color: var(--warn); }
+.trig { margin: 8px 0 -4px; font-size: 12px; line-height: 16px; }
+
+/* Event lines (summoned, finished, failed): quiet, like the tool chip, one tap to the shikigami's page */
+.evline {
+  display: inline-flex; align-self: flex-start; align-items: center; gap: 8px; max-width: 100%; min-height: 40px;
+  padding: 8px 8px 8px 16px; border: 0; border-radius: var(--shape-md); background: var(--container);
+  color: var(--text-2); font: 400 14px/20px var(--sans); text-align: left; cursor: pointer;
+  transition: border-radius var(--spring-fast-ms) var(--spring-fast);
+}
+.evline:active { border-radius: var(--shape-lg); }
+.evline > span { min-width: 0; }
+.evline b { color: var(--text); font-weight: 500; }
+.evline small { margin-left: 8px; font-size: 12px; line-height: 16px; color: var(--text-3); }
+.evline svg { flex: none; color: var(--text-3); }
+.evline.failed { background: var(--error-container); color: var(--on-error-container); }
+.evline.failed b { color: var(--on-error-container); }
+.evline.failed small { display: block; margin: 2px 0 0; color: var(--on-error-container); opacity: .85; }
+.evline.failed svg { color: var(--on-error-container); }
+
+/* The report: the event line on top, the report under it, one segmented block; no tile, no badge, no outline */
+.report { align-self: stretch; display: flex; flex-direction: column; gap: 2px; }
+.report .evline { align-self: stretch; border-radius: var(--shape-lg-inc) var(--shape-lg-inc) var(--shape-xs) var(--shape-xs); }
+.report .evline span { flex: 1; }
+.report .rbody {
+  padding: 12px 16px 14px; border-radius: var(--shape-xs) var(--shape-xs) var(--shape-lg-inc) var(--shape-lg-inc);
+  background: var(--container); font-size: 14px; line-height: 20px; color: var(--text);
+}
+.report .rbody p { margin: 0 0 8px; }
+.report .rbody p:last-child { margin: 0; }
+.report .rbody ul { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+.report .rbody code { font-size: 13px; overflow-wrap: anywhere; }
+
+/* Trajectory: "Reply in chat" is a tonal button, not an outline */
+.reply-btn { min-height: 40px; padding: 0 16px; border: 0; border-radius: var(--shape-full); background: var(--tonal); color: var(--on-tonal); font: 500 14px/20px var(--sans); }
+
+/* The activity fold: a count of what happened, centered, 48px */
+.fold { min-height: 40px; padding: 8px 16px; font: 500 12px/16px var(--sans); }
+
+/* ---------- A question in chat: a decision, so tile and card, in the warm container ---------- */
+.wcard.asking { border-radius: var(--shape-xl); padding: 16px; gap: 12px; background: var(--warn-container); box-shadow: none; border: 0; }
+.wcard.asking .head { align-items: center; }
+.wcard.asking .badge {
+  width: 40px; height: 40px; border-radius: var(--shape-md); background: var(--warn); color: var(--on-warn);
+  display: grid; place-items: center;
+}
+.wcard.asking .badge svg { width: 22px; height: 22px; }
+.wcard.asking .title b { font-size: 16px; line-height: 24px; font-weight: var(--w-emph); color: var(--on-warn-container); }
+.wcard.asking .body { font-size: 14px; line-height: 20px; color: var(--on-warn-container); }
+.wcard.asking .body p { margin: 0; }
+.wcard.asking .foot { display: flex; gap: 8px; margin: 4px 0 0; }
+.wcard.asking .foot .btn { flex: 1; min-height: 48px; border-radius: var(--shape-full); font-size: 14px; font-weight: 500; }
+.wcard.asking .foot .btn.tonal { background: color-mix(in srgb, var(--warn) 16%, var(--warn-container)); color: var(--on-warn-container); }
+.wcard.asking .foot .btn.filled { flex: 1.4; background: var(--warn); color: var(--on-warn); font-weight: var(--w-emph); }
+
+/* User bubbles and assistant text on the type scale */
+.msg { font-size: 16px; line-height: 24px; }
+.msg.user { border-radius: var(--shape-lg-inc) var(--shape-lg-inc) var(--shape-xs) var(--shape-lg-inc); }
+
+/* ---------- Shikigami and session page ---------- */
+.sbar .sub i { display: none; }
+.sbar .sub span.work { color: var(--primary); }
+.sbar .handoff { height: 40px; padding: 0 16px; border-radius: var(--shape-full); font: 500 14px/20px var(--sans); position: relative; }
+.sbar .handoff::after { content: ""; position: absolute; inset: -4px 0; }
+.chip .spin { display: none; }
+.chip { min-height: 40px; border-radius: var(--shape-md); font-size: 14px; }
+
+/* The question on the page: warm container like the chat card, no outline, the filled warm tile */
+.qcard { padding: 16px; gap: 12px; border-radius: var(--shape-xl); background: var(--warn-container); box-shadow: none; }
+.qhead { align-items: flex-start; gap: 12px; }
+.qic { width: 40px; height: 40px; border-radius: var(--shape-md); background: var(--warn); color: var(--on-warn); }
+.qt b { font-size: 16px; line-height: 24px; font-weight: 500; color: var(--on-warn-container); }
+.qt small, .qt span { color: var(--on-warn-container); opacity: .85; }
+.qcard .qopts, .qcard .opts { gap: 2px; }
+.qcard .qopt, .qcard .opt { border: 0; border-radius: var(--shape-xs); background: color-mix(in srgb, var(--warn) 10%, var(--warn-container)); min-height: 56px; }
+.qcard .qopt:first-child, .qcard .opt:first-child { border-top-left-radius: var(--shape-lg-inc); border-top-right-radius: var(--shape-lg-inc); }
+.qcard .qopt:last-child, .qcard .opt:last-child { border-bottom-left-radius: var(--shape-lg-inc); border-bottom-right-radius: var(--shape-lg-inc); }
+.qnote { color: var(--on-warn-container); opacity: .85; font-size: 12px; line-height: 16px; }
+
+/* Stop on a working shikigami's page: the same square as in chat */
+#sstop, .scomposer .fab.tonal { border-radius: var(--shape-lg); }
+
+/* ---------- Agents: working is primary, not the project's tint ---------- */
+.tile.work { background: var(--primary-container); }
+.tile.work .loader > i { background: var(--primary); }
+.tile.idle { background: var(--container-high); color: var(--text-2); }
+
+/* ---------- Login: one mark, no tile behind it, no rules around "or" ---------- */
+.signin .mark { background: none; width: auto; height: auto; color: var(--primary); margin-bottom: 0; }
+.signin h1 { font-size: 28px; line-height: 36px; }
+.signin .sub { font-size: 14px; line-height: 20px; }
+.signin .btn { border-radius: var(--shape-full); font-size: 16px; font-weight: 500; }
+.signin .btn.filled { font-weight: var(--w-emph); }
+.signin input { border-radius: var(--shape-lg); }
+.or::before, .or::after { content: none; }
+.or { justify-content: center; font-size: 12px; line-height: 16px; }
+
+/* ---------- Offline: no second star in a tile; the words and the one action ---------- */
+.away .badge { display: none; }
+.away button { min-height: 48px; padding: 0 24px; font-size: 14px; }
+
+/* ---------- Sheets ---------- */
+.sheet { border-radius: var(--shape-xl) var(--shape-xl) 0 0; }
+.sheet h2.list { font-size: 22px; line-height: 28px; }
+.sheet .usage-note { padding: 0; margin: 4px 0 0; font-size: 14px; line-height: 20px; color: var(--text-3); }
+
+/* Theme: light or dark is a connected button group at 48, the accents 40px swatches with 48px targets */
+.trow { margin: 8px 0; }
+.trl { font-size: 14px; color: var(--text-2); }
+.tseg { border: 0; gap: 2px; border-radius: 0; overflow: visible; }
+.tseg button { min-height: 48px; padding: 0 16px; border-radius: var(--shape-xs); background: var(--container-high); color: var(--text); font: 500 14px/20px var(--sans); }
+.tseg button + button { border-left: 0; }
+.tseg button:first-child { border-radius: var(--shape-full) var(--shape-xs) var(--shape-xs) var(--shape-full); }
+.tseg button:last-child { border-radius: var(--shape-xs) var(--shape-full) var(--shape-full) var(--shape-xs); }
+.tseg button.on { background: var(--primary); color: var(--on-primary); border-radius: var(--shape-full); }
+.ttile { border-radius: var(--shape-xl); }
+.trow:has(.tdots) { flex-direction: column; align-items: flex-start; }
+.tdots { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 4px; }
+.tdot { width: 40px; height: 40px; margin: 4px; }
+.tseed { width: 40px; height: 32px; border: 0; border-radius: var(--shape-sm); }
+
+/* Activity log: one segmented list per day, the decision in words in its tone, no pills, no rules */
+.alist { display: flex; flex-direction: column; gap: 2px; }
+.aday { margin: 16px 0 8px; font-size: 14px; font-weight: var(--w-emph); color: var(--text-2); }
+.arow { border: 0; padding: 12px 16px; gap: 4px; background: var(--container-high); border-radius: var(--shape-xs); }
+.aday + .arow { border-top-left-radius: var(--shape-lg-inc); border-top-right-radius: var(--shape-lg-inc); }
+.arow:has(+ .aday), .arow:last-child { border-bottom-left-radius: var(--shape-lg-inc); border-bottom-right-radius: var(--shape-lg-inc); }
+.atop { font-size: 14px; line-height: 20px; }
+.atop time { font-size: 12px; }
+.atop .tag, .arow.ok .tag, .arow.bad .tag { padding: 0; background: none; border-radius: 0; font-size: 12px; font-weight: 500; }
+.arow.ok .tag { color: var(--ok); }
+.arow.bad { background: var(--error-container); }
+.arow.bad .tag, .arow.bad b, .arow.bad .tool, .arow.bad time { color: var(--on-error-container); }
+.arow.bad code { color: var(--on-error-container); opacity: .85; }
+.arow code { font-size: 13px; line-height: 20px; }
+
+/* Phone app */
+.pblock { gap: 12px; padding: 16px 0 0; }
+.pblock .btn { min-height: 48px; padding: 0 24px; border-radius: var(--shape-full); font-size: 14px; font-weight: 500; display: inline-flex; align-items: center; }
+.psec { margin: 24px 0 8px; font-size: 14px; font-weight: var(--w-emph); color: var(--text-2); }
+.sheet .alist .prow { border: 0; padding: 8px 8px 8px 16px; min-height: 64px; background: var(--container-high); border-radius: var(--shape-xs); }
+.sheet .alist .prow:first-child { border-radius: var(--shape-lg-inc) var(--shape-lg-inc) var(--shape-xs) var(--shape-xs); }
+.sheet .alist .prow:last-child { border-radius: var(--shape-xs) var(--shape-xs) var(--shape-lg-inc) var(--shape-lg-inc); }
+.sheet .alist:has(.prow) { gap: 2px; }
+.ptext { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.ptext b { font-size: 16px; line-height: 24px; font-weight: 500; }
+.ptext span { font-size: 14px; line-height: 20px; color: var(--text-3); }
+.prow .btn.text { min-height: 48px; padding: 0 16px; border-radius: var(--shape-full); }
+
+/* ---------- Menu ---------- */
+.menu { border-radius: var(--shape-lg); }
+.menu button { min-height: 48px; font-size: 14px; }
+
+/* ---------- On the type scale (12/14/16/20/22/28/34): what style.css and the earlier after CSS left between steps ---------- */
+code, .wcard.approval .body.cmd, .arow code, .report .rbody code { font-size: 14px; }
+.wcard.approval .choices.m3x-seg .choice small, .wcard.approval .choices.m3x-seg .choice code { font-size: 12px; }
+.wcard.approval .choices.m3x-seg .choice code { font-size: 12px; }
+.wcard.approval .foot .btn, .working, .prow .btn.text { font-size: 14px; }
+.wcard.approval.settled .foot .left { font-size: 12px; line-height: 16px; color: var(--ok); font-weight: 500; }
+.card h3, #fp-card h3 { font-size: 16px; line-height: 24px; }
+.agent .top b { font-size: 16px; line-height: 24px; }
+.agent time { font-size: 12px; line-height: 16px; }
+.agent .sub, .agent .proj, .agent .line, .agent .sub span { font-size: 14px; line-height: 20px; }
+.sbar h1 { font-size: 22px; line-height: 28px; }
+.sbar .sub, .sbar .sub b, .sbar .sub span { font-size: 12px; line-height: 16px; }
+.sbar .sub b { color: var(--text-2) !important; }
+.sbar .ring span { font-size: 12px; }
+.stl h4, .sthread h4 { font-size: 16px; line-height: 24px; }
+.qopt b { font-size: 14px; line-height: 20px; }
+.qopt small { font-size: 12px; line-height: 16px; }
+.meter .pct { font-size: 34px; line-height: 40px; }
+.meter span, .meter .sub { font-size: 14px; line-height: 20px; }
+.usage-note { font-size: 14px; line-height: 20px; }
+.crow b, .urow b { font-size: 16px; line-height: 24px; }
+.away p { font-size: 16px; line-height: 24px; }
+.card .actions .btn { font-size: 14px; }
+.archrow .txt b { font-size: 16px; line-height: 24px; }
+.archrow .txt span { font-size: 14px; line-height: 20px; }
+.msg.assistant h3, .msg.assistant h4, .msg.assistant h5 { font-size: 16px; line-height: 24px; }
+.msg.assistant code { font-size: 14px; }
+.qt small { font-size: 12px; line-height: 16px; }
+.urow span, .urow time { font-size: 14px; line-height: 20px; }
+
+/* decisions.py */
+.tview, .tseg { gap: 2px; border: 0; }
+.tview button, .tseg button { height: 40px; min-height: 40px; padding: 0 16px; border: 0; border-radius: 8px; background: var(--primary-container); color: var(--on-primary-container); font: 500 14px/20px var(--sans); transition: none; }
+.tview button:first-child, .tseg button:first-child { border-radius: 20px 8px 8px 20px; }
+.tview button:last-child, .tseg button:last-child { border-radius: 8px 20px 20px 8px; }
+.tview button.on, .tseg button.on { background: var(--primary); color: var(--on-primary); border-radius: 20px; }
+.btn.busy { gap: 8px; }
+.btn.busy:disabled, .btn.held:disabled { opacity: 1; }
+.btn.held:disabled { opacity: .38; }
+.btn.busy::before { content: ""; flex: none; width: 16px; height: 16px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin .8s linear infinite; }
+.jump { position: fixed; right: 16px; bottom: 156px; display: flex; align-items: center; gap: 8px; height: 48px; padding: 0 18px 0 14px; border: 0; border-radius: 16px; background: var(--tonal); color: var(--on-tonal); font: 500 14px/20px var(--sans); box-shadow: 0 2px 6px rgb(0 0 0 / .3); z-index: 5; }
+.jump b { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--primary); color: var(--on-primary); font: 600 12px/20px var(--sans); text-align: center; }
+
+/* audit_fixes.py: begin */
+
+/* 12: 48 to touch. The lane tabs, event lines, Reply in chat, the fold, snackbar actions, menu and attach are 48;
+   the Now/All tasks group keeps its 40 look with a 48 hit area (its buttons clip nothing) */
+.ltab { height: 48px; }
+.evline, .reply-btn { min-height: 48px; }
+.snack button { min-height: 48px; padding: 0 16px; border-radius: 24px; }
+.snack:has(button) { padding: 4px 4px 4px 16px; }
+.icon-btn, .field .attach { width: 48px; height: 48px; }
+/* chips and the handoff keep their 40 look; their hit areas reach 48 past the clip of .sl */
+.sbar .handoff.sl { overflow: visible; }
+/* one separator (round 2, N2): the line was a flex row, so a loose " · " lost its spaces and took the 6 gap each side */
+.sbar .sub { display: block; overflow: hidden; text-overflow: ellipsis; }
+/* tabular figures widen the spaces and the dot; one line of text, nothing to line up */
+.urow span { font-variant-numeric: normal; }
+/* one chip (round 2, N3): tool chips take the model chip's 48 height, padding, corners and type; no hit area tricks */
+.chip { min-height: 48px; padding: 8px 8px 8px 12px; border-radius: var(--shape-md); font: 400 14px/20px var(--sans); color: var(--text-2); }
+.chip::before { content: none; }
+.chip svg:last-child { width: 20px; height: 20px; color: var(--text-3); }
+.activity.running .chip { padding-left: 16px; }
+.sbar .handoff::after { inset: 0; }
+.sbar .handoff::before { content: ""; position: absolute; inset: -4px 0; }
+.field .attach { margin: 2px 0 2px 4px; }
+.tview button, .tseg button { position: relative; overflow: visible; }
+.tview button::before, .tseg button::before { content: ""; position: absolute; inset: -4px 0; }
+.tdots { gap: 0; }
+/* the swatches are 48 boxes around their 40 discs: the inline background shorthand would reset the clip, so it is
+   forced; the selected ring sits in the box, 2 clear and 2 ring as before */
+.tdot { width: 48px; height: 48px; margin: 0; background-clip: content-box !important; padding: 4px; border: 0; box-sizing: border-box; }
+.tdot.on { box-shadow: inset 0 0 0 2px var(--text); }
+.tseed { width: 48px; height: 48px; }
+
+/* Nav: the active pill on primary (7.3:1 on the bar), its icon on-primary; the label stays as it was */
+.nav-item.on .ind { background: var(--primary); color: var(--on-primary); }
+.nav-item.on .ring-ico .t { stroke: color-mix(in srgb, var(--on-primary) 30%, transparent); }
+.nav-item.on .ring-ico .f, #nav-usage.on[data-tone] .ring-ico .f { stroke: var(--on-primary); }
+
+/* 15: usage is neutral (round 3, R1): primary is for working (REVIEW 6). Meters, their percentages and the idle nav ring take
+   on-surface-variant on an outline-variant track, error only near the limit (90%+); the 5-hour note is plain supporting text.
+   The app has no outline-variant yet (theme.js maps no outlineVariant), so the mockup mixes it from the theme's own outline */
+:root { --outline-variant: color-mix(in srgb, var(--outline) 45%, var(--surface)); }
+.note.warn { color: var(--text-2); }
+.meter, .meter.ok, .meter.warn { --tone: var(--text-2); }
+.meter.bad { --tone: var(--error); }
+.meter .bar-track::after { background: var(--outline-variant); }
+#nav-usage:not(.on) .ring-ico .t { stroke: var(--outline-variant); opacity: 1; }
+.ring-ico .f, #nav-usage[data-tone="warn"] .ring-ico .f { stroke: var(--text-2); }
+#nav-usage[data-tone="bad"] .ring-ico .f { stroke: var(--error); }
+#nav-usage.on .ring-ico .f { stroke: var(--on-primary); }
+
+/* Wavy progress on a running task's step bar (amplitude 3, wavelength 40, 4 thick, a 4 gap, the flat track); usage
+   meters are amounts and stay flat. The wave is a mask over the theme's primary, so accents and themes carry over */
+.tr.k-run .prog { height: 10px; align-items: center; }
+.tr.k-run .prog i { height: 10px; border-radius: 0; background: var(--primary);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='10' viewBox='0 0 40 10'%3E%3Cpath d='M0 5 C 5 1.05 15 1.05 20 5 S 35 8.95 40 5' fill='none' stroke='%23000' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E") left center / 40px 10px repeat-x; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='10' viewBox='0 0 40 10'%3E%3Cpath d='M0 5 C 5 1.05 15 1.05 20 5 S 35 8.95 40 5' fill='none' stroke='%23000' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E") left center / 40px 10px repeat-x;
+  animation: wave 1.2s linear infinite; }
+.tr.k-run .prog::after { height: 4px; }
+@keyframes wave { to { -webkit-mask-position: 40px center; mask-position: 40px center; } }
+@media (prefers-reduced-motion: reduce) { .tr.k-run .prog i { animation: none; } }
+
+/* Contrast: choice descriptions on the warm options */
+.qcard .qopt small { color: var(--on-warn-container); opacity: .82; }
+
+/* 8: sending, the contained indicator in the button, widths fixed by the row, not the label */
+.btn.busy::before { content: none; }
+.wcard.approval .foot .btn.tonal { flex: 1 1 0; }
+.wcard.approval .foot .btn.filled { flex: 1.4 1 0; }
+.wcard.approval .choice.held:disabled { opacity: .38; }
+
+/* 19, 20: Tasks on the 16 grid; the toggle has room below it */
+.tasks { padding-left: 0; padding-right: 0; }
+.tview { margin: 4px 0; }
+.tview + .tgrp { margin-top: 20px; }
+
+/* 22 */
+.archrow .cnt { flex: none; font-size: 14px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+
+/* 24: the choices as one segmented group */
+.qcard .qopts { display: flex; flex-direction: column; }
+
+/* 25: a settled command fades only when it overflows (one line here fits); its tile stays neutral */
+.wcard.approval.settled .body { -webkit-mask-image: none; mask-image: none; }
+.wcard.approval.settled .badge { background: var(--container-high); color: var(--text-2); }
+
+/* 26: one monospace */
+.report .rbody code { font: 13px var(--mono); background: var(--container-high); border-radius: 6px; padding: .1em .35em; }
+
+/* 27: the note button round and tonal like Deny */
+.wcard.approval .foot .btn.icon { border-radius: var(--shape-full); background: var(--tonal); color: var(--on-tonal); }
+
+/* 14 */
+.usage-h { color: var(--text-2); }
+
+/* 17: the buttons under the title */
+.card .actions { margin: 12px 0 0; gap: 8px; }
+
+/* 36 */
+.tct code { background: none; padding: 0; }
+.tcard { border: 0; box-shadow: none; }
+
+/* 37, 38: one card shape in chat; the failure line spans the column */
+.card { border-radius: var(--shape-xl); }
+.report .evline { border-radius: var(--shape-xl) var(--shape-xl) var(--shape-xs) var(--shape-xs); }
+.report .rbody { border-radius: var(--shape-xs) var(--shape-xs) var(--shape-xl) var(--shape-xl); }
+.evline.failed { align-self: stretch; border-radius: var(--shape-xl); padding: 10px 12px 10px 20px; }
+.evline.failed > span { flex: 1; }
+
+/* 30: even sheet spacing, 14 under the title as between the blocks: no extra room before Today (15) or the version
+   line (16), and the same 14 between the line and each button (the block has its own 12 gap) */
+.alist > .aday:first-child { margin-top: 0; }
+#sheet-body .pblock { padding-top: 0; }
+#sheet-body .pblock .usage-note { margin: 0 0 2px; }
+
+/* 40: the fold as a row of the column, left aligned, nothing cut */
+.fold { align-self: stretch; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px;
+  max-width: none; padding: 12px 16px 12px 20px; border-radius: var(--shape-xl); text-align: left; font: 400 14px/20px var(--sans); }
+.fold span { white-space: normal; overflow: visible; text-overflow: clip; }
+.fold b { flex: none; }
+/* audit_fixes.py: end */
+
+/* ===== app ===== */
+/* A snackbar sits above the composer (util.js snackPlace); the thread makes room under it */
+body.snacked .thread { padding-bottom: 72px; }

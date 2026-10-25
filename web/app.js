@@ -84,13 +84,13 @@ function chrome() {
   let s = 'idle', text = '';
   if (S.tab === 'chat') ({ s, text } = S.status);
   else if (S.tab === 'agents') {
-    s = asks ? 'waiting' : working ? 'working' : 'idle';
-    text = [working && `${working} working`, asks && `${asks} ${asks === 1 ? 'needs' : 'need'} you`].filter(Boolean).join(' · ') || 'nothing running';
+    // The sections and the nav badge say how many work and need you
+    s = 'idle';
   }
   // Away: the other tabs show the last known state, and say so (QA U2).
   if (S.tab !== 'chat' && !S.online && S.awaySince) {
     s = 'away';
-    text = `offline since ${clock(S.awaySince / 1000)} · last known state`;
+    text = `Offline since ${clock(S.awaySince / 1000)}`;
   }
   $('title').textContent = TITLES[S.tab];
   $('status').dataset.s = s;
@@ -105,7 +105,7 @@ function chrome() {
   count.textContent = n > 99 ? '99+' : n;
   count.classList.toggle('attn', asks > 0);
   $('nav-chat-dot').hidden = !(S.tab !== 'chat' && (S.unread || waitingApprovals().length));
-  const label = [working && `${working} working`, asks && `${asks} waiting for you`].filter(Boolean).join(', ');
+  const label = [working && `${working} working`, asks && `${asks} ${asks === 1 ? 'needs' : 'need'} you`].filter(Boolean).join(', ');
   $('nav-agents').setAttribute('aria-label', label ? `Agents, ${label}` : 'Agents');
 
   const w = S.usage?.windows?.five_hour;

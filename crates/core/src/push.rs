@@ -747,7 +747,7 @@ impl Push {
                 *n
             };
             // Later pings on the key update the notification; only urgent ones sound again.
-            let count = if n > 1 { format!("({n} updates)") } else { String::new() };
+            let count = if n > 1 { format!("({n} pings)") } else { String::new() };
             let text: Vec<&str> = [body.as_str(), count.as_str()].into_iter().filter(|x| !x.is_empty()).collect();
             (
                 tag,
@@ -767,7 +767,7 @@ impl Push {
             let (t, b) = if bundle.len() > 1 {
                 let lines: Vec<String> =
                     bundle.iter().map(|(t, b)| if b.is_empty() { t.clone() } else { format!("{t}: {b}") }).collect();
-                (format!("{} updates", bundle.len()), lines.join("\n"))
+                (format!("{} from seimei", bundle.len()), lines.join("\n"))
             } else {
                 (title.clone(), body.clone())
             };

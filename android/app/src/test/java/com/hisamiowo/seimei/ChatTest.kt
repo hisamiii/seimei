@@ -118,7 +118,7 @@ class ChatTest {
             .put("doing", JSONObject().put("tool", "Bash").put("what", "make").put("since", now - 250))
         val r = fromSession(busy, seen)
         assertEquals("work", r.state)
-        assertEquals("Running make · 4m", r.line)
+        assertEquals("make · 4m", r.line)
         val asking = JSONObject().put("pid", 8).put("name", "q").put("status", "waiting").put("question", true).put("ask", "Keep 4?")
         assertEquals("ask" to "Keep 4?", fromSession(asking, seen).let { it.state to it.line })
         // The server words the wait (sessions.py waiting_text); without it the row says only where it waits.

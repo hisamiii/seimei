@@ -320,7 +320,7 @@ pub fn waiting_text(w: Option<&str>) -> String {
     match w.filter(|w| !w.is_empty()) {
         None => "Waiting on the server".into(),
         Some("dialog open") => "A dialog is open on the server".into(),
-        Some("input needed") => "Needs your input on the server".into(),
+        Some("input needed") => "Input on the server".into(),
         Some("sandbox request") => "A sandboxed command wants network access".into(),
         Some("goal proposal") => "Proposed a session goal".into(),
         Some(w) => format!("Waiting on the server: {w}"),

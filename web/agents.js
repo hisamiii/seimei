@@ -1,6 +1,6 @@
 // Shikigami and the user's own Claude sessions: the Agents list, and the full-screen page of one of them.
 import { $, S, hooks, el, svg, clock, at as atTime, home, short, when, getJSON, snack, finePointer, toLogin, ICON, keep } from './util.js';
-import { Renderer, doing as doingPhrase, elapsed } from './chat.js';
+import { Renderer, doing as doingPhrase, elapsed, loader } from './chat.js';
 import { sheet, showSheet, closeSheet } from './sheet.js';
 import { metricFacts } from './usage.js';
 import { current as themeNow } from './theme.js';
@@ -14,9 +14,9 @@ function stateText(w) {
   const at = atTime(w.updated);
   const since = at.replace(/^at /, '').replace(/^on /, '');
   return {
-    starting: 'Starting', running: `Working since ${since}`, asking: 'Waiting for your answer', done: `Finished ${at}`,
+    starting: 'Starting', running: `Working since ${since}`, asking: 'Needs you', done: `Finished ${at}`,
     failed: `Failed ${at}`, stopped: `Stopped ${at}`, interrupted: `Interrupted ${at}`,
-    laptop: `Open on the server since ${since}`, released: `Your session since ${since}`,
+    laptop: `In a terminal on the server since ${since}`, released: `Your session since ${since}`,
   }[w.state] || w.state;
 }
 
@@ -25,16 +25,18 @@ const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
 // What a shikigami is up to: its latest step.
 function workerLine(w) {
   const d = w.doing;
-  if (!d) return w.state === 'starting' ? 'Starting' : 'Working';
+  if (!d) return w.state === 'starting' ? 'Starting' : '';
   if (d.text) return d.text;
+  // A command is the news itself
+  if (d.name === 'Bash' && d.summary) return d.summary;
   return d.summary ? `${cap(doingPhrase(d.name))}: ${d.summary}` : cap(doingPhrase(d.name));
 }
 
 // What a session is up to: its open call and how long it has run.
 function sessionLine(d) {
-  if (!d) return 'Working';
-  const what = d.tool === 'Bash' ? `running ${d.what}` : `${doingPhrase(d.tool)}: ${d.what}`;
-  return `${cap(what)}${d.since ? ` · ${elapsed(d.since).split(' ')[0]}` : ''}`;
+  if (!d) return '';
+  const what = d.tool === 'Bash' ? d.what : `${doingPhrase(d.tool)}: ${d.what}`;
+  return `${d.tool === 'Bash' ? what : cap(what)}${d.since ? ` · ${elapsed(d.since).split(' ')[0]}` : ''}`;
 }
 
 // ---------- the user's own sessions: which turns are new to them ----------
@@ -118,7 +120,7 @@ function fromWorker(w) {
   const state = w.state === 'asking' ? 'ask' : ACTIVE.has(w.state) ? 'work' : 'done';
   return {
     kind: 'worker', id: w.id, name: w.name, project: w.project, context: w.context, state, since: w.updated,
-    line: state === 'ask' ? (w.question || 'Asks a question') : state === 'work' ? workerLine(w) : (w.summary || stateText(w)),
+    line: state === 'ask' ? (w.question || '') : state === 'work' ? workerLine(w) : (w.summary || stateText(w)),
     bad: w.state === 'failed', end: w.state, archived: !!w.archived, find: [w.name, w.task, w.summary],
   };
 }
@@ -128,8 +130,8 @@ function fromSession(s) {
   const state = asking ? 'ask' : s.status === 'busy' ? 'work' : 'idle';
   return {
     kind: 'session', id: s.pid, name: s.name, project: s.project, context: s.context, state, since: s.since,
-    line: s.question ? (s.ask || 'Asks a question') : asking ? (s.waiting_text || 'Waiting on the server')
-      : state === 'work' ? sessionLine(s.doing) : (s.line || 'Idle'),
+    line: s.question ? (s.ask || '') : asking ? (s.waiting_text || 'Waiting on the server')
+      : state === 'work' ? sessionLine(s.doing) : (s.line || ''),
     fresh: state === 'idle' && s.active > (seen[s.session_id] || 0) + 1,
     archived: !!s.archived, find: [s.name, s.project, s.line],
   };
@@ -150,14 +152,18 @@ setInterval(() => { if (S.tab === 'agents') renderAgents(); }, 30000);
 // ---------- the list ----------
 
 const Q_ICON = 'M4 5h16v11H9l-5 4zM10 9.2a2 2 0 1 1 2.6 1.9c-.4.2-.6.5-.6.9M12 13.6v.1';
-const ARC = 'M12 3a9 9 0 1 1-9 9';
+const CLOCK = 'M12 4a8 8 0 1 1 0 16 8 8 0 0 1 0-16zM12 8v4l2.5 2';
 // How a finished shikigami ended, when not by finishing (QA U6).
 const END = { stopped: 'M7.5 7.5h9v9h-9z', interrupted: 'M4 12a8 8 0 1 0 2.4-5.7M4 4.5v4h4' };
 
 function tile(x) {
   const t = el('span', `tile ${x.state}${x.bad ? ' bad' : ''}`);
   t.style.setProperty('--c', tint(x.project));
-  const icon = x.state === 'work' ? ARC : x.state === 'ask' ? Q_ICON : x.bad ? 'M12 7v6M12 17v.01' : END[x.end] || ICON.check;
+  if (x.state === 'work') {
+    t.append(loader('bare small'));
+    return t;
+  }
+  const icon = x.state === 'ask' ? Q_ICON : x.state === 'idle' ? CLOCK : x.bad ? 'M12 7v6M12 17v.01' : END[x.end] || ICON.check;
   t.append(svg(icon, 20));
   return t;
 }
@@ -177,14 +183,13 @@ function row(x, q = '') {
   b.type = 'button';
   const top = el('span', 'top');
   top.append(el('b', null, x.name));
-  if (x.kind === 'worker') top.append(el('span', 'tag', 'shikigami'));
   const t = el('time', x.fresh ? 'fresh' : null, x.state === 'done' ? when(x.since) : short(x.since));
   top.append(t);
   const sub = el('span', 'sub');
-  if (x.project) {
+  if (x.project && x.project !== x.name) {
     const p = el('span', 'proj', x.project);
     p.style.color = tint(x.project);
-    sub.append(p, ' · ');
+    sub.append(p, x.line ? ' · ' : '');
   }
   // A search match in the task, not the line: show the task around it.
   const hit = q && !x.line.toLowerCase().includes(q) && x.find.find((f) => f && f !== x.name && f.toLowerCase().includes(q));
@@ -214,7 +219,9 @@ function row(x, q = '') {
 
 function group(title, cls, items, q) {
   const sec = el('section', `agroup ${cls}`);
-  sec.append(el('h2', null, title), ...items.map((x) => row(x, q)));
+  const h = el('h2', null, title);
+  h.hidden = !title;
+  sec.append(h, ...items.map((x) => row(x, q)));
   return sec;
 }
 
@@ -265,10 +272,8 @@ function rowMenu(x) {
     b.addEventListener('click', () => { closeSheet(); run(); });
     return b;
   };
-  const who = x.kind === 'worker' ? `${x.name} · shikigami` : `${x.name} · your session${x.project ? ` in ${x.project}` : ''}`;
-  const hint = x.archived ? 'Back into the list.' : x.kind === 'session'
-    ? 'Only hides it from this list. The session keeps running, and it comes back here when it does something.'
-    : 'Hides it from this list. A message wakes it and brings it back.';
+  const who = x.name;
+  const hint = x.archived ? null : x.kind === 'session' ? 'Keeps running. Back when it does something.' : 'A message brings it back';
   sheet.body.replaceChildren(el('div', 'mwho', who),
     opt(ARCH, x.archived ? 'Unarchive' : 'Archive', hint, () => setArchived(x, !x.archived)),
     opt('M5 12h14M13 6l6 6-6 6', 'Open', null, () => openPage(x.kind, x.id)));
@@ -284,10 +289,10 @@ function archRow(n) {
   const b = el('button', 'archrow sl');
   b.type = 'button';
   const t = el('span', 'txt');
-  t.append(el('b', null, 'Archived'), el('span', null, `${n} shikigami and session${n === 1 ? '' : 's'}`));
+  t.append(el('b', null, 'Archived'));
   const tl = el('span', 'tile done');
   tl.append(svg(ARCH, 20));
-  b.append(tl, t, svg('m9 6 6 6-6 6', 20));
+  b.append(tl, t, el('span', 'cnt', String(n)), svg('m9 6 6 6-6 6', 20));
   b.addEventListener('click', openArch);
   return b;
 }
@@ -306,7 +311,7 @@ function archPage() {
   const search = el('label', 'asearch');
   const input = el('input');
   input.type = 'search';
-  input.placeholder = 'Search names, tasks and reports';
+  input.placeholder = 'Search';
   input.setAttribute('aria-label', 'Search the archive');
   input.value = archQuery;
   input.addEventListener('input', () => {
@@ -319,8 +324,8 @@ function archPage() {
   });
   search.append(svg('M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-3.5-3.5', 20), input);
   const parts = [head, search];
-  if (hits.length) parts.push(group(q ? 'Matches' : 'Newest first', 'done', hits, q));
-  else parts.push(el('div', 'empty', q ? 'Nothing archived matches.' : 'Nothing archived. Shikigami and idle sessions move here 12 hours after their last activity.'));
+  if (hits.length) parts.push(group(q ? 'Matches' : '', 'done', hits, q));
+  else parts.push(el('div', 'empty', q ? 'No matches' : 'Nothing archived. Idle ones move here after 12 hours.'));
   return parts;
 }
 
@@ -343,7 +348,7 @@ export function renderAgents() {
   const done = (all || S.workers).filter((w) => !ACTIVE.has(w.state) && !w.archived && w.state !== 'released').sort((a, b) => b.updated - a.updated);
   if (done.length) {
     const shown = showAll ? done : done.slice(0, 15);
-    parts.push(group('Finished shikigami', 'done', shown.map(fromWorker)));
+    parts.push(group('Finished', 'done', shown.map(fromWorker)));
     if (done.length > shown.length) {
       const more = el('button', 'older sl', `Show all ${done.length}`);
       more.type = 'button';
@@ -355,7 +360,7 @@ export function renderAgents() {
   if (arch) parts.push(archRow(arch));
   if (!parts.length) {
     const empty = el('div', 'empty');
-    empty.append(el('b', null, 'Nothing running'), el('span', null, 'Your Claude sessions on the server and the shikigami seimei summons show up here.'));
+    empty.append(el('b', null, 'No shikigami or sessions yet'));
     parts.push(empty);
   }
   const top = page.scrollTop;
@@ -384,12 +389,12 @@ function ring(pct) {
   // No context figure yet: an info button, not an empty track that reads as a spinner (QA U9).
   if (pct == null) {
     b.classList.add('info');
-    b.setAttribute('aria-label', 'Session details');
+    b.setAttribute('aria-label', 'Details');
     b.append(svg('M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v5M12 7.5v.01', 22));
     return b;
   }
   const n = Math.max(0, Math.min(100, pct ?? 0));
-  b.setAttribute('aria-label', pct == null ? 'Session details' : `Context ${n}% used. Session details`);
+  b.setAttribute('aria-label', pct == null ? 'Details' : `Context ${n}% used, session details`);
   b.innerHTML = `<svg width="34" height="34" viewBox="0 0 36 36" aria-hidden="true"><circle class="t" cx="18" cy="18" r="15"/>`
     + `<circle class="f" cx="18" cy="18" r="15" pathLength="100" stroke-dasharray="${n} 100" transform="rotate(-90 18 18)"/></svg>`;
   b.append(el('span', null, pct == null ? '' : String(n)));
@@ -405,13 +410,13 @@ function head() {
   sub.replaceChildren();
   const dot = el('i', x.state);
   sub.append(dot);
-  if (x.project) {
+  if (x.project && x.project !== x.name) {
     const p = el('b', null, x.project);
     p.style.color = tint(x.project);
     sub.append(p, ' · ');
   }
   const word = { ask: 'Needs you', work: 'Working', idle: 'Idle', done: P.row.state ? stateText(P.row) : 'Done' }[x.state];
-  sub.append(el('span', x.state, x.state === 'done' ? word : `${word} ${short(x.since).replace('now', '')}`.trim()));
+  sub.append(el('span', x.state, x.state === 'done' ? word : [word, short(x.since).replace('now', '')].filter(Boolean).join(' · ')));
   const r = ring(x.context);
   r.addEventListener('click', details);
   P.ring.replaceWith(r);
@@ -423,22 +428,20 @@ function head() {
   const can = P.kind === 'worker' ? P.row.started !== false && !['released', 'starting'].includes(P.row.state)
     : ['interactive', 'background'].includes(P.row.kind);
   P.hand.hidden = !can;
-  P.hand.textContent = P.kind === 'worker' ? 'Give to me' : 'Hand to seimei';
-  P.hand.setAttribute('aria-label', P.kind === 'worker'
-    ? `Give ${x.name} to me: it goes on as my own session on the server` : `Hand ${x.name} to seimei as a shikigami`);
+  P.hand.textContent = P.kind === 'worker' ? 'Take over' : 'Hand off';
+  P.hand.setAttribute('aria-label', P.kind === 'worker' ? `Take over ${x.name}` : `Hand ${x.name} off to seimei`);
   P.banner.hidden = !P.row.archived;
   if (P.row.archived) {
     const un = el('button', 'sl', 'Unarchive');
     un.type = 'button';
     un.addEventListener('click', () => setArchived(x, false));
     P.banner.replaceChildren(svg(ARCH, 20), el('span', null, P.kind === 'worker'
-      ? 'Archived. A message wakes it with its full context and puts it back in the list.'
-      : 'Archived: hidden from the list, still running. It comes back when it does something.'), un);
+      ? 'Archived. A message brings it back.' : 'Archived, still running'), un);
   }
   composerState();
 }
 
-// Give to me: the shikigami goes on as the user's own session (their tap is the OK). Hand to seimei: the session
+// Take over: the shikigami goes on as the user's own session (their tap is the OK). Hand off: the session
 // becomes a shikigami once the user approves the card in the chat, as when seimei adopts one.
 async function handoff() {
   if (!P) return;
@@ -448,9 +451,9 @@ async function handoff() {
   if (P) P.hand.disabled = false;
   if (!r.ok) return snack(r.error);
   if (kind === 'worker') {
-    snack(`${row.name} is your session now, open on the server.`);
+    snack(`${row.name} is yours, on the server`);
     history.back();
-  } else snack('Approve the card in Chat to hand it over.');
+  } else snack('Allow it in Chat to hand it off');
 }
 
 // The question card at the end of the timeline: options to tap when the server can be reached.
@@ -467,11 +470,12 @@ function question(ask) {
   ic.append(svg(Q_ICON, 18));
   const t = el('span', 'qt');
   const q = ask.questions?.[0];
-  t.append(el('b', null, q?.question || ask.text || 'A question'));
-  if (q?.header) t.append(el('small', null, q.header));
+  t.append(el('b', null, q?.question || ask.text || ''));
   top.append(ic, t);
   P.qbox.append(top);
   if (q) {
+    const opts = el('div', 'qopts');
+    P.qbox.append(opts);
     (q.options || []).forEach((o, i) => {
       const b = el('button', 'qopt sl');
       b.type = 'button';
@@ -479,13 +483,9 @@ function question(ask) {
       if (o.description) b.append(el('small', null, o.description));
       b.disabled = !ask.answerable || !!P.row.reach;
       b.addEventListener('click', () => answer({ option: i + 1 }, b));
-      P.qbox.append(b);
+      opts.append(b);
     });
-    const many = (ask.questions?.length || 0) > 1;
-    P.qbox.append(el('p', 'qnote', !ask.answerable ? `Answer ${many ? 'these' : 'this one'} on the server: ${many ? 'several questions at once' : 'pick any'} works there only.`
-      : 'Something else? Answer in your own words below.'));
-  } else {
-    P.qbox.append(el('p', 'qnote', 'Answer below.'));
+    if (!ask.answerable) P.qbox.append(el('p', 'qnote', 'Answer on the server'));
   }
   composerState();
   stick(true);
@@ -519,7 +519,7 @@ async function postJSON(path, body) {
   const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).catch(() => null);
   if (r?.status === 401) toLogin();
   const j = await r?.json().catch(() => null);
-  return r?.ok ? { ...(j && typeof j === 'object' ? j : {}), ok: true } : { ok: false, error: j?.error || (r ? `The server said no (${r.status}).` : 'The server did not answer.') };
+  return r?.ok ? { ...(j && typeof j === 'object' ? j : {}), ok: true } : { ok: false, error: j?.error || (r ? `The server said no (${r.status})` : "The server didn't answer") };
 }
 
 function note(text, cls = 'error') {
@@ -533,7 +533,7 @@ function blocked() {
   if (P.kind === 'worker') return null;
   const s = P.row;
   if (s.reach) return s.reach;
-  if (P.ask && !P.ask.answerable) return 'Answer on the server.';
+  if (P.ask && !P.ask.answerable) return 'Answer on the server';
   if (s.status === 'waiting' && !s.question) return `${s.waiting_text || 'Waiting on the server'}. Answer it there.`;
   return null;
 }
@@ -544,8 +544,8 @@ function composerState() {
   P.input.disabled = !!why;
   P.attach.disabled = !!why;
   const nm = P.row.name.length > 22 ? `${P.row.name.slice(0, 21).trim()}…` : P.row.name;
-  P.input.placeholder = why ? 'Can\'t reply from here right now' : P.ask ? 'Your answer…'
-    : P.kind === 'worker' && P.row.archived ? `Message ${nm} to wake it` : `Message ${nm}`;
+  P.input.placeholder = why ? 'Can\'t reply from here right now' : P.ask ? 'Your answer'
+    : `Message ${nm}`;
   if (P.kind === 'session') {
     if (why) note(why, 'info');
     else if (P.note.classList.contains('info')) note(null);
@@ -574,7 +574,7 @@ function addFiles(list) {
       a.id = body.id;
     }).catch((e) => {
       P?.files.splice(P.files.indexOf(a) >>> 0, P.files.includes(a) ? 1 : 0);
-      note(`Could not upload ${a.name}: ${e.message}`);
+      note(`Couldn't upload ${a.name}: ${e.message}`);
     }).finally(() => { a.upload = null; tray(); });
     P.files.push(a);
   }
@@ -726,7 +726,7 @@ function details() {
   // A permission card it waits on (#64).
   if (P.kind === 'worker' && r.card) {
     const w = el('div', 'dwait');
-    w.append(svg(LOCK, 16), el('span', null, `Waits for your OK: ${r.card.replace(/^wants to /, '').split(':')[0]}`));
+    w.append(svg(LOCK, 16), el('span', null, `Needs you: ${r.card.replace(/^wants to /, '').split(':')[0]}`));
     body.push(w);
   }
   // Facts as a quiet key/value list; what can be done sits below as buttons (QA U12).
@@ -746,7 +746,7 @@ function details() {
   tune('Model', r.model);
   const effort = r.effort || r.effort_now;
   tune('Effort', r.effort_next ? `${effort || 'default'} → ${r.effort_next} at its next turn`
-    : effort && `${effort}${r.effort || P.kind !== 'worker' ? '' : ' (default)'}`);
+    : effort && `${effort}${r.effort || P.kind !== 'worker' ? '' : ' · default'}`);
   if (P.kind === 'worker') tune('Permissions', MODE_LABEL[r.mode] || r.mode);
   fact('Compacts at', r.context_cap);
   fact('Subagents', r.subagents);
@@ -773,7 +773,7 @@ function details() {
   }
   if (actions.childElementCount) body.push(actions);
   if (P.kind === 'worker' && r.task) body.push(taskRow(r.task));
-  if (P.kind === 'session') body.push(el('p', 'usage-note', r.reach ? r.reach : 'Messages you send here are typed into this session\'s window on the server.'));
+  if (P.kind === 'session') body.push(el('p', 'usage-note', r.reach ? r.reach : 'Typed into its terminal on the server'));
   sheet.body.replaceChildren(...body);
   showSheet('details');
 }
@@ -782,10 +782,8 @@ const LOCK = 'M7 11V8a5 5 0 0 1 10 0v3M6 11h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H6a1
 const CHEV = 'M9 6l6 6-6 6';
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const MODELS = ['opus', 'sonnet', 'haiku'];
-const MODE_LABEL = { plan: 'Plan first', default: 'Ask', acceptEdits: 'Allow edits', auto: 'Auto', dontAsk: "Only what's allowed", bypassPermissions: 'Bypass' };
-const MODE_NOTE = { plan: 'It plans, you OK the plan, then it works.', default: 'What Claude Code would ask comes to you as a card.',
-  acceptEdits: 'File edits go through; commands still ask.', auto: 'Claude Code decides what is safe; the rest asks.',
-  dontAsk: 'Only what your rules allow; nothing asks.', bypassPermissions: "Nothing asks. seimei's guard still applies." };
+const MODE_LABEL = { plan: 'Plan first', default: 'Ask first', acceptEdits: 'Allow edits', auto: 'Auto', dontAsk: "Only what's allowed", bypassPermissions: 'Bypass' };
+const MODE_NOTE = { acceptEdits: 'Commands still ask', auto: 'Claude Code decides', dontAsk: 'Never asks', bypassPermissions: 'The guard still applies' };
 
 // One sheet for effort, model and permissions: only the user changes these here (seimei's tune tool does effort and model).
 function changeSheet(w) {
@@ -828,7 +826,7 @@ function changeSheet(w) {
     const r = await postJSON(`api/workers/${encodeURIComponent(w.id)}/tune`, body);
     apply.disabled = false;
     if (!r.ok) {
-      err.textContent = r.error || 'Could not change it.';
+      err.textContent = r.error || "Couldn't change it";
       err.hidden = false;
       return;
     }
@@ -839,7 +837,7 @@ function changeSheet(w) {
   btns.append(cancel, apply);
   sheet.body.replaceChildren(el('h2', 'change-h', `Change ${w.name}`),
     el('p', 'lab', 'Effort'), seg('effort', EFFORTS), el('p', 'lab', 'Model'), seg('model', MODELS),
-    el('p', 'hint', 'Takes effect at its next turn, without restarting the task. A new effort keeps the cache; a new model rebuilds it once.'),
+    el('p', 'hint', 'From its next turn. A new model rebuilds the cache once.'),
     el('p', 'lab', 'Permissions'), modes, err, btns);
   showSheet('change');
 }
@@ -860,7 +858,7 @@ function stopButton(w) {
 function laptopButton(w) {
   const b = el('button', 'dbtn sl');
   b.type = 'button';
-  const label = el('span', null, 'Open on server');
+  const label = el('span', null, 'Open in a terminal');
   b.append(svg(ICON.laptop, 16), label);
   let armed = false;
   b.addEventListener('click', async () => {
@@ -868,7 +866,7 @@ function laptopButton(w) {
     // A running worker gets stopped first, so ask for a second tap.
     if (ACTIVE.has(cur.state) && !armed) {
       armed = true;
-      label.textContent = 'Stop it and open on server';
+      label.textContent = 'Stop it and open in a terminal';
       return;
     }
     b.disabled = true;
@@ -878,8 +876,8 @@ function laptopButton(w) {
     if (r.ok) {
       b.hidden = true;
     } else {
-      label.textContent = 'Open on server';
-      sheet.body.append(el('p', 'snote error', `Could not open ${w.name} on the server: ${r.error}`));
+      label.textContent = 'Open in a terminal';
+      sheet.body.append(el('p', 'snote error', `Couldn't open ${w.name} on the server: ${r.error}`));
     }
   });
   return b;
@@ -919,7 +917,7 @@ function build(kind, id, row) {
   const sub = el('div', 'sub');
   titles.append(title, sub);
   const r = el('span');
-  // One tap each way between seimei and the user: Give to me on a shikigami, Hand to seimei on a session.
+  // One tap each way between seimei and the user: Take over on a shikigami, Hand off on a session.
   const hand = el('button', 'handoff sl');
   hand.type = 'button';
   hand.hidden = true;
@@ -928,7 +926,7 @@ function build(kind, id, row) {
 
   const main = el('main', 'stl');
   const thread = el('div', 'sthread');
-  const empty = el('div', 'note', 'Nothing here yet.');
+  const empty = el('div', 'note', 'Nothing yet');
   thread.append(empty);
   const qbox = el('section', 'qcard');
   qbox.hidden = true;
@@ -1017,7 +1015,7 @@ export async function openPage(kind, id) {
     if (r) r.reset = true;
   }
   if (kept && P !== p) return;
-  if (!r) return kept ? snack('Offline: this is the last copy.') : snack('Could not reach the server.');
+  if (!r) return kept ? snack('Offline: this is the last copy') : snack("Couldn't reach the server");
   // Drawn anew when there was no copy, or the server says the copy is too old to extend.
   if (!kept || r.reset) build(kind, id, kind === 'worker' ? { ...r.worker, ...live } : { ...r.session, reach: r.reach });
   else P.row = kind === 'worker' ? { ...P.row, ...r.worker, ...live } : { ...P.row, ...r.session, reach: r.reach };

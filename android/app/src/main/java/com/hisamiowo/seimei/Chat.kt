@@ -243,7 +243,7 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
             val a = items[i] as Item.Activity
             items[i] = a.copy(calls = a.calls.map {
                 if (it.id == ev.str("tool_id") && it.running)
-                    it.copy(running = false, error = ev.optBoolean("error"), out = ev.str("text").ifEmpty { "(no output)" })
+                    it.copy(running = false, error = ev.optBoolean("error"), out = ev.str("text").ifEmpty { "No output" })
                 else it
             })
             return
@@ -285,7 +285,7 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
                     owner.settle(i, if (event == "replied" || event == "done") "Answered" else "Closed")
                 }
                 if (event == "replied") {
-                    put(Item.Note(key, "You ${if (ev.optBoolean("asked")) "answered" else "messaged"} ${ev.str("name")}: ${ev.str("text")}", ""))
+                    Unit
                 } else if (event in WORKER_CARDS) {
                     if (event == "asking") asks[wid] = this to items.size
                     put(Item.Worker(key, event, ev.str("name"), ev.str("worker"), ev.str("text"), ev.str("model"), ev.str("cwd"),
@@ -358,8 +358,8 @@ private fun phraseOf(name: String, n: Int): String = when {
     name in setOf("Grep", "Glob") -> if (n == 1) "searched the files" else "searched $n times"
     name == "WebSearch" -> "searched the web"
     name == "WebFetch" -> "opened ${plural(n, "a page", "pages")}"
-    name in setOf("Agent", "Task") -> "started ${plural(n, "an agent", "agents")}"
-    name in setOf("TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet") -> "updated its tasks"
+    name in setOf("Agent", "Task") -> "started ${plural(n, "a subagent", "subagents")}"
+    name in setOf("TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet") -> "updated its steps"
     name == "ToolSearch" -> "loaded tools"
     name == "AskUserQuestion" -> if (n == 1) "asked you a question" else "asked you $n questions"
     name == "mcp__seimei__workers" -> "checked the shikigami"
@@ -398,7 +398,7 @@ fun doingPhrase(name: String): String = when {
     name in setOf("Grep", "Glob") -> "searching the files"
     name == "WebSearch" -> "searching the web"
     name == "WebFetch" -> "opening a page"
-    name in setOf("Agent", "Task") -> "running an agent"
+    name in setOf("Agent", "Task") -> "running a subagent"
     else -> "using " + if (name.startsWith("mcp__")) name.split("__").last().replace('_', ' ') else name
 }
 

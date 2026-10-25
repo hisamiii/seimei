@@ -81,7 +81,7 @@ def seed():
            question="Should the glass plane stay at 1.6x lift (q2), or do you want the darker q1? I rendered both into final/ and the difference is mostly in the top-left corner where the blue shard catches the light.",
            tokens=380000, age=60, wid="3905ef87")  # the default board's #55 runs on it: no drift line
     worker("stopped-one", "stopped", summary="Stopped.", age=3000)
-    worker("interrupted-one", "interrupted", summary="Interrupted by a seimei restart.", age=4000)
+    worker("interrupted-one", "interrupted", summary="Interrupted by a restart", age=4000)
     for i in range(10):
         worker(f"bulk-{i:02d}", "done", cwd=f"{HOME}/src/proj{i}", model=["opus", "sonnet", "haiku"][i % 3],
                summary=f"Finished bulk job {i} with a summary line that is long enough to wrap onto a second line on a phone",

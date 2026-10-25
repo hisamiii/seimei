@@ -44,7 +44,7 @@ export function svg(path, size = 16) {
   return s;
 }
 
-export const clock = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+export const clock = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 export const dayKey = (t) => new Date(t * 1000).toDateString();
 export const home = (p) => (p || '').replace(/^\/home\/[^/]+/, '~');
 export const plural = (n, one, many) => (n === 1 ? one : `${n} ${many}`);
@@ -126,18 +126,43 @@ export async function post(path, body) {
 // A short note at the bottom for taps that could not do anything (QA U15).
 let snackTimer = 0;
 // A short message at the bottom; action ({ label, run }) adds a button such as Undo.
+// The snackbar sits above whatever holds the bottom edge, never over the field: an agent page's composer, or the
+// composer and navigation bar (the rail layout has only the composer there).
+function snackPlace() {
+  const s = $('snack');
+  const page = document.querySelector('#spage:not([hidden]) .scomposer');
+  const bottom = document.querySelector('body > .bottom');
+  const base = page || (getComputedStyle(bottom).display === 'contents' ? $('composer') : bottom);
+  const top = base && base.offsetParent !== null || base === bottom ? base.getBoundingClientRect().top : innerHeight;
+  s.style.bottom = `${Math.max(16, innerHeight - top + 8)}px`;
+}
+// The keyboard, the navigation bar stepping aside or a page opening move that edge while the bar shows
+addEventListener('resize', () => { if (!$('snack').hidden) snackPlace(); });
+new ResizeObserver(() => { if (!$('snack').hidden) snackPlace(); }).observe(document.querySelector('body > .bottom'));
+
+function unsnack() {
+  $('snack').hidden = true;
+  document.body.classList.remove('snacked');
+}
+
 export function snack(text, action = null) {
   const s = $('snack');
   s.replaceChildren(el('span', null, text));
   if (action) {
     const b = el('button', 'sl', action.label);
     b.type = 'button';
-    b.addEventListener('click', () => { s.hidden = true; action.run(); });
+    b.addEventListener('click', () => { unsnack(); action.run(); });
     s.append(b);
   }
   s.hidden = false;
+  // The thread makes room, so the bar never hides the end of it (a card's buttons)
+  const log = $('log');
+  const end = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
+  document.body.classList.add('snacked');
+  if (end) log.scrollTop = log.scrollHeight;
+  snackPlace();
   clearTimeout(snackTimer);
-  snackTimer = setTimeout(() => { s.hidden = true; }, action ? 6000 : 4000);
+  snackTimer = setTimeout(unsnack, action ? 6000 : 4000);
 }
 
 export async function getJSON(path) {

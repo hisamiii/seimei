@@ -14,7 +14,7 @@ const MODES = [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']];
 
 function preview() {
   const card = h('div', 'tcard', h('div', 'tct', 'Run ', el('code', null, 'deploy.sh'), '?'),
-    h('div', 'tbt', el('span', 'tallow', 'Allow'), el('span', 'tdeny', 'Deny')));
+    h('div', 'tbt', el('span', 'tdeny', 'Deny'), el('span', 'tallow', 'Allow')));
   return h('div', 'tprev', el('div', 'tub', 'ship it'), h('div', 'tsay', 'Deployed ', el('b', null, '0ea1eca'), '. Tests pass.'), card);
 }
 
@@ -76,7 +76,7 @@ async function render() {
     seg.append(b);
   }
   const grid = h('div', 'tgrid', ...(await Promise.all(THEMES.map((n) => tile(n, p)))));
-  const body = [el('h2', 'list', 'Theme'), h('div', 'trow', el('span', 'trl', 'Light or dark'), seg), grid];
+  const body = [el('h2', 'list', 'Theme'), h('div', 'trow', seg), grid];
   if (p.theme === 'catppuccin') body.push(await accents(p));
   if (sheet.view === 'theme') sheet.body.replaceChildren(...body);
 }

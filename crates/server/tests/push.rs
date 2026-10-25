@@ -174,7 +174,7 @@ async fn rules_who_gets_what_when() {
     assert!(out.iter().all(|(_, x)| x["tag"] == "k:build"), "keyed pings share a tag");
     let a_alerts: Vec<&Value> = out.iter().filter(|(t, _)| t == "tokA").map(|(_, x)| &x["alert"]).collect();
     assert_eq!(a_alerts, [&json!("1"), &json!("0")]);
-    assert!(out.last().unwrap().1["body"].as_str().unwrap().contains("(2 updates)"));
+    assert!(out.last().unwrap().1["body"].as_str().unwrap().contains("(2 pings)"));
 
     // Reply ready: skips only a phone showing the chat.
     let open_a = p.opened(Some(&a), Box::new(|| true));
@@ -206,7 +206,7 @@ async fn rules_who_gets_what_when() {
     let out = took(&f);
     assert_eq!(
         (&out[0].1["title"], &out[0].1["body"]),
-        (&json!("2 updates"), &json!("apk is up: 0.4 on the page\nrender done"))
+        (&json!("2 from seimei"), &json!("apk is up: 0.4 on the page\nrender done"))
     );
     let id = p.opened(Some(&a), Box::new(|| true));
     p.closed(Some(&a), id);

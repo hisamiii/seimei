@@ -81,7 +81,7 @@ pub struct App {
     pub pool: Arc<Pool>,
     /// The user's own sessions, for the page and the dispatcher.
     pub watcher: Arc<Watcher>,
-    /// Hand to seimei, Give to me.
+    /// Hand off, Take over.
     pub adopter: Arc<Adopter>,
     /// The dispatcher's watch rules.
     pub watches: Arc<Watches>,
@@ -538,7 +538,7 @@ fn fresh_login(app: &App, headers: &HeaderMap) -> Result<(), Response> {
     }
     Err(json_status(
         StatusCode::FORBIDDEN,
-        json!({"error": "Log in again first: adding a passkey or a phone needs a fresh login."}),
+        json!({"error": "Log out and in again first"}),
     ))
 }
 
@@ -570,7 +570,7 @@ async fn register(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> Respo
     App::alarm(
         &app.events,
         &app.push,
-        "A passkey was added",
+        "Fingerprint login was added",
         &format!(
             "{}. If it was not you, run `seimei lockdown` on the server.",
             if name.is_empty() { "Unnamed" } else { &name }
@@ -1539,7 +1539,7 @@ async fn worker_laptop(State(app): Shared, UrlPath(id): UrlPath<String>) -> Resp
         Ok(win) => win,
         Err(e) => return json_status(StatusCode::CONFLICT, json!({"error": e})),
     };
-    app.events.add(json!({"type": "system", "text": format!("shikigami {} is open on the server.", w.name())}));
+    app.events.add(json!({"type": "system", "text": format!("{} is open in a terminal on the server", w.name())}));
     let line = format!(
         "the user opened shikigami {} ({}) on the server: its session now runs in a terminal window there, so message \
          it only after that window is closed.",
@@ -1550,7 +1550,7 @@ async fn worker_laptop(State(app): Shared, UrlPath(id): UrlPath<String>) -> Resp
     ok(json!({"ok": true, "window": win.map(|w| w["id"].clone())}))
 }
 
-/// Give to me: the shikigami becomes one of the user's sessions (their tap is the OK).
+/// Take over: the shikigami becomes one of the user's sessions (their tap is the OK).
 async fn worker_release(State(app): Shared, UrlPath(id): UrlPath<String>) -> Response {
     let w = match worker_of(&app, &id) {
         Ok(w) => w,
@@ -1570,7 +1570,7 @@ async fn worker_release(State(app): Shared, UrlPath(id): UrlPath<String>) -> Res
     ok(json!({"ok": true}))
 }
 
-/// Hand to seimei: adopt this session as a shikigami, through the same card as seimei's adopt.
+/// Hand off: adopt this session as a shikigami, through the same card as seimei's adopt.
 async fn session_adopt(State(app): Shared, UrlPath(pid): UrlPath<String>) -> Response {
     let (sess, _) = match user_session(&app, &pid).await {
         Ok(found) => found,
@@ -1582,7 +1582,7 @@ async fn session_adopt(State(app): Shared, UrlPath(pid): UrlPath<String>) -> Res
             Ok(said) => said,
             Err(e) => format!("handing session \"{}\" to seimei failed: {e}", sess.name),
         };
-        let line = format!("the user tapped Hand to seimei on their session \"{}\": {said}", sess.name);
+        let line = format!("the user tapped Hand off on their session \"{}\": {said}", sess.name);
         app.dispatcher.note(&line, None);
     });
     ok(json!({"ok": true}))

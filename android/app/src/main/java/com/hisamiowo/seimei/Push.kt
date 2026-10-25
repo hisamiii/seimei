@@ -35,11 +35,11 @@ object Push {
         Triple("urgent", "Urgent", NotificationManager.IMPORTANCE_HIGH),
     )
     private val ABOUT = mapOf(
-        "approval" to "A card waits for your OK: a session command, a file edit, a desktop action.",
-        "quiet" to "Pings seimei sends without sound.",
-        "ping" to "Things seimei tells you about: an APK is up, a run finished, a reply is ready.",
-        "urgent" to "Rare emergencies seimei flags itself.",
-        "listen" to "Shown while seimei keeps its own connection open, on phones without a push app.",
+        "approval" to "What a session wants to run, edit, or do",
+        "quiet" to "Pings without sound",
+        "ping" to "What seimei tells you",
+        "urgent" to "Emergencies",
+        "listen" to "While seimei keeps its own connection open",
     )
 
     /** Whether the app is on screen; the server holds pushes then, and this catches any that slip through. */
@@ -110,7 +110,7 @@ object Push {
         if (aid != null && Build.VERSION.SDK_INT >= 31 && session() != null) {
             n.addExtras(Bundle().apply { putString("aid", aid) })
             val perm = d["perm"] == "1"
-            for ((approve, label) in listOf(false to "Deny", true to if (perm) "Allow" else "Approve")) {
+            for ((approve, label) in listOf(false to "Deny", true to "Allow")) {
                 val pi = PendingIntent.getBroadcast(
                     ctx, (aid + approve).hashCode(),
                     Intent(ctx, Decide::class.java).putExtra("aid", aid).putExtra("approve", approve).putExtra("perm", perm),
@@ -134,7 +134,7 @@ object Push {
     }
 
     const val MAUVE = 0xFFCBA6F7.toInt()
-    val PUBLIC = mapOf("approval" to "Approval waiting", "quiet" to "Update from seimei", "ping" to "Update from seimei",
+    val PUBLIC = mapOf("approval" to "Approval waiting", "quiet" to "seimei", "ping" to "seimei",
         "urgent" to "seimei: urgent")
 }
 
@@ -153,9 +153,9 @@ class Decide : BroadcastReceiver() {
                 api.post("api/approvals/$aid", body)
                 Push.settled(ctx, aid)
             } catch (e: HttpError) {
-                if (e.code == 409) Push.settled(ctx, aid) else Push.openToAnswer(ctx, "seimei said no (${e.code}).")
+                if (e.code == 409) Push.settled(ctx, aid) else Push.openToAnswer(ctx, "The server said no (${e.code})")
             } catch (e: IOException) {
-                Push.openToAnswer(ctx, "Could not reach seimei.")
+                Push.openToAnswer(ctx, "Couldn't reach the server")
             } finally {
                 done.finish()
             }

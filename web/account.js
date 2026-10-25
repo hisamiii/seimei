@@ -25,17 +25,17 @@ export async function account() {
 }
 
 // Adding a passkey or a phone needs a login from the last 10 minutes (auth audit L2).
-const FRESH = 'For safety, this needs a fresh login: log out, log in again, then try once more.';
+const FRESH = 'Log out and in again first';
 
 async function addPasskey() {
   menu.hidden = true;
   const r = await register(deviceName()).catch(() => ({ ok: false }));
   if (r.status === 401) return toLogin();
   if (r.ok) card.hidden = true;
-  const text = r.ok ? 'Fingerprint login is set up on this device.'
+  const text = r.ok ? 'Fingerprint login is on'
     : r.status === 403 ? FRESH
-    : r.exists ? 'This device already has a passkey for seimei.'
-    : r.cancelled ? null : 'Could not set up the fingerprint login.';
+    : r.exists ? 'Fingerprint login is already on for this device'
+    : r.cancelled ? null : "Couldn't set up the fingerprint login";
   if (text) {
     main.add({ type: 'system', level: r.ok || r.exists ? '' : 'error', text });
     toBottom();
@@ -95,14 +95,14 @@ async function openAudit() {
     const row = el('div', `arow ${AUDIT_TONE[c.decision] || ''}`);
     const top = el('div', 'atop');
     top.append(el('time', null, clock(c.t)), el('b', null, c.who), el('span', 'tool', c.tool.replace(/^mcp__.+?__/, '')));
-    if (c.decision !== 'allowed') top.append(el('span', 'tag', c.why ? `${c.decision}: ${c.why}` : c.decision));
-    if (c.failed) top.append(el('span', 'tag', 'failed'));
+    const word = c.decision === 'approved' ? 'Allowed' : c.decision.charAt(0).toUpperCase() + c.decision.slice(1);
+    if (c.decision !== 'allowed') top.append(el('span', 'tag', c.why ? `${word}: ${c.why}` : word));
+    if (c.failed) top.append(el('span', 'tag', 'Failed'));
     row.append(top, el('code', null, auditWhat(c)));
     list.append(row);
   }
-  if (!r.calls.length) list.append(el('p', 'usage-note', 'Nothing yet.'));
-  sheet.body.replaceChildren(el('h2', 'list', 'Activity log'),
-    el('p', 'usage-note', 'Every tool call by seimei and the shikigami, newest first.'), list);
+  if (!r.calls.length) list.append(el('p', 'usage-note', 'Nothing yet'));
+  sheet.body.replaceChildren(el('h2', 'list', 'Activity log'), list);
   showSheet('audit');
 }
 
@@ -125,9 +125,9 @@ async function openPhones() {
     const a = el('a', 'btn tonal', 'Download the app');
     a.href = 'api/app/seimei.apk';
     a.setAttribute('download', 'seimei.apk');
-    get.append(el('p', 'usage-note', `seimei for Android ${app.version}, ${mb(app.size)}. Open the file on the phone to install or update it.`), a);
+    get.append(el('p', 'usage-note', `Android ${app.version} · ${mb(app.size)}`), a);
   } else {
-    get.append(el('p', 'usage-note', 'The Android app is not built yet.'));
+    get.append(el('p', 'usage-note', 'Not built yet'));
   }
   body.push(get);
 
@@ -148,7 +148,7 @@ async function openPhones() {
     const addr = el('div', 'paddr');
     const copy = el('button', 'btn text', 'Copy');
     copy.type = 'button';
-    copy.addEventListener('click', () => navigator.clipboard?.writeText(location.host).then(() => snack('Copied.'), () => null));
+    copy.addEventListener('click', () => navigator.clipboard?.writeText(location.host).then(() => snack('Copied'), () => null));
     addr.append(el('code', null, location.host), copy);
     codeBox.replaceChildren(el('p', 'usage-note', 'In the app, connect to'), addr,
       el('p', 'usage-note', 'then type this code:'), el('b', null, r.code), left);
@@ -173,8 +173,8 @@ async function openPhones() {
   for (const d of devs.devices) {
     const row = el('div', 'prow');
     const text = el('div', 'ptext');
-    text.append(el('b', null, d.name + (d.this ? ' (this phone)' : '')),
-      el('span', null, `Paired ${when(d.created)}` + (d.used ? `, last opened ${when(d.used)}` : '')));
+    text.append(el('b', null, d.name),
+      el('span', null, d.this ? `This phone · paired ${when(d.created)}` : d.used ? `Opened ${when(d.used)} · paired ${when(d.created)}` : `Paired ${when(d.created)}`));
     const un = el('button', 'btn text', 'Unpair');
     un.type = 'button';
     un.addEventListener('click', async () => {
@@ -186,7 +186,7 @@ async function openPhones() {
     list.append(row);
   }
   body.push(el('h3', 'psec', 'Paired phones'),
-    devs.devices.length ? list : el('p', 'usage-note', 'None yet. The app opens with your fingerprint; unpairing a phone here locks it out.'));
+    devs.devices.length ? list : el('p', 'usage-note', 'None yet'));
   sheet.body.replaceChildren(...body);
   showSheet('phones');
 }

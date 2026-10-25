@@ -137,7 +137,7 @@ impl Usage {
         if !new.is_empty() {
             at.extend(new.iter().map(|l| json!(l)));
             let when = resets.map_or_else(|| "later".into(), |r| local(r, "%H:%M"));
-            let text = format!("{} limit at {}%, resets {when}", name(key), (used * 100.0).round());
+            let text = format!("{} {}% used, resets {when}", name(key), (used * 100.0).round());
             if let Some(ev) = &self.events {
                 ev.add(json!({"type": "system", "level": "warn", "text": text}));
             }

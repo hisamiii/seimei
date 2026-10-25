@@ -877,7 +877,7 @@
       "name": "kv-gate",
       "status": "waiting",
       "question": false,
-      "waiting_text": "Needs your input on the server"
+      "waiting_text": "Input on the server"
      },
      {
       "session_id": "",

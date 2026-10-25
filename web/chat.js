@@ -48,8 +48,8 @@ export function phrase(name, n) {
   if (/^(Grep|Glob)$/.test(name)) return n === 1 ? 'searched the files' : `searched ${n} times`;
   if (name === 'WebSearch') return 'searched the web';
   if (name === 'WebFetch') return `opened ${plural(n, 'a page', 'pages')}`;
-  if (/^(Agent|Task)$/.test(name)) return `started ${plural(n, 'an agent', 'agents')}`;
-  if (/^(TodoWrite|TaskCreate|TaskUpdate|TaskList|TaskGet)$/.test(name)) return 'updated its tasks';
+  if (/^(Agent|Task)$/.test(name)) return `started ${plural(n, 'a subagent', 'subagents')}`;
+  if (/^(TodoWrite|TaskCreate|TaskUpdate|TaskList|TaskGet)$/.test(name)) return 'updated its steps';
   if (name === 'ToolSearch') return 'loaded tools';
   if (name === 'AskUserQuestion') return n === 1 ? 'asked you a question' : `asked you ${n} questions`;
   if (name === 'mcp__seimei__workers') return 'checked the shikigami';
@@ -86,7 +86,7 @@ export function doing(name) {
   if (/^(Grep|Glob)$/.test(name)) return 'searching the files';
   if (name === 'WebSearch') return 'searching the web';
   if (name === 'WebFetch') return 'opening a page';
-  if (/^(Agent|Task)$/.test(name)) return 'running an agent';
+  if (/^(Agent|Task)$/.test(name)) return 'running a subagent';
   const short = name.startsWith('mcp__') ? name.split('__').pop().replace(/_/g, ' ') : name;
   return `using ${short}`;
 }
@@ -182,7 +182,7 @@ class Activity {
     if (!r || !r.row.classList.contains('run')) return;
     r.row.classList.remove('run');
     r.row.classList.toggle('err', ev.error);
-    r.out.textContent = ev.text || '(no output)';
+    r.out.textContent = ev.text || 'No output';
     this.running--;
     if (ev.error) this.failed++;
     this.label();
@@ -192,7 +192,7 @@ class Activity {
     const counts = new Map(this.counts);
     if (this.live_) counts.set(this.liveName, counts.get(this.liveName) - 1);
     const parts = [...counts].filter(([, n]) => n > 0).map(([name, n]) => phrase(name, n));
-    if (this.live_) parts.push(doing(this.liveName));
+    if (this.live_) parts.push(`${doing(this.liveName)}…`);
     const text = parts.join(', ') + (this.failed ? ` · ${this.failed} failed` : '');
     // A failure shows on the collapsed chip too, not only in its row (QA U5).
     this.chip.classList.toggle('err', this.failed > 0);
@@ -200,7 +200,7 @@ class Activity {
     chev.classList.add('chev');
     this.clock = this.live_ ? el('span', 'clock') : null;
     this.chip.replaceChildren(
-      this.running ? el('span', 'spin') : svg(iconFor(this.first)),
+      this.running ? loader('bare small') : svg(iconFor(this.first)),
       el('span', null, text.charAt(0).toUpperCase() + text.slice(1)),
       ...(this.clock ? [this.clock] : []),
       chev,
@@ -211,40 +211,73 @@ class Activity {
 
 // ---------- cards ----------
 
-const WORKER = {
-  summoned: { icon: ICON.star, title: (n) => `Summoned ${n}` },
-  done: { icon: ICON.check, title: (n) => `${n} finished` },
-  failed: { icon: 'M12 7v6M12 17v.01M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z', title: (n) => `${n} failed` },
-  asking: { icon: 'M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17v.01', title: (n) => `${n} asks` },
+export const loader = (cls = '') => {
+  const l = el('span', `loader ${cls}`.trim());
+  l.append(el('i'));
+  return l;
 };
 
+// The question glyph of the Agents and Tasks ask tiles
+const ASK = 'M4 5h16v11H9l-5 4zM10 9.2a2 2 0 1 1 2.6 1.9c-.4.2-.6.5-.6.9M12 13.6v.1';
+const CHEV = 'M9.5 6l6 6-6 6';
+// "opus" reads as the product name it is: "Opus · high"
+const model = (ev) => [ev.model && cap(ev.model), ev.effort].filter(Boolean).join(' · ');
+const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+const oneSentence = (t) => (t || '').trim().split(/(?<=[.!?])\s/)[0].replace(/\.$/, '');
+
+// A quiet line naming a shikigami, one tap from its page: what seimei's own sentence above didn't say.
+function evline(ev, cls, ...parts) {
+  const b = el('button', `evline ${cls}sl`);
+  b.type = 'button';
+  b.dataset.worker = ev.worker;
+  const text = el('span');
+  text.append(...parts);
+  b.append(text, svg(CHEV, 20));
+  return b;
+}
+
+// What a shikigami event shows in chat, or nothing: the user wrote their own reply on its page.
 function workerCard(ev) {
-  const kind = WORKER[ev.event];
-  if (ev.event === 'replied') return el('div', 'note', `You ${ev.asked ? 'answered' : 'messaged'} ${ev.name}: ${ev.text}`);
-  if (!kind) {
-    const what = ev.event === 'stopped' ? 'was stopped' : 'was interrupted by a restart';
-    return el('div', 'note', `${ev.name} ${what}`);
+  const name = el('b', null, ev.name);
+  if (ev.event === 'replied') return null;
+  if (ev.event === 'summoned') return evline(ev, '', name, el('small', null, model(ev)));
+  if (ev.event === 'failed') return evline(ev, 'failed ', name, ' failed', el('small', null, oneSentence(firstLine(ev.text))));
+  if (ev.event === 'done') {
+    const report = el('div', 'report');
+    report.dataset.worker = ev.worker;
+    report.append(evline(ev, '', name, ' finished'));
+    if (ev.text) {
+      const body = el('div', 'rbody');
+      body.innerHTML = md(ev.text);
+      report.append(body);
+      clipWatch.observe(body);
+    }
+    return report;
   }
-  const card = el('div', `wcard ${ev.event}`);
+  if (ev.event !== 'asking') return el('div', 'note', `${ev.name} ${ev.event === 'stopped' ? 'was stopped' : 'was interrupted by a restart'}`);
+  // A decision: the warm card, the asker's name as its title, the question its body, the answer one tap away
+  const card = el('div', 'wcard asking');
   card.dataset.worker = ev.worker;
   const badge = el('span', 'badge');
-  badge.append(svg(kind.icon, 18));
+  badge.append(svg(ASK, 22));
   const head = el('div', 'head');
   const title = el('div', 'title');
-  title.append(el('b', null, kind.title(ev.name)));
-  if (ev.event === 'summoned') {
-    const how = [ev.model, ev.effort, ev.context_cap].filter(Boolean).join(' · ');
-    title.append(el('span', 'meta', `${how} · ${ev.cwd.replace(/^\/home\/[^/]+/, '~')}`));
-  }
+  title.append(name);
   head.append(badge, title);
   card.append(head);
   if (ev.text) {
-    const body = el('div', ev.event === 'summoned' ? 'body task' : 'body');
-    if (ev.event === 'summoned') body.textContent = ev.text;
-    else body.innerHTML = md(ev.text);
+    const body = el('div', 'body');
+    body.innerHTML = md(ev.text);
     card.append(body);
     clipWatch.observe(body);
   }
+  const foot = el('div', 'foot');
+  const open = el('button', 'btn tonal sl morph', `Open ${ev.name}`);
+  const answer = el('button', 'btn filled sl morph', 'Answer');
+  open.type = answer.type = 'button';
+  answer.dataset.answer = '1';
+  foot.append(open, answer);
+  card.append(foot);
   return card;
 }
 
@@ -257,6 +290,7 @@ const clipWatch = new ResizeObserver((entries) => {
     if (body.scrollHeight <= body.clientHeight + 4 || card.querySelector('.more')) continue;
     card.classList.add('clipped');
     const more = el('button', 'more sl', 'Show more');
+    more.type = 'button';
     more.type = 'button';
     more.addEventListener('click', () => {
       card.classList.toggle('open');
@@ -272,7 +306,8 @@ const outcomes = new Map();
 const LOCK = 'M7 11V8a5 5 0 0 1 10 0v3M6 11h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1z';
 const PLAN = 'M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01';
 const PEN = 'M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4';
-const OUTCOME = { approved: 'Approved', denied: 'Denied', restart: 'Cancelled by a seimei restart', cancelled: 'Cancelled' };
+const OUTCOME = { approved: 'Allowed', denied: 'Denied', restart: 'Canceled by a restart', cancelled: 'Canceled' };
+const ALLOW = 'M5 12.5l4.5 4.5L19 7.5';
 
 const SUB = { message: 'a session you started', desktop: 'a desktop action', discord: 'a Discord action' };
 
@@ -333,7 +368,7 @@ function approvalCard(ev) {
   } else body = el('div', `body ${message || ev.action === 'discord' ? 'task' : 'cmd'}`, ev.detail);
   card.append(head, body);
 
-  const opts = perm ? ev.options : [{ id: 'deny', label: 'Deny' }, { id: 'once', label: 'Approve' }];
+  const opts = perm ? ev.options : [{ id: 'deny', label: 'Deny' }, { id: 'once', label: 'Allow' }];
   const once = opts.find((o) => o.id === 'once');
   const denyOpt = opts.find((o) => o.id === 'deny');
   const buttons = [];
@@ -342,10 +377,8 @@ function approvalCard(ev) {
     // Past 200 ms the tapped button shows the answer is on its way.
     const slow = setTimeout(() => {
       if (!btn) return;
-      const loader = el('span', 'loader bare');
-      loader.append(el('i'));
       btn.classList.add('busy');
-      btn.append(loader);
+      btn.append(loader('bare'));
     }, 200);
     try {
       await post(`api/approvals/${ev.aid}`, { decision, ...(perm ? { option } : {}), ...(note ? { note } : {}) });
@@ -362,7 +395,7 @@ function approvalCard(ev) {
   };
   const extra = opts.filter((o) => o.id !== 'once' && o.id !== 'deny');
   if (extra.length) {
-    const list = el('div', 'choices');
+    const list = el('div', 'choices m3x-seg');
     for (const o of extra) {
       const b = choice(o);
       b.addEventListener('click', () => answer('approve', o.id, '', b));
@@ -373,8 +406,9 @@ function approvalCard(ev) {
   }
   const foot = el('div', 'foot');
   const left = el('span', 'left');
-  const deny = el('button', 'btn text sl', denyOpt?.label || 'Deny');
-  const ok = el('button', 'btn filled sl', once?.label || 'Approve');
+  const deny = el('button', 'btn tonal sl morph', denyOpt?.label || 'Deny');
+  const ok = el('button', 'btn filled sl morph');
+  ok.append(svg(ALLOW, 20), once?.label || 'Allow');
   deny.type = ok.type = 'button';
   deny.addEventListener('click', () => answer('deny', 'deny', '', deny));
   ok.addEventListener('click', () => answer('approve', 'once', '', ok));
@@ -382,9 +416,10 @@ function approvalCard(ev) {
   foot.append(left);
   if (perm) {
     // The note goes to the agent with a deny, like the terminal's "tell Claude what to do differently".
-    const pen = el('button', 'btn icon sl');
+    const pen = el('button', 'btn icon sl morph');
     pen.type = 'button';
     pen.title = 'Add a note';
+    pen.setAttribute('aria-label', 'Add a note');
     pen.append(svg(PEN, 18));
     buttons.push(pen);
     pen.addEventListener('click', () => {
@@ -427,7 +462,8 @@ function settle(done) {
   let text = OUTCOME[outcome] || outcome;
   if (outcome === 'expired') text = card.expires ? 'No answer in time, denied' : 'No answer, denied';
   if (outcome === 'approved' && card.classList.contains('plan')) text = 'Went ahead';
-  if (outcome === 'approved' && done.chosen) text = done.chosen.replace(/^Always allow/, 'Always allowed').replace(/^Allow /, 'Allowed ');
+  if (outcome === 'approved' && done.chosen === 'Allow') text = 'Allowed once';
+  else if (outcome === 'approved' && done.chosen) text = done.chosen.replace(/^Always allow/, 'Always allowed').replace(/^Allow /, 'Allowed ');
   if (outcome === 'denied' && done.by === 'chat') text = 'Denied: you wrote in the chat';
   else if (outcome === 'denied' && done.note) text = `Denied: “${done.note}”`;
   foot.querySelector('.left').textContent = text;
@@ -440,7 +476,7 @@ function tick() {
   const now = Date.now() / 1000;
   for (const [, card] of waitingApprovals()) {
     const left = card.querySelector('.foot .left');
-    if (!card.expires) left.textContent = 'Waits for you';
+    if (!card.expires) left.textContent = '';
     else {
       const min = Math.ceil((card.expires - now) / 60);
       left.textContent = min > 0 ? `Auto-denies in ${min} min` : 'Expiring';
@@ -472,7 +508,7 @@ const FILE_ICON = {
 };
 const fileIcon = (kind) => FILE_ICON[kind] || FILE_ICON.doc;
 export const size = (n) => (n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
-const KIND_LABEL = { pdf: 'PDF', archive: 'Archive', audio: 'Audio', video: 'Video', image: 'Image', code: 'Code', text: 'Text', file: 'File' };
+const KIND_LABEL = { pdf: 'PDF', archive: 'Zip', audio: 'Audio', video: 'Video', image: 'Image', code: 'Code', text: 'Text', file: 'File' };
 
 // The server deletes files after 30 days (uploads.py KEEP_DAYS); older chips show as expired.
 const KEEP = 30 * 86400;
@@ -572,7 +608,7 @@ function foldLabel(ev) {
 // What the user can answer: seimei's messages and the report, question and approval cards. Each gets a reply button
 // on hover; a long press replies on touch. Event id -> the composer's quote and the lane it shows in.
 const quotable = new Map();
-const VERB = { done: 'finished', failed: 'failed', asking: 'asks' };
+const VERB = { done: 'finished' };
 
 function replyable(node, ev, text) {
   quotable.set(ev.id, { text, lane: ev.lane === 't' ? 't' : 'c' });
@@ -625,7 +661,14 @@ export class Renderer {
   put(node) {
     if (this.cur && !node.dataset.id) node.dataset.id = this.cur;
     this.target.insertBefore(node, this.before);
+    // What the last drawn node says happened ("dev finished"): a trigger line naming it right after repeats it
+    this.said = node.dataset.said || null;
     return node;
+  }
+
+  trig(ev) {
+    if (ev.why && ev.why === this.said) return;
+    this.put(el('div', 'trig', ev.why ? `after ${ev.why}` : 'on its own'));
   }
 
   daily(ev) {
@@ -656,7 +699,7 @@ export class Renderer {
     if (l && !list.includes(l)) list.push(l);
     const all = [...f.reports, ...f.notes];
     const shown = all.slice(0, Math.max(1, Math.min(3, f.reports.length)));
-    const what = all.length ? shown.join(', ') + (all.length > shown.length ? ` and ${all.length - shown.length} more` : '') : 'seimei acted on its own';
+    const what = all.length ? shown.join(', ') + (all.length > shown.length ? `${shown.length > 1 ? ',' : ''} and ${all.length - shown.length} more` : '') : 'seimei acted on its own';
     f.node.replaceChildren(el('span', null, what), el('b', null, 'Trajectory'));
   }
 
@@ -693,16 +736,16 @@ export class Renderer {
     if (this.lane === 't' && ev.turn && ev.turn !== this.turn && ev.type !== 'tool_result') {
       this.turn = ev.turn;
       this.activity = null;
-      this.put(el('div', 'trig', ev.why ? `after ${ev.why}` : 'on its own'));
+      this.trig(ev);
     } else if (this.lane === 't' && !ev.turn) this.turn = null;
     // The part of an event turn that came to the chat (a picture, a reply for the user) says what started it.
     if (this.lane === 'c' && ev.from && ev.from !== this.from && ev.type !== 'tool_result') {
       this.from = ev.from;
       this.activity = null;
-      this.put(el('div', 'trig', ev.why ? `after ${ev.why}` : 'on its own'));
+      this.trig(ev);
     } else if (this.lane === 'c' && !ev.from) this.from = null;
     // The summoned card already says it.
-    if (ev.type === 'tool' && ev.name === 'mcp__seimei__summon') return;
+    if (ev.type === 'tool' && (ev.name === 'mcp__seimei__summon' || ev.name === 'AskUserQuestion')) return;
     if (ev.type === 'tool') {
       if (!this.activity) {
         this.activity = new Activity();
@@ -745,10 +788,14 @@ export class Renderer {
       const open = this.asks.get(ev.worker);
       if (open && ev.event !== 'summoned') {
         open.classList.replace('asking', 'asked');
+        open.querySelector('.foot')?.remove();
         open.querySelector('.title').append(el('span', 'meta', ev.event === 'replied' || ev.event === 'done' ? 'Answered' : 'Closed'));
         this.asks.delete(ev.worker);
       }
-      const card = this.put(workerCard(ev));
+      const node = workerCard(ev);
+      if (!node) return;
+      node.dataset.said = foldLabel(ev);
+      const card = this.put(node);
       if (ev.event === 'asking') this.asks.set(ev.worker, card);
       if (VERB[ev.event]) replyable(card, ev, `${ev.name} ${VERB[ev.event]}: ${firstLine(ev.text)}`);
     }
@@ -778,13 +825,13 @@ export function render() {
     : !S.session.connected ? 'starting'
     : waitingApprovals().length ? 'waiting'
     : S.session.busy ? 'working' : 'idle';
-  const text = { away: `away since ${S.awaySince ? clock(S.awaySince / 1000) : ''}`, connecting: 'connecting',
-    starting: 'session starting', waiting: 'waiting for your OK', working: 'working', idle: 'idle' }[s];
+  const text = { away: '', connecting: 'Connecting…', starting: 'Session starting…', waiting: '', working: 'Working', idle: '' }[s];
   S.status = { s, text };
   document.body.classList.toggle('offline', !S.online && !!S.awaySince);
   const away = !!(S.awaySince && Date.now() - S.awaySince > 4000 && !S.online);
   if (away && $('away').hidden) requestAnimationFrame(toBottom);
   $('away').hidden = !away;
+  if (S.awaySince) $('away-since').textContent = `Since ${clock(S.awaySince / 1000)}. Reconnects on its own.`;
   working.hidden = !(S.online && S.session.busy && !live) || s === 'waiting';
   const typing = input.value.trim() !== '' || attachments.length > 0;
   stopBtn.hidden = !(S.session.busy && !typing);
@@ -977,7 +1024,7 @@ $('composer').addEventListener('submit', async (e) => {
   const sending = attachments.splice(0);
   if ((!text && !sending.length) || !S.online) {
     attachments.push(...sending);
-    if (!S.online) snack('Not connected to the server yet. Your message stays here.');
+    if (!S.online) snack('Offline. Your message stays here.');
     return;
   }
   input.value = '';
@@ -1114,7 +1161,7 @@ function uploadFile(f) {
     Object.assign(a, { id: body.id, kind: 'file', fkind: body.kind });
   }).catch((e) => {
     attachments.splice(attachments.indexOf(a) >>> 0, attachments.includes(a) ? 1 : 0);
-    main.add({ type: 'system', level: 'error', text: `Could not upload ${a.name}: ${e.message}` });
+    main.add({ type: 'system', level: 'error', text: `Couldn't upload ${a.name}: ${e.message}` });
   }).finally(() => { a.upload = null; renderAttachments(); });
   return a;
 }
@@ -1128,7 +1175,7 @@ async function addFiles(list) {
       else if (f.size > MAX_FILE) main.add({ type: 'system', level: 'error', text: `${f.name} is over 50 MB.` });
       else if (files < 10) attachments.push(uploadFile(f));
     } catch {
-      main.add({ type: 'system', level: 'error', text: `Could not read ${f.name || 'that file'}.` });
+      main.add({ type: 'system', level: 'error', text: `Couldn't read ${f.name || 'that file'}` });
     }
   }
   renderAttachments();
@@ -1193,8 +1240,13 @@ function onTap(e) {
     const n = e.target.dataset.name;
     return view(e.target.src, n ? { full: `api/files/${n}`, save: `api/files/${n}?download=1` } : {});
   }
-  const card = e.target.closest('.wcard');
-  if (card?.dataset.worker && !e.target.closest('a, .more') && !getSelection().toString()) return openWorker(card.dataset.worker);
+  const card = e.target.closest('.wcard, .report, .evline');
+  if (card?.dataset.worker && !e.target.closest('a, .more') && !getSelection().toString()) {
+    // Answer opens the page with its answer field ready
+    const go = openWorker(card.dataset.worker);
+    if (e.target.closest('[data-answer]')) go.then(() => $('spage').querySelector('textarea')?.focus());
+    return go;
+  }
   const msg = e.target.closest('.msg');
   if (!msg || e.target.closest('a') || getSelection().toString()) return;
   const t = msg.querySelector(':scope > .time');

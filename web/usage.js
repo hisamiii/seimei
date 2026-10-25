@@ -4,7 +4,8 @@ import { $, S, hooks, el, svg, clock, getJSON, home, ICON } from './util.js';
 const page = $('usage');
 const WINDOWS = [['five_hour', '5-hour'], ['seven_day', 'Weekly']];
 
-export const tone = (u) => (u >= 0.95 ? 'bad' : u >= 0.8 ? 'warn' : 'ok');
+// Usage is neutral; the error tone only near the limit
+export const tone = (u) => (u >= 0.9 ? 'bad' : u >= 0.8 ? 'warn' : 'ok');
 const tokens = (n) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : `${n}`);
 
 function resetText(t) {
@@ -12,8 +13,8 @@ function resetText(t) {
   const mins = Math.max(0, Math.round((t * 1000 - Date.now()) / 60000));
   const left = mins < 60 ? `${mins} min` : mins < 2880 ? `${Math.floor(mins / 60)} h ${mins % 60} min` : `${Math.round(mins / 1440)} days`;
   const at = d.toDateString() === new Date().toDateString() ? clock(t)
-    : d.toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
-  return `resets ${at}, in ${left}`;
+    : d.toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+  return `Resets ${at}, in ${left}`;
 }
 
 export function setUsage(u) {
@@ -39,15 +40,15 @@ export function renderUsage() {
     meter.append(top, bar, el('span', 'sub', w.resets_at ? resetText(w.resets_at) : ''));
     body.push(meter);
   }
-  if (!body.length) body.push(el('p', 'usage-note', 'No usage reported yet. Claude Code reports it when a session takes a turn.'));
-  else if (usage.updated) body.push(el('p', 'usage-note', `Updated ${clock(usage.updated)}. Claude Code reports usage when a session takes a turn.`));
+  if (!body.length) body.push(el('p', 'usage-note', 'No usage yet'));
+  else if (usage.updated) body.push(el('p', 'usage-note', `Updated ${clock(usage.updated)}`));
   const rows = Object.entries(usage?.today?.sessions || {}).sort((a, b) => b[1].output - a[1].output);
   if (rows.length) {
     body.push(el('h3', 'usage-h', 'Today in seimei'));
     const list = el('div', 'ulist');
     for (const [name, t] of rows) {
       const row = el('div', 'urow');
-      row.append(el('b', null, name), el('time', null, `${t.turns} ${t.turns === 1 ? 'turn' : 'turns'}`),
+      row.append(el('b', null, name.replace(/^shikigami /, '')), el('time', null, `${t.turns} ${t.turns === 1 ? 'turn' : 'turns'}`),
         el('span', null, `${tokens(t.output)} out · ${tokens(t.input + t.cache_read + t.cache_write)} in`));
       list.append(row);
     }
@@ -85,15 +86,15 @@ export const span = (sec) => {
 export function metricFacts(m) {
   const t = m.tokens;
   const by = [m.followups_by.seimei && `${m.followups_by.seimei} from seimei`, m.followups_by.user && `${m.followups_by.user} from you`];
-  const rounds = [m.asks && `${m.asks} ${m.asks === 1 ? 'ask' : 'asks'}`,
-    m.followups && `${m.followups} ${m.followups === 1 ? 'follow-up' : 'follow-ups'} (${by.filter(Boolean).join(', ')})`,
-    m.reopened && 'reopened'].filter(Boolean).join(' · ');
+  const times = m.followups === 1 ? 'Once' : `${m.followups} times`;
+  const rounds = [m.followups ? `${times} (${by.filter(Boolean).join(', ')})` : 'Never', m.asks && `${m.asks} ${m.asks === 1 ? 'question' : 'questions'}`]
+    .filter(Boolean).join(' · ');
   return [
-    ['Cost', `${usd(m.usd)} at API prices${m.adopted ? ', with its time as your session' : ''}`],
+    ['Cost', `${usd(m.usd)}${m.adopted ? ', with its time as your session' : ''}`],
     ['Tokens', `${tokens(t.input)} in · ${tokens(t.cache_read)} cache read · ${tokens(t.cache_write)} cache write · ${tokens(t.output)} out`],
     ['Time', `${span(m.wall)}, busy ${span(m.busy)}`],
     // Asks while it worked, messages after its first done, and whether one asked for more work.
-    ['Rounds', rounds || 'one go'],
+    ['Reopened', rounds],
     // Effort, model or permissions changed on the way (#74), oldest first.
     ...(m.tunes?.length ? [['Changes', m.tunes.map((x) => `${x.what} at ${new Date(x.t * 1000).toTimeString().slice(0, 5)}`).join(' · ')]] : []),
   ];
@@ -107,20 +108,19 @@ function metricsSection() {
     return box;
   }
   if (!metrics.length) {
-    box.append(el('p', 'usage-note', 'No shikigami yet.'));
+    box.append(el('p', 'usage-note', 'No shikigami yet'));
     return box;
   }
   const finished = metrics.filter((m) => m.first_done);
   const total = metrics.reduce((a, m) => a + m.usd, 0);
-  box.append(el('p', 'usage-note', `${metrics.length} shikigami, ${usd(total)} at API prices. `
-    + `${finished.filter((m) => m.reopened).length} of ${finished.length} that finished got more work after.`));
+  box.append(el('p', 'usage-note', `${usd(total)} in all · ${finished.filter((m) => m.reopened).length} of ${finished.length} reopened`));
   const list = el('div', 'ulist');
   for (const m of allShown ? metrics : metrics.slice(0, SHOWN)) {
     const row = el('button', `crow sl${mopen.has(m.id) ? ' open' : ''}`);
     row.type = 'button';
     const chev = svg(ICON.chev, 18);
     chev.classList.add('chev');
-    const how = [MODEL(m.model || ''), m.effort, m.context, span(m.wall), m.state, m.reopened ? 'reopened' : '']
+    const how = [MODEL(m.model || ''), m.effort, m.context, span(m.wall), m.state === 'asking' ? 'question' : m.state, m.reopened ? 'reopened' : '']
       .filter(Boolean).join(' · ');
     row.append(el('b', null, m.name), el('span', 'amt', usd(m.usd)), chev, el('small', null, how));
     const facts = el('dl', 'kv mfacts');
@@ -170,9 +170,9 @@ function costSection() {
     box.append(el('p', 'usage-note', 'Adding up…'));
     return box;
   }
-  const since = new Date(cost.week_start * 1000).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+  const since = new Date(cost.week_start * 1000).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
   const list = el('div', 'ulist');
-  for (const [key, label, sub] of [['day', 'Today', ''], ['week', 'This week', `since ${since}`], ['all', 'All time', '']]) {
+  for (const [key, label, sub] of [['day', 'Today', ''], ['week', 'This week', `Since ${since}`], ['all', 'All time', '']]) {
     const p = cost[key];
     const row = el('button', `crow sl${open.has(key) ? ' open' : ''}`);
     row.type = 'button';
@@ -188,7 +188,7 @@ function costSection() {
         el('small', null, `${tokens(v.output)} out · ${tokens(v.input)} in · ${tokens(v.cache_read)} cache read · ${tokens(v.cache_write)} cache write`));
       models.append(r);
     }
-    if (p.unpriced.length) models.append(el('p', 'usage-note', `No price for ${p.unpriced.join(', ')}; counted as $0.`));
+    if (p.unpriced.length) models.append(el('p', 'usage-note', `No price for ${p.unpriced.join(', ')}, counted as $0`));
     row.addEventListener('click', () => {
       if (open.has(key)) open.delete(key);
       else open.add(key);
@@ -198,6 +198,6 @@ function costSection() {
     list.append(row, models);
   }
   box.append(list, el('p', 'usage-note',
-    `What this server's Claude Code use would cost on pay-as-you-go API prices (checked ${cost.prices_checked}). Other machines on the account are not included.`));
+    `Prices of ${cost.prices_checked}. This server only.`));
   return box;
 }

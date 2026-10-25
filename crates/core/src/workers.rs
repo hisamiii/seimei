@@ -578,10 +578,10 @@ impl Worker {
         let at = path.as_ref().map(|p| p.display().to_string());
         self.set(
             "released",
-            json!({"summary": "Handed to you as a session.", "question": null, "laptop_window": window,
+            json!({"summary": "You took it over", "question": null, "laptop_window": window,
                 "released": {"at": now(), "path": at, "offset": offset}}),
         );
-        self.add(json!({"type": "system", "text": "Handed to you: it goes on as your session on the server."}));
+        self.add(json!({"type": "system", "text": "You took it over"}));
         let pool = self.pool();
         let mut board = pool.board.lock().unwrap();
         if let Some(tid) = board.current(&self.id).map(|t| t.id.clone()) {
@@ -1089,7 +1089,7 @@ impl Session {
                 let what = format!("permissions {a} → {b}");
                 tunes.as_array_mut().expect("a list").push(json!({"t": now(), "by": "the user", "what": what}));
             });
-            self.w.add(json!({"type": "system", "text": format!("Permissions {a} → {b} (by the user).")}));
+            self.w.add(json!({"type": "system", "text": format!("Permissions: {a} → {b}, by you")}));
         }
         self.w.mode_chosen(mode);
         Ok(())
@@ -1462,10 +1462,10 @@ impl Session {
                 }
                 Ok(reason) | Err(reason) => {
                     let why = match reason.as_str() {
-                        "max_tokens" => "The agent ran out of tokens.".to_string(),
-                        "max_turn_requests" => "The agent hit its limit of model requests for a turn.".to_string(),
-                        "refusal" => "The agent refused.".to_string(),
-                        r => format!("The agent failed: {r}."),
+                        "max_tokens" => "Ran out of tokens".to_string(),
+                        "max_turn_requests" => "Hit its limit of model requests for a turn".to_string(),
+                        "refusal" => "Refused".to_string(),
+                        r => format!("Failed: {r}"),
                     };
                     self.w.set("failed", json!({"summary": why}));
                     let said = if text.is_empty() { why } else { format!("{why} It said: {text}") };
@@ -2106,7 +2106,7 @@ impl Pool {
             "failed" => format!("failed: {}", first_line(text, 300)),
             "asking" => format!("asks: {}", chars(text, 1000)),
             "stopped" => "was stopped".into(),
-            _ => "was interrupted by a seimei restart".into(),
+            _ => "was interrupted by a restart".into(),
         };
         // Everything but a stop the user asked for wakes the dispatcher, so it can follow up on its own.
         self.tell(&w.id, &line, event != "stopped", Some(&format!("report:{}", w.id)));
@@ -2379,13 +2379,13 @@ impl Pool {
             if w.state() != "running" {
                 continue;
             }
-            w.log.close_open_tools("Interrupted by a seimei restart.");
+            w.log.close_open_tools("Interrupted by a restart");
             let recent: Vec<f64> = (w.get("resumes").as_array().into_iter().flatten())
                 .filter_map(Value::as_f64)
                 .filter(|t| at - t < RESUME_WINDOW)
                 .collect();
             if recent.len() >= RESUME_CAP {
-                w.set("interrupted", json!({"summary": "Interrupted by a seimei restart."}));
+                w.set("interrupted", json!({"summary": "Interrupted by a restart"}));
                 self.report(&w, "interrupted", "");
                 continue;
             }
@@ -2436,7 +2436,7 @@ impl Pool {
             Ok(()) => true,
             Err(e) => {
                 eprintln!("seimei: resuming {} failed: {e}", w.name());
-                w.set("interrupted", json!({"summary": "Interrupted by a seimei restart."}));
+                w.set("interrupted", json!({"summary": "Interrupted by a restart"}));
                 self.report(&w, "interrupted", "");
                 false
             }

@@ -140,7 +140,7 @@ async function tick(t) {
   try {
     await post(`api/tasks/${encodeURIComponent(t.id.replace(/^#/, ''))}/tick`, { done });
   } catch {
-    snack('Could not reach the server.');
+    snack("Couldn't reach the server");
     loadTasks();
   }
 }
@@ -194,6 +194,6 @@ export function renderTasks() {
     }
     out.push(sec);
   }
-  if (!out.length) out.push(el('p', 'tasks-empty', 'Nothing on the board. seimei adds what it queues here.'));
+  if (!out.length) out.push(el('p', 'tasks-empty', 'No tasks'));
   box.replaceChildren(...out);
 }

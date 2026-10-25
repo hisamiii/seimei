@@ -200,6 +200,9 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     var undo: (() -> Unit)? = null
     /** The label of the snackbar's action that runs undo. */
     var snackAction = "Undo"
+    /** The heights of what holds the bottom edge (the composer and navigation bar; a page's composer): snackbars sit above it. */
+    var barPx by mutableStateOf(0)
+    var pageBarPx by mutableStateOf(0)
     /** The Archived list (#43) is open, and what it is searched for. */
     var archOpen by mutableStateOf(false)
     var archQuery by mutableStateOf("")
@@ -238,7 +241,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         }
         authBusy = true
         viewModelScope.launch {
-            val notSeimei = "${a.shown} answers, but it is not seimei."
+            val notSeimei = "${a.shown} answers, but it isn't seimei"
             try {
                 if (Api(a.url).get("api/hello").has("seimei")) {
                     pairServer = a.url
@@ -250,7 +253,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             } catch (e: JSONException) {
                 serverError = notSeimei
             } catch (e: IOException) {
-                serverError = "Could not reach ${a.shown}."
+                serverError = "Couldn't reach ${a.shown}"
             } finally {
                 authBusy = false
             }
@@ -315,7 +318,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 authError = "The server's answer made no sense. Is this seimei?"
             } catch (e: IOException) {
                 DeviceKey.delete()
-                authError = "Could not reach ${server.substringAfter("://")}."
+                authError = "Couldn't reach ${server.substringAfter("://")}"
             } finally {
                 withContext(NonCancellable) { api.endPageSession() }
                 authBusy = false
@@ -363,7 +366,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             } catch (e: HttpError) {
                 authError = "Login failed (${e.code})."
             } catch (e: IOException) {
-                authError = "Could not reach the server. Is it on?"
+                authError = "Couldn't reach the server"
             } finally {
                 authBusy = false
             }
@@ -383,7 +386,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             } catch (e: HttpError) {
                 if (e.code == 409) "This phone has no notifications registered yet." else "The server said: ${e.message}"
             } catch (e: IOException) {
-                "Could not reach the server."
+                "Couldn't reach the server"
             }
         }
     }
@@ -892,10 +895,10 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 }
                 savePage(pg)
             } catch (e: HttpError) {
-                if (shown == null) snack = "Could not reach the server."
+                if (shown == null) snack = "Couldn't reach the server"
                 else if (e.code == 404) shown.note = "The server no longer has this; it shows the last copy."
             } catch (e: IOException) {
-                snack = if (shown == null) "Could not reach the server." else "Offline: this is the last copy."
+                snack = if (shown == null) "Couldn't reach the server" else "Offline: this is the last copy"
             }
         }
     }
@@ -962,7 +965,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
 
     private fun errorOf(e: IOException): String = (e as? HttpError)?.let {
         try { JSONObject(it.body).str("error") } catch (x: JSONException) { "" }
-    }.orEmpty().ifEmpty { if (e is HttpError) "The server said no (${e.code})." else "The server did not answer." }
+    }.orEmpty().ifEmpty { if (e is HttpError) "The server said no (${e.code})" else "The server didn't answer" }
 
     /** Sends the page's draft and files: to a shikigami, as the answer to an open question, or typed into a session. */
     fun pageSend() {
@@ -1043,7 +1046,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                     pg.note = "seimei may not read $name."
                 } catch (e: IOException) {
                     pg.files = pg.files - doc
-                    pg.note = "Could not upload $name: ${errorOf(e)}"
+                    pg.note = "Couldn't upload $name: ${errorOf(e)}"
                 } finally {
                     doc.uploading = false
                 }
@@ -1076,7 +1079,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             try {
                 api.post(path, JSONObject().put("archived", on))
             } catch (e: IOException) {
-                snack = "Could not reach the server."
+                snack = "Couldn't reach the server"
             }
         }
     }
@@ -1111,7 +1114,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         "no answer"
     }
 
-    /** Give to me (a shikigami goes on as the user's own session) or Hand to seimei (a session becomes a shikigami once
+    /** Take over (a shikigami goes on as the user's own session) or Hand off (a session becomes a shikigami once
      * the card in the chat is approved): one tap each way. */
     fun handoff(pg: Page) {
         val worker = pg.kind == "worker"
@@ -1120,8 +1123,8 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 api.post(if (worker) "api/workers/${pg.id}/release" else "api/sessions/${pg.id}/adopt")
                 if (worker) {
                     closePage()
-                    snack = "${pg.row.str("name")} is your session now, open on the server."
-                } else snack = "Approve the card in Chat to hand it over."
+                    snack = "${pg.row.str("name")} is yours, on the server"
+                } else snack = "Allow it in Chat to hand it off"
             } catch (e: HttpError) {
                 snack = try { JSONObject(e.body).optString("error") } catch (x: JSONException) { "" }.ifEmpty { errorOf(e) }
             } catch (e: IOException) {
@@ -1158,7 +1161,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         val sending = attachments
         if (text.isEmpty() && sending.isEmpty()) return
         if (!online) {
-            snack = "Not connected to the server yet. Your message stays here."
+            snack = "Offline. Your message stays here."
             return
         }
         edit("")
@@ -1226,7 +1229,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 try {
                     attachments = attachments + withContext(Dispatchers.Default) { prepare(uri) }
                 } catch (e: Exception) {
-                    chat.local("Could not read that image.")
+                    chat.local("Couldn't read that image")
                     publish()
                 }
             }

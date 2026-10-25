@@ -13,7 +13,7 @@
     "expect": {"tasks": {"#56": {"state": "running", "worker": "abc", "linked": "<set>"}}}},
    {"do": "update", "args": {"id": "#56", "state": "done"}, "expect": {"tasks": {"#56": {"done_at": "<set>"}}}},
    {"do": "update", "args": {"id": "#56", "state": "open"}, "expect": {"tasks": {"#56": {"done_at": null}}}},
-   {"do": "tick", "args": {"id": "#56", "done": true}, "expect": {"error": "only your own items can be ticked here"}},
+   {"do": "tick", "args": {"id": "#56", "done": true}, "expect": {"error": "Only your own tasks tick off here"}},
    {"do": "tick", "args": {"id": "t8", "done": true}, "expect": {"tasks": {"t8": {"state": "done", "done_at": "<set>"}}}},
    {"do": "tick", "args": {"id": "t8", "done": false}, "expect": {"tasks": {"t8": {"state": "open", "done_at": null}}}},
    {"do": "tick", "args": {"id": "t99", "done": true}, "expect": {"error": "no task t99"}},

@@ -378,7 +378,7 @@ async fn acp_shikigami() {
     let w = pool.summon(Summon { name: "crashy".into(), task: "!crash".into(), ..summon("acp:fake") }).await.unwrap();
     let w2 = w.clone();
     assert!(until(20, || w2.state() == "failed").await, "{}", w.state());
-    assert_eq!(w.get("summary"), json!("The agent failed: the agent exited."));
+    assert_eq!(w.get("summary"), json!("Failed: the agent exited"));
 
     let _ = std::fs::remove_dir_all(&base);
 }
