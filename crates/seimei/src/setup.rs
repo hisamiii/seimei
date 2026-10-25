@@ -332,8 +332,8 @@ pub fn run(read_secret: impl Fn(&str) -> String) {
     let guard = seimei_core::util::guard_file();
     if !guard.exists() {
         println!(
-            "\nThe guard has no rules: agents may do what Claude Code lets them. Rules go in {}; \
-             contrib/guard.example.toml in seimei's source has examples to copy.",
+            "\nThe guard has no rules of yours: beyond seimei's own secrets, agents may do what Claude Code lets them. \
+             Rules go in {}; contrib/guard.example.toml in seimei's source has examples to copy.",
             guard.display()
         );
     }

@@ -1942,7 +1942,8 @@
     "command": "rm -rf ~"
    },
    "cwd": "/home/tester",
-   "action": null,
+   "action": "deny",
+   "why": "secrets",
    "rules": "none"
   },
   {
@@ -1969,7 +1970,8 @@
     "file_path": "/home/tester/.local/share/seimei/auth.json"
    },
    "cwd": "/home/tester",
-   "action": null,
+   "action": "deny",
+   "why": "login",
    "rules": "none"
   },
   {
@@ -2240,6 +2242,12 @@
   {"tool": "Bash", "input": {"command": "python3 -c \"import os; print(open(os.path.expanduser('~/.local/share/seimei/auth.json')).read())\""}, "cwd": "/home/tester", "action": "deny", "why": "login secrets"},
   {"tool": "Bash", "input": {"command": "python3 -c \"import os; print(open(os.environ['HOME'] + '/.cloudflared/cert.pem').read())\""}, "cwd": "/home/tester", "action": "deny", "why": "tunnel"},
   {"tool": "Read", "input": {"file_path": "/home/tester/.local/share/seimei/auth.json"}, "cwd": "/home/tester", "action": "deny", "why": "login secrets"},
-  {"tool": "Edit", "input": {"file_path": "/home/tester/.cloudflared/config.yml", "old_string": "a", "new_string": "b"}, "cwd": "/home/tester", "action": "deny", "why": "tunnel"}
+  {"tool": "Edit", "input": {"file_path": "/home/tester/.cloudflared/config.yml", "old_string": "a", "new_string": "b"}, "cwd": "/home/tester", "action": "deny", "why": "tunnel"},
+  {"what": "built in (#171): seimei's own secrets are off limits with no guard.toml", "tool": "Bash", "input": {"command": "cat ~/.local/share/seimei/auth.json"}, "cwd": "/home/tester", "rules": "none", "action": "deny", "why": "login"},
+  {"tool": "Read", "input": {"file_path": "/home/tester/.local/share/seimei/dev/push-vapid.pem"}, "cwd": "/home/tester", "rules": "none", "action": "deny", "why": "push"},
+  {"tool": "Bash", "input": {"command": "cp ~/.local/share/seimei/signing/release.jks /tmp/x"}, "cwd": "/home/tester", "rules": "none", "action": "deny", "why": "signing"},
+  {"tool": "Write", "input": {"file_path": "/home/tester/.local/share/seimei/kitty-rc.conf", "content": "x"}, "cwd": "/home/tester", "rules": "none", "action": "deny", "why": "kitty"},
+  {"tool": "Bash", "input": {"command": "ls -l ~/.local/share/seimei/"}, "cwd": "/home/tester", "rules": "none", "action": null},
+  {"tool": "Bash", "input": {"command": "cat ~/.local/share/seimei/notes.md"}, "cwd": "/home/tester", "rules": "none", "action": null}
  ]
 }

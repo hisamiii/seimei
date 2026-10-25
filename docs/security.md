@@ -21,7 +21,7 @@
 The dispatcher and every shikigami run as the user, with Bash, in the permission mode set in config.
 
 **seimei's guard** runs before every tool call, in every mode. Its rules are the user's, in
-`~/.config/seimei/guard.toml`; seimei ships none, and `contrib/guard.example.toml` has a set to copy (secrets,
+`~/.config/seimei/guard.toml`, and `contrib/guard.example.toml` has a set to copy (secrets,
 deleting the home folder, downloads run as scripts, kitty remote control, the user's sessions, the desktop, the
 plugins).
 
@@ -45,6 +45,8 @@ plugins).
 - **Built in, whatever the file says:**
   - no agent writes, replaces, moves or deletes `guard.toml`, or moves or deletes its folder (reading, listing and
     writing other files there are fine);
+  - no agent reads or writes seimei's own secrets in its data folder (and the dev server's): `auth.json`, `unlock`,
+    `push-vapid.pem`, `kitty-rc.conf`, `signing/`, `firebase/`;
   - a command nested too deep to check is refused.
   - the browser plugin acts or navigates in a tab the user opened only after their card (once per tab and site), and
     never reads or fills password, payment card, one-time code or file fields.

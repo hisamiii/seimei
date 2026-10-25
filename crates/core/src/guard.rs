@@ -1,6 +1,7 @@
 //! seimei's guard, in front of every tool call of the dispatcher and the shikigami. Its rules are the user's, in
-//! guard.toml (contrib/guard.example.toml shows them); seimei ships with none. Built in is only what keeps the rules
-//! the user's: agents cannot write, move or delete guard.toml, and a command nested too deep to check is refused.
+//! guard.toml (contrib/guard.example.toml shows them). Built in is what keeps the rules the user's and seimei's own
+//! secrets safe: agents cannot write, move or delete guard.toml, cannot read or write the secrets under seimei's
+//! data folder (SECRETS), and a command nested too deep to check is refused.
 //! tests/cases/guard.json holds it to its decisions.
 
 use std::collections::{BTreeMap, HashMap};
@@ -342,6 +343,37 @@ pub fn rules() -> Arc<Rules> {
     l.rules.clone()
 }
 
+/// seimei's own secrets under its data folder (and the dev server's): no agent reads or writes them, whatever
+/// guard.toml allows. Only a deny of the user's comes first.
+const SECRETS: [(&str, &str); 6] = [
+    ("{,dev/}auth.json", "seimei's login secrets"),
+    ("{,dev/}unlock", "the screen password"),
+    ("{,dev/}push-vapid.pem", "seimei's push signing key"),
+    ("{,dev/}kitty-rc.conf", "the kitty remote-control password"),
+    ("signing/**", "the app signing key"),
+    ("firebase/**", "the Firebase key"),
+];
+
+/// The built-in rules for SECRETS, for the data folder as it is now (tests move it).
+fn secret_rules() -> Arc<Rules> {
+    static BUILT: LazyLock<Mutex<(PathBuf, Arc<Rules>)>> = LazyLock::new(Mutex::default);
+    let dir = crate::util::data_dir();
+    let mut b = BUILT.lock().unwrap();
+    if b.0 != dir || b.1.is_empty() {
+        let glob = dir.to_string_lossy();
+        let text: String = (SECRETS.iter())
+            .map(|(path, why)| {
+                let path = toml::Value::String(format!("{glob}/{path}"));
+                format!(
+                    "[[rule]]\npaths = [{path}]\nop = [\"read\", \"write\"]\naction = \"deny\"\nmessage = \"{why}\"\n"
+                )
+            })
+            .collect();
+        *b = (dir, Arc::new(parse(&text).expect("the built-in secret rules parse")));
+    }
+    b.1.clone()
+}
+
 /// A broken guard.toml's error, once per version of the file.
 pub fn take_error() -> Option<String> {
     rules();
@@ -352,8 +384,9 @@ pub fn take_error() -> Option<String> {
 pub fn prompt_section() -> String {
     let lines = rules().lines();
     if lines.is_empty() {
-        return "seimei's guard has no rules now (the user's ~/.config/seimei/guard.toml has none). It still refuses \
-                any agent edit of that file, and commands nested too deep to check."
+        return "seimei's guard has no rules of the user's now (~/.config/seimei/guard.toml has none). It still refuses \
+                any agent edit of that file, reading or writing seimei's own secrets (its login, push key, signing \
+                keys), and commands nested too deep to check."
             .into();
     }
     let mut out = String::from(
@@ -861,10 +894,19 @@ fn tool_pieces<'a>(tool: &str, inp: &Value, cwd: &Path, reads: &[PathBuf]) -> Ve
 /// What guard.toml's rules say about a call: for each piece of it the first rule that matches, and of those the
 /// strictest. None: no rule matches. facts: what a plugin knows about the call; reads: files a plugin tool will read.
 pub fn decide(tool: &str, inp: &Value, cwd: &str, facts: &Value, reads: &[PathBuf]) -> Option<Verdict> {
-    let rules = rules();
+    let user = decide_by(&rules(), tool, inp, cwd, facts, reads);
+    if user.as_ref().is_some_and(|v| v.action == Action::Deny) {
+        return user;
+    }
+    // seimei's secrets, whatever the user's rules allow.
+    decide_by(&secret_rules(), tool, inp, cwd, facts, reads).or(user)
+}
+
+fn decide_by(rules: &Rules, tool: &str, inp: &Value, cwd: &str, facts: &Value, reads: &[PathBuf]) -> Option<Verdict> {
     if rules.is_empty() {
         return None;
     }
+    let rules = &rules.0;
     let cwd = Path::new(cwd);
     let home_dir = home();
     let h = home_dir.to_string_lossy();
@@ -877,10 +919,10 @@ pub fn decide(tool: &str, inp: &Value, cwd: &str, facts: &Value, reads: &[PathBu
         pieces.push(Piece::call(None));
     }
     let call = Call { tool, input: inp, facts, cmds };
-    let piped: Vec<bool> = rules.0.iter().map(|r| r.pipe.as_ref().is_some_and(|p| pipe_hits(p, &call.cmds))).collect();
+    let piped: Vec<bool> = rules.iter().map(|r| r.pipe.as_ref().is_some_and(|p| pipe_hits(p, &call.cmds))).collect();
     let mut best: Option<&Rule> = None;
     for p in &pieces {
-        let first = rules.0.iter().zip(&piped).find(|(r, piped)| rule_hits(r, &call, **piped, p)).map(|(r, _)| r);
+        let first = rules.iter().zip(&piped).find(|(r, piped)| rule_hits(r, &call, **piped, p)).map(|(r, _)| r);
         if let Some(r) = first
             && best.is_none_or(|b| r.action > b.action)
         {
@@ -1066,7 +1108,9 @@ pub fn card(tool: &str, args: &Value, message: &str, about: Option<&About>) -> V
         _ => ("tool", format!("{tool}\n\n{}", brief(args))),
     };
     match about.filter(|a| !a.what.is_empty()) {
-        Some(a) => json!({"action": action, "target": a.what, "detail": if a.detail.is_empty() { detail } else { a.detail.clone() }}),
+        Some(a) => {
+            json!({"action": action, "target": a.what, "detail": if a.detail.is_empty() { detail } else { a.detail.clone() }})
+        }
         None => json!({"action": action, "target": message, "detail": detail}),
     }
 }
@@ -1170,7 +1214,8 @@ impl Guard {
             }
             Some(Verdict { action: Action::Card, message }) => {
                 let what = card(tool, &args, &message, about.as_ref());
-                let card = format!("{}: {}", what["action"].as_str().unwrap_or(""), what["target"].as_str().unwrap_or(""));
+                let card =
+                    format!("{}: {}", what["action"].as_str().unwrap_or(""), what["target"].as_str().unwrap_or(""));
                 let key = format!("approval:{}", tool_use_id.unwrap_or(""));
                 self.tell(worker, &format!("waits on an approval card ({card})"), false, Some(&key));
                 let outcome = self.approvals.hold(what, who, worker).await;
