@@ -318,7 +318,7 @@ impl Browser {
         if let Some(no) = self.may_act(tab, "navigate", session).await? {
             return Ok(no);
         }
-        let t = self.link.call("navigate", 60, args).await?;
+        let t = self.link.call("navigate", 60, args).await.map_err(|e| self.page_error(e))?;
         Ok(text(&format!("Now at {}", tab_line(&t)), false))
     }
 
@@ -354,10 +354,16 @@ impl Browser {
         ))
     }
 
-    /// An error from inside a page, said plainly when the browser keeps extensions out of it.
+    /// An error from inside a page, said plainly when the browser keeps extensions out of it or the extension is
+    /// older than seimei.
     fn page_error(&self, e: String) -> String {
         let low = e.to_lowercase();
-        if low.contains("missing host permission") || low.contains("cannot access") {
+        if let Some(op) = e.strip_prefix("unknown op ") {
+            format!(
+                "The seimei extension in the browser is older than seimei and cannot {op} yet: \
+                 the user installs its new version (docs/plugins.md)."
+            )
+        } else if low.contains("missing host permission") || low.contains("cannot access") {
             "Extensions may not touch that page (a browser page or an add-on store).".into()
         } else {
             e
@@ -444,7 +450,9 @@ impl Browser {
                 ok(out)
             }
             "browser_open" => {
-                let args = json!({"url": py(&a["url"]), "front": truthy(&a["front"])});
+                // background is what extension 1.0 reads; a newer one reads front.
+                let front = truthy(&a["front"]);
+                let args = json!({"url": py(&a["url"]), "front": front, "background": !front});
                 let t = self.link.call("open", 30, args).await?;
                 if let Some(id) = t["id"].as_i64() {
                     self.opened.lock().unwrap().insert(id);

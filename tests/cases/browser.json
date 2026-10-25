@@ -336,7 +336,8 @@
        "op": "open",
        "args": {
         "url": "https://x.org/new",
-        "front": true
+        "front": true,
+        "background": false
        }
       }
      ]
@@ -481,7 +482,8 @@
        "op": "open",
        "args": {
         "url": "https://x.org/two",
-        "front": false
+        "front": false,
+        "background": true
        }
       }
      ]
@@ -925,7 +927,8 @@
        "op": "open",
        "args": {
         "url": "https://x.org/new",
-        "front": false
+        "front": false,
+        "background": true
        }
       }
      ]
@@ -1163,6 +1166,30 @@
         "tab": 14,
         "action": "scroll",
         "amount": 600
+       }
+      }
+     ]
+    },
+    {
+     "tool": "browser_act",
+     "args": {
+      "tab": 11,
+      "action": "click",
+      "ref": "e3"
+     },
+     "fails": {
+      "act": "unknown op act"
+     },
+     "want": "The seimei extension in the browser is older than seimei and cannot act yet: the user installs its new version (docs/plugins.md).",
+     "error": true,
+     "card": null,
+     "sent": [
+      {
+       "op": "act",
+       "args": {
+        "tab": 11,
+        "action": "click",
+        "ref": "e3"
        }
       }
      ]
