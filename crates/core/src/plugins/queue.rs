@@ -675,28 +675,6 @@ fn wait_minutes(target: &str) -> Option<f64> {
     }
 }
 
-/// The app API: cqd's snapshot, or the /proc view when cqd is down.
-pub async fn view() -> Value {
-    blocking(|| match cqd(&json!({"op": "status"})) {
-        Some(mut c) if c.get("holders").is_some() => {
-            c["cqd"] = json!(true);
-            c
-        }
-        _ => proc_snapshot(&HashMap::new()),
-    })
-    .await
-}
-
-/// The user steers the queue from the app: the same actions as queue_control, no card. None: cqd is not running.
-pub async fn action(body: &Value) -> Option<Value> {
-    let mut act = s(&body["action"]);
-    if act == "revoke" && crate::util::truthy(&body["kill"]) {
-        act = "kill".into();
-    }
-    let req = json!({"op": "control", "action": act, "target": body["target"], "to": body["to"]});
-    blocking(move || cqd(&req)).await
-}
-
 /// A line for the dispatcher: (text, urgent, key).
 pub type Notify = Box<dyn Fn(&str, bool, &str) + Send + Sync>;
 

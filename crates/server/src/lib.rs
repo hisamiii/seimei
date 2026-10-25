@@ -332,9 +332,6 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/sessions/{pid}/send", post(session_send))
         .route("/api/sessions/{pid}/archive", post(session_archive))
         .route("/api/sessions/{pid}/answer", post(session_answer));
-    if app.pool.plugins.queue.is_some() {
-        r = r.route("/api/queue", get(queue_view)).route("/api/queue/action", post(queue_action));
-    }
     if app.auth.is_some() {
         r = r
             .route("/api/auth/password", post(login_password))
@@ -695,23 +692,6 @@ async fn theme_set(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> Resp
         app.events.flash(ev);
     }
     ok(rec)
-}
-
-/// claude-queue's state: cqd's snapshot, or the /proc view when cqd is down.
-async fn queue_view() -> Response {
-    ok(seimei_core::plugins::queue::view().await)
-}
-
-/// The user steers the queue from the app: the same actions as queue_control, no card.
-async fn queue_action(bytes: Bytes) -> Response {
-    let b = match body(&bytes) {
-        Ok(b) => b,
-        Err(r) => return r,
-    };
-    match seimei_core::plugins::queue::action(&b).await {
-        None => text(StatusCode::SERVICE_UNAVAILABLE, "cqd is not running"),
-        Some(r) => json_status(if r.get("error").is_some() { StatusCode::BAD_REQUEST } else { StatusCode::OK }, r),
-    }
 }
 
 async fn tasks_view(State(app): Shared) -> Response {

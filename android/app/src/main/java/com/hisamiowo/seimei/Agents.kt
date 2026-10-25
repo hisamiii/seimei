@@ -575,7 +575,7 @@ fun blocked(pg: Page): String? {
     if (pg.kind == "worker") return null
     pg.reach?.let { return it }
     val ask = pg.ask
-    if (ask != null && !ask.optBoolean("answerable")) return "Answer on the server."
+    if (ask != null && !ask.optBoolean("answerable")) return "Answer on the server"
     if (pg.row.str("status") == "waiting" && ask == null) return "${pg.row.str("waiting_text").ifEmpty { "Waiting on the server" }}. Answer it there."
     return null
 }
@@ -979,7 +979,7 @@ fun Details(vm: Seimei, pg: Page) {
                 if (pg.kind == "worker") pg.metrics?.let { m -> for ((k, v) in metricFacts(m)) Fact(k, v) }
             }
             val state = r.str("state")
-            if (pg.kind == "worker" && state != "laptop" && state != "released" && r.optBoolean("started")) {
+            if (pg.kind == "worker" && state != "laptop" && state != "released" && r.optBoolean("started", true)) {
                 // A running worker gets stopped first, so it takes a second tap.
                 var armed by remember { mutableStateOf(false) }
                 var sending by remember { mutableStateOf(false) }

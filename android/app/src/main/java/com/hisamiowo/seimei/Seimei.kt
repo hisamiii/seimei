@@ -406,6 +406,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 api.postAsPage("api/auth/password", JSONObject().put("password", password))
                 Push.live = api
                 phase = Phase.Ready
+                registerPush()
                 start()
                 checkUpdate()
                 pendingShare?.let { pendingShare = null; applyShare(it) }
@@ -1147,24 +1148,37 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     fun setArchived(a: Agent, on: Boolean, offerUndo: Boolean = true) {
         val path = if (a.kind == "worker") "api/workers/${a.id}/archive" else "api/sessions/${a.id}/archive"
         // Shown at once; the server's listing follows.
-        fun flag(list: List<JSONObject>, key: String) = list.map { if (it.optString(key) == a.id) it.merged(JSONObject().put("archived", on)) else it }
-        if (a.kind == "worker") {
-            workers = flag(workers, "id")
-            allWorkers = allWorkers?.let { flag(it, "id") }
-        } else sessions = flag(sessions, "pid")
-        page?.takeIf { it.kind == a.kind && it.id == a.id }?.let { it.row = it.row.merged(JSONObject().put("archived", on)) }
+        showArchived(a, on)
         if (on && page?.let { it.kind == a.kind && it.id == a.id } != true) viewModelScope.launch(Dispatchers.IO) { store.drop(Store.pageKey(a.kind, a.id)) }
         if (offerUndo) {
             undo = { setArchived(a, !on, false) }
             snack = "${if (on) "Archived" else "Unarchived"} ${a.name}"
         }
         viewModelScope.launch {
-            try {
+            // Refused or unreachable: the list goes back to what the server has, as the page's does.
+            val failed = try {
                 api.post(path, JSONObject().put("archived", on))
+                null
+            } catch (e: HttpError) {
+                runCatching { JSONObject(e.body).optString("error") }.getOrNull()?.ifEmpty { null } ?: "Couldn't ${if (on) "archive" else "unarchive"} ${a.name}"
             } catch (e: IOException) {
-                snack = "Couldn't reach the server"
+                "Couldn't reach the server"
+            }
+            if (failed != null) {
+                showArchived(a, !on)
+                undo = null
+                snack = failed
             }
         }
+    }
+
+    private fun showArchived(a: Agent, on: Boolean) {
+        fun flag(list: List<JSONObject>, key: String) = list.map { if (it.optString(key) == a.id) it.merged(JSONObject().put("archived", on)) else it }
+        if (a.kind == "worker") {
+            workers = flag(workers, "id")
+            allWorkers = allWorkers?.let { flag(it, "id") }
+        } else sessions = flag(sessions, "pid")
+        page?.takeIf { it.kind == a.kind && it.id == a.id }?.let { it.row = it.row.merged(JSONObject().put("archived", on)) }
     }
 
     fun workerStop(id: String) {
@@ -1183,7 +1197,9 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         loadMetrics(pg)
         null
     } catch (e: HttpError) {
-        e.body.trim().take(200).ifEmpty { "no answer" }
+        // The server says why as {"error": ...}; the page shows that line too.
+        runCatching { JSONObject(e.body).optString("error") }.getOrNull()?.ifEmpty { null }
+            ?: e.body.trim().take(200).ifEmpty { "no answer" }
     } catch (e: IOException) {
         "no answer"
     }

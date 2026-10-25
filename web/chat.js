@@ -486,10 +486,8 @@ function approvalCard(ev) {
   foot.append(deny);
   if (!question) foot.append(ok);
   card.append(foot);
-  card.expires = ev.expires;
   approvals.set(ev.aid, card);
   if (outcomes.has(ev.aid)) settle(outcomes.get(ev.aid));
-  else tick();
   return card;
 }
 
@@ -523,19 +521,6 @@ function settle(done) {
 }
 
 export const waitingApprovals = () => [...approvals.entries()].filter(([aid]) => !outcomes.has(aid));
-
-function tick() {
-  const now = Date.now() / 1000;
-  for (const [, card] of waitingApprovals()) {
-    const left = card.querySelector('.foot .left');
-    if (!card.expires) left.textContent = '';
-    else {
-      const min = Math.ceil((card.expires - now) / 60);
-      left.textContent = min > 0 ? `Auto-denies in ${min} min` : 'Expiring';
-    }
-  }
-}
-setInterval(tick, 20000);
 
 function pic(name, size) {
   const img = el('img', 'pic');
@@ -1245,7 +1230,7 @@ async function addFiles(list) {
     const files = attachments.length - pics;
     try {
       if (PICTURE.test(f.type) && pics < 6) attachments.push(await prepare(f));
-      else if (f.size > MAX_FILE) main.add({ type: 'system', level: 'error', text: `${f.name} is over 50 MB.` });
+      else if (f.size > MAX_FILE) main.add({ type: 'system', level: 'error', text: `${f.name} is larger than 50 MB.` });
       else if (files < 10) attachments.push(uploadFile(f));
     } catch {
       main.add({ type: 'system', level: 'error', text: `Couldn't read ${f.name || 'that file'}` });

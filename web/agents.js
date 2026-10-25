@@ -564,7 +564,7 @@ function addFiles(list) {
   for (const f of list) {
     if (P.files.length >= 10) break;
     if (f.size > MAX_FILE) {
-      note(`${f.name} is over 50 MB.`);
+      note(`${f.name} is larger than 50 MB.`);
       continue;
     }
     const a = { name: f.name || 'file', id: null, url: f.type.startsWith('image/') ? URL.createObjectURL(f) : null };

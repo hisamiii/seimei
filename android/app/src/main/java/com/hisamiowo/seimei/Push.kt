@@ -186,7 +186,7 @@ class Decide : BroadcastReceiver() {
                 api.post("api/approvals/$aid", body)
                 Push.settled(ctx, aid)
             } catch (e: HttpError) {
-                if (e.code == 409) Push.settled(ctx, aid) else Push.openToAnswer(ctx, aid, "Answer didn't go through", "Tap to try again")
+                if (e.code == 409) Push.settled(ctx, aid) else Push.openToAnswer(ctx, aid, "Couldn't send your answer", "Tap to try again")
             } catch (e: IOException) {
                 Push.openToAnswer(ctx, aid, "Couldn't send your answer", "Couldn't reach the server. Tap to answer")
             } finally {
