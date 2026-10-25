@@ -259,6 +259,7 @@ fn main() {
         .ok()
         .map(|s| s.parse().unwrap_or_else(|e| die(&format!("config.toml: {e}"))))
         .unwrap_or_default();
+    seimei_core::plan::set(seimei_core::plan::from_config(cfg.get("models").and_then(|m| m.as_table())));
     let server = cfg.get("server").and_then(|s| s.as_table()).cloned().unwrap_or_default();
     let mut port = server.get("port").and_then(|p| p.as_integer()).unwrap_or(8417) as u16;
     // The address phones and browsers use (also the passkey domain): set it when seimei sits behind a tunnel.

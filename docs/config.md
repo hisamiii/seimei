@@ -7,9 +7,13 @@ defaults.
 |---|---|---|---|
 | `[server]` | `port` | 8417 | listens on 127.0.0.1 (`--dev` uses port + 1) |
 | | `origin` | `http://localhost:8417` | the address phones and browsers use (a tunnel's https URL); also the passkey domain and the only Host served besides localhost |
-| `[dispatcher]` | `model` | `opus` | the dispatcher's model |
+| `[dispatcher]` | `model` | `[models] work` | the dispatcher's model |
 | | `cwd` | `~` | its working folder |
-| | `compact_window` | 400000 | tokens at which its context compacts |
+| | `compact_window` | 400000, or 80% of `[models] context` when that is less | tokens at which its context compacts |
+| `[models]` | `work` | `opus` | for real work, and a shikigami's model when none is picked |
+| | `routine` | `sonnet` | for routine jobs |
+| | `quick` | `haiku` | for lookups, and every shikigami's own subagents |
+| | `context` | `1m` | the most context a shikigami gets (200k, 256k, 400k, 1m); `seimei setup` writes sonnet and 200k for Pro |
 | `[host]` | `about` | `computer` | how prompts name the machine |
 | `[sessions]` | `terminal` | `$TERMINAL`'s or the first one installed (kitty, foot, alacritty, ghostty, wezterm, gnome-terminal, konsole, xfce4-terminal) | how a session opens for the user (release, "Open on server"); the command follows |
 | `[approvals]` | `dispatcher` | `default` | permission mode, by Claude Code's names |

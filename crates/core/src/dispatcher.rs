@@ -340,8 +340,10 @@ pub struct Config {
 impl Config {
     pub fn new(disp: &toml::Table, mode: &str, about: &str, dev: bool) -> Config {
         let s = |k: &str| disp.get(k).and_then(|v| v.as_str()).map(String::from);
+        let plan = crate::plan::get();
         let compact_window = match disp.get("compact_window") {
-            None => COMPACT_WINDOW,
+            // Where the plan's models hold less, a fifth below that.
+            None => COMPACT_WINDOW.min((plan.max_context * 0.8) as i64),
             Some(v) => v.as_integer().unwrap_or_else(|| {
                 eprintln!("seimei: [dispatcher] compact_window is not a number; using {COMPACT_WINDOW}");
                 COMPACT_WINDOW
@@ -349,7 +351,7 @@ impl Config {
         };
         Config {
             name: s("name").unwrap_or_else(|| if dev { "seimei-dev" } else { "seimei" }.into()),
-            model: s("model").unwrap_or_else(|| "opus".into()),
+            model: s("model").unwrap_or_else(|| plan.work.clone()),
             cwd: PathBuf::from(expand(&s("cwd").unwrap_or_else(|| "~".into()))),
             mode: mode.into(),
             about: about.into(),

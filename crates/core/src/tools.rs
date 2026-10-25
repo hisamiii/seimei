@@ -23,7 +23,7 @@ use crate::uploads::Uploads;
 use crate::usage::Usage;
 use crate::util::{chars, now, py_repr, truthy};
 use crate::watches::{DEFAULT_HOURS, NewRule, TRIGGERS, Watches, mins};
-use crate::workers::{ACTIVE, CONTEXTS, EFFORTS, MODELS, Pool, Summon, Worker};
+use crate::workers::{ACTIVE, EFFORTS, MODELS, Pool, Summon, Worker};
 
 static SERVER: LazyLock<Value> =
     LazyLock::new(|| serde_json::from_str(include_str!("../data/tools.json")).expect("tools.json"));
@@ -38,7 +38,6 @@ const EFFORT_GUIDE: &str = "reasoning effort, picked per task: low (or the haiku
                             mockups, CSS and config; high for research, kernels and risky or delicate work; xhigh or \
                             max only for escalations or tasks seimei judges very important, never for long iterative \
                             work";
-const CONTEXT_GUIDE: &str = "where it compacts: 256k or 400k for most tasks; 1m only when the task really needs it";
 
 pub struct Tools {
     pub events: Arc<EventLog>,
@@ -98,6 +97,7 @@ fn arg(a: &Value, k: &str) -> String {
 
 /// Why a summon call cannot go ahead (a pick missing or not one of the choices), or "".
 pub fn summon_problem(a: &Value) -> String {
+    let plan = crate::plan::get();
     let given = |k: &str| match &a[k] {
         Value::Null | Value::Bool(false) => false,
         Value::Number(n) => n.as_f64() != Some(0.0),
@@ -109,12 +109,13 @@ pub fn summon_problem(a: &Value) -> String {
         let each = if missing.len() == 1 { "it" } else { "each" };
         return format!(
             "summon needs {}: pick {each} for this task, there are no defaults. cwd: the project folder (~ only for \
-             home tasks). model: {}. effort: {EFFORT_GUIDE}. context: {CONTEXT_GUIDE}.",
+             home tasks). model: {}. effort: {EFFORT_GUIDE}. context: {}.",
             missing.join(", "),
-            MODELS.join("/")
+            plan.model_guide(),
+            plan.context_guide()
         );
     }
-    let contexts = CONTEXTS.map(|c| c.0);
+    let contexts = plan.contexts();
     for (k, choices) in [("model", &MODELS[..]), ("effort", &EFFORTS[..]), ("context", &contexts[..])] {
         if !a[k].as_str().is_some_and(|v| choices.contains(&v)) {
             let shown = match &a[k] {
@@ -224,11 +225,16 @@ fn upper_first(s: &str) -> String {
     it.next().map(|c| c.to_uppercase().chain(it).collect()).unwrap_or_default()
 }
 
-/// The summon tool as listed: tools.json's, plus a tools option when plugins can be granted and a harness option
-/// when config has ACP agents.
+/// The summon tool as listed: tools.json's with the plan's models and contexts, plus a tools option when plugins can
+/// be granted and a harness option when config has ACP agents.
 pub fn summon_spec(groups: &[String], agents: &[String]) -> Value {
     let mut t = (SERVER["tools"].as_array().into_iter().flatten()).find(|t| t["name"] == "summon").cloned().unwrap();
     let props = &mut t["inputSchema"]["properties"];
+    let plan = crate::plan::get();
+    props["model"]["description"] = json!(plan.model_guide());
+    props["context"]["enum"] = json!(plan.contexts());
+    props["context"]["description"] = json!(plan.context_guide());
+    props["subagent_model"]["default"] = json!(plan.quick);
     if !groups.is_empty() {
         props["tools"] = json!({"type": "array", "items": {"type": "string", "enum": groups},
                 "description": "plugin tool groups to grant it, with the same cards, guard and rules as yours (their \
@@ -258,8 +264,14 @@ impl Tools {
     fn spec(&self) -> Value {
         let mut spec = SERVER.clone();
         let agents: Vec<String> = self.pool.agents.get().into_iter().flatten().map(|(n, _)| n.clone()).collect();
-        for t in spec["tools"].as_array_mut().into_iter().flatten().filter(|t| t["name"] == "summon") {
-            *t = summon_spec(&self.pool.plugins.names(), &agents);
+        for t in spec["tools"].as_array_mut().into_iter().flatten() {
+            match t["name"].as_str() {
+                Some("summon") => *t = summon_spec(&self.pool.plugins.names(), &agents),
+                Some("adopt") => {
+                    t["inputSchema"]["properties"]["context"]["enum"] = json!(crate::plan::get().contexts())
+                }
+                _ => {}
+            }
         }
         let extra = self.watches.triggers().split_off(TRIGGERS.len());
         if extra.is_empty() {
@@ -309,6 +321,10 @@ impl Tools {
                 text(&format!("Stopping {}.", w.name()), false)
             }
             "adopt" => {
+                let contexts = crate::plan::get().contexts();
+                if !arg(a, "context").is_empty() && !contexts.contains(&arg(a, "context").as_str()) {
+                    return text(&format!("Adopting failed: context is one of {}", contexts.join(", ")), true);
+                }
                 let when = Some(arg(a, "when")).filter(|w| !w.is_empty()).unwrap_or_else(|| "idle".into());
                 let wish = Wish {
                     name: arg(a, "name"),

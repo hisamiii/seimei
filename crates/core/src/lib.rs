@@ -15,6 +15,7 @@ pub mod kitty;
 pub mod metrics;
 pub mod paths;
 pub mod permissions;
+pub mod plan;
 pub mod plugins;
 pub mod push;
 pub mod recall;

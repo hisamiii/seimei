@@ -161,7 +161,7 @@
  "summon_problem": [
   {
    "args": {},
-   "problem": "summon needs cwd, model, effort, context: pick each for this task, there are no defaults. cwd: the project folder (~ only for home tasks). model: opus/sonnet/haiku. effort: reasoning effort, picked per task: low (or the haiku model) for lookups; medium for mockups, CSS and config; high for research, kernels and risky or delicate work; xhigh or max only for escalations or tasks seimei judges very important, never for long iterative work. context: where it compacts: 256k or 400k for most tasks; 1m only when the task really needs it."
+   "problem": "summon needs cwd, model, effort, context: pick each for this task, there are no defaults. cwd: the project folder (~ only for home tasks). model: opus for real work, sonnet for routine jobs, haiku for quick lookups. effort: reasoning effort, picked per task: low (or the haiku model) for lookups; medium for mockups, CSS and config; high for research, kernels and risky or delicate work; xhigh or max only for escalations or tasks seimei judges very important, never for long iterative work. context: where it compacts: 256k or 400k for most tasks; 1m only when the task really needs it."
   },
   {
    "args": {
@@ -197,14 +197,14 @@
     "effort": "low",
     "context": "2m"
    },
-   "problem": "summon: context must be one of 256k, 400k, 1m, not '2m'."
+   "problem": "summon: context must be one of 200k, 256k, 400k, 1m, not '2m'."
   },
   {
    "args": {
     "cwd": " ",
     "model": "opus"
    },
-   "problem": "summon needs cwd, effort, context: pick each for this task, there are no defaults. cwd: the project folder (~ only for home tasks). model: opus/sonnet/haiku. effort: reasoning effort, picked per task: low (or the haiku model) for lookups; medium for mockups, CSS and config; high for research, kernels and risky or delicate work; xhigh or max only for escalations or tasks seimei judges very important, never for long iterative work. context: where it compacts: 256k or 400k for most tasks; 1m only when the task really needs it."
+   "problem": "summon needs cwd, effort, context: pick each for this task, there are no defaults. cwd: the project folder (~ only for home tasks). model: opus for real work, sonnet for routine jobs, haiku for quick lookups. effort: reasoning effort, picked per task: low (or the haiku model) for lookups; medium for mockups, CSS and config; high for research, kernels and risky or delicate work; xhigh or max only for escalations or tasks seimei judges very important, never for long iterative work. context: where it compacts: 256k or 400k for most tasks; 1m only when the task really needs it."
   },
   {
    "args": {
@@ -212,7 +212,7 @@
     "effort": "max",
     "context": "1m"
    },
-   "problem": "summon needs cwd: pick it for this task, there are no defaults. cwd: the project folder (~ only for home tasks). model: opus/sonnet/haiku. effort: reasoning effort, picked per task: low (or the haiku model) for lookups; medium for mockups, CSS and config; high for research, kernels and risky or delicate work; xhigh or max only for escalations or tasks seimei judges very important, never for long iterative work. context: where it compacts: 256k or 400k for most tasks; 1m only when the task really needs it."
+   "problem": "summon needs cwd: pick it for this task, there are no defaults. cwd: the project folder (~ only for home tasks). model: opus for real work, sonnet for routine jobs, haiku for quick lookups. effort: reasoning effort, picked per task: low (or the haiku model) for lookups; medium for mockups, CSS and config; high for research, kernels and risky or delicate work; xhigh or max only for escalations or tasks seimei judges very important, never for long iterative work. context: where it compacts: 256k or 400k for most tasks; 1m only when the task really needs it."
   }
  ],
  "capped": [

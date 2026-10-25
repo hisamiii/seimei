@@ -96,8 +96,26 @@ fn older(version: &str, than: (u32, u32)) -> bool {
 }
 
 /// config.toml from the example, with these answers in place of its defaults.
-pub fn config_text(port: u16, origin: &str, about: &str, terminal: &str, enabled: &[&str]) -> String {
+/// A plan's lines in config.toml: the dispatcher's model and compaction point, and [models]. Max keeps the example's.
+pub fn plan_lines(plan: &str) -> &'static [(&'static str, &'static str)] {
+    match plan {
+        "pro" => &[
+            ("model = ", "model = \"sonnet\""),
+            ("compact_window = ", "compact_window = 160000"),
+            ("work = ", "work = \"sonnet\""),
+            ("context = ", "context = \"200k\""),
+        ],
+        _ => &[],
+    }
+}
+
+pub fn config_text(port: u16, origin: &str, about: &str, plan: &str, terminal: &str, enabled: &[&str]) -> String {
     let q = |s: &str| toml::Value::String(s.into()).to_string();
+    // A new value keeps the line's comment, in its column.
+    let keep = |l: &str, new: &str| match l.find('#') {
+        Some(at) => format!("{new:<w$}{}", &l[at..], w = at.max(new.len() + 1)),
+        None => new.to_string(),
+    };
     let list = enabled.iter().map(|p| q(p)).collect::<Vec<_>>().join(", ");
     let mut out = String::new();
     for line in EXAMPLE.lines() {
@@ -114,6 +132,10 @@ pub fn config_text(port: u16, origin: &str, about: &str, terminal: &str, enabled
             }
             l if l.starts_with("terminal = ") => {
                 format!("terminal = {}{}", q(terminal), &l[l.find("   #").unwrap_or(l.len())..])
+            }
+            l if plan_lines(plan).iter().any(|(k, _)| l.starts_with(k)) => {
+                let (_, new) = plan_lines(plan).iter().find(|(k, _)| l.starts_with(k)).unwrap();
+                keep(l, new)
             }
             "enabled = []" => format!("enabled = [{list}]"),
             l => l.into(),
@@ -342,6 +364,16 @@ pub fn run(read_secret: impl Fn(&str) -> String) {
         let origin = ask("Origin", &format!("http://localhost:{port}"));
         let about = ask("How should the prompts call this machine (e.g. \"desktop, an Arch box\")", "computer");
         println!(
+            "\nYour Claude plan sets the defaults: max (opus, up to 1m of context) or pro (sonnet and 200k, so the \
+             5-hour window lasts). Other plans and API keys: pick the closer one and edit [models] later."
+        );
+        let plan = loop {
+            match ask("Plan", "max").to_lowercase().as_str() {
+                p @ ("max" | "pro") => break p.to_string(),
+                _ => println!("max or pro."),
+            }
+        };
+        println!(
             "\nA session you take over from a shikigami opens in a terminal here ({{cwd}} and {{title}} filled in)."
         );
         let terminal = ask("Terminal", terminal_default(std::env::var("TERMINAL").ok().as_deref(), on_path));
@@ -364,7 +396,7 @@ pub fn run(read_secret: impl Fn(&str) -> String) {
         if let Some(dir) = cfg_path.parent() {
             std::fs::create_dir_all(dir).unwrap_or_else(|e| fail(&format!("{}: {e}", dir.display())));
         }
-        std::fs::write(&cfg_path, config_text(port, &origin, &about, &terminal, &enabled))
+        std::fs::write(&cfg_path, config_text(port, &origin, &about, &plan, &terminal, &enabled))
             .unwrap_or_else(|e| fail(&format!("{}: {e}", cfg_path.display())));
         println!("Wrote {}.", cfg_path.display());
         origin
@@ -441,9 +473,17 @@ mod tests {
         assert_eq!(t(Some("/usr/bin/foot"), |_| false), "foot -D {cwd} -T {title}");
         assert_eq!(t(Some("st"), |n| n == "konsole"), "konsole --workdir {cwd} -p tabtitle={title} -e");
         assert_eq!(t(None, |_| false), "kitty -d {cwd} --title {title}");
-        let cfg = super::config_text(8417, "http://localhost:8417", "pc", "foot -D {cwd} -T {title}", &[]);
+        let cfg = super::config_text(8417, "http://localhost:8417", "pc", "pro", "foot -D {cwd} -T {title}", &[]);
         let parsed: toml::Table = cfg.parse().unwrap();
         assert_eq!(parsed["sessions"]["terminal"].as_str(), Some("foot -D {cwd} -T {title}"));
+        assert_eq!(parsed["dispatcher"]["model"].as_str(), Some("sonnet"));
+        assert_eq!(parsed["dispatcher"]["compact_window"].as_integer(), Some(160000));
+        assert_eq!(parsed["models"]["work"].as_str(), Some("sonnet"));
+        assert_eq!(parsed["models"]["context"].as_str(), Some("200k"));
+        assert!(cfg.contains("compact_window = 160000             # tokens at which"), "{cfg}");
+        let max: toml::Table = super::config_text(1, "o", "a", "max", "t", &[]).parse().unwrap();
+        assert_eq!(max["dispatcher"]["model"].as_str(), Some("opus"));
+        assert_eq!(max["models"]["context"].as_str(), Some("1m"));
         let rc = super::kitty_rc_text("pw");
         assert!(rc.lines().any(|l| l == "remote_control_password \"pw\" ls send-text send-key get-text"), "{rc}");
     }

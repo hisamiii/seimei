@@ -9,6 +9,13 @@ model = "opus"
 cwd = "~"
 compact_window = 400000             # tokens at which its context compacts
 
+# What your plan affords; `seimei setup` writes these for Max or Pro.
+[models]
+work = "opus"                       # for real work, and a shikigami's model when none is picked
+routine = "sonnet"                  # for routine jobs
+quick = "haiku"                     # for lookups, and every shikigami's own subagents
+context = "1m"                      # the most context a shikigami gets: 200k, 256k, 400k or 1m
+
 [host]
 about = "computer"                  # how the prompts name this machine, e.g. "desktop (an Arch box running niri)"
 

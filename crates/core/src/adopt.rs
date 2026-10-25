@@ -177,17 +177,6 @@ fn find<'a>(rows: &'a [Value], key: &str) -> Option<&'a Value> {
         .or_else(|| rows.iter().find(|s| background(s) && str_of(&s["job"]) == key))
 }
 
-/// The smallest compaction point with room above what the conversation holds already.
-fn default_context(tokens: i64) -> &'static str {
-    if tokens < 180_000 {
-        "256k"
-    } else if tokens < 300_000 {
-        "400k"
-    } else {
-        "1m"
-    }
-}
-
 fn idle(s: &Value) -> bool {
     s["status"] == "idle" && s["question"] != true
 }
@@ -517,13 +506,17 @@ impl Adopter {
         let kids = tokio::task::spawn_blocking(move || descendants(pid)).await.unwrap_or_default();
         let model = match (wish.model.as_str(), s["model"].as_str().filter(|m| !m.is_empty())) {
             ("", Some(m)) => format!("claude-{m}"),
-            ("", None) => "opus".into(),
+            ("", None) => crate::plan::get().work.clone(),
             (m, _) => m.into(),
         };
         let effort = Some(wish.effort.clone())
             .filter(|e| !e.is_empty())
             .or_else(|| s["effort"].as_str().filter(|e| !e.is_empty()).map(String::from));
-        let context = if wish.context.is_empty() { default_context(tokens).to_string() } else { wish.context.clone() };
+        let context = if wish.context.is_empty() {
+            crate::plan::get().context_for(tokens).to_string()
+        } else {
+            wish.context.clone()
+        };
         let a = Adoption {
             name: if wish.name.is_empty() { name.clone() } else { wish.name.clone() },
             session_id: str_of(&s["session_id"]),

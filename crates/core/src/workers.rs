@@ -55,9 +55,10 @@ pub const EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 pub const MODELS: [&str; 3] = ["opus", "sonnet", "haiku"];
 /// What Claude Code's /effort command answers (no model turn): not part of the task.
 const EFFORT_SET: [&str; 2] = ["Set effort level", "Effort level"];
-/// The context a shikigami may fill before it compacts, in tokens: the user keeps most at 256-400k, 1m only where
-/// really needed.
-pub const CONTEXTS: [(&str, f64); 3] = [("256k", 256_000.0), ("400k", 400_000.0), ("1m", 1_000_000.0)];
+/// The context a shikigami may fill before it compacts, in tokens: most at 256-400k, 1m only where really needed,
+/// 200k where the plan's models hold no more (crate::plan says which it offers).
+pub const CONTEXTS: [(&str, f64); 4] =
+    [("200k", 200_000.0), ("256k", 256_000.0), ("400k", 400_000.0), ("1m", 1_000_000.0)];
 pub const ACTIVE: [&str; 2] = ["running", "asking"];
 /// How long a started process must stay up before adopt ends the user's session.
 const START_SETTLE: Duration = Duration::from_secs(1);
@@ -400,7 +401,7 @@ impl Worker {
     pub fn prompt(&self) -> String {
         let r = self.rec();
         let pool = self.pool();
-        let subagents = r["subagents"].as_str().filter(|s| !s.is_empty()).unwrap_or("haiku");
+        let subagents = r["subagents"].as_str().filter(|s| !s.is_empty()).unwrap_or(&crate::plan::get().quick);
         let mut text = PROMPT
             .replace("{name}", r["name"].as_str().unwrap_or(""))
             .replace("{subagents}", subagents)
@@ -422,7 +423,7 @@ impl Worker {
 
     fn env(&self) -> Vec<(String, String)> {
         let r = self.rec();
-        let subagents = r["subagents"].as_str().filter(|s| !s.is_empty()).unwrap_or("haiku");
+        let subagents = r["subagents"].as_str().filter(|s| !s.is_empty()).unwrap_or(&crate::plan::get().quick);
         // No auto-memory: a shikigami reports what it learned, and seimei decides what is kept. The todo tools
         // (TaskCreate, TaskUpdate) are off by default for current models: the board mirrors them.
         let mut env = self.pool().plugins.env(r["name"].as_str().unwrap_or(""));
@@ -2210,8 +2211,9 @@ impl Pool {
         if s.effort.as_deref().is_some_and(|e| !EFFORTS.contains(&e)) {
             return Err(format!("effort is one of {}", EFFORTS.join(", ")));
         }
-        if !CONTEXTS.iter().any(|c| c.0 == s.context) {
-            return Err(format!("context is one of {}", CONTEXTS.map(|c| c.0).join(", ")));
+        let contexts = crate::plan::get().contexts();
+        if !contexts.contains(&s.context.as_str()) {
+            return Err(format!("context is one of {}", contexts.join(", ")));
         }
         if let Some(link) = &s.link
             && !self.board.lock().unwrap().knows(link)
@@ -2237,10 +2239,10 @@ impl Pool {
         // An ACP agent picks its own model: the record names the agent.
         let model = match harness {
             Some(h) => h.to_string(),
-            None if s.model.is_empty() => "opus".to_string(),
+            None if s.model.is_empty() => crate::plan::get().work.clone(),
             None => s.model.clone(),
         };
-        let subagents = if s.subagents.is_empty() { "haiku".to_string() } else { s.subagents.clone() };
+        let subagents = if s.subagents.is_empty() { crate::plan::get().quick.clone() } else { s.subagents.clone() };
         let cwd = path.display().to_string();
         let mut rec = json!({"id": hex(&random_bytes(4)), "name": name, "task": s.task, "cwd": cwd, "model": model,
             "effort": s.effort, "context_cap": s.context, "subagents": subagents, "session_id": new_uuid(),
@@ -2336,7 +2338,7 @@ impl Pool {
                 let at = now();
                 let task = format!("Adopted from your session \"{}\".", a.origin);
                 let rec = json!({"id": hex(&random_bytes(4)), "name": slug(&a.name), "task": task, "cwd": a.cwd,
-                    "model": a.model, "effort": a.effort, "context_cap": a.context, "subagents": "haiku",
+                    "model": a.model, "effort": a.effort, "context_cap": a.context, "subagents": crate::plan::get().quick,
                     "session_id": a.session_id, "state": "starting", "created": at, "updated": at, "summary": "",
                     "started": true, "adopted": a.origin});
                 (self.add_worker(rec)?, None)
@@ -2386,7 +2388,7 @@ impl Pool {
                 }
                 self.events.add(json!({"type": "worker", "worker": w.id, "name": r["name"], "event": "summoned",
                     "text": r["task"], "cwd": r["cwd"], "model": r["model"], "effort": r["effort"],
-                    "context_cap": r["context_cap"], "subagents": "haiku"}));
+                    "context_cap": r["context_cap"], "subagents": crate::plan::get().quick}));
             }
             Some(old) => {
                 let gone = &old["released"];

@@ -55,6 +55,7 @@
      "context": {
       "type": "string",
       "enum": [
+       "200k",
        "256k",
        "400k",
        "1m"
@@ -343,7 +344,7 @@
    "name": "usage"
   },
   {
-   "description": "Adopt one of the user's interactive or background sessions as a shikigami: its Claude Code ends (a background one through claude stop) and the same conversation goes on as a shikigami, reporting like any other. when: idle (default, at its next idle) or now (interrupts it first). Optional name (default: the session's), model, effort and context (default: the session's model and effort, the smallest of 256k/400k/1m above what it holds). close_window closes its terminal afterwards. It goes on the task board like a summoned one: a new task (project from its folder unless given) or the task_id you name. The user approves first; you hear what ended with it.",
+   "description": "Adopt one of the user's interactive or background sessions as a shikigami: its Claude Code ends (a background one through claude stop) and the same conversation goes on as a shikigami, reporting like any other. when: idle (default, at its next idle) or now (interrupts it first). Optional name (default: the session's), model, effort and context (default: the session's model and effort, the smallest context with room above what it holds). close_window closes its terminal afterwards. It goes on the task board like a summoned one: a new task (project from its folder unless given) or the task_id you name. The user approves first; you hear what ended with it.",
    "inputSchema": {
     "properties": {
      "session": {
@@ -377,6 +378,7 @@
      "context": {
       "type": "string",
       "enum": [
+       "200k",
        "256k",
        "400k",
        "1m"
