@@ -101,7 +101,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
 /* Top app bar */
-.bar { display: flex; align-items: center; gap: 12px; height: 64px; padding: 0 16px 0 12px; padding-top: env(safe-area-inset-top); }
+.bar { display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 0 16px 0 12px; padding-top: env(safe-area-inset-top); }
 /* The seiman, in the element's colour. */
 .glyph { display: block; flex: none; background: currentColor; -webkit-mask: url(mark.svg) center / contain no-repeat; mask: url(mark.svg) center / contain no-repeat; }
 .glyph.g22 { width: 22px; height: 22px; }
@@ -302,9 +302,10 @@ body.offline .thread { opacity: .45; transition: opacity .4s; }
 /* Composer */
 .composer { padding: 10px 12px 2px; }
 .composer-inner { max-width: 720px; margin: 0 auto; display: flex; align-items: flex-end; gap: 8px; }
-.field { flex: 1; display: flex; background: var(--container-high); border-radius: 28px; min-height: 52px; }
+/* min-width 0: at large text the textarea's own width would push Send and Stop off the screen. */
+.field { flex: 1; min-width: 0; display: flex; background: var(--container-high); border-radius: 28px; min-height: 52px; }
 .field textarea {
-  flex: 1; resize: none; border: 0; outline: none; background: none; color: var(--text);
+  flex: 1; min-width: 0; resize: none; border: 0; outline: none; background: none; color: var(--text);
   font: 15px/1.4 var(--sans); padding: 15px 20px; min-height: 52px; max-height: 168px;
 }
 .field textarea::placeholder { color: var(--text-3); }
@@ -332,6 +333,13 @@ body.offline .composer { opacity: .5; pointer-events: none; }
 .btn.tonal { background: var(--tonal); color: var(--on-tonal); }
 .btn.text { background: none; color: var(--primary); padding: 0 14px; min-height: 40px; }
 .btn:disabled { opacity: .5; pointer-events: none; }
+/* An answer on its way: the loading indicator over the hidden label, so the button keeps its size. */
+.btn.busy { position: relative; color: transparent; }
+.btn.busy:disabled { opacity: 1; }
+.btn.busy .loader { position: absolute; inset: 0; margin: auto; width: 24px; height: 24px; }
+.btn.busy .loader > i { width: 20px; height: 20px; background: var(--on-primary); }
+.btn.tonal.busy .loader > i { background: var(--on-tonal); }
+.btn.text.busy .loader > i { background: var(--primary); }
 
 /* Login */
 body.login { display: grid; place-items: center; grid-template-rows: 1fr; padding: 24px 16px; }
@@ -664,9 +672,9 @@ button.g::after { content: ""; position: absolute; inset: -13px; }
 body:not([data-tab="chat"]) .composer { display: none; }
 body.typing .navbar { display: none; }
 body.typing .composer { padding-bottom: 10px; }
-.navbar { display: flex; height: 64px; max-width: 720px; margin: 0 auto; padding: 0 8px; }
+.navbar { display: flex; min-height: 64px; max-width: 720px; margin: 0 auto; padding: 0 8px; }
 .nav-item {
-  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 0;
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 6px 0;
   border: 0; border-radius: 16px; background: none; color: var(--text-3); font: 500 12px/16px var(--sans); letter-spacing: .02em;
 }
 .nav-item.sl::after { display: none; }

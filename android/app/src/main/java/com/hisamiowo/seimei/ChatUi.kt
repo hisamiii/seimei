@@ -12,6 +12,10 @@ import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
@@ -750,6 +754,9 @@ fun WorkerCard(w: Item.Worker) {
     }
     var open by rememberSaveable(w.key) { mutableStateOf(false) }
     var clipped by remember { mutableStateOf(false) }
+    // The body's full height against the box it shows in: large text clips far below 400 characters.
+    var full by remember { mutableIntStateOf(0) }
+    var shown by remember { mutableIntStateOf(0) }
     Card(highlight = w.event == "asking" && w.settled == null) {
         CardHead(icon, bg, fg, title, if (w.event == "summoned") listOf(w.model, w.effort, w.contextCap, home(w.cwd)).filter { it.isNotEmpty() }.joinToString(" · ")
             else w.settled, mono = w.event == "summoned")
@@ -757,8 +764,14 @@ fun WorkerCard(w: Item.Worker) {
             val max = if (open) Int.MAX_VALUE else if (w.event == "summoned") 3 else 6
             if (w.event == "summoned") Text(w.text, fontSize = 14.sp, color = LocalExtra.current.text2, maxLines = max, overflow = TextOverflow.Ellipsis,
                 onTextLayout = { if (!open) clipped = it.hasVisualOverflow })
-            else Box(Modifier.animateContentSize().heightIn(max = if (open) 10_000.dp else 140.dp)) { Md(w.text, 14, LocalExtra.current.text2) }
-            if (clipped || w.event != "summoned" && w.text.length > 400) {
+            else Box(Modifier.animateContentSize().heightIn(max = if (open) 10_000.dp else 140.dp).clipToBounds().onSizeChanged { shown = it.height }) {
+                Box(Modifier.wrapContentHeight(Alignment.Top, unbounded = true).onSizeChanged { full = it.height }) { Md(w.text, 14, LocalExtra.current.text2) }
+                if (!open && full > shown) {
+                    Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(28.dp)
+                        .background(Brush.verticalGradient(listOf(Color.Transparent, cs.surfaceContainer))))
+                }
+            }
+            if (open || if (w.event == "summoned") clipped else full > shown) {
                 Text(if (open) "Show less" else "Show more", color = cs.primary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
                     modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { open = !open }.padding(vertical = 12.dp, horizontal = 4.dp))
             }
@@ -849,9 +862,28 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
         "approved" -> OK_BG to LocalExtra.current.ok
         else -> BAD_BG to cs.error
     }
-    fun answer(approve: Boolean, option: String?, note: String? = null) {
+    // Which button was tapped, and whether the answer took over 200 ms: that button then shows it is on its way.
+    var tapped by remember(a.aid) { mutableStateOf("") }
+    val slow by produceState(false, sent) {
+        value = false
+        if (sent) {
+            delay(200)
+            value = true
+        }
+    }
+    fun answer(approve: Boolean, option: String?, note: String? = null, key: String = option ?: "") {
         sent = true
+        tapped = key
         vm.decide(a.aid, approve, option, note) { sent = false }
+    }
+    // The indicator sits over the hidden label, so the button keeps its size.
+    @Composable
+    fun Label(key: String, text: String) {
+        val busy = slow && tapped == key
+        Box(contentAlignment = Alignment.Center) {
+            Text(text, Modifier.alpha(if (busy) 0f else 1f))
+            if (busy) CircularProgressIndicator(Modifier.size(18.dp), color = LocalContentColor.current, strokeWidth = 2.dp)
+        }
     }
     val who = if (a.subagent) "${a.who}'s subagent" else a.who
     Card(highlight = a.outcome == null) {
@@ -903,7 +935,7 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
                 Spacer(Modifier.weight(1f))
                 TextButton({ noting = false }, enabled = !sent) { Text("Cancel") }
                 Spacer(Modifier.width(4.dp))
-                Button({ answer(false, "deny", note.trim()) }, enabled = !sent) { Text(if (a.action == "plan") "Keep planning" else "Deny with note") }
+                Button({ answer(false, "deny", note.trim(), "note") }, enabled = !sent) { Label("note", if (a.action == "plan") "Keep planning" else "Deny with note") }
             } else {
                 if (a.expires > 0) {
                     val left by produceState(minutesLeft(a.expires), a.expires) {
@@ -916,9 +948,9 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
                         modifier = Modifier.weight(1f))
                 } else Text("Waits for you", fontSize = 13.sp, color = LocalExtra.current.text3, modifier = Modifier.weight(1f))
                 if (perm) IconButton({ noting = true }, enabled = !sent) { Icon(PEN, "Add a note", Modifier.size(20.dp)) }
-                TextButton({ answer(false, if (perm) "deny" else null) }, enabled = !sent) { Text(deny?.label ?: "Deny") }
+                TextButton({ answer(false, if (perm) "deny" else null, key = "deny") }, enabled = !sent) { Label("deny", deny?.label ?: "Deny") }
                 Spacer(Modifier.width(4.dp))
-                Button({ answer(true, if (perm) "once" else null) }, enabled = !sent) { Text(once?.label ?: "Approve") }
+                Button({ answer(true, if (perm) "once" else null, key = "once") }, enabled = !sent) { Label("once", once?.label ?: "Approve") }
             }
         }
     }

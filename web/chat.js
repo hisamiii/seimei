@@ -337,12 +337,27 @@ function approvalCard(ev) {
   const once = opts.find((o) => o.id === 'once');
   const denyOpt = opts.find((o) => o.id === 'deny');
   const buttons = [];
-  const answer = async (decision, option, note) => {
+  const answer = async (decision, option, note, btn) => {
     buttons.forEach((b) => (b.disabled = true));
+    // Past 200 ms the tapped button shows the answer is on its way.
+    const slow = setTimeout(() => {
+      if (!btn) return;
+      const loader = el('span', 'loader bare');
+      loader.append(el('i'));
+      btn.classList.add('busy');
+      btn.append(loader);
+    }, 200);
     try {
       await post(`api/approvals/${ev.aid}`, { decision, ...(perm ? { option } : {}), ...(note ? { note } : {}) });
-    } catch {
-      if (!outcomes.has(ev.aid)) buttons.forEach((b) => (b.disabled = false));
+    } catch (e) {
+      // 409: answered elsewhere, the event stream settles the card.
+      if (e.message === '409' || outcomes.has(ev.aid)) return;
+      buttons.forEach((b) => (b.disabled = false));
+      snack("Couldn't send your answer", { label: 'Retry', run: () => answer(decision, option, note, btn) });
+    } finally {
+      clearTimeout(slow);
+      btn?.classList.remove('busy');
+      btn?.querySelector('.loader')?.remove();
     }
   };
   const extra = opts.filter((o) => o.id !== 'once' && o.id !== 'deny');
@@ -350,7 +365,7 @@ function approvalCard(ev) {
     const list = el('div', 'choices');
     for (const o of extra) {
       const b = choice(o);
-      b.addEventListener('click', () => answer('approve', o.id));
+      b.addEventListener('click', () => answer('approve', o.id, '', b));
       buttons.push(b);
       list.append(b);
     }
@@ -361,8 +376,8 @@ function approvalCard(ev) {
   const deny = el('button', 'btn text sl', denyOpt?.label || 'Deny');
   const ok = el('button', 'btn filled sl', once?.label || 'Approve');
   deny.type = ok.type = 'button';
-  deny.addEventListener('click', () => answer('deny', 'deny'));
-  ok.addEventListener('click', () => answer('approve', 'once'));
+  deny.addEventListener('click', () => answer('deny', 'deny', '', deny));
+  ok.addEventListener('click', () => answer('approve', 'once', '', ok));
   buttons.push(deny, ok);
   foot.append(left);
   if (perm) {
@@ -383,7 +398,7 @@ function approvalCard(ev) {
       noteFoot.append(el('span', 'left'), cancel, send);
       buttons.push(cancel, send);
       cancel.addEventListener('click', () => { field.remove(); noteFoot.remove(); foot.hidden = false; });
-      send.addEventListener('click', () => answer('deny', 'deny', field.value.trim()));
+      send.addEventListener('click', () => answer('deny', 'deny', field.value.trim(), send));
       foot.hidden = true;
       card.append(field, noteFoot);
       field.focus();

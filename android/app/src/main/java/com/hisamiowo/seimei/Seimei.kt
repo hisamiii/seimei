@@ -198,6 +198,8 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     var snack by mutableStateOf<String?>(null)
     /** What the snack's Undo does, set together with snack. */
     var undo: (() -> Unit)? = null
+    /** The label of the snackbar's action that runs undo. */
+    var snackAction = "Undo"
     /** The Archived list (#43) is open, and what it is searched for. */
     var archOpen by mutableStateOf(false)
     var archQuery by mutableStateOf("")
@@ -1207,7 +1209,12 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 api.post("api/approvals/$aid", JSONObject().put("decision", if (approve) "approve" else "deny")
                     .apply { option?.let { put("option", it) }; if (!note.isNullOrEmpty()) put("note", note) })
             } catch (e: IOException) {
+                // 409: answered elsewhere, the event stream settles the card.
+                if (e is HttpError && e.code == 409) return@launch
                 onFail()
+                undo = { decide(aid, approve, option, note, onFail) }
+                snackAction = "Retry"
+                snack = "Couldn't send your answer"
             }
         }
     }

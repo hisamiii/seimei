@@ -480,12 +480,14 @@ fun AppScreen(vm: Seimei) {
     LaunchedEffect(vm.snack) {
         val t = vm.snack ?: return@LaunchedEffect
         val undo = vm.undo
+        val label = vm.snackAction
         vm.snack = null
         vm.undo = null
+        vm.snackAction = "Undo"
         snackScope.launch {
             snacks.currentSnackbarData?.dismiss()
             // With an action, a snackbar stays up until tapped unless given a duration.
-            val shown = snacks.showSnackbar(t, actionLabel = if (undo != null) "Undo" else null, duration = SnackbarDuration.Long)
+            val shown = snacks.showSnackbar(t, actionLabel = if (undo != null) label else null, duration = SnackbarDuration.Long)
             if (shown == SnackbarResult.ActionPerformed) undo?.invoke()
         }
     }
