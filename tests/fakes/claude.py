@@ -407,7 +407,7 @@ async def dispatcher(self: Fake, text: str, images: int):
         for m in done:
             await self.tool("mcp__seimei__peek", {"worker": m[2]})
         said = "\n".join(m[3] for m in done) if done else "Noted."
-        # A report that says "plain" is passed on unmarked; the rest is marked noise (one that asks still reaches the chat).
+        # A report that says "plain" is passed on unmarked; the rest is marked noise (a report still reaches the chat).
         await self.say(("" if "plain" in said else "trajectory: ") + said)
     else:
         await self.say(f"Echo: {text[:300]}" + (f" ({images} images)" if images else ""))

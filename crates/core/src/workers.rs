@@ -287,6 +287,8 @@ pub struct Worker {
     /// together are handled on separate tasks, and the last one asked is the one it waits on.
     asked: AtomicU64,
     shown: AtomicU64,
+    /// Its own tool calls (not its subagents'): every style::EVERY of them hears the user's style again.
+    calls: AtomicU64,
 }
 
 impl Worker {
@@ -463,7 +465,7 @@ impl Worker {
             hooks: vec![
                 ("PreToolUse".into(), vec![hook("pre", Some(HOOK_TIMEOUT))]),
                 ("PostToolUseFailure".into(), vec![hook("failed", None)]),
-                ("PostToolUse".into(), vec![hook("done", None), hook("nudge", None)]),
+                ("PostToolUse".into(), vec![hook("done", None), hook("nudge", None), hook("style", None)]),
             ],
             resume,
             session_id,
@@ -966,12 +968,14 @@ impl Session {
         }
         self.w.add(ev);
         self.connect().await?;
+        // The user's style rides on every message, for the model only (its log has what the user saw).
+        let text = crate::style::with(text, &crate::style::text(self.pool.state()));
         if self.acp.is_some() {
-            return self.prompt_acp(text.into());
+            return self.prompt_acp(text);
         }
         self.stopping = false;
         self.w.set("running", json!({"question": null}));
-        self.client.as_ref().expect("a session").query(text).map_err(|e| e.to_string())
+        self.client.as_ref().expect("a session").query(&text).map_err(|e| e.to_string())
     }
 
     async fn connect(&mut self) -> Result<(), String> {
@@ -1727,6 +1731,9 @@ impl Handler for Side {
                 "failed" => guard.failed(Some(&w.id), &input, tool_use_id.as_deref()),
                 "done" => guard.done(Some(&w.id), &input),
                 "nudge" => w.nudge(&input),
+                "style" if input.get("agent_id").is_none_or(|a| a.is_null()) => {
+                    crate::style::reminder(w.calls.fetch_add(1, Ordering::Relaxed) + 1, w.pool().state())
+                }
                 _ => json!({}),
             }
         })
@@ -1936,6 +1943,7 @@ impl Pool {
                         tx: Mutex::new(None),
                         asked: AtomicU64::new(0),
                         shown: AtomicU64::new(0),
+                        calls: AtomicU64::new(0),
                     })
                 })
                 .collect();
@@ -1995,6 +2003,11 @@ impl Pool {
             self.all().into_iter().map(|w| (w.get("created").as_f64().unwrap_or(0.0), w)).collect();
         ws.sort_by(|a, b| b.0.total_cmp(&a.0));
         ws.into_iter().map(|(_, w)| w).collect()
+    }
+
+    /// seimei's state folder.
+    pub fn state(&self) -> &Path {
+        self.path.parent().unwrap_or(Path::new("."))
     }
 
     pub fn running(&self) -> usize {
@@ -2273,6 +2286,7 @@ impl Pool {
             tx: Mutex::new(None),
             asked: AtomicU64::new(0),
             shown: AtomicU64::new(0),
+            calls: AtomicU64::new(0),
         });
         self.workers.lock().unwrap().push(w.clone());
         Ok(w)

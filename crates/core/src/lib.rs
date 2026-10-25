@@ -20,6 +20,7 @@ pub mod push;
 pub mod recall;
 pub mod sessions;
 pub mod shell;
+pub mod style;
 pub mod tasks;
 pub mod tools;
 pub mod transcripts;

@@ -1,5 +1,5 @@
 {
- "about": "The dispatcher's reply markers (head: lane markers and re: lines, final or while streaming; None means the start could still be a marker), turn labels (why) and reply quotes (quoted: the chip and the line seimei gets).",
+ "about": "The dispatcher's reply markers (head: lane markers and re: lines, final or while streaming; None means the start could still be a marker), turn labels (why), the class of the events that start a turn (class: user always reaches the chat, noise stays in the trajectory) and reply quotes (quoted: the chip and the line seimei gets).",
  "head": [
   {
    "text": "Plain reply.",
@@ -651,6 +651,52 @@
    },
    "chip": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
    "line": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+  }
+ ],
+ "class": [
+  {
+   "text": "[seimei] shikigami app-tester (ab12) finished: 3 bugs fixed",
+   "class": "user"
+  },
+  {
+   "text": "[seimei] Events:\n- claude-queue: q1's command ended but pid 5 still holds npu (2 min since)\n- shikigami asr-bench (cd34) failed: oom",
+   "class": "user"
+  },
+  {
+   "text": "[seimei] session \"kv-gate\" asks: Which branch?",
+   "class": "user"
+  },
+  {
+   "text": "[seimei] shikigami dev (ab12) waits on a permission card: Bash rm -r build",
+   "class": "user"
+  },
+  {
+   "text": "[seimei] claude-queue: kernel: amdxdna TDR timeout detected; grants closed until `cq grants on`",
+   "class": "user"
+  },
+  {
+   "text": "[seimei] claude-queue: moved pid 77 waybar out of the queue (desktop)",
+   "class": "noise"
+  },
+  {
+   "text": "[seimei] Events:\n- seimei restarted; resumed shikigami dev (told to check their state first)\n- session \"cleanup\" (pid 6575) was closed",
+   "class": "noise"
+  },
+  {
+   "text": "[seimei] shikigami dev (ab12) was interrupted by a restart",
+   "class": "noise"
+  },
+  {
+   "text": "[seimei] session \"cleanup\" (pid 6575) died without closing: killed or crashed",
+   "class": "other"
+  },
+  {
+   "text": "[seimei] session \"cleanup\" finished a turn",
+   "class": "other"
+  },
+  {
+   "text": "[seimei] Events:\n- claude-queue: q1's command ended but pid 5 still holds npu\n- session \"x\" finished a turn",
+   "class": "other"
   }
  ]
 }

@@ -26,12 +26,10 @@ use crate::tools::Tools;
 use crate::usage::Usage;
 use crate::util::chars;
 
-/// style.md is appended to every message the dispatcher gets, for the model only; past this it is cut.
-const STYLE_MAX: usize = 1000;
-/// A reply that starts with one of these goes to that lane, whatever started the turn: chat: moves the rest of an
-/// event turn to the chat, trajectory: keeps a reply out of the chat (one that asks something still goes there). A
-/// first line "re: <words from one of the user's messages>" anchors the reply to that message. They combine, in any
-/// order.
+/// A reply that starts with one of these overrides where its turn's class puts it: chat: moves the rest of an event
+/// turn to the chat, trajectory: keeps a reply out of the chat (one that asks something, or answers events that need
+/// the user, still goes there). A first line "re: <words from one of the user's messages>" anchors the reply to that
+/// message. They combine, in any order.
 const MARKERS: [&str; 2] = ["chat:", "trajectory:"];
 const RE: &str = "re:";
 /// A re: line longer than this, or one that never ends, is text.
@@ -261,11 +259,54 @@ enum Content {
     Blocks(Value),
 }
 
-/// What started a turn: the user's message (its event id) or events (what to call the turn).
+/// What started a turn: the user's message (its event id) or events (what to call the turn, and their class).
 #[derive(Clone)]
 pub enum Source {
     User(i64),
-    Event(String),
+    Event(String, Class),
+}
+
+/// Where an event turn's closing reply goes, by what started it. The reply's markers override it, except that
+/// trajectory: cannot keep what needs the user out of the chat.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Class {
+    /// Queue moves and waits, restarts, closed sessions: the trajectory.
+    Noise,
+    /// The rest: the chat, unless marked trajectory:.
+    #[default]
+    Other,
+    /// A shikigami finished, failed or asks; a session asks; a card waits; a GPU fault: always the chat.
+    User,
+}
+
+static NEEDS_USER: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(concat!(
+        r"^shikigami \S+ \(\w+\) (finished|failed|asks|waits on a permission card)",
+        r"|^session .* asks: |waits on the server for a permission prompt",
+        r"|^claude-queue: .*(grants closed until|memory pressure|GB available while)",
+    ))
+    .unwrap()
+});
+static NOISE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"^claude-queue: |^seimei restarted|was interrupted by a restart$|^session ".*" \(pid \d+\) was closed$"#,
+    )
+    .unwrap()
+});
+
+/// The class of the [seimei] lines that start a turn: the user's if one needs them, noise if all are.
+pub fn class(text: &str) -> Class {
+    let lines: Vec<&str> = (text.lines())
+        .map(|l| l.trim().trim_start_matches("[seimei] ").trim_start_matches("- "))
+        .filter(|l| !l.is_empty() && *l != "Events:" && !l.starts_with("Since your last turn"))
+        .collect();
+    if lines.iter().any(|l| NEEDS_USER.is_match(l)) {
+        Class::User
+    } else if !lines.is_empty() && lines.iter().all(|l| NOISE.is_match(l)) {
+        Class::Noise
+    } else {
+        Class::Other
+    }
 }
 
 enum Cmd {
@@ -518,7 +559,7 @@ impl Dispatcher {
 
     /// Something the dispatcher should act on now.
     pub fn wake(&self, text: &str) {
-        let src = Source::Event(why(text));
+        let src = Source::Event(why(text), class(text));
         let _ = self.tx.send(Cmd::Deliver { text: format!("[seimei] {text}"), images: vec![], src: Some(src) });
     }
 
@@ -582,6 +623,10 @@ impl Dispatcher {
                     "PostToolUseFailure".into(),
                     vec![HookMatcher { matcher: None, callbacks: vec!["failed".into()], timeout: None }],
                 ),
+                (
+                    "PostToolUse".into(),
+                    vec![HookMatcher { matcher: None, callbacks: vec!["style".into()], timeout: None }],
+                ),
             ],
             // Only the dispatcher's compactions get the checklist: a --settings layer, not ~/.claude.
             settings: Some(crate::recall::settings(&checklist)),
@@ -599,12 +644,15 @@ impl Dispatcher {
         self.prompt_news();
         let mut t = Turns::new(self.clone());
         let (mut delay, mut failures) = (Duration::from_secs(1), 0u32);
+        let calls = Arc::new(std::sync::atomic::AtomicU64::new(0));
         loop {
             let handler: Arc<dyn Handler> = Arc::new(Seimei {
                 approvals: self.approvals.clone(),
                 guard: self.guard.clone(),
                 tools: self.tools.clone(),
                 mode: self.cfg.mode.clone(),
+                state: self.state.clone(),
+                calls: calls.clone(),
             });
             let why = match Client::connect(self.options(), handler).await {
                 Ok(mut client) => {
@@ -658,6 +706,9 @@ struct Seimei {
     guard: Arc<Guard>,
     tools: Arc<Tools>,
     mode: String,
+    state: PathBuf,
+    /// Its own tool calls (not its subagents'): every style::EVERY of them hears the user's style again.
+    calls: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl Handler for Seimei {
@@ -669,11 +720,14 @@ impl Handler for Seimei {
     }
 
     fn hook(&self, callback_id: String, input: Value, tool_use_id: Option<String>) -> BoxFuture<Value> {
-        let guard = self.guard.clone();
+        let (guard, state, calls) = (self.guard.clone(), self.state.clone(), self.calls.clone());
         Box::pin(async move {
             match callback_id.as_str() {
                 "pre" => guard.pre("seimei", None, &input, tool_use_id.as_deref()).await,
                 "failed" => guard.failed(None, &input, tool_use_id.as_deref()),
+                "style" if input.get("agent_id").is_none_or(|a| a.is_null()) => {
+                    crate::style::reminder(calls.fetch_add(1, Ordering::Relaxed) + 1, &state)
+                }
                 _ => json!({}),
             }
         })
@@ -714,11 +768,12 @@ struct Turns {
     held: Option<Map<String, Value>>,
     /// What was sent since the last model step; see step().
     inputs: Vec<Source>,
+    /// What the events that started this turn (and joined it) are: the closing reply's default place.
+    class: Class,
     /// What Claude Code itself put in since the last model step (a background task ending, a peer's message), named
     /// for an event turn that has no input of seimei's.
     own: Option<String>,
     rate_limits: std::collections::HashMap<String, Value>,
-    style_seen: (Option<(std::time::SystemTime, u64)>, String),
 }
 
 /// What the session loop does after a message was handled.
@@ -744,9 +799,9 @@ impl Turns {
             block_lane: None,
             held: None,
             inputs: vec![],
+            class: Class::Noise,
             own: None,
             rate_limits: Default::default(),
-            style_seen: (None, String::new()),
         }
     }
 
@@ -801,7 +856,8 @@ impl Turns {
                     // Notes waited HOLD with no turn to ride on: they go now, as a turn of their own.
                     self.notes_due = None;
                     if !self.notes.is_empty() {
-                        let src = Some(Source::Event("notes waited 30 min".into()));
+                        let notes: Vec<&str> = self.notes.iter().map(|n| n.rsplit('\0').next().unwrap_or(n)).collect();
+                        let src = Some(Source::Event("notes waited 30 min".into(), class(&notes.join("\n"))));
                         if let Some(c) = self.deliver(String::new(), vec![], src)
                             && let Err(e) = write(client, c)
                         {
@@ -854,23 +910,6 @@ impl Turns {
         }
     }
 
-    /// style.md as it is now (read again when it changes); "" when missing or empty.
-    fn style(&mut self) -> String {
-        let path = self.d.state.join("style.md");
-        let Ok(meta) = std::fs::metadata(&path) else { return String::new() };
-        let key = meta.modified().ok().map(|m| (m, meta.len()));
-        if key != self.style_seen.0 {
-            let Ok(text) = std::fs::read(&path) else { return String::new() };
-            let mut style = String::from_utf8_lossy(&text).trim().to_string();
-            if style.chars().count() > STYLE_MAX {
-                eprintln!("seimei: style.md is {} chars; only the first {STYLE_MAX} are sent", style.chars().count());
-                style = chars(&style, STYLE_MAX);
-            }
-            self.style_seen = (key, style);
-        }
-        self.style_seen.1.clone()
-    }
-
     /// What goes to the session with a message: notes first, the board's drift on a new turn, the After compaction
     /// block once, the style reminder last. Returns the message to write.
     fn deliver(&mut self, mut text: String, images: Vec<(String, String)>, src: Option<Source>) -> Option<Content> {
@@ -900,10 +939,7 @@ impl Turns {
             text = if text.is_empty() { back } else { format!("{back}\n\n{text}") };
         }
         // The user's style reminder rides on every message; the event log already has what the user saw.
-        let style = self.style();
-        if !style.is_empty() {
-            text = format!("{text}\n\n[style]\n{style}");
-        }
+        text = crate::style::with(&text, &crate::style::text(&self.d.state));
         let content = if images.is_empty() {
             Content::Text(text)
         } else {
@@ -1030,8 +1066,12 @@ impl Turns {
                         // More of the turn: the held reply did not end it.
                         self.route_held(false);
                     }
-                    // trajectory: is for noise; a reply that asks the user something goes to the chat anyway.
+                    // trajectory: is for noise; a reply that asks the user something, or answers what needs them, goes
+                    // to the chat anyway.
                     let asking = asks(&text);
+                    let needs_user =
+                        self.class == Class::User && self.events.turn().get("lane").is_some_and(|l| l == "t");
+                    let lanes: Vec<&str> = lanes.into_iter().filter(|m| *m == "chat:" || !needs_user).collect();
                     let mut place = Map::new();
                     for m in &lanes {
                         if *m == "chat:" {
@@ -1103,8 +1143,9 @@ impl Turns {
 
     fn result(&mut self, msg: ResultMessage) -> After {
         self.d.usage.turn("seimei", &msg.session_id, msg.model_usage.as_ref(), false);
-        // The held reply ended the turn: it is what the turn has to say, so it goes to the chat.
-        self.route_held(true);
+        // The held reply ended the turn: it is what the turn has to say, so it goes to the chat, unless only noise
+        // started the turn.
+        self.route_held(self.class != Class::Noise);
         if msg.is_error {
             let lane = self.events.turn().get("lane").cloned().unwrap_or(json!("c"));
             if self.stopping {
@@ -1117,6 +1158,7 @@ impl Turns {
             }
         }
         self.stopping = false;
+        self.class = Class::Noise;
         self.events.set_turn(Map::new());
         self.set(None, Some(false));
         After::Idle
@@ -1132,8 +1174,13 @@ impl Turns {
         }
         let user = took.iter().rev().find_map(|s| match s {
             Source::User(id) => Some(*id),
-            Source::Event(_) => None,
+            Source::Event(..) => None,
         });
+        for s in &took {
+            if let Source::Event(_, c) = s {
+                self.class = self.class.max(*c);
+            }
+        }
         if let Some(id) = user {
             let mut turn = Map::new();
             turn.insert("lane".into(), json!("c"));
@@ -1141,8 +1188,12 @@ impl Turns {
             self.events.set_turn(turn);
         } else if self.events.turn().is_empty() {
             let why = match took.first() {
-                Some(Source::Event(w)) => w.clone(),
-                _ => self.own.take().unwrap_or_default(),
+                Some(Source::Event(w, _)) => w.clone(),
+                _ => {
+                    // Claude Code's own input started it: not noise.
+                    self.class = self.class.max(Class::Other);
+                    self.own.take().unwrap_or_default()
+                }
             };
             let mut turn = Map::new();
             turn.insert("lane".into(), json!("t"));

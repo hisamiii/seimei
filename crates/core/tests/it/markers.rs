@@ -1,7 +1,7 @@
 //! tests/cases/markers.json: the dispatcher's reply markers,
-//! turn labels and reply quotes.
+//! turn labels, event classes and reply quotes.
 
-use seimei_core::dispatcher::{head, quoted, why};
+use seimei_core::dispatcher::{Class, class, head, quoted, why};
 use serde_json::{Value, json};
 
 #[test]
@@ -21,6 +21,17 @@ fn marker_cases() {
         let got = why(c["text"].as_str().unwrap());
         if got != c["why"] {
             fails.push(format!("why {}: {got}", c["text"]));
+        }
+    }
+    for c in doc["class"].as_array().unwrap() {
+        let want = match c["class"].as_str().unwrap() {
+            "user" => Class::User,
+            "noise" => Class::Noise,
+            _ => Class::Other,
+        };
+        let got = class(c["text"].as_str().unwrap());
+        if got != want {
+            fails.push(format!("class {}: {got:?}", c["text"]));
         }
     }
     for c in doc["quoted"].as_array().unwrap() {
