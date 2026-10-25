@@ -244,7 +244,13 @@ function resume() {
     }
   }, GRACE);
 }
-document.addEventListener('visibilitychange', () => { if (!document.hidden) resume(); });
+document.addEventListener('visibilitychange', () => {
+  // A hidden page is away: this browser's notifications (if on) take over until it shows again.
+  fetch('api/presence', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ view: document.hidden ? 'hidden' : 'chat' }) }).catch(() => null);
+  if (document.hidden) return;
+  resume();
+  navigator.serviceWorker?.getRegistration().then((r) => r?.getNotifications()).then((ns) => ns?.forEach((n) => n.close())).catch(() => null);
+});
 window.addEventListener('pageshow', (e) => { if (e.persisted) resume(); });
 
 async function start() {

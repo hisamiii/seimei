@@ -365,3 +365,62 @@ fn decrypt(body: &[u8], ua: &openssl::ec::EcKey<openssl::pkey::Private>, auth: &
         openssl::symm::decrypt_aead(openssl::symm::Cipher::aes_128_gcm(), &cek, Some(&nonce), &[], ct, tag).unwrap();
     plain[..plain.len() - 1].to_vec()
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_browser_gets_pushes_while_its_page_is_away() {
+    let (f, addr) = fake().await;
+    let d = dir("browser");
+    let events = Arc::new(EventLog::open(&d.join("e.jsonl")).unwrap());
+    let auth = Arc::new(Auth::new(&d, "http://localhost:8417"));
+    let token = auth.new_session("password", "Firefox", None);
+    let mut headers = HeaderMap::new();
+    headers.insert("cookie", format!("{}={token}", auth.cookie).parse().unwrap());
+    let b = auth.browser_of(&headers).unwrap();
+    assert!(b.starts_with("b:"));
+    let group = openssl::ec::EcGroup::from_curve_name(openssl::nid::Nid::X9_62_PRIME256V1).unwrap();
+    let ua = openssl::ec::EcKey::generate(&group).unwrap();
+    let up = |which: &str| {
+        json!({"up": format!("http://localhost:{}/up/{which}", addr.port()), "p256dh": b64url(&seimei_core::push::point(&ua)),
+               "auth": b64url(b"0123456789abcdef")})
+    };
+    auth.set_browser_push(&b, Some(up("ok")));
+    let p = Push::new(
+        events.clone(),
+        Some(auth.clone()),
+        Fcm::new(d.join("none.json")),
+        &d,
+        WebPush::new(d.join("vapid.pem"), "x"),
+    );
+    tokio::spawn(p.clone().run());
+    settle().await;
+    let card = |aid: &str| {
+        json!({"type": "approval", "aid": aid, "who": "seimei", "action": "command",
+                                  "target": "run a command", "detail": "ls"})
+    };
+
+    // On screen: nothing. Hidden: it is away and gets the card.
+    let open = p.opened(Some(&b), Box::new(|| true));
+    events.add(card("a1"));
+    settle().await;
+    assert!(f.up.lock().unwrap().is_empty(), "the page on screen gets no push");
+    p.shows(Some(&b), "hidden");
+    events.add(card("a2"));
+    settle().await;
+    let sent = std::mem::take(&mut *f.up.lock().unwrap());
+    assert_eq!(sent.len(), 1, "a hidden page is away");
+    let plain: Value = serde_json::from_slice(&decrypt(&sent[0].2, &ua, b"0123456789abcdef")).unwrap();
+    assert_eq!(plain["tag"], "approval:a2");
+
+    // A settled card takes its notification back on phones, never on a browser (it would show an empty one).
+    p.closed(Some(&b), open);
+    events.add(json!({"type": "approval_done", "aid": "a2", "decision": "allow"}));
+    settle().await;
+    assert!(f.up.lock().unwrap().is_empty(), "no take-back to a browser");
+
+    // A push service that dropped the subscription ends it.
+    auth.set_browser_push(&b, Some(up("old")));
+    p.test(&b);
+    settle().await;
+    assert!(auth.push_devices().is_empty(), "the gone subscription is dropped");
+    std::fs::remove_dir_all(&d).unwrap();
+}

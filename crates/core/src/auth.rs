@@ -731,6 +731,9 @@ impl Auth {
 
     /// The phone's push record (a Firebase token, a UnifiedPush endpoint or the background connection); None stops it.
     pub fn set_push(&self, device: &str, rec: Option<Value>) {
+        if device.starts_with("b:") {
+            return self.set_browser_push(device, rec);
+        }
         let mut g = self.lock();
         let mut changed = false;
         for d in g.arr("devices").iter_mut() {
@@ -759,9 +762,36 @@ impl Auth {
         }
     }
 
+    /// Phones and browsers with a push record: a browser's id is "b:" and its session's key.
     pub fn push_devices(&self) -> Vec<Value> {
         let g = self.lock();
-        g.data["devices"].as_array().into_iter().flatten().filter(|d| d.get("push").is_some()).cloned().collect()
+        let phones = g.data["devices"].as_array().into_iter().flatten().filter(|d| d.get("push").is_some()).cloned();
+        let t = now();
+        let browsers = (g.data["sessions"].as_object().into_iter().flatten())
+            .filter(|(_, s)| s.get("push").is_some() && s["exp"].as_f64().unwrap_or(0.0) > t)
+            .map(|(k, s)| json!({"id": format!("b:{k}"), "push": s["push"]}));
+        phones.chain(browsers).collect()
+    }
+
+    /// The browser a request comes from ("b:" and its session's key): a logged-in session that is not a phone's.
+    pub fn browser_of(&self, headers: &HeaderMap) -> Option<String> {
+        let token = self.token(headers)?;
+        let s = self.current(headers)?;
+        (s.get("device").is_none()).then(|| format!("b:{}", key(&token)))
+    }
+
+    /// A browser's push subscription (a Web Push endpoint and keys); None stops it. It ends with the session.
+    pub fn set_browser_push(&self, browser: &str, rec: Option<Value>) {
+        let Some(k) = browser.strip_prefix("b:") else { return };
+        let mut g = self.lock();
+        let Some(s) = g.sessions().get_mut(k).and_then(Value::as_object_mut) else { return };
+        let changed = match rec {
+            Some(r) => s.insert("push".into(), r.clone()) != Some(r),
+            None => s.remove("push").is_some(),
+        };
+        if changed {
+            self.save(&mut g);
+        }
     }
 
     /// After a leak: every session ends, every passkey and phone goes. The password stays (change it with passwd).

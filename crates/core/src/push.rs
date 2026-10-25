@@ -443,7 +443,7 @@ struct State {
 }
 
 impl State {
-    /// Whether the app is on screen: a closed stream means the app just left.
+    /// Whether the app is on screen: a closed stream means the app just left, and a page in a hidden tab is away.
     fn is_open(&mut self, dev: &str) -> bool {
         let Some(streams) = self.open.get_mut(dev) else { return false };
         let had = !streams.is_empty();
@@ -451,7 +451,7 @@ impl State {
         if had && streams.is_empty() {
             self.left.insert(dev.into(), now());
         }
-        !streams.is_empty()
+        !streams.is_empty() && self.view.get(dev).is_none_or(|v| v != "hidden")
     }
 
     fn on_chat(&mut self, dev: &str) -> bool {
@@ -499,6 +499,8 @@ impl Push {
         let id = s.next;
         if let Some(d) = dev {
             s.open.entry(d.into()).or_default().push((id, alive));
+            // A page that opens is on screen until it says otherwise.
+            s.view.remove(d);
             s.pings.clear();
             s.keyed.clear();
         }
@@ -603,7 +605,8 @@ impl Push {
                     s.sent.drain(..n - 50);
                 }
             }
-            if !self.can_send(&rec) {
+            // A browser shows every push it gets: taking one back would show an empty one.
+            if !self.can_send(&rec) || (dev.starts_with("b:") && data.contains_key("cancel")) {
                 continue;
             }
             let out = match Self::way(&rec) {

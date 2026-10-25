@@ -1,4 +1,5 @@
-// The account menu: fingerprint login, the phone app and its pairing, the theme, the activity log, and logging out.
+// The account menu: fingerprint login, the phone app and its pairing, this browser's notifications, the theme, the
+// activity log, and logging out.
 import { deviceName, register, supported } from './passkey.js';
 import { $, el, clock, dayLabel, when, post, getJSON, toLogin, snack, ask } from './util.js';
 import { main, toBottom } from './chat.js';
@@ -16,6 +17,7 @@ export async function account() {
   }
   $('add-passkey').hidden = !supported();
   $('phones').hidden = false;
+  $('notify').hidden = !canPush();
   let dismissed = false;
   try { dismissed = localStorage.getItem('seimei.fp-card') === 'no'; } catch {}
   if (supported() && r.passkeys === 0 && !dismissed) {
@@ -59,6 +61,10 @@ $('phones').addEventListener('click', () => {
   menu.hidden = true;
   openPhones();
 });
+$('notify').addEventListener('click', () => {
+  menu.hidden = true;
+  openNotifications();
+});
 $('theme').addEventListener('click', () => {
   menu.hidden = true;
   openThemes();
@@ -67,6 +73,63 @@ $('audit').addEventListener('click', () => {
   menu.hidden = true;
   openAudit();
 });
+
+// ---------- this browser's notifications (Web Push; the phone app has its own) ----------
+
+const canPush = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+
+function b64url(s) {
+  const raw = atob(s.replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+}
+
+async function openNotifications() {
+  const info = await getJSON('api/push/web');
+  if (!info) return;
+  const body = [el('h2', 'list', 'Notifications')];
+  const block = el('div', 'pblock');
+  block.append(el('p', 'usage-note', info.on
+    ? 'This browser gets a notification when a card waits or seimei needs you, while this page is closed or hidden'
+    : 'Get a notification in this browser when a card waits or seimei needs you, while this page is closed or hidden'));
+  const ios = /iPhone|iPad/.test(navigator.userAgent) && !navigator.standalone;
+  if (Notification.permission === 'denied') {
+    block.append(el('p', 'usage-note', "Notifications are blocked for this site in the browser's settings"));
+  } else if (ios && !info.on) {
+    block.append(el('p', 'usage-note', 'On iPhone, add this page to the Home Screen first (Share, Add to Home Screen), then turn them on there'));
+  } else {
+    const b = el('button', info.on ? 'btn text' : 'btn filled', info.on ? 'Turn off' : 'Turn on');
+    b.type = 'button';
+    b.addEventListener('click', async () => {
+      b.disabled = true;
+      const done = await (info.on ? pushOff() : pushOn(info.vapid)).catch(() => false);
+      b.disabled = false;
+      if (done === false) return snack(info.on ? "Couldn't turn them off" : "Couldn't turn them on");
+      if (!info.on) snack('A test notification is on its way');
+      openNotifications();
+    });
+    block.append(b);
+  }
+  body.push(block);
+  sheet.body.replaceChildren(...body);
+  showSheet('notify');
+}
+
+async function pushOn(vapid) {
+  if (await Notification.requestPermission() !== 'granted') return false;
+  const reg = await navigator.serviceWorker.register('sw.js', { scope: './' });
+  await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.getSubscription()
+    || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64url(vapid) });
+  await post('api/push/web', sub.toJSON());
+  return true;
+}
+
+async function pushOff() {
+  const reg = await navigator.serviceWorker.getRegistration();
+  await (await reg?.pushManager.getSubscription())?.unsubscribe();
+  await post('api/push/web', { off: true });
+  return true;
+}
 
 // ---------- activity log ----------
 

@@ -50,8 +50,10 @@ const SEND_BODY: usize = 40 << 20;
 const BODY: usize = 1 << 20;
 
 /// Everything else needs a session. The page at / decides between the app and the login screen itself.
-const PUBLIC: [(&str, &str); 6] = [
+const PUBLIC: [(&str, &str); 7] = [
     ("GET", "/"),
+    // The page's service worker: it shows the pushes.
+    ("GET", "/sw.js"),
     ("POST", "/api/auth/password"),
     ("POST", "/api/auth/passkey/options"),
     ("POST", "/api/auth/passkey/login"),
@@ -280,6 +282,7 @@ fn mime(name: &str) -> &'static str {
         "html" => "text/html",
         "css" => "text/css",
         "js" => "text/javascript",
+        "webmanifest" => "application/manifest+json",
         "json" => "application/json",
         "svg" => "image/svg+xml",
         "png" => "image/png",
@@ -297,6 +300,7 @@ pub fn router(app: Arc<App>) -> Router {
     let mut r = Router::new()
         .route("/", get(index))
         .route("/static/{version}/{*path}", get(static_file))
+        .route("/sw.js", get(service_worker))
         .route("/api/hello", get(hello))
         .route("/api/history", get(history))
         .route("/api/stream", get(stream))
@@ -348,7 +352,8 @@ pub fn router(app: Arc<App>) -> Router {
             .route("/api/devices/{id}/revoke", post(revoke))
             .route("/api/devices/push", get(push_info).post(push_token))
             .route("/api/devices/push/test", post(push_test))
-            .route("/api/push/ws", get(push_ws));
+            .route("/api/push/ws", get(push_ws))
+            .route("/api/push/web", get(web_push_info).post(web_push_set));
     }
     r.fallback(not_found).layer(middleware::from_fn_with_state(app.clone(), guard)).with_state(app)
 }
@@ -483,6 +488,15 @@ async fn static_file(State(app): Shared, UrlPath((_version, path)): UrlPath<(Str
             [(header::CONTENT_TYPE, mime(&path)), (header::CACHE_CONTROL, "public, max-age=31536000, immutable")],
             data.clone(),
         )
+            .into_response(),
+        None => not_found().await,
+    }
+}
+
+/// The service worker, from the site's root so it can show notifications for the whole page.
+async fn service_worker(State(app): Shared) -> Response {
+    match app.assets.get("sw.js") {
+        Some(data) => ([(header::CONTENT_TYPE, mime("sw.js")), (header::CACHE_CONTROL, "no-cache")], data.clone())
             .into_response(),
         None => not_found().await,
     }
@@ -782,8 +796,8 @@ async fn stream(State(app): Shared, headers: HeaderMap, Query(q): Query<HashMap<
         .unwrap_or(0);
     let mut sub = app.events.subscribe();
     let (tx, rx) = mpsc::channel::<Result<Bytes, Infallible>>(64);
-    // A phone with its stream open has the app on screen, so it gets no pushes meanwhile.
-    let device = app.auth.as_ref().and_then(|a| a.device_of(&headers));
+    // A phone or browser with its stream open has the app on screen, so it gets no pushes meanwhile.
+    let device = app.auth.as_ref().and_then(|a| a.device_of(&headers).or_else(|| a.browser_of(&headers)));
     let alive = tx.clone();
     let opened = app.push.opened(device.as_deref(), Box::new(move || !alive.is_closed()));
     tokio::spawn(async move {
@@ -921,6 +935,40 @@ async fn push_test(State(app): Shared, headers: HeaderMap) -> Response {
     ok(json!({"ok": true}))
 }
 
+/// What the page needs to subscribe this browser (the VAPID key), and whether it is subscribed.
+async fn web_push_info(State(app): Shared, headers: HeaderMap) -> Response {
+    let Some(id) = auth(&app).browser_of(&headers) else {
+        return text(StatusCode::FORBIDDEN, "the phone app has its own notifications");
+    };
+    let on = auth(&app).push_devices().iter().any(|d| d["id"] == id.as_str());
+    ok(json!({"vapid": app.push.webpush.public(), "on": on}))
+}
+
+/// The page subscribes this browser with its Push API subscription ({endpoint, keys: {p256dh, auth}}), and a test
+/// notification follows; {"off": true} stops it. It ends with the browser's session.
+async fn web_push_set(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> Response {
+    let Some(id) = auth(&app).browser_of(&headers) else {
+        return text(StatusCode::FORBIDDEN, "the phone app has its own notifications");
+    };
+    let b = match body(&bytes) {
+        Ok(b) => b,
+        Err(r) => return r,
+    };
+    if truthy(&b["off"]) {
+        auth(&app).set_browser_push(&id, None);
+        return ok(json!({"on": false}));
+    }
+    let field = |v: &Value, n: usize| json!(seimei_core::util::cut(v.as_str().unwrap_or(""), n));
+    let rec = json!({"up": field(&b["endpoint"], 2048), "p256dh": field(&b["keys"]["p256dh"], 200),
+                     "auth": field(&b["keys"]["auth"], 100)});
+    if !push_mod::valid_endpoint(rec["up"].as_str().unwrap()) || rec["p256dh"] == "" || rec["auth"] == "" {
+        return text(StatusCode::BAD_REQUEST, "not a push subscription");
+    }
+    auth(&app).set_browser_push(&id, Some(rec));
+    app.push.test(&id);
+    ok(json!({"on": true}))
+}
+
 /// GET /api/push/ws with "Authorization: Push <device> <secret>": the secret only opens this stream.
 async fn push_ws(
     State(app): Shared,
@@ -968,7 +1016,7 @@ async fn presence(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> Respo
         Err(r) => return r,
     };
     let view = seimei_core::util::chars(&s(&b, "view"), 20);
-    let dev = app.auth.as_ref().and_then(|a| a.device_of(&headers));
+    let dev = app.auth.as_ref().and_then(|a| a.device_of(&headers).or_else(|| a.browser_of(&headers)));
     if !view.is_empty() {
         app.push.shows(dev.as_deref(), &view);
     }
