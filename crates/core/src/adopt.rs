@@ -608,7 +608,7 @@ impl Adopter {
             said += &format!("; ended with it: {}", list.join("; "));
         }
         said += &format!("; window {window}.");
-        if let Some(t) = w.get("board_task").as_str().filter(|t| !t.is_empty()) {
+        if let Some((t, _)) = self.pool.current(&w.id) {
             said += &format!(" On the board as {t}.");
         }
         Ok(said)

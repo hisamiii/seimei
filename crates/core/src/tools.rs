@@ -292,8 +292,17 @@ impl Tools {
             "summon" => self.summon(a).await,
             "message" => {
                 let Some(w) = self.pool.find(&arg(a, "worker")) else { return text("No such shikigami.", true) };
+                // The board moves before the message goes, so the turn it starts follows the new item.
+                let tid = arg(a, "task_id");
+                let mut on = String::new();
+                if !tid.is_empty() {
+                    match self.board.lock().unwrap().give(&w.id, &w.name(), &tid) {
+                        Ok(t) => on = format!(" {} {} runs on it.", t.id, t.title),
+                        Err(e) => return text(&format!("Not sent: {e}"), true),
+                    }
+                }
                 match w.send(&arg(a, "text"), None, vec![]).await {
-                    Ok(()) => text(&format!("Sent to {}.", w.name()), false),
+                    Ok(()) => text(&format!("Sent to {}.{on}", w.name()), false),
                     Err(e) => text(&e, true),
                 }
             }
@@ -405,8 +414,8 @@ impl Tools {
             s("context_cap"),
             s("subagents")
         );
-        if !s("board_task").is_empty() {
-            said += &format!(" On the board as {}.", s("board_task"));
+        if let Some((t, _)) = self.pool.current(&w.id) {
+            said += &format!(" On the board as {t}.");
         }
         let (pool, w2) = (self.pool.clone(), w.clone());
         if let Ok(Some(crowd)) = tokio::task::spawn_blocking(move || writers(&pool, &w2)).await {
@@ -445,13 +454,13 @@ impl Tools {
                     Some(p) => format!("its transcript: {}", p.display()),
                     None => format!("its log: {}", w.log.path().display()),
                 };
-                let head = format!(
-                    "{} ({}) is {}. Task: {}",
-                    w.name(),
-                    w.id,
-                    w.state(),
-                    chars(r["task"].as_str().unwrap_or(""), 500)
-                );
+                let task = chars(r["task"].as_str().unwrap_or(""), 500);
+                let head = match self.pool.current(&w.id) {
+                    Some((id, title)) => {
+                        format!("{} ({}) is {}. Now on {id} {title}. First task: {task}", w.name(), w.id, w.state())
+                    }
+                    None => format!("{} ({}) is {}. Task: {task}", w.name(), w.id, w.state()),
+                };
                 text(&capped(&head, &lines, &full), false)
             }
             "show_image" => {

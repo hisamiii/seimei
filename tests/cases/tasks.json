@@ -26,7 +26,10 @@
    {"do": "stale", "expect": {"result": null}},
    {"do": "age", "args": {"id": "#57", "since_ago": 300000, "updated_ago": 300000}, "expect": {}},
    {"do": "stale", "expect": {"text_has": ["#57 Parked fresh (seimei, 3 days)"], "text_lacks": ["t6"]}},
-   {"do": "update", "args": {"id": "#57"}, "expect": {}},
+   {"do": "update", "args": {"id": "#57"}, "expect": {"tasks": {"#57": {"asked": "<set>"}}}},
+   {"do": "age", "args": {"id": "#57", "since_ago": 900000, "updated_ago": 900000, "asked_ago": 900000}, "expect": {}},
+   {"do": "age", "args": {"id": "t6", "since_ago": 900000, "updated_ago": 900000, "asked_ago": 900000}, "expect": {}},
+   {"do": "stale", "expect": {"result": null}},
    {"do": "tool", "args": {"action": "list"}, "expect": {"text_has": ["  #57 paused: Parked fresh (dev #7)"]}},
    {"do": "add", "args": {"title": "A", "project": "tl", "owner": "w"}, "expect": {}},
    {"do": "add", "args": {"title": "B", "project": "tl", "owner": "w", "state": "running"}, "expect": {}},
@@ -138,7 +141,8 @@
     "expect": {"result": "[seimei] Board drift: shikigami docs (w2) asks with no open task."}},
    {"do": "update", "args": {"id": "#61", "state": "running"}, "expect": {}},
    {"do": "drift", "args": {"workers": {"w1": ["deploy-fix", "done"], "w2": ["docs", "running"], "w3": ["queued", "done"]}},
-    "expect": {"result": "[seimei] Board drift: #62 is running but shikigami queued is done."}},
+    "expect": {"result": "[seimei] Board drift: #62 went back to the queue: shikigami queued is done.", "tasks": {"#62": {"state": "open", "worker": "w3"}}}},
+   {"do": "drift", "args": {"workers": {"w1": ["deploy-fix", "done"], "w2": ["docs", "running"], "w3": ["queued", "done"]}}, "expect": {"result": null}},
    {"do": "update", "args": {"id": "#62", "state": "review"}, "expect": {}},
    {"do": "age", "args": {"id": "#62", "since_ago": 10800}, "expect": {}},
    {"do": "drift", "args": {"workers": {"w1": ["deploy-fix", "done"], "w2": ["docs", "running"], "w3": ["queued", "done"]}},
@@ -146,7 +150,7 @@
    {"do": "update", "args": {"id": "#62", "state": "done"}, "expect": {}},
    {"do": "add", "args": {"title": "Orphan", "project": "seimei", "owner": "ghost", "state": "running", "worker": "deadbeef"}, "expect": {"result": {"id": "#64"}}},
    {"do": "drift", "args": {"workers": {"w1": ["deploy-fix", "done"], "w2": ["docs", "running"], "w3": ["queued", "done"]}},
-    "expect": {"result": "[seimei] Board drift: #64 is running but its shikigami deadbeef is gone."}},
+    "expect": {"result": "[seimei] Board drift: #64 went back to the queue: its shikigami deadbeef is gone.", "tasks": {"#64": {"state": "open", "worker": null}}}},
    {"do": "remove", "args": {"id": "#64"}, "expect": {}},
    {"do": "drift", "args": {"workers": {"w1": ["deploy-fix", "done"], "w2": ["docs", "running"], "w3": ["queued", "done"], "w4": ["handed", "laptop"]}},
     "expect": {"result": null}},
@@ -201,6 +205,19 @@
    {"do": "remove", "args": {"id": "#3"}, "expect": {}},
    {"do": "remove", "args": {"id": "#5"}, "expect": {"total": 0, "projects": {"p": null}}},
    {"do": "tool", "args": {"action": "list"}, "expect": {"result": {"text": "The board is empty."}}}
+  ]},
+  {"what": "a message's task_id moves the shikigami on at once (#170), its report sends the item to review", "steps": [
+   {"do": "add", "args": {"title": "First job", "project": "seimei", "owner": "dev", "state": "running", "worker": "w9"}, "expect": {"result": {"id": "#56"}}},
+   {"do": "add", "args": {"title": "Second job", "project": "seimei", "owner": "you"}, "expect": {"result": {"id": "#57"}}},
+   {"do": "follow", "args": {"worker": "w9", "wstate": "done"}, "expect": {"tasks": {"#56": {"state": "review"}}}},
+   {"do": "give", "args": {"worker": "w9", "owner": "dev", "id": "#57"}, "expect": {"result": {"id": "#57", "state": "running", "owner": "dev", "worker": "w9"}, "tasks": {"#56": {"state": "review", "worker": "w9"}}}},
+   {"do": "follow", "args": {"worker": "w9", "wstate": "running"}, "expect": {"tasks": {"#56": {"state": "review"}, "#57": {"state": "running"}}}},
+   {"do": "add", "args": {"title": "Third job", "project": "seimei", "owner": "dev"}, "expect": {"result": {"id": "#58"}}},
+   {"do": "give", "args": {"worker": "w9", "owner": "dev", "id": "58"}, "expect": {"tasks": {"#57": {"state": "open", "worker": null}, "#58": {"state": "running"}}}},
+   {"do": "follow", "args": {"worker": "w9", "wstate": "done"}, "expect": {"tasks": {"#58": {"state": "review"}, "#57": {"state": "open"}}}},
+   {"do": "update", "args": {"id": "#58", "state": "done"}, "expect": {}},
+   {"do": "give", "args": {"worker": "w9", "owner": "dev", "id": "#58"}, "expect": {"tasks": {"#58": {"state": "running", "done_at": null}}}},
+   {"do": "give", "args": {"worker": "w9", "owner": "dev", "id": "#404"}, "expect": {"error": "no task #404"}}
   ]}
  ]
 }

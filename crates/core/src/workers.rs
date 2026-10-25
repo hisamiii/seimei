@@ -2000,7 +2000,16 @@ impl Pool {
         out.insert("mode".into(), json!(mode));
         out.insert("started".into(), json!(rec["started"].as_bool().unwrap_or(false)));
         out.insert("archived".into(), json!(self.archive.worker(rec)));
+        // What it works on now, from the board: the summon text is only its first task.
+        if let Some((id, title)) = self.current(rec["id"].as_str().unwrap_or("")) {
+            out.insert("now".into(), json!({"id": id, "title": title}));
+        }
         Value::Object(out)
+    }
+
+    /// The board item a worker works on now: its id and title.
+    pub fn current(&self, worker: &str) -> Option<(String, String)> {
+        self.board.lock().unwrap().current(worker).map(|t| (t.id.clone(), t.title.clone()))
     }
 
     /// The Agents page's live list: active ones and those that ended in the last day, released ones aside.
@@ -2155,13 +2164,10 @@ impl Pool {
                 Path::new(&cwd).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
             }
         });
-        let t = self
-            .board
-            .lock()
-            .unwrap()
+        let mut board = self.board.lock().unwrap();
+        board
             .attach(&w.id, &str_of(&r["name"]), &str_of(&r["task"]), &project, title, link)
             .map_err(|e| e.to_string())?;
-        w.edit(|r| r.insert("board_task".into(), json!(t.id)));
         Ok(())
     }
 

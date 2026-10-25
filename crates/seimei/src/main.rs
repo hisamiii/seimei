@@ -474,10 +474,14 @@ fn wire(app: &Arc<seimei_server::App>) {
             .filter(|rec| matches!(rec["state"].as_str(), Some("running" | "asking" | "laptop")))
             .map(|rec| {
                 let s = |k: &str| rec[k].as_str().unwrap_or("").to_string();
-                let task = s("board_task");
-                let task = if task.is_empty() { String::new() } else { format!(", task {task}") };
-                let first =
-                    s("task").trim().lines().next().map(|l| seimei_core::util::chars(l, 200)).unwrap_or_default();
+                // What it works on now; the summon's first line only when the board has nothing.
+                let (task, first) = match a.pool.current(&s("id")) {
+                    Some((id, title)) => (format!(", task {id}"), title),
+                    None => {
+                        let first = s("task").trim().lines().next().map(|l| seimei_core::util::chars(l, 200));
+                        (String::new(), first.unwrap_or_default())
+                    }
+                };
                 format!("- {} ({}) {} in {}{task}: {first}", s("name"), s("id"), s("state"), s("cwd"))
             })
             .collect();

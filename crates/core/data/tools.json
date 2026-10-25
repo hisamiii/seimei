@@ -166,6 +166,10 @@
      },
      "text": {
       "type": "string"
+     },
+     "task_id": {
+      "type": "string",
+      "description": "a board item (#NN or tN) it goes on to: it runs on the board at once, and what it worked on goes back to the queue unless it waits in review"
      }
     },
     "required": [

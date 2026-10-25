@@ -220,7 +220,8 @@ fun fromWorker(w: JSONObject): Agent {
             else -> w.str("summary").ifEmpty { stateText(w) }
         },
         bad = st == "failed", end = st, archived = w.optBoolean("archived"),
-        find = listOf(w.str("name"), w.str("task"), w.str("summary")),
+        find = listOf(w.str("name"), w.str("task"), w.str("summary"),
+            w.optJSONObject("now")?.let { "${it.str("id")} ${it.str("title")}" } ?: ""),
     )
 }
 
@@ -1021,16 +1022,20 @@ fun Details(vm: Seimei, pg: Page) {
                 Spacer(Modifier.width(8.dp))
                 Text(if (agent.archived) "Unarchive" else "Archive")
             }
-            if (pg.kind == "worker" && r.str("task").isNotEmpty()) TaskRow(r.str("task"))
+            if (pg.kind == "worker" && r.str("task").isNotEmpty()) TaskRow(r.str("task"), r.optJSONObject("now"))
             if (pg.kind == "session") Text(pg.reach ?: "Messages you send here are typed into this session's window on the server.",
                 fontSize = 13.sp, color = LocalExtra.current.text3)
         }
     }
 }
 
+// Its board item now when it has one; the summon text, its first task, opens under it.
 @Composable
-fun TaskRow(text: String) {
+fun TaskRow(text: String, now: JSONObject? = null) {
     var open by remember(text) { mutableStateOf(false) }
+    val head = now?.let { "Now on ${it.str("id")}" } ?: "Task"
+    val preview = now?.str("title") ?: text
+    val full = if (now != null) "${now.str("title")}\n\nFirst task: $text" else text
     val cs = MaterialTheme.colorScheme
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(cs.surfaceContainerHigh)) {
         Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable { open = !open }.padding(start = 10.dp, end = 14.dp, top = 8.dp, bottom = 8.dp),
@@ -1040,12 +1045,12 @@ fun TaskRow(text: String) {
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text("Task", fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                if (!open) Text(text, fontSize = 13.sp, color = LocalExtra.current.text3, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(head, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                if (!open) Text(preview, fontSize = 13.sp, color = LocalExtra.current.text3, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Icon(Icons.chev, null, Modifier.size(20.dp).then(if (open) Modifier.rotate(90f) else Modifier), tint = LocalExtra.current.text3)
         }
-        if (open) Text(text, fontSize = 14.sp, color = LocalExtra.current.text2,
+        if (open) Text(full, fontSize = 14.sp, color = LocalExtra.current.text2,
             modifier = Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState()).padding(start = 14.dp, end = 14.dp, bottom = 12.dp))
     }
 }

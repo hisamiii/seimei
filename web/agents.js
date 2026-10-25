@@ -121,7 +121,7 @@ function fromWorker(w) {
   return {
     kind: 'worker', id: w.id, name: w.name, project: w.project, context: w.context, state, since: w.updated,
     line: state === 'ask' ? (w.question || '') : state === 'work' ? workerLine(w) : (w.summary || stateText(w)),
-    bad: w.state === 'failed', end: w.state, archived: !!w.archived, find: [w.name, w.task, w.summary],
+    bad: w.state === 'failed', end: w.state, archived: !!w.archived, find: [w.name, w.task, w.summary, w.now && `${w.now.id} ${w.now.title}`],
   };
 }
 
@@ -775,7 +775,7 @@ function details() {
     actions.append(b);
   }
   if (actions.childElementCount) body.push(actions);
-  if (P.kind === 'worker' && r.task) body.push(taskRow(r.task));
+  if (P.kind === 'worker' && r.task) body.push(taskRow(r.task, r.now));
   if (P.kind === 'session') body.push(el('p', 'usage-note', r.reach ? r.reach : 'Typed into its terminal on the server'));
   sheet.body.replaceChildren(...body);
   showSheet('details');
@@ -887,18 +887,19 @@ function laptopButton(w) {
 }
 
 // The task as one tonal row with a preview; tapping it unfolds the whole text.
-function taskRow(text) {
+// Its board item now when it has one; the summon text, its first task, opens under it.
+function taskRow(text, now) {
   const box = el('div', 'taskd');
   const headBtn = el('button', 'taskd-head sl');
   headBtn.type = 'button';
   const ic = el('span', 'ic');
   ic.append(svg(ICON.list, 18));
   const txt = el('span', 'txt');
-  txt.append(el('b', null, 'Task'), el('span', 'preview', text));
+  txt.append(el('b', null, now ? `Now on ${now.id}` : 'Task'), el('span', 'preview', now ? now.title : text));
   const chev = svg(ICON.chev, 20);
   chev.classList.add('chev');
   headBtn.append(ic, txt, chev);
-  const full = el('div', 'full', text);
+  const full = el('div', 'full', now ? `${now.title}\n\nFirst task: ${text}` : text);
   full.hidden = true;
   headBtn.addEventListener('click', () => {
     full.hidden = !full.hidden;

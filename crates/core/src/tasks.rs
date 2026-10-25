@@ -24,7 +24,7 @@ const DONE_KEEP: usize = 30;
 pub const DONE_SHOWN: f64 = 24.0 * 3600.0;
 /// How many tasks the archive keeps; the oldest drop off.
 const ARCHIVE_KEEP: usize = 5000;
-/// A paused item (or one of a paused project) untouched this long may be dead: seimei asks the user, once a stretch.
+/// A paused item (or one of a paused project) untouched this long may be dead: seimei asks the user, once.
 pub const PAUSED_STALE: f64 = 3.0 * 86400.0;
 /// A linked task's state for each shikigami state: it works, waits on a question, or finished and waits for seimei's
 /// check (failed ones too: seimei looks at those first); a stop or a restart parks it; given to the user, it is
@@ -102,7 +102,8 @@ pub struct Task {
     /// Delivered by its shikigami: it stays in review until seimei checks it.
     #[serde(default, skip_serializing_if = "is_false")]
     pub shipped: bool,
-    /// When seimei was last asked whether this paused item is dead.
+    /// When seimei asked whether this paused item is dead, or the user kept it (an update with just the id): it is
+    /// not asked about again until it moves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asked: Option<f64>,
     #[serde(flatten)]
@@ -371,6 +372,9 @@ impl Board {
             valid(s)?;
         }
         let i = self.live(tid)?;
+        if *fields == Fields::default() {
+            self.data.tasks[i].asked = Some(now());
+        }
         if let Some(o) = fields.owner.as_deref().filter(|o| *o != self.data.tasks[i].owner) {
             // To the end of its new owner's queue.
             self.data.tasks[i].pos = self.last(o) + 1;
@@ -580,6 +584,31 @@ impl Board {
         Ok(t)
     }
 
+    /// seimei sends a shikigami on to `tid` (a message's task_id): it runs and follows the shikigami at once, wherever
+    /// it was (queued, done, archived); what the shikigami worked on before goes back to the queue, unless it is in
+    /// review.
+    pub fn give(&mut self, worker: &str, owner: &str, tid: &str) -> Result<Task> {
+        let i = self.live(tid)?;
+        let at = now();
+        for (j, o) in self.data.tasks.iter_mut().enumerate() {
+            if j != i && o.worker.as_deref() == Some(worker) && o.state != "done" && o.state != "review" {
+                (o.worker, o.linked, o.wstate, o.updated) = (None, None, None, at);
+                set_state(o, "open");
+            }
+        }
+        if self.data.tasks[i].owner != owner {
+            self.data.tasks[i].pos = self.last(owner) + 1;
+        }
+        let t = &mut self.data.tasks[i];
+        // The message starts a turn: followed as running, it is the current item from now on.
+        let wstate = Some("running".into());
+        (t.worker, t.linked, t.wstate, t.updated, t.owner) = (Some(worker.into()), Some(at), wstate, at, owner.into());
+        set_state(t, "running");
+        let t = t.clone();
+        self.changed();
+        Ok(t)
+    }
+
     /// A shikigami deployed or delivered one of its items (#79): it waits in review for seimei's check.
     pub fn ship(&mut self, worker: &str, name: &str, tid: &str) -> Result<Task> {
         let i = self.own(name, tid)?;
@@ -620,9 +649,10 @@ impl Board {
         self.changed();
     }
 
-    /// Where the board and the shikigami disagree, as one line for seimei; None when they agree. `workers`: id, name
-    /// and state of each.
-    pub fn drift(&self, workers: &[(String, String, String)], at: f64) -> Option<String> {
+    /// Where the board and the shikigami disagree, as one line for seimei; None when they agree. An item marked as
+    /// worked on that nobody works on goes back to the queue (one whose shikigami is gone loses it too). `workers`:
+    /// id, name and state of each.
+    pub fn drift(&mut self, workers: &[(String, String, String)], at: f64) -> Option<String> {
         let mut out = vec![];
         for (wid, name, state) in workers {
             // One open on the server is the user's to drive: it needs no task.
@@ -631,20 +661,31 @@ impl Board {
                 out.push(format!("shikigami {name} ({wid}) {does} with no open task"));
             }
         }
-        for t in &self.data.tasks {
-            if let Some(w) = t.worker.as_deref().filter(|_| t.state == "running" || t.state == "asks") {
-                match workers.iter().find(|x| x.0 == w) {
-                    None => out.push(format!("{} is {} but its shikigami {w} is gone", t.id, t.state)),
-                    Some((_, name, state)) if !LIVE.contains(&state.as_str()) => {
-                        out.push(format!("{} is {} but shikigami {name} is {state}", t.id, t.state))
+        let mut moved = false;
+        for t in &mut self.data.tasks {
+            if let Some(w) = t.worker.clone().filter(|_| t.state == "running" || t.state == "asks") {
+                let why = match workers.iter().find(|x| x.0 == w) {
+                    None => {
+                        (t.worker, t.linked, t.wstate) = (None, None, None);
+                        format!("its shikigami {w} is gone")
                     }
-                    _ => {}
+                    Some((_, name, state)) if !LIVE.contains(&state.as_str()) => format!("shikigami {name} is {state}"),
+                    _ => String::new(),
+                };
+                if !why.is_empty() {
+                    out.push(format!("{} went back to the queue: {why}", t.id));
+                    set_state(t, "open");
+                    t.updated = at;
+                    moved = true;
                 }
             }
             let since = t.since.unwrap_or(t.updated);
             if t.state == "review" && at - since > REVIEW_STALE {
                 out.push(format!("{} has waited for review {:.0} h", t.id, (at - since) / 3600.0));
             }
+        }
+        if moved {
+            self.changed();
         }
         if out.is_empty() {
             return None;
@@ -654,13 +695,14 @@ impl Board {
     }
 
     /// Paused items nobody touched for PAUSED_STALE (paused ones, and the live ones of a paused project), as one line
-    /// for seimei to ask the user whether they are dead; each once a stretch (marked asked). None when there are none.
+    /// for seimei to ask the user whether they are dead; each once, and not after the user kept it (both mark it asked).
+    /// None when there are none.
     pub fn stale_note(&mut self, at: f64) -> Option<String> {
         let held: Vec<String> = self.data.projects.iter().filter(|p| p.paused).map(|p| p.name.clone()).collect();
         let mut out = vec![];
         for t in &mut self.data.tasks {
             let parked = t.state == "paused" || (t.state != "done" && held.contains(&t.project));
-            if parked && at - touched(t) > PAUSED_STALE && t.asked.is_none_or(|a| at - a > PAUSED_STALE) {
+            if parked && at - touched(t) > PAUSED_STALE && t.asked.is_none() {
                 t.asked = Some(at);
                 let days = ((at - touched(t)) / 86400.0) as u64;
                 out.push(format!("{} {} ({}, {days} days)", t.id, t.title, t.project));
@@ -672,7 +714,7 @@ impl Board {
         self.save();
         Some(format!(
             "[seimei] Paused and untouched for 3+ days: {}. Ask the user whether they are dead (remove them) or still \
-             wanted (an update with just the id keeps one).",
+             wanted (an update with just the id keeps one, and it is not asked about again).",
             out.join("; ")
         ))
     }
@@ -743,7 +785,8 @@ impl Board {
                     if t.steps.is_empty() { String::new() } else { format!(", {done}/{} steps", t.steps.len()) };
                 let parked = t.state == "paused" || p.paused;
                 let idle = at - touched(t);
-                let stale = if parked && idle > PAUSED_STALE {
+                // Once asked about or kept, it is quiet here too.
+                let stale = if parked && idle > PAUSED_STALE && t.asked.is_none() {
                     format!(", untouched {} days", (idle / 86400.0) as u64)
                 } else {
                     String::new()
@@ -898,7 +941,7 @@ impl<'a> NewTask<'a> {
 }
 
 /// What an update changes; None leaves a field as it is.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Fields {
     pub title: Option<String>,
     pub project: Option<String>,
@@ -924,6 +967,8 @@ fn set_state(t: &mut Task, state: &str) {
     t.done_at = (state == "done").then_some(at);
     t.state = state.into();
     t.since = Some(at);
+    // Moved on: when it is parked again, it may be asked about again.
+    t.asked = None;
     if state != "review" {
         t.shipped = false;
     }

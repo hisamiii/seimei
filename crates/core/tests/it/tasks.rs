@@ -81,6 +81,7 @@ fn run(s: &Value, seed: &Value, fails: &mut Vec<String>) {
             "start" => {
                 task(b.start(st("worker").unwrap(), st("name").unwrap(), st("wstate").unwrap(), st("id").unwrap()))
             }
+            "give" => task(b.give(st("worker").unwrap(), st("owner").unwrap(), st("id").unwrap())),
             "ship" => task(b.ship(st("worker").unwrap(), st("name").unwrap(), st("id").unwrap())),
             "step" => {
                 b.step(st("worker").unwrap(), st("sid").unwrap(), st("title"), st("state"));
@@ -91,9 +92,12 @@ fn run(s: &Value, seed: &Value, fails: &mut Vec<String>) {
                 let mut data: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
                 for t in data["tasks"].as_array_mut().unwrap() {
                     if t["id"] == a["id"] {
-                        for (field, ago) in
-                            [("since", "since_ago"), ("updated", "updated_ago"), ("done_at", "done_ago")]
-                        {
+                        for (field, ago) in [
+                            ("since", "since_ago"),
+                            ("updated", "updated_ago"),
+                            ("done_at", "done_ago"),
+                            ("asked", "asked_ago"),
+                        ] {
                             if let Some(s) = a[ago].as_f64() {
                                 t[field] = json!(now() - s);
                             }
