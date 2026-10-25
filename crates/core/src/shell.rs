@@ -63,15 +63,13 @@ struct Pending {
 struct Lexer {
     s: Vec<char>,
     i: usize,
-    /// Where heredoc bodies are, with their closing lines.
-    bodies: Vec<(usize, usize)>,
     /// How many backticks are open.
     ticks: usize,
 }
 
 impl Lexer {
     fn new(text: &str) -> Lexer {
-        Lexer { s: text.chars().collect(), i: 0, bodies: vec![], ticks: 0 }
+        Lexer { s: text.chars().collect(), i: 0, ticks: 0 }
     }
 
     fn peek(&self, k: usize) -> Option<char> {
@@ -195,7 +193,6 @@ impl Lexer {
             let last = self.peek(0).is_none();
             self.i = (self.i + 1).min(self.s.len());
             if closing || last {
-                self.bodies.push((start, self.i));
                 return self.s[start..if closing { line } else { self.i }].iter().collect();
             }
         }
@@ -494,23 +491,6 @@ pub fn unwrap(argv: &[String]) -> Vec<String> {
     argv[i..].to_vec()
 }
 
-/// The command without heredoc bodies: they are data.
-pub fn drop_heredocs(cmd: &str) -> String {
-    let mut lx = Lexer::new(cmd);
-    lx.script(0, None);
-    let mut out = String::new();
-    let mut at = 0;
-    lx.bodies.sort();
-    for (from, to) in lx.bodies {
-        if from >= at {
-            out.extend(&lx.s[at..from]);
-            at = to;
-        }
-    }
-    out.extend(&lx.s[at.min(lx.s.len())..]);
-    out
-}
-
 /// Where a shell's command string is: after the first option cluster with a c (`-c`, `-lc`, `-ec`). Codex runs
 /// every command as `bash -lc '...'`.
 fn script_at(argv: &[String]) -> Option<usize> {
@@ -629,7 +609,6 @@ mod tests {
         assert!(!argvs("cat <<'EOF'\n$(rm -rf ~)\nEOF").iter().any(|a| a[0] == "rm"));
         assert!(argvs("bash <<< 'rm -rf ~'").iter().any(|a| a[0] == "rm"));
         assert_eq!(argvs("cat <<A <<-B; echo x\na\nA\n\tb\n\tB\nls"), [vec!["cat"], vec!["echo", "x"], vec!["ls"]]);
-        assert_eq!(drop_heredocs("cat <<EOF > f\nx > y\nEOF\nls > z"), "cat <<EOF > f\nls > z");
     }
 
     #[test]
@@ -675,7 +654,6 @@ mod tests {
             "a{,}{,}{,}{,}{,}{,}{,}{,}{,}{,}",
         ] {
             let _ = commands(cmd);
-            let _ = drop_heredocs(cmd);
         }
         assert!(commands(&deep).iter().any(Option::is_none));
         assert!(expand_braces("a{,}{,}{,}{,}{,}{,}{,}{,}{,}{,}").len() <= BRACES);
