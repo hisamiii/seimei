@@ -97,4 +97,4 @@ significantly improving the robustness of the security layer.
 
 ## Deploys
 
-Production runs from its own checkout, never the working tree. `./deploy.sh <rev>` moves it to a pushed commit and restarts once the dispatcher is idle; docs/architecture.md (Deploys) has the details. A deploy restarts the session that runs it, so make it the last step of a change.
+Production runs from its own checkout, never the working tree. `contrib/maintainer/deploy.sh <rev>` moves it to a pushed commit and restarts once the dispatcher is idle; docs/architecture.md (Deploys) has the details. A deploy restarts the session that runs it, so make it the last step of a change.

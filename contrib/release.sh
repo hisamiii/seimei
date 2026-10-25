@@ -1,6 +1,7 @@
 #!/bin/sh
 # release.sh VERSION: build seimei VERSION with the update key built in, sign it with minisign and publish it as a
-# GitHub release, the one `seimei update` installs. VERSION must be the version in crates/seimei/Cargo.toml.
+# GitHub release, the one `seimei update` installs, with the phone app beside it (the foss build, no server built in,
+# signed with the app key android/publish.sh keeps). VERSION must be the version in crates/seimei/Cargo.toml.
 # Once: `minisign -G -p contrib/minisign.pub -s ~/.minisign/seimei.key`, then commit contrib/minisign.pub.
 # The key's password goes to minisign on stdin from ~/.config/seimei/minisign.pass (mode 600, outside the repo) when
 # that file is there; otherwise minisign asks for it. It never shows in arguments or output.
@@ -29,5 +30,7 @@ else
     sign
 fi
 minisign -V -p contrib/minisign.pub -m "dist/$asset"
-gh release create "v$v" "dist/$asset" "dist/$asset.minisig" --target "$(git rev-parse HEAD)" --title "seimei $v" \
-    --notes "Install or update with \`seimei update\`; the binary is signed with contrib/minisign.pub."
+android/publish.sh release dist/seimei.apk
+gh release create "v$v" "dist/$asset" "dist/$asset.minisig" dist/seimei.apk --target "$(git rev-parse HEAD)" \
+    --title "seimei $v" --notes "Install or update with \`seimei update\`; the binary is signed with contrib/minisign.pub. \
+seimei.apk is the phone app (Android 11+): on first run it asks for your seimei's address."

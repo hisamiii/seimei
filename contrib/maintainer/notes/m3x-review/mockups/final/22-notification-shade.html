@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>seimei: notification shade</title>
+<!-- BEHAVIOR.md topic 4: one notification per approval, grouped under seimei, each with its own Deny and Allow; a
+question with an inline reply (RemoteInput, with its options as choices). Android 16 shade, dark, by hand. -->
+<style>
+@font-face { font-family: "Google Sans Flex"; src: url("../../../../../web/fonts/google-sans-flex-latin.woff2"); font-weight: 1 1000; }
+@font-face { font-family: "Roboto Mono"; src: url("../../../../../web/fonts/roboto-mono-latin.woff2"); font-weight: 400 500; }
+:root { --bg: #11111b; --c1: #1e1e2e; --c2: #262637; --c3: #313244; --text: #cdd6f4; --text-2: #a6adc8; --text-3: #7f849c;
+  --primary: #cba6f7; --on-primary: #11111b; --peach: #fab387; --on-peach: #2a1a0e; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { width: 412px; min-height: 915px; background: radial-gradient(120% 70% at 20% 0%, #3b2f55 0%, #1b1830 45%, #0c0c14 100%); color: var(--text);
+  font: 400 14px/20px "Google Sans Flex", sans-serif; padding: 0 12px; }
+.status { display: flex; justify-content: space-between; align-items: center; height: 40px; padding: 0 12px; font-weight: 500; font-size: 14px; }
+.status .icons { display: flex; gap: 6px; align-items: center; }
+.status .icons svg { display: block; }
+.clock { padding: 8px 12px 16px; }
+.clock b { display: block; font: 400 34px/40px "Google Sans Flex", sans-serif; }
+.clock span { color: var(--text-2); }
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; }
+.tile { height: 64px; border-radius: 20px; background: var(--c3); display: flex; align-items: center; gap: 12px; padding: 0 16px; font-weight: 500; }
+.tile.on { background: var(--primary); color: var(--on-primary); }
+.tile small { display: block; font-weight: 400; opacity: .8; font-size: 12px; line-height: 16px; }
+.tile svg { flex: none; }
+.group { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.n { background: var(--c1); padding: 14px 16px 6px; border-radius: 8px; }
+.group .n:first-child { border-radius: 28px 28px 8px 8px; }
+.group .n:last-child { border-radius: 8px 8px 28px 28px; }
+.solo { border-radius: 28px; }
+.hd { display: flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 12px; line-height: 16px; margin-bottom: 8px; }
+.app { width: 24px; height: 24px; border-radius: 50%; background: var(--primary); display: grid; place-items: center; flex: none; }
+.app i { width: 14px; height: 14px; background: var(--on-primary); -webkit-mask: url(../../../../../web/mark.svg) center / contain no-repeat; mask: url(../../../../../web/mark.svg) center / contain no-repeat; }
+.hd .more { margin-left: auto; width: 28px; height: 20px; border-radius: 10px; background: var(--c3); display: grid; place-items: center; }
+.n h3 { margin: 0; font: 500 16px/22px "Google Sans Flex", sans-serif; }
+.n p { margin: 2px 0 0; color: var(--text-2); }
+.n code { display: block; font: 13px/19px 'Roboto Mono', ui-monospace, monospace; color: var(--text-2); overflow-wrap: anywhere; }
+.acts { display: flex; gap: 4px; margin: 4px -8px -4px; }
+.acts button { height: 48px; padding: 0 12px; border: 0; border-radius: 20px; background: none; color: var(--primary); font: 500 14px/20px "Google Sans Flex", sans-serif; }
+.sub { padding-left: 0; }
+.choices { display: flex; gap: 16px 8px; margin-top: 12px; flex-wrap: wrap; }
+.choices span::before { content: ""; position: absolute; inset: -8px 0; }
+.choices span { position: relative; height: 32px; padding: 0 14px; border-radius: 8px; background: var(--c3); display: flex; align-items: center; font-weight: 500; }
+.reply { display: flex; align-items: center; gap: 8px; margin: 10px -4px 10px; }
+.reply .field { flex: 1; min-width: 0; height: 48px; border-radius: 24px; background: var(--c3); display: flex; align-items: center; padding: 0 18px; color: var(--text); }
+.reply .field::after { content: ""; width: 2px; height: 20px; background: var(--primary); margin-left: 1px; }
+.reply .send { width: 48px; height: 48px; border-radius: 50%; background: var(--primary); color: var(--on-primary); display: grid; place-items: center; flex: none; }
+.ask .app { background: var(--peach); }
+.ask .app i { background: var(--on-peach); }
+.clear { display: flex; justify-content: center; margin-top: 12px; }
+.clear span::before { content: ""; position: absolute; inset: -6px 0; }
+.clear span { position: relative; height: 36px; padding: 0 16px; border-radius: 18px; background: var(--c3); display: flex; align-items: center; font-weight: 500; }
+</style>
+</head>
+<body data-screen="notification-shade">
+<div class="status"><span>6:54</span><span class="icons"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 20.5 1.2 9.1A15.5 15.5 0 0 1 22.8 9.1z"/></svg><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21 3v18H3z"/></svg><svg width="10" height="16" viewBox="0 0 10 18" fill="currentColor" aria-hidden="true"><path d="M3 0h4v2h2a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H1a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h2z"/></svg></span></div>
+<div class="clock"><b>6:54</b><span>Saturday, October 24</span></div>
+<div class="tiles">
+  <div class="tile on"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 8.8a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M12 19.5h.01"/></svg><span>Internet<small>flowz13 hotspot</small></span></div>
+  <div class="tile"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 12h8"/></svg><span>Do not disturb<small>Off</small></span></div>
+</div>
+
+<div class="group" aria-label="seimei, 2 approvals">
+  <div class="n">
+    <div class="hd"><span class="app"><i></i></span>seimei · 2 approvals · now<span class="more"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg></span></div>
+    <h3>seimei wants to run</h3>
+    <code>git -C ~/Development/Projects/seimei push origin main</code>
+    <div class="acts"><button>Deny</button><button>Allow</button></div>
+  </div>
+  <div class="n">
+    <div class="hd"><span class="app"><i></i></span>2 min ago</div>
+    <h3>gentoo wants to edit</h3>
+    <code>/etc/portage/make.conf: CFLAGS += -fstack-protector-strong</code>
+    <div class="acts"><button>Deny</button><button>Allow</button></div>
+  </div>
+</div>
+
+<div class="n solo ask">
+  <div class="hd"><span class="app"><i></i></span>seimei · gentoo · 6 min ago</div>
+  <h3>Which profile for the laptop?</h3>
+  <p>Desktop or hardened? Hardened rebuilds about 1,400 packages, roughly 9 hours.</p>
+  <div class="choices"><span>Desktop</span><span>Hardened</span></div>
+  <div class="reply"><span class="field">keep desktop for now</span><span class="send"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg></span></div>
+</div>
+
+<div class="clear"><span>Clear all</span></div>
+</body>
+</html>

@@ -70,7 +70,7 @@ A card holds a tool call until the user answers on the phone or the web. Three s
 |---|---|
 | `~/.config/seimei/config.toml` | config ([config.md](config.md)) |
 | `~/.local/share/seimei/` | state: events, session id, workers, tasks, notes, auth.json, uploads, audit log |
-| `~/.local/share/seimei-app/` | the production checkout; `deploy.sh` moves it to a commit and restarts once idle |
+| `~/.local/share/seimei-app/` | the maintainer's production checkout; `contrib/maintainer/deploy.sh` moves it to a commit and restarts once idle |
 | `$XDG_RUNTIME_DIR/seimei/` | sockets of the connectors (Discord, browser) |
 
 ## Themes
@@ -84,7 +84,7 @@ server never reads its own wallpaper.
 
 ## Deploys
 
-Production never runs from the working tree. `deploy.sh [rev]` runs detached, as its own transient systemd unit or, when PID 1 is not systemd (OpenRC), in its own session under init (so the restart it ends with cannot cut it off), checks out the commit in the production checkout, builds the server there (`cargo build --release`, its own `target/`), waits for open cards and an idle dispatcher, renames the build to `bin/seimei` and restarts the service. The result goes to `deploy/last.json`, which seimei hands to whoever it resumes.
+Production never runs from the working tree. `contrib/maintainer/deploy.sh [rev]` (the author's setup; an install from a release uses `seimei update`) runs detached, as its own transient systemd unit or, when PID 1 is not systemd (OpenRC), in its own session under init (so the restart it ends with cannot cut it off), checks out the commit in the production checkout, builds the server there (`cargo build --release`, its own `target/`), waits for open cards and an idle dispatcher, renames the build to `bin/seimei` and restarts the service. The result goes to `deploy/last.json`, which seimei hands to whoever it resumes.
 
 ## Tests
 
