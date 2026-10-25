@@ -429,6 +429,20 @@ async def shikigami(self: Fake, text: str):
     elif t == "run":
         await self.tool("Bash", {"command": "make -j16 render"}, hang=True)
         said = "Rendered."
+    elif t == "bg":
+        # A background command outlives the turn: it ends 3 s after the result, and no turn starts by itself.
+        tid = "bg" + uuid.uuid4().hex[:6]
+        self.out({"type": "system", "subtype": "task_started", "task_id": tid, "task_type": "local_bash",
+                  "description": "sleep 3", "session_id": self.sid, "uuid": str(uuid.uuid4())})
+
+        async def end():
+            await asyncio.sleep(3)
+            self.out({"type": "system", "subtype": "task_notification", "task_id": tid, "status": "completed",
+                      "session_id": self.sid, "uuid": str(uuid.uuid4())})
+        asyncio.ensure_future(end())
+        said = "Started the render in the background."
+    elif "background commands have finished" in text:
+        said = "The background render finished: 12 frames."
     else:
         await asyncio.sleep(1)
         said = f"(fake) got: {text[:200]}"

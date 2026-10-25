@@ -33,6 +33,12 @@
    {"do": "add", "args": {"title": "C", "project": "tl", "owner": "w", "state": "review"}, "expect": {}},
    {"do": "add", "args": {"title": "D", "project": "tl", "owner": "w", "state": "done"}, "expect": {}},
    {"do": "add", "args": {"title": "E", "project": "tl", "owner": "w", "state": "paused"}, "expect": {}},
+   {"do": "attach", "args": {"worker": "w9", "owner": "olddev", "task": "#53 Follow up on the cache. It broke.", "project": "seimei", "title": "Follow up on the cache"},
+    "expect": {"result": {"id": "#53", "title": "Conversation cache on the phone", "worker": "w9", "owner": "olddev", "state": "open"}, "tasks": {"#53": {"worker": "w9"}}}},
+   {"do": "archived", "args": {"q": "cache"}, "expect": {"result": {"n": 0}}},
+   {"do": "attach", "args": {"worker": "w10", "owner": "tl", "task": "#61 D again", "project": "tl", "title": "D again"},
+    "expect": {"result": {"id": "#61", "worker": "w10", "state": "open"}, "data": {"next": 63}}},
+   {"do": "update", "args": {"id": "#61", "state": "done"}, "expect": {}},
    {"do": "tool", "args": {"action": "list"}, "expect": {"text_has": ["tl\n  done today: #61 D\n  #60 review: C (w #3)\n  #59 running: B (w #2)\n  #58 open (next): A (w #1)\n  #62 paused: E (w #5)\n"]}}
   ]},
   {"what": "the store and the tasks tool", "steps": [

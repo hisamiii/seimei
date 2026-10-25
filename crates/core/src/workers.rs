@@ -45,6 +45,7 @@ You are `{name}`, a worker summoned by seimei, the user's dispatcher on their {a
 Nobody watches your terminal: work on the task on your own until it is done.
 Your final message is shown to the user on their phone as your report: start it with a one-line summary, keep it short.
 Before reporting done, run the checks that prove it (tests, build, a command, a screenshot) and list them with their result in the report. If you could not verify, say so in the first line.
+Before your final message, wait for the background commands you started (or stop them): the report goes out only once they end.
 If you are blocked on a decision only the user can make, call mcp__shikigami__ask with the question and end your turn.
 Subagents are fine for searches and lookups; they run on {subagents}. No big parallel fan-outs.
 Start every task with a short step list (3-8 steps, TaskCreate) and keep it current as you go (TaskUpdate: in_progress when you start a step, completed when it is done; add or delete steps when the plan changes). It shows live as your task's steps on the user's board. Skip it only for a one-step job.
@@ -67,6 +68,10 @@ const IDLE_DISCONNECT: Duration = Duration::from_secs(5);
 /// real turn before calling the worker done.
 const TRIVIAL_GRACE: Duration = Duration::from_secs(30);
 const TRIVIAL: [&str; 2] = ["", "No response requested."];
+/// Its last background command ended and no turn started within this: it is asked to read the output and report.
+const SHELL_GRACE: Duration = Duration::from_secs(20);
+const SHELLS_DONE: &str = "seimei: your background commands have finished. Check their output, then finish the task \
+     with your report.";
 /// An ACP agent's text chunks are one event; this long without another, what came so far is said.
 const CHUNK_PAUSE: Duration = Duration::from_millis(500);
 /// Built-in tools a shikigami has no use for: scheduling, notebooks, worktree switching, remote triggers, design sync,
@@ -755,6 +760,8 @@ struct Session {
     tasks: HashMap<String, String>,
     /// Background shells still running: they live in its process, so it stays up until they end.
     shells: HashSet<String>,
+    /// Its turn ended while shells ran: the report waits for them, then for a turn that reads their output.
+    shell_wait: bool,
     /// /effort commands sent to the session whose own result (no model turn) is not a turn of the task.
     quiet: u32,
     /// TaskCreate calls waiting for their result, which names the step's id.
@@ -860,6 +867,7 @@ impl Session {
             turn_text: false,
             tasks: HashMap::new(),
             shells: HashSet::new(),
+            shell_wait: false,
             quiet: 0,
             steps: HashMap::new(),
             grace: None,
@@ -905,6 +913,7 @@ impl Session {
         }
         self.turn = false;
         self.shells.clear();
+        self.shell_wait = false;
     }
 
     /// The stream ended: the claude process is gone.
@@ -1013,11 +1022,12 @@ impl Session {
         if let Err(e) = client.interrupt().await {
             eprintln!("seimei: interrupting {}: {e}", self.w.name());
         }
-        if (!self.tasks.is_empty() || self.grace.is_some()) && self.w.state() == "running" {
+        if (!self.tasks.is_empty() || self.grace.is_some() || self.shell_wait) && self.w.state() == "running" {
             // No turn runs while it only waits for subagents (or after a trivial turn), so no result will say it
             // stopped.
             self.tasks.clear();
             self.grace = None;
+            self.shell_wait = false;
             self.stopping = false;
             self.w.set("stopped", json!({"summary": "Stopped."}));
             self.pool.report(&self.w, "stopped", "");
@@ -1109,9 +1119,14 @@ impl Session {
             Message::System(s) if s.subtype == "task_notification" => {
                 let id = s.data["task_id"].as_str().unwrap_or("");
                 self.tasks.remove(id);
-                // The last background shell ended: the process may close again.
+                // The last background shell ended: the process may close again, and a held report gets a turn to
+                // read the output (settle nudges it when none starts by itself).
                 if self.shells.remove(id) && self.shells.is_empty() {
-                    self.idle = Some(Instant::now() + IDLE_DISCONNECT);
+                    if self.shell_wait {
+                        self.grace = Some(Instant::now() + SHELL_GRACE);
+                    } else {
+                        self.idle = Some(Instant::now() + IDLE_DISCONNECT);
+                    }
                 }
             }
             Message::Assistant(a) => self.assistant(a),
@@ -1218,6 +1233,7 @@ impl Session {
     /// A new turn after the worker settled (its queued message, a subagent's report): it runs again.
     fn turn_goes_on(&mut self) {
         self.grace = None;
+        self.shell_wait = false;
         if matches!(self.w.state().as_str(), "done" | "failed") {
             self.idle = None;
             self.w.set("running", json!({"question": null}));
@@ -1250,6 +1266,13 @@ impl Session {
             let doing = format!("Waiting for {n} subagent{}", if n > 1 { "s" } else { "" });
             self.w.set("running", json!({"doing": {"text": doing}}));
             return;
+        } else if !self.shells.is_empty() && !msg.is_error {
+            // Its background commands still run: reporting now would drop their result.
+            let n = self.shells.len();
+            let doing = format!("Waiting for {n} background command{}", if n > 1 { "s" } else { "" });
+            self.w.set("running", json!({"doing": {"text": doing}}));
+            self.shell_wait = true;
+            return;
         } else if msg.is_error {
             let line = first_line(&text, 160);
             let summary = if line.is_empty() { msg.subtype.clone() } else { line };
@@ -1267,9 +1290,17 @@ impl Session {
         self.go_idle();
     }
 
-    /// No turn followed a trivial one: done, with the last thing it said.
+    /// No turn followed a trivial one: done, with the last thing it said. No turn followed the end of its background
+    /// commands: it is asked to read them and report.
     fn settle(&mut self) {
         self.grace = None;
+        if std::mem::take(&mut self.shell_wait)
+            && self.w.state() == "running"
+            && let Some(c) = &self.client
+            && c.query(SHELLS_DONE).is_ok()
+        {
+            return;
+        }
         if self.w.state() == "running" && self.tasks.is_empty() {
             let text = self.last_text.trim().to_string();
             self.w.set("done", json!({"summary": first_line(&text, 160), "result": chars(&text, 4000)}));
@@ -2154,7 +2185,7 @@ impl Pool {
             return Err(format!("context is one of {}", CONTEXTS.map(|c| c.0).join(", ")));
         }
         if let Some(link) = &s.link
-            && self.board.lock().unwrap().find(link).is_none()
+            && !self.board.lock().unwrap().knows(link)
         {
             return Err(format!("no task {link} on the board"));
         }
@@ -2201,7 +2232,12 @@ impl Pool {
             rec["tools"] = json!(tools);
         }
         let w = self.add_worker(rec.clone())?;
-        self.file(&w, &title_of(&s.task, &name), s.project.as_deref(), s.link.as_deref())?;
+        if let Err(e) = self.file(&w, &title_of(&s.task, &name), s.project.as_deref(), s.link.as_deref()) {
+            // Never started: no record stays behind.
+            self.workers.lock().unwrap().retain(|x| x.id != w.id);
+            let _ = std::fs::remove_file(self.dir.join(format!("{}.jsonl", w.id)));
+            return Err(e);
+        }
         self.events.add(json!({"type": "worker", "worker": w.id, "name": name, "event": "summoned", "text": s.task,
             "cwd": cwd, "model": rec["model"], "effort": rec["effort"], "context_cap": s.context,
             "subagents": rec["subagents"]}));

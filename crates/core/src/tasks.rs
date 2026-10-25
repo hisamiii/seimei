@@ -291,6 +291,11 @@ impl Board {
         Ok(self.data.tasks.len() - 1)
     }
 
+    /// Whether the board or its archive has this id.
+    pub fn knows(&self, tid: &str) -> bool {
+        self.find(tid).is_some() || self.archive.iter().any(|t| t.id == norm(tid))
+    }
+
     /// A task by its id ("#55", "55" or "t3").
     pub fn find(&self, tid: &str) -> Option<&Task> {
         self.index(tid).map(|i| &self.data.tasks[i])
@@ -484,7 +489,8 @@ impl Board {
         self.current_index(worker).map(|i| &self.data.tasks[i])
     }
 
-    /// A new shikigami's task: the one `link` names, or one of its own (seimei's #NN when `task` starts with one).
+    /// A new shikigami's task: the one `link` names, or one of its own. A `task` that starts with seimei's #NN takes
+    /// that item, wherever it is: live, done (it opens again) or archived (it comes back).
     pub fn attach(
         &mut self,
         worker: &str,
@@ -495,7 +501,7 @@ impl Board {
         link: Option<&str>,
     ) -> Result<Task> {
         if let Some(link) = link {
-            let i = self.found(link)?;
+            let i = self.live(link)?;
             if self.data.tasks[i].owner != owner {
                 self.data.tasks[i].pos = self.last(owner) + 1;
             }
@@ -515,16 +521,14 @@ impl Board {
         }
         let number = NUMBER.captures(task).map(|c| format!("#{}", &c[1]));
         if let Some(n) = &number
-            && let Some(t) = self.find(n).filter(|t| t.state != "done")
+            && self.knows(n)
         {
-            let id = t.id.clone();
-            return self.attach(worker, owner, task, project, title, Some(&id));
+            return self.attach(worker, owner, task, project, title, Some(n));
         }
-        let tid = number.filter(|n| self.find(n).is_none());
         self.add(NewTask {
             state: "running",
             worker: Some(worker),
-            tid: tid.as_deref(),
+            tid: number.as_deref(),
             ..NewTask::new(title, project, owner)
         })
     }
