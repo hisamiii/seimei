@@ -1,10 +1,10 @@
 # Connectors: desktop and browser, the next step
 
-What the desktop and browser plugins are missing so an agent can work while the user uses the same machine, ranked, with the tool API for the top items. Status: design, not approved yet. Nothing here is built.
+What the desktop and browser plugins are missing so an agent can work while the user uses the same machine, ranked, with the tool API for the top items. Status: items 1 to 6 are built (browser_act, browser_read elements, browser_wait, browser_screenshot, agent tabs with browser_navigate, the pinned compositor socket; extension 1.1.0). Items 7 and 8 (an agent display, an agent browser) are designs, not approved.
 
 The goal in one line: an agent should be able to drive a web page or an app to the end of a task without taking the user's keyboard focus, moving their mouse or switching their workspace.
 
-## Where we are
+## The starting point (before items 1 to 6 were built)
 
 ### Browser (the extension in `browser/`, the plugin in `crates/core/src/plugins/browser.rs`)
 

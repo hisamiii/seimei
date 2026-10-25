@@ -12,7 +12,7 @@ Layout:
 - `web/`: the web page, built into the binary. Plain JS and CSS, no build step.
 - `android/`: the app (Kotlin).
 - `browser/`, `discord/`: the browser extension and the Discord connector the plugins talk to.
-- `contrib/`: service files, compositor snippets, theme generator.
+- `contrib/`: the guard example, the release script and its minisign key, the theme generator, the dsh profile; `contrib/maintainer/`: the author's own deploy and machine setup.
 - `tests/`: `cases/` (case files the Rust tests run), `fakes/` (a fake Claude Code CLI, ACP agent, Codex and window manager), `qa/` (the QA server), `live.sh` (see Tests).
 - `docs/`: see Docs below.
 
@@ -61,7 +61,7 @@ Docs are for a human reader who knows Linux and Claude Code but not this repo. T
 - No session diaries, no dated "today we..." sections, no step-by-step history. Git history is the history.
 - Update the doc in the same commit as the code it describes. Delete text that is no longer true.
 
-Docs live in `docs/`: `architecture.md` (processes, state, deploys, tests), `config.md` (every config key), `plugins.md` (the plugin interface and each plugin), `security.md` (who can reach what, the guard, the cards).
+Docs live in `docs/`, indexed in `docs/README.md`: `architecture.md` (processes, state, the code map, deploys, tests), `config.md` (every config key and command), `plugins.md` (the plugin interface and each plugin), `security.md` (who can reach what, the guard, the cards).
 
 ### Local scratchpads
 

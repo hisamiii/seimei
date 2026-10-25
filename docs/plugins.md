@@ -1,7 +1,6 @@
 # Plugins
 
-A plugin is an optional group of tools on top of seimei's core. Each one is a single MCP server named after it, so
-its tools are `mcp__<name>__<tool>`. None are on by default.
+A plugin is an optional group of tools on top of seimei's core. Each one is a single MCP server named after it, so its tools are `mcp__<name>__<tool>`. None are on by default.
 
 ```toml
 [plugins]
@@ -11,8 +10,7 @@ enabled = ["desktop", "music", "mytool"]
 - **seimei** (the dispatcher) gets every enabled plugin.
 - **A shikigami** gets the ones its summon grants (`tools: ["desktop"]`), with the same guard, cards and rules.
 - Each plugin brings a **prompt section** that rides along with its tools, and its own **approval cards**.
-- The server is built fresh for every session that gets it, so a card names the right session; the backend behind it
-  (a desktop connection, a connector socket) is shared.
+- The server is built fresh for every session that gets it, so a card names the right session; the backend behind it (a desktop connection, a connector socket) is shared.
 
 ## Built in
 
@@ -37,8 +35,7 @@ What the extension does in a page: it reads the text and a numbered list of link
 
 ## External MCP servers
 
-Any other name in `enabled` is an external MCP server, in the format Claude Code's `mcpServers` takes, plus a prompt
-section:
+Any other name in `enabled` is an external MCP server, in the format Claude Code's `mcpServers` takes, plus a prompt section:
 
 ```toml
 [plugins.mytool]
@@ -49,9 +46,7 @@ prompt = """## My tool
 What it is for and its rules."""
 ```
 
-`type`, `command`, `args`, `env`, `url` and `headers` are passed on. External servers get no cards of their own:
-their calls go through Claude Code's permission prompts like any other tool (so "Always allow" works for them), and
-through seimei's guard.
+`type`, `command`, `args`, `env`, `url` and `headers` are passed on. External servers get no cards of their own: their calls go through Claude Code's permission prompts like any other tool (so "Always allow" works for them), and through seimei's guard.
 
 ## Writing a plugin
 
