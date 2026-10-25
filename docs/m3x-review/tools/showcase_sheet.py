@@ -4,7 +4,7 @@ tasks and agents, then usage, account and offline, then the BEHAVIOR.md screens)
 import glob, html, os, sys
 
 D, OUT = sys.argv[1], sys.argv[2]
-ROWS = [("01", "05"), ("06", "11"), ("12", "17"), ("18", "22")]
+ROWS = [("01", "05"), ("06", "11"), ("12", "17"), ("18", "22"), ("23", "99")]  # 23 on: the final set's extra states
 here = os.path.dirname(os.path.abspath(OUT))
 font = os.path.relpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../../web/fonts"), here)
 rel = os.path.relpath(os.path.abspath(D), here)
@@ -13,7 +13,8 @@ rows = []
 for a, b in ROWS:
     cells = "".join(f'<figure><figcaption><span>{n[:2]}</span>{html.escape(n[3:-4].replace("-", " ").capitalize())}'
                     f'</figcaption><img src="{rel}/{n}" width="412"></figure>' for n in shots if a <= n[:2] <= b)
-    rows.append(f'<div class="row">{cells}</div>')
+    if cells:
+        rows.append(f'<div class="row">{cells}</div>')
 open(OUT, "w").write(f"""<!doctype html><meta charset="utf-8"><title>Showcase</title>
 <style>
 @font-face {{ font-family: "Google Sans Flex"; src: url("{font}/google-sans-flex-latin.woff2"); font-weight: 1 1000; }}
