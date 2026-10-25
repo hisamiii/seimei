@@ -168,7 +168,7 @@ class Activity {
     out.hidden = true;
     row.addEventListener('click', () => { if (out.textContent) out.hidden = !out.hidden; });
     this.calls.append(row, out);
-    this.rows.set(ev.tool_id, { row, out });
+    this.rows.set(ev.tool_id, { row, out, name: ev.name });
     this.running++;
     this.label();
   }
@@ -222,10 +222,12 @@ class Activity {
   }
 
   label() {
+    // The call under way reads in the present (final/ 10), live box or not yet
+    const now = this.live_ ? this.liveName : [...this.rows.values()].reverse().find((r) => r.row.classList.contains('run'))?.name;
     const counts = new Map(this.counts);
-    if (this.live_) counts.set(this.liveName, counts.get(this.liveName) - 1);
+    if (now) counts.set(now, counts.get(now) - 1);
     const parts = [...counts].filter(([, n]) => n > 0).map(([name, n]) => phrase(name, n));
-    if (this.live_) parts.push(`${doing(this.liveName)}…`);
+    if (now) parts.push(`${doing(now)}…`);
     const text = parts.join(', ') + (this.failed ? ` · ${this.failed} failed` : '');
     // A failure shows on the collapsed chip too, not only in its row (QA U5).
     this.chip.classList.toggle('err', this.failed > 0);
@@ -407,7 +409,8 @@ function approvalCard(ev) {
   const denyOpt = opts.find((o) => o.id === 'deny');
   const buttons = [];
   const answer = async (decision, option, note, btn) => {
-    buttons.forEach((b) => (b.disabled = true));
+    // The others step back while the tapped one is on its way
+    buttons.forEach((b) => { b.disabled = true; b.classList.toggle('held', b !== btn); });
     // Past 200 ms the tapped button shows the answer is on its way.
     const slow = setTimeout(() => {
       if (!btn) return;
@@ -419,7 +422,7 @@ function approvalCard(ev) {
     } catch (e) {
       // 409: answered elsewhere, the event stream settles the card.
       if (e.message === '409' || outcomes.has(ev.aid)) return;
-      buttons.forEach((b) => (b.disabled = false));
+      buttons.forEach((b) => { b.disabled = false; b.classList.remove('held'); });
       snack("Couldn't send your answer", { label: 'Retry', run: () => answer(decision, option, note, btn) });
     } finally {
       clearTimeout(slow);

@@ -10,7 +10,6 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -21,6 +20,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.withStyle
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.SwipeToDismissBox
@@ -118,6 +118,9 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.graphics.SolidColor
 
 // ---------- tones and words, as on the web page ----------
 
@@ -282,9 +285,7 @@ fun AgentsTab(vm: Seimei) {
             item("h-$title") { GroupTitle(title, color) }
             itemsIndexed(list, key = { _, it -> "${it.kind}-${it.id}" }) { i, a ->
                 val shape = segment(i, list.size, if (a.state == "ask") 28.dp else 20.dp, if (a.state == "ask") 8.dp else 4.dp)
-                // The screen's one emphasized title: the first shikigami at work
-                val emph = a.state == "work" && i == 0
-                if (a.state == "idle") SwipeToArchive(a, vm) { AgentRow(a, now, shape = shape) { vm.open(a) } } else AgentRow(a, now, shape = shape, emph = emph) { vm.open(a) }
+                if (a.state == "idle") SwipeToArchive(a, vm) { AgentRow(a, now, shape = shape) { vm.open(a) } } else AgentRow(a, now, shape = shape) { vm.open(a) }
             }
         }
         if (done.isNotEmpty()) {
@@ -448,7 +449,11 @@ fun ShapeTile(name: String, size: Dp, bg: Color, working: Boolean = false, conte
         return
     }
     val run = rememberInfiniteTransition("tile")
-    val t by run.animateFloat(0f, 1f, infiniteRepeatable(tween(2400, easing = SpringEasing), RepeatMode.Reverse), "morph")
+    // The morph goes there and back on the spring (2.4 s each way), started at the name's phase, as on the web
+    val clock by run.animateFloat(0f, 4800f, infiniteRepeatable(tween(4800, easing = LinearEasing)), "morph")
+    val phase = remember(name) { phaseOf(name) }
+    val at = (clock + phase) % 4800f
+    val t = SpringEasing.transform(if (at < 2400f) at / 2400f else (4800f - at) / 2400f)
     val turn by run.animateFloat(0f, 360f, infiniteRepeatable(tween(9000, easing = LinearEasing)), "turn")
     val burst = SHAPES.getValue("soft-burst")
     Box(Modifier.size(size).graphicsLayer { rotationZ = turn }.clip(PolyShape(me, burst, t)).background(bg), contentAlignment = Alignment.Center) { content() }
@@ -491,7 +496,7 @@ fun AgentTile(a: Agent) {
 }
 
 @Composable
-fun AgentRow(a: Agent, now: Long, query: String = "", shape: Shape = RoundedCornerShape(20.dp), emph: Boolean = false, onClick: () -> Unit) {
+fun AgentRow(a: Agent, now: Long, query: String = "", shape: Shape = RoundedCornerShape(20.dp), onClick: () -> Unit) {
     val t = LocalTokens.current
     val cs = MaterialTheme.colorScheme
     val ask = a.state == "ask"
@@ -509,7 +514,8 @@ fun AgentRow(a: Agent, now: Long, query: String = "", shape: Shape = RoundedCorn
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // Name and tag take the room left of the time, so the time lines up at the right edge.
                 Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                    Text(a.name, fontSize = 16.sp, lineHeight = 24.sp, fontWeight = if (emph) FontWeight.Bold else FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    // Who asks has an emphasized name (final/ 08)
+                    Text(a.name, fontSize = 16.sp, lineHeight = 24.sp, fontWeight = if (ask) FontWeight.Bold else FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         color = if (ask) t.onWarnContainer else if (a.state == "done" || a.archived) LocalExtra.current.text2 else Color.Unspecified, modifier = Modifier.weight(1f, fill = false))
                 }
                 Spacer(Modifier.width(8.dp))
@@ -519,17 +525,17 @@ fun AgentRow(a: Agent, now: Long, query: String = "", shape: Shape = RoundedCorn
                     fontWeight = if (a.fresh) FontWeight.Medium else null)
             }
             Spacer(Modifier.height(3.dp))
-            Row {
-                if (a.project.isNotEmpty() && a.project != a.name) Text("${a.project} · ", fontSize = 14.sp, lineHeight = 20.sp,
-                    color = if (ask) t.onWarnContainer else LocalExtra.current.text2, fontWeight = FontWeight.Medium, maxLines = 1)
-                val (line, at) = searchLine(a, query)
-                val mark = MaterialTheme.colorScheme.primary.copy(alpha = .3f)
-                Text(buildAnnotatedString {
-                    append(line)
-                    if (at >= 0) addStyle(SpanStyle(background = mark), at, at + query.length)
-                }, fontSize = 14.sp, lineHeight = 20.sp, maxLines = if (ask) 2 else 1, overflow = TextOverflow.Ellipsis,
-                    color = when (a.state) { "ask" -> t.onWarnContainer; "work" -> cs.onSurface; else -> LocalExtra.current.text3 })
-            }
+            // One paragraph, the project inline, so a wrapped question starts its second line at the edge (final/ 08)
+            val (line, at) = searchLine(a, query)
+            val mark = MaterialTheme.colorScheme.primary.copy(alpha = .3f)
+            Text(buildAnnotatedString {
+                if (a.project.isNotEmpty() && a.project != a.name) withStyle(SpanStyle(fontWeight = FontWeight.Medium,
+                    color = if (ask) t.onWarnContainer else LocalExtra.current.text2)) { append("${a.project} · ") }
+                val start = length
+                append(line)
+                if (at >= 0) addStyle(SpanStyle(background = mark), start + at, start + at + query.length)
+            }, fontSize = 14.sp, lineHeight = 20.sp, maxLines = if (ask) 2 else 1, overflow = TextOverflow.Ellipsis,
+                color = when (a.state) { "ask" -> t.onWarnContainer; "work" -> cs.onSurface; else -> LocalExtra.current.text3 })
         }
     }
     Spacer(Modifier.height(2.dp))
@@ -612,9 +618,13 @@ fun AgentPage(vm: Seimei, pg: Page) {
             Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 4.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(vm::closePage, Modifier.size(48.dp)) { Icon(Icons.back, "Back to agents", Modifier.size(22.dp)) }
                 Column(Modifier.weight(1f)) {
-                    Text(a.name, fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (a.project.isNotEmpty() && a.project != a.name) Text("${a.project} · ", fontSize = 13.sp, color = tint(a.project), fontWeight = FontWeight.Medium)
+                    // final/ 10: the name at 22, then the project (text-2, medium) and the state in its colour, at 12
+                    Text(a.name, fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (a.project.isNotEmpty() && a.project != a.name) {
+                            Text(a.project, fontSize = 12.sp, lineHeight = 16.sp, color = LocalExtra.current.text2, fontWeight = FontWeight.Medium)
+                            Text(" · ", fontSize = 12.sp, lineHeight = 16.sp, color = LocalExtra.current.text3)
+                        }
                         val word = when (a.state) {
                             "ask" -> "Needs you"
                             "work" -> "Working"
@@ -622,18 +632,19 @@ fun AgentPage(vm: Seimei, pg: Page) {
                             else -> stateText(pg.row)
                         }
                         val ago = short(a.since)
-                        Text(if (a.state == "done" || ago == "now") word else "$word · $ago", fontSize = 13.sp,
-                            color = if (a.state == "ask") PEACH else LocalExtra.current.text3, maxLines = 1)
+                        Text(if (a.state == "done" || ago == "now") word else "$word · $ago", fontSize = 12.sp, lineHeight = 16.sp,
+                            color = when (a.state) { "ask" -> PEACH; "work" -> cs.primary; else -> LocalExtra.current.text3 }, maxLines = 1)
                     }
                 }
                 // One tap each way between seimei and the user.
                 val canHand = if (pg.kind == "worker") pg.row.optBoolean("started", true) && pg.row.str("state") !in setOf("released", "starting")
                     else pg.row.str("kind") in setOf("interactive", "background")
-                if (canHand) FilledTonalButton({ vm.handoff(pg) }, Modifier.heightIn(min = 36.dp).padding(end = 4.dp)
+                if (canHand) FilledTonalButton({ vm.handoff(pg) }, Modifier.height(40.dp).padding(end = 0.dp)
                     .semantics { contentDescription = if (pg.kind == "worker") "Take over ${a.name}" else "Hand ${a.name} off to seimei" },
-                    contentPadding = PaddingValues(horizontal = 12.dp)) {
-                    Text(if (pg.kind == "worker") "Take over" else "Hand off", fontSize = 13.sp, maxLines = 1)
+                    contentPadding = PaddingValues(horizontal = 16.dp)) {
+                    Text(if (pg.kind == "worker") "Take over" else "Hand off", fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1)
                 }
+                Spacer(Modifier.width(8.dp))
                 ContextRing(a.context) { pg.details = true }
             }
             if (a.archived) Row(
@@ -655,7 +666,8 @@ fun AgentPage(vm: Seimei, pg: Page) {
             }
             LazyColumn(
                 Modifier.weight(1f).fillMaxWidth(), state = list, reverseLayout = true,
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
+                // A short thread sits on the composer, as a chat does (final/ 09)
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.Bottom),
             ) {
                 pg.ask?.let { ask -> item("ask-${ask.str("tool_id")}") { QuestionCard(vm, pg, ask) } }
                 if (pg.kind == "worker" && pg.row.str("state") == "asking" && pg.row.str("question").isNotEmpty()) item("wask") {
@@ -686,25 +698,19 @@ fun QuestionCard(vm: Seimei, pg: Page, ask: JSONObject) {
         }
     }
     val tk = LocalTokens.current
-    // The warm card of a decision: the asker's shape, the question as the screen's one emphasized title, the options a
-    // segmented list
+    // The warm card of a decision (final/ 09): the question glyph on a warn tile, the question, the options a segmented list
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(tk.warnContainer).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(verticalAlignment = Alignment.Top) {
-            ShapeTile(pg.row.str("name"), 40.dp, tk.warn) {
-                Icon(Icons.question, null, Modifier.size(20.dp), tint = tk.onWarn)
+            Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(tk.warn), contentAlignment = Alignment.Center) {
+                Icon(Icons.question, null, Modifier.size(18.dp), tint = tk.onWarn)
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                // The question's first sentence is its title, the screen's one emphasized line; what follows explains it
-                val text = q?.str("question") ?: ask.str("text").ifEmpty { "A question" }
-                val cut = Regex("(?<=[?.!])\\s").find(text)?.range?.first ?: -1
-                Text(if (cut > 0) text.substring(0, cut) else text, fontSize = 16.sp, lineHeight = 24.sp,
-                    fontWeight = FontWeight.Bold, color = tk.onWarnContainer, modifier = Modifier.semantics { heading() })
-                if (cut > 0) Text(text.substring(cut + 1), fontSize = 14.sp, lineHeight = 20.sp, color = tk.onWarnContainer)
-                if (q != null && q.str("header").isNotEmpty()) Text(q.str("header"), fontSize = 14.sp, lineHeight = 20.sp, color = tk.onWarnContainer.copy(alpha = .82f))
+                Text(q?.str("question") ?: ask.str("text").ifEmpty { "A question" }, fontSize = 16.sp, lineHeight = 24.sp,
+                    fontWeight = FontWeight.Medium, color = tk.onWarnContainer, modifier = Modifier.semantics { heading() })
             }
         }
         if (q != null) Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -720,9 +726,9 @@ fun QuestionCard(vm: Seimei, pg: Page, ask: JSONObject) {
                             picked = n
                             vm.pageAnswer(n) { ok -> if (ok) sentAt = System.currentTimeMillis() else picked = 0 }
                         }
-                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                        .padding(horizontal = 14.dp, vertical = 12.dp)
                         .alpha(if (canTap || picked == n) 1f else .7f),
-                    verticalArrangement = Arrangement.Center,
+                    verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(o.str("label"), fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium, color = tk.onWarnContainer, modifier = Modifier.weight(1f))
@@ -743,7 +749,7 @@ fun PageComposer(vm: Seimei, pg: Page, a: Agent) {
     var menu by remember { mutableStateOf(false) }
     val cs = MaterialTheme.colorScheme
     val why = blocked(pg)
-    Column(Modifier.fillMaxWidth().onSizeChanged { vm.pageBarPx = it.height }.padding(start = 12.dp, end = 12.dp, bottom = 10.dp)) {
+    Column(Modifier.fillMaxWidth().onSizeChanged { vm.pageBarPx = it.height }.padding(start = 12.dp, end = 12.dp, bottom = 12.dp)) {
         val note = pg.note ?: why
         if (note != null) Text(note, fontSize = 13.sp, color = if (pg.note != null) cs.error else LocalExtra.current.text3,
             modifier = Modifier.padding(start = 4.dp, end = 4.dp, bottom = 8.dp))
@@ -773,45 +779,56 @@ fun PageComposer(vm: Seimei, pg: Page, a: Agent) {
         }
         Row(verticalAlignment = Alignment.Bottom) {
             val name = if (a.name.length > 22) a.name.take(21).trim() + "…" else a.name
-            TextField(
-                value = pg.draft,
-                onValueChange = { pg.draft = it },
-                enabled = why == null,
-                placeholder = { Text(if (why != null) "Can't reply from here right now" else if (pg.ask != null) "Your answer" else "Message $name", maxLines = 1) },
-                leadingIcon = {
-                    Box {
-                        IconButton({ menu = true }, enabled = why == null) { Icon(Icons.attach, "Attach photos or files") }
-                        DropdownMenu(menu, { menu = false }) {
-                            DropdownMenuItem({ Text("Photos") }, {
-                                menu = false
-                                pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                            }, leadingIcon = { Icon(Icons.photo, null) })
-                            DropdownMenuItem({ Text("Files") }, {
-                                menu = false
-                                pickFiles.launch(arrayOf("*/*"))
-                            }, leadingIcon = { Icon(Icons.doc, null) })
-                        }
+            val x = LocalTokens.current
+            val asking = pg.ask != null || (pg.kind == "worker" && pg.row.str("state") == "asking")
+            // final/ 09: the 52 pill of the chat's composer, the attach button inside it
+            Row(Modifier.weight(1f).heightIn(min = 52.dp).clip(RoundedCornerShape(26.dp)).background(cs.surfaceContainerHigh),
+                verticalAlignment = Alignment.Bottom) {
+                Box(Modifier.padding(start = 4.dp, bottom = 2.dp)) {
+                    IconButton({ menu = true }, Modifier.size(48.dp), enabled = why == null) {
+                        Icon(Icons.attach, "Attach photos or files", Modifier.size(22.dp), tint = x.text3)
                     }
-                },
-                maxLines = 6,
-                shape = RoundedCornerShape(28.dp),
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = cs.surfaceContainerHigh, unfocusedContainerColor = cs.surfaceContainerHigh,
-                    disabledContainerColor = cs.surfaceContainerHigh,
-                    focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, disabledIndicatorColor = Color.Transparent,
-                ),
-                modifier = Modifier.weight(1f).heightIn(min = 56.dp),
-            )
+                    DropdownMenu(menu, { menu = false }) {
+                        DropdownMenuItem({ Text("Photos") }, {
+                            menu = false
+                            pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        }, leadingIcon = { Icon(Icons.photo, null) })
+                        DropdownMenuItem({ Text("Files") }, {
+                            menu = false
+                            pickFiles.launch(arrayOf("*/*"))
+                        }, leadingIcon = { Icon(Icons.doc, null) })
+                    }
+                }
+                val hint = if (why != null) "Can't reply from here right now" else if (asking) "Your answer" else "Message $name"
+                BasicTextField(
+                    value = pg.draft,
+                    onValueChange = { pg.draft = it },
+                    enabled = why == null,
+                    maxLines = 6,
+                    textStyle = TextStyle(fontSize = 15.sp, lineHeight = 22.sp, color = x.text),
+                    cursorBrush = SolidColor(cs.primary),
+                    modifier = Modifier.weight(1f).padding(start = 8.dp, end = 16.dp, top = 15.dp, bottom = 15.dp).semantics { contentDescription = hint },
+                    decorationBox = { field ->
+                        Box {
+                            if (pg.draft.isEmpty()) Text(hint, fontSize = 15.sp, lineHeight = 22.sp, color = x.text3, maxLines = 1)
+                            field()
+                        }
+                    },
+                )
+            }
             Spacer(Modifier.width(8.dp))
             val typing = pg.draft.isNotBlank() || pg.files.isNotEmpty()
             // Asking: the answer goes through Send; Stop is in the details sheet.
             if (pg.kind == "worker" && pg.row.str("state") in ACTIVE && pg.row.str("state") != "asking" && !typing) {
-                FilledTonalIconButton({ vm.workerStop(pg.id) }, Modifier.size(56.dp)) {
-                    Box(Modifier.size(14.dp).clip(RoundedCornerShape(3.dp)).background(cs.onSecondaryContainer).semantics { contentDescription = "Stop" })
+                // The square Stop of final/ 10: 16 corners on primary-container
+                Box(Modifier.size(52.dp).clip(RoundedCornerShape(16.dp)).background(cs.primaryContainer)
+                    .clickable(onClickLabel = "Stop") { vm.workerStop(pg.id) }.semantics { contentDescription = "Stop" },
+                    contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(14.dp).clip(RoundedCornerShape(4.dp)).background(cs.onPrimaryContainer))
                 }
             } else {
-                FilledIconButton(vm::pageSend, Modifier.size(56.dp), enabled = typing && why == null) {
-                    Icon(Icons.send, "Send", Modifier.size(22.dp))
+                FilledIconButton(vm::pageSend, Modifier.size(52.dp), enabled = typing && why == null) {
+                    Icon(Icons.send, "Send", Modifier.size(20.dp))
                 }
             }
         }

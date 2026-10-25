@@ -25,14 +25,25 @@ val SHAPES: Map<String, FloatArray> = mapOf(
     "very-sunny" to floatArrayOf(0.506f, 0.000f, 0.557f, 0.022f, 0.595f, 0.079f, 0.628f, 0.124f, 0.665f, 0.142f, 0.715f, 0.138f, 0.782f, 0.122f, 0.838f, 0.134f, 0.872f, 0.174f, 0.874f, 0.236f, 0.858f, 0.300f, 0.861f, 0.345f, 0.884f, 0.381f, 0.936f, 0.413f, 0.987f, 0.455f, 1.000f, 0.506f, 0.978f, 0.557f, 0.921f, 0.595f, 0.876f, 0.628f, 0.858f, 0.665f, 0.862f, 0.715f, 0.878f, 0.782f, 0.866f, 0.838f, 0.826f, 0.872f, 0.764f, 0.874f, 0.700f, 0.858f, 0.655f, 0.861f, 0.619f, 0.884f, 0.587f, 0.936f, 0.545f, 0.987f, 0.493f, 1.000f, 0.443f, 0.978f, 0.405f, 0.921f, 0.372f, 0.876f, 0.335f, 0.858f, 0.285f, 0.862f, 0.218f, 0.878f, 0.162f, 0.866f, 0.128f, 0.826f, 0.126f, 0.764f, 0.142f, 0.700f, 0.139f, 0.655f, 0.116f, 0.619f, 0.064f, 0.587f, 0.013f, 0.545f, 0.000f, 0.493f, 0.022f, 0.443f, 0.079f, 0.405f, 0.124f, 0.372f, 0.142f, 0.335f, 0.138f, 0.285f, 0.122f, 0.218f, 0.134f, 0.162f, 0.174f, 0.128f, 0.236f, 0.126f, 0.300f, 0.142f, 0.345f, 0.139f, 0.381f, 0.116f, 0.413f, 0.064f, 0.455f, 0.013f),
 )
 
-/** The identity shapes, in the order the web's shapeOf (util.js) picks from. */
-private val IDENTITY = listOf("pentagon", "clover4", "cookie9", "sunny", "cookie6", "puffy-diamond", "gem", "flower", "cookie4", "cookie12", "clover8")
+/** The identity shapes, in the order the web's shapeOf (util.js) picks from: it puts final/'s names on their shapes. */
+private val IDENTITY = listOf("cookie4", "cookie12", "cookie6", "sunny", "cookie9", "flower", "clover8", "clover4", "puffy-diamond", "gem", "pentagon")
+
+private fun nameHash(name: String): Long {
+    var h = 0L
+    for (c in name) h = (h * 101 + c.code) and 0xFFFFFFFFL
+    return h
+}
 
 /** A shikigami's shape: the same for a name everywhere, and the same as on the web. */
-fun shapeOf(name: String): String {
-    var h = 0L
-    for (c in name) h = (h * 31 + c.code) and 0xFFFFFFFFL
-    return IDENTITY[(h % IDENTITY.size).toInt()]
+fun shapeOf(name: String): String = IDENTITY[(nameHash(name) % IDENTITY.size).toInt()]
+
+/** Where in the 4.8 s morph cycle a working tile starts, in ms (util.js phaseOf): working tiles don't move in step. */
+fun phaseOf(name: String): Int {
+    var x = nameHash(name) xor 736562L
+    x = x xor (x ushr 16)
+    x = (x * 0x45d9f3bL) and 0xFFFFFFFFL
+    x = x xor (x ushr 16)
+    return (x % 96).toInt() * 50
 }
 
 /** A library shape, or the morph [t] of the way from [from] to [to]. */

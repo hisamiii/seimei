@@ -125,9 +125,18 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
 
     val waiting get() = approvals.keys.count { it !in outcomes }
 
+    /** What the last item says happened ("dev finished"): a trigger line right after it that repeats it is left out, as on the web. */
+    private var lastSaid: String? = null
+
     private fun put(item: Item): Int {
         items.add(item)
+        lastSaid = null
         return items.size - 1
+    }
+
+    private fun trig(key: String, why: String) {
+        if (why.isNotEmpty() && why == lastSaid) return
+        put(Item.Trig(key, if (why.isEmpty()) "on its own" else "after $why"))
     }
 
     private fun note(text: String, level: String, t: Double, key: String) {
@@ -193,7 +202,7 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
         val all = reports + notesSeen
         val shown = all.take(maxOf(1, minOf(3, reports.size)))
         val text = if (all.isEmpty()) "seimei acted on its own"
-            else shown.joinToString(", ") + if (all.size > shown.size) " and ${all.size - shown.size} more" else ""
+            else shown.joinToString(", ") + if (all.size > shown.size) "${if (shown.size > 1) "," else ""} and ${all.size - shown.size} more" else ""
         items[fold] = (items[fold] as Item.Fold).copy(text = text)
     }
 
@@ -215,19 +224,17 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
         if (lane == "t" && turnId > 0 && turnId != turn && type != "tool_result") {
             turn = turnId
             activity = -1
-            val why = ev.str("why")
-            put(Item.Trig("g$key", if (why.isEmpty()) "on its own" else "after $why"))
+            trig("g$key", ev.str("why"))
         } else if (lane == "t" && turnId == 0L) turn = 0
         // The part of an event turn that came to the chat (a picture, a reply for the user) says what started it.
         val fromId = ev.optLong("from")
         if (lane == "c" && fromId > 0 && fromId != from && type != "tool_result") {
             from = fromId
             activity = -1
-            val why = ev.str("why")
-            put(Item.Trig("from$key", if (why.isEmpty()) "on its own" else "after $why"))
+            trig("from$key", ev.str("why"))
         } else if (lane == "c" && fromId == 0L) from = 0
-        // The summoned card already says it.
-        if (type == "tool" && ev.str("name") == "mcp__seimei__summon") return
+        // The summoned card already says it; a question shows as its own card (as on the web).
+        if (type == "tool" && ev.str("name") in setOf("mcp__seimei__summon", "AskUserQuestion")) return
         if (type == "tool") {
             val call = Call(ev.str("tool_id"), ev.str("name"), ev.str("summary"))
             if (activity < 0) activity = put(Item.Activity(key, listOf(call)))
@@ -290,6 +297,7 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
                     if (event == "asking") asks[wid] = this to items.size
                     put(Item.Worker(key, event, ev.str("name"), ev.str("worker"), ev.str("text"), ev.str("model"), ev.str("cwd"),
                         ev.str("effort"), ev.str("context_cap")))
+                    lastSaid = "${ev.str("name")} ${ENDED[event] ?: event}"
                 } else {
                     val what = if (event == "stopped") "was stopped" else "was interrupted by a restart"
                     put(Item.Note(key, "${ev.str("name")} $what", ""))
@@ -339,9 +347,10 @@ fun resetsAt(t: Double): String {
         " " + clock(t)
 }
 
+// The locale's short time, as the web page shows it ("6:13 PM" in English)
 fun clock(t: Double): String =
-    java.time.format.DateTimeFormatter.ofPattern("HH:mm")
-        .format(Instant.ofEpochMilli((t * 1000).toLong()).atZone(ZoneId.systemDefault()))
+    java.time.format.DateTimeFormatter.ofLocalizedTime(java.time.format.FormatStyle.SHORT)
+        .format(Instant.ofEpochMilli((t * 1000).toLong()).atZone(ZoneId.systemDefault())).replace('\u202f', ' ')
 
 fun plural(n: Int, one: String, many: String) = if (n == 1) one else "$n $many"
 
@@ -402,11 +411,12 @@ fun doingPhrase(name: String): String = when {
     else -> "using " + if (name.startsWith("mcp__")) name.split("__").last().replace('_', ' ') else name
 }
 
-/** The calls done so far, then the one still running (live) as what it does now. */
+/** The calls done so far, then the one still running (live, or not yet streaming) as what it does now. */
 fun activityLabel(calls: List<Call>, live: String? = null): String {
+    val now = live ?: calls.lastOrNull { it.running }?.id
     val counts = LinkedHashMap<String, Int>()
-    for (c in calls) if (c.id != live) counts[c.name] = (counts[c.name] ?: 0) + 1
-    val parts = counts.entries.map { phrase(it.key, it.value) } + listOfNotNull(calls.firstOrNull { it.id == live }?.let { doingPhrase(it.name) })
+    for (c in calls) if (c.id != now) counts[c.name] = (counts[c.name] ?: 0) + 1
+    val parts = counts.entries.map { phrase(it.key, it.value) } + listOfNotNull(calls.firstOrNull { it.id == now }?.let { doingPhrase(it.name) })
     return parts.joinToString(", ").replaceFirstChar { it.uppercase() }
 }
 

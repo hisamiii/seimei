@@ -44,6 +44,9 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.text.style.TextOverflow
 
 val WINDOWS = listOf("five_hour" to "5-hour", "seven_day" to "Weekly")
 
@@ -73,7 +76,7 @@ fun resetText(t: Double): String {
         else -> "${Math.round(mins / 1440.0)} days"
     }
     val d = Instant.ofEpochMilli((t * 1000).toLong()).atZone(ZoneId.systemDefault())
-    val at = if (dayOf(t) == java.time.LocalDate.now()) clock(t) else d.format(DateTimeFormatter.ofPattern("EEE HH:mm"))
+    val at = if (dayOf(t) == java.time.LocalDate.now()) clock(t) else d.format(DateTimeFormatter.ofPattern("EEE")) + " " + clock(t)
     return "Resets $at, in $left"
 }
 
@@ -83,8 +86,9 @@ fun UsageTab(vm: Seimei) {
     val cs = MaterialTheme.colorScheme
     val scroll = rememberScrollState()
     LaunchedEffect(scroll) { snapshotFlow { scroll.value > 0 }.collect { vm.lifted = it } }
-    Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    // final/ 12: the page gap is 14, a section's own gap 8, every list one segmented group
+    Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 40.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)) {
         var any = false
         for ((key, label) in WINDOWS) {
             val w = u?.optJSONObject("windows")?.optJSONObject(key) ?: continue
@@ -94,100 +98,113 @@ fun UsageTab(vm: Seimei) {
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(cs.surfaceContainer).padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.Bottom) {
-                    Text(label, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                    Text(label, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, lineHeight = 24.sp, modifier = Modifier.weight(1f).padding(bottom = 4.dp))
                     Text("${Math.round(util * 100)}%", fontSize = 34.sp, lineHeight = 40.sp, fontWeight = FontWeight.SemiBold, color = tone, style = TNUM)
                 }
                 // M3X linear progress: the active part, a 4dp gap, the rest of the track; no stop dot
                 LinearProgressIndicator(
-                    progress = { util.toFloat().coerceIn(0f, 1f) }, color = tone, trackColor = LocalTokens.current.outline.copy(alpha = .45f).compositeOver(cs.surface),
+                    progress = { util.toFloat().coerceIn(0f, 1f) }, color = tone, trackColor = LocalTokens.current.containerHighest,
                     strokeCap = StrokeCap.Round, gapSize = 4.dp, drawStopIndicator = {},
                     modifier = Modifier.fillMaxWidth().height(8.dp),
                 )
                 val resets = w.optDouble("resets_at", 0.0)
-                if (resets > 0) Text(resetText(resets), fontSize = 14.sp, color = LocalExtra.current.text2)
+                if (resets > 0) Text(resetText(resets), fontSize = 14.sp, lineHeight = 20.sp, color = LocalExtra.current.text2)
             }
         }
         val note = if (!any) "No usage yet"
         else u?.optDouble("updated", 0.0)?.takeIf { it > 0 }?.let { "Updated ${clock(it)}" }
-        note?.let { Text(it, fontSize = 13.sp, color = LocalExtra.current.text3) }
+        note?.let { Note(it) }
 
         val today = u?.optJSONObject("today")?.optJSONObject("sessions")
         if (today != null && today.length() > 0) {
             Heading("Today in seimei")
             val rows = today.keys().asSequence().map { it to today.getJSONObject(it) }.sortedByDescending { it.second.optLong("output") }.toList()
-            Column {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 for ((i, r) in rows.withIndex()) {
-                    if (i > 0) HorizontalDivider(color = cs.surfaceContainerHigh)
                     val (name, t) = r
-                    Column(Modifier.padding(vertical = 10.dp)) {
-                        Row {
-                            Text(name.removePrefix("shikigami "), fontWeight = FontWeight.Medium, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                    Column(Modifier.fillMaxWidth().clip(segment(i, rows.size)).background(cs.surfaceContainer).padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(name.removePrefix("shikigami "), fontWeight = FontWeight.Medium, fontSize = 16.sp, lineHeight = 24.sp, modifier = Modifier.weight(1f))
                             val turns = t.optInt("turns")
-                            Text("$turns ${if (turns == 1) "turn" else "turns"}", fontSize = 12.sp, color = LocalExtra.current.text3)
+                            Spacer(Modifier.width(12.dp))
+                            Text("$turns ${if (turns == 1) "turn" else "turns"}", fontSize = 14.sp, lineHeight = 20.sp, color = LocalExtra.current.text3)
                         }
                         Text("${tokens(t.optLong("output"))} out · ${tokens(t.optLong("input") + t.optLong("cache_read") + t.optLong("cache_write"))} in",
-                            fontSize = 13.sp, color = LocalExtra.current.text3)
+                            fontSize = 14.sp, lineHeight = 20.sp, color = LocalExtra.current.text3)
                     }
                 }
             }
         }
         CostSection(vm.cost)
         MetricsSection(vm.metrics)
-        Spacer(Modifier.size(8.dp))
     }
 }
 
 @Composable
-fun Heading(text: String) = Text(text, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = LocalExtra.current.text2, modifier = Modifier.padding(top = 6.dp))
+fun Heading(text: String) = Text(text, fontSize = 14.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold, color = LocalExtra.current.text2,
+    modifier = Modifier.padding(top = 14.dp))
+
+@Composable
+private fun Note(text: String) = Text(text, fontSize = 14.sp, lineHeight = 20.sp, color = LocalExtra.current.text3)
+
+/** One row of a segmented list (final/ 12's crow): the name, the amount large on the right, a chevron, the facts under the name. */
+@Composable
+private fun CostRow(shape: Shape, title: String, amount: String, sub: String, open: Boolean, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(shape).background(MaterialTheme.colorScheme.surfaceContainer).clickable(onClick = onClick)
+        .padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.Medium, fontSize = 16.sp, lineHeight = 24.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(sub, fontSize = 12.sp, lineHeight = 18.sp, color = LocalExtra.current.text3, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(amount, fontSize = 22.sp, lineHeight = 34.sp, fontWeight = FontWeight.SemiBold, style = TNUM)
+        Spacer(Modifier.width(8.dp))
+        Icon(Icons.chev, null, Modifier.size(18.dp).rotate(if (open) 90f else 0f), tint = LocalExtra.current.text3)
+    }
+}
 
 /** What the tokens would cost on pay-as-you-go API prices; tap a period for its models. */
 @Composable
 fun CostSection(cost: JSONObject?) {
     val cs = MaterialTheme.colorScheme
-    Heading("At API prices")
-    if (cost == null) {
-        Text("Adding up…", fontSize = 13.sp, color = LocalExtra.current.text3)
-        return
-    }
-    val since = Instant.ofEpochMilli((cost.optDouble("week_start") * 1000).toLong()).atZone(ZoneId.systemDefault())
-        .format(DateTimeFormatter.ofPattern("EEE HH:mm"))
-    Column {
-        for ((i, row) in listOf(Triple("day", "Today", ""), Triple("week", "This week", "since $since"), Triple("all", "All time", "")).withIndex()) {
-            val (key, label, sub) = row
-            val p = cost.optJSONObject(key) ?: continue
-            var open by remember(key) { mutableStateOf(false) }
-            if (i > 0) HorizontalDivider(color = cs.surfaceContainerHigh)
-            Row(Modifier.fillMaxWidth().clickable { open = !open }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(label, fontWeight = FontWeight.Medium, fontSize = 15.sp)
-                    Text(listOf(sub, "%,d API calls".format(Locale.US, p.optLong("messages"))).filter { it.isNotEmpty() }.joinToString(" · "),
-                        fontSize = 12.sp, color = LocalExtra.current.text3)
-                }
-                Text(usd(p.optDouble("usd")), fontSize = 20.sp, style = TNUM)
-                Spacer(Modifier.width(6.dp))
-                Icon(Icons.chev, null, Modifier.size(18.dp).rotate(if (open) 90f else 0f), tint = LocalExtra.current.text3)
-            }
-            if (open) Column(Modifier.padding(bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                val models = p.optJSONObject("models") ?: JSONObject()
-                for (m in models.keys().asSequence().sortedByDescending { models.getJSONObject(it).optDouble("usd") }) {
-                    val v = models.getJSONObject(m)
-                    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(cs.surfaceContainerLow).padding(horizontal = 12.dp, vertical = 8.dp)) {
-                        Row {
-                            Text(modelName(m), fontSize = 14.sp, modifier = Modifier.weight(1f))
-                            Text(usd(v.optDouble("usd")), fontSize = 14.sp, style = TNUM)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Heading("At API prices")
+        if (cost == null) {
+            Note("Adding up…")
+            return@Column
+        }
+        val since = Instant.ofEpochMilli((cost.optDouble("week_start") * 1000).toLong()).atZone(ZoneId.systemDefault())
+            .format(DateTimeFormatter.ofPattern("EEE")) + " " + clock(cost.optDouble("week_start"))
+        val rows = listOf(Triple("day", "Today", ""), Triple("week", "This week", "Since $since"), Triple("all", "All time", ""))
+            .filter { cost.optJSONObject(it.first) != null }
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            for ((i, row) in rows.withIndex()) {
+                val (key, label, sub) = row
+                val p = cost.getJSONObject(key)
+                var open by remember(key) { mutableStateOf(false) }
+                CostRow(segment(i, rows.size), label, usd(p.optDouble("usd")),
+                    listOf(sub, "%,d API calls".format(Locale.US, p.optLong("messages"))).filter { it.isNotEmpty() }.joinToString(" · "), open) { open = !open }
+                if (open) Column(Modifier.padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    val models = p.optJSONObject("models") ?: JSONObject()
+                    for (m in models.keys().asSequence().sortedByDescending { models.getJSONObject(it).optDouble("usd") }) {
+                        val v = models.getJSONObject(m)
+                        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(cs.surfaceContainerLow).padding(horizontal = 12.dp, vertical = 8.dp)) {
+                            Row {
+                                Text(modelName(m), fontSize = 14.sp, modifier = Modifier.weight(1f))
+                                Text(usd(v.optDouble("usd")), fontSize = 14.sp, style = TNUM)
+                            }
+                            Text("${tokens(v.optLong("output"))} out · ${tokens(v.optLong("input"))} in · ${tokens(v.optLong("cache_read"))} cache read · " +
+                                "${tokens(v.optLong("cache_write"))} cache write", fontSize = 12.sp, color = LocalExtra.current.text3)
                         }
-                        Text("${tokens(v.optLong("output"))} out · ${tokens(v.optLong("input"))} in · ${tokens(v.optLong("cache_read"))} cache read · " +
-                            "${tokens(v.optLong("cache_write"))} cache write", fontSize = 12.sp, color = LocalExtra.current.text3)
                     }
+                    val unpriced = p.optJSONArray("unpriced")
+                    if (unpriced != null && unpriced.length() > 0) Note("No price for ${List(unpriced.length()) { unpriced.getString(it) }.joinToString(", ")}, counted as \$0")
                 }
-                val unpriced = p.optJSONArray("unpriced")
-                if (unpriced != null && unpriced.length() > 0) Text("No price for ${List(unpriced.length()) { unpriced.getString(it) }.joinToString(", ")}; counted as \$0.",
-                    fontSize = 12.sp, color = LocalExtra.current.text3)
             }
         }
+        Note("Prices of ${cost.str("prices_checked")}. This server only.")
     }
-    Text("What this server's Claude Code use would cost on pay-as-you-go API prices (checked ${cost.str("prices_checked")}). " +
-        "Other machines on the account are not included.", fontSize = 13.sp, color = LocalExtra.current.text3)
 }
 
 fun span(sec: Double): String {
@@ -224,54 +241,54 @@ fun metricFacts(m: JSONObject): List<Pair<String, String>> {
 /** Each shikigami: what it was given, what it cost, how it went; tap one for its facts. */
 @Composable
 fun MetricsSection(list: List<JSONObject>?) {
-    val cs = MaterialTheme.colorScheme
-    Heading("Shikigami")
-    if (list == null) {
-        Text("Adding up…", fontSize = 13.sp, color = LocalExtra.current.text3)
-        return
-    }
-    if (list.isEmpty()) {
-        Text("No shikigami yet.", fontSize = 13.sp, color = LocalExtra.current.text3)
-        return
-    }
-    val finished = list.filter { !it.isNull("first_done") }
-    Text("${usd(list.sumOf { it.optDouble("usd") })} in all · ${finished.count { it.optBoolean("reopened") }} of ${finished.size} reopened",
-        fontSize = 13.sp, color = LocalExtra.current.text3)
-    var all by remember { mutableStateOf(false) }
-    Column {
-        for ((i, m) in (if (all) list else list.take(8)).withIndex()) {
-            var open by remember(m.str("id")) { mutableStateOf(false) }
-            if (i > 0) HorizontalDivider(color = cs.surfaceContainerHigh)
-            Row(Modifier.fillMaxWidth().clickable { open = !open }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(m.str("name"), fontWeight = FontWeight.Medium, fontSize = 15.sp)
-                    Text(listOf(modelName(m.str("model")).replaceFirstChar { it.uppercase() }, m.str("effort"), m.str("context"),
-                        span(m.optDouble("wall")), m.str("state"), if (m.optBoolean("reopened")) "reopened" else "")
-                        .filter { it.isNotEmpty() }.joinToString(" · "), fontSize = 12.sp, color = LocalExtra.current.text3)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Heading("Shikigami")
+        if (list == null) {
+            Note("Adding up…")
+            return@Column
+        }
+        if (list.isEmpty()) {
+            Note("No shikigami yet")
+            return@Column
+        }
+        val finished = list.filter { !it.isNull("first_done") }
+        Note("${usd(list.sumOf { it.optDouble("usd") })} in all · ${finished.count { it.optBoolean("reopened") }} of ${finished.size} reopened")
+        var all by remember { mutableStateOf(false) }
+        val shown = if (all) list else list.take(8)
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            for ((i, m) in shown.withIndex()) {
+                var open by remember(m.str("id")) { mutableStateOf(false) }
+                val state = if (m.str("state") == "asking") "question" else m.str("state")
+                CostRow(segment(i, shown.size), m.str("name"), usd(m.optDouble("usd")),
+                    listOf(modelName(m.str("model")), m.str("effort"), m.str("context"), span(m.optDouble("wall")), state,
+                        if (m.optBoolean("reopened")) "reopened" else "").filter { it.isNotEmpty() }.joinToString(" · "), open) { open = !open }
+                if (open) Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Fact("Folder", home(m.str("cwd")), mono = true)
+                    for ((k, v) in metricFacts(m).drop(1)) Fact(k, v)
                 }
-                Text(usd(m.optDouble("usd")), fontSize = 20.sp, style = TNUM)
-                Spacer(Modifier.width(6.dp))
-                Icon(Icons.chev, null, Modifier.size(18.dp).rotate(if (open) 90f else 0f), tint = LocalExtra.current.text3)
-            }
-            if (open) Column(Modifier.padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Fact("Folder", home(m.str("cwd")), mono = true)
-                for ((k, v) in metricFacts(m).drop(1)) Fact(k, v)
             }
         }
+        if (list.size > 8 && !all) TextButton({ all = true }) { Text("Show all ${list.size}") }
     }
-    if (list.size > 8 && !all) TextButton({ all = true }) { Text("Show all ${list.size}") }
 }
 
-/** The Usage tab's icon: the 5-hour window as a ring. */
+/** The Usage tab's icon: the 5-hour window as a ring (final/: text-2 on an outline-variant track, on-primary on the pill). */
 @Composable
-fun UsageRing(vm: Seimei) {
+fun UsageRing(vm: Seimei, on: Boolean = false) {
     val w = vm.usage?.optJSONObject("windows")?.optJSONObject("five_hour")
     val util = w?.optDouble("utilization", 0.0) ?: 0.0
-    val tone = if (w == null) LocalExtra.current.text3 else if (vm.usage?.str("status") == "rejected") MaterialTheme.colorScheme.error else toneColor(util)
+    val cs = MaterialTheme.colorScheme
+    val tone = when {
+        on -> cs.onPrimary
+        w == null -> Color.Transparent
+        vm.usage?.str("status") == "rejected" -> cs.error
+        else -> toneColor(util)
+    }
     Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
         androidx.compose.material3.CircularProgressIndicator(
-            progress = { util.toFloat().coerceIn(0f, 1f) }, modifier = Modifier.size(19.dp), color = tone,
-            trackColor = MaterialTheme.colorScheme.outline, strokeWidth = 2.dp, gapSize = 0.dp,
+            progress = { util.toFloat().coerceIn(0f, 1f) }, modifier = Modifier.size(19.4.dp), color = tone,
+            trackColor = if (on) cs.onPrimary.copy(alpha = .3f) else cs.outlineVariant, strokeWidth = 2.4.dp, gapSize = 0.dp,
+            strokeCap = androidx.compose.ui.graphics.StrokeCap.Round,
         )
     }
 }

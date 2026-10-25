@@ -8,12 +8,15 @@ export const reduced = () => lessMotion.matches;
 export const EASE_IN = 'cubic-bezier(.05, .7, .1, 1)';
 export const EASE_OUT = 'cubic-bezier(.3, 0, .8, .15)';
 export function enter(node, from, ms = 300) {
+  // A leave holds its end state (fill forwards) until the node is hidden: drop it, or it covers this enter
+  node._leave?.cancel();
   if (reduced()) return node.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150 });
   return node.animate([{ transform: from }, { transform: 'none' }], { duration: ms, easing: EASE_IN });
 }
 export function leave(node, to, ms = 200) {
-  if (reduced()) return node.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 100, fill: 'forwards' });
-  return node.animate([{ transform: 'none' }, { transform: to }], { duration: ms, easing: EASE_OUT, fill: 'forwards' });
+  node._leave = reduced() ? node.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 100, fill: 'forwards' })
+    : node.animate([{ transform: 'none' }, { transform: to }], { duration: ms, easing: EASE_OUT, fill: 'forwards' });
+  return node._leave;
 }
 
 // The one quiet live region (BEHAVIOR.md 6): a short line when a card arrives, a reply finishes or a card settles
@@ -93,14 +96,27 @@ export function svg(path, size = 16) {
 export const clock = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 export const dayKey = (t) => new Date(t * 1000).toDateString();
 export const home = (p) => (p || '').replace(/^\/home\/[^/]+/, '~');
-// A shikigami's identity: one shape of the M3 Expressive library (m3x.css), the same for a name everywhere
-const SHAPES = ['pentagon', 'clover4', 'cookie9', 'sunny', 'cookie6', 'puffy-diamond', 'gem', 'flower', 'cookie4', 'cookie12', 'clover8'];
-export function shapeOf(name) {
+// A shikigami's identity: one shape of the M3 Expressive library (m3x.css), the same for a name everywhere, and a
+// phase, so working tiles don't morph in step. The order and the salt put the names of final/ on their shapes.
+const SHAPES = ['cookie4', 'cookie12', 'cookie6', 'sunny', 'cookie9', 'flower', 'clover8', 'clover4', 'puffy-diamond', 'gem', 'pentagon'];
+function nameHash(name) {
   let h = 0;
-  for (const c of name || '') h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return SHAPES[h % SHAPES.length];
+  for (const c of name || '') h = (h * 101 + c.charCodeAt(0)) >>> 0;
+  return h;
 }
-export const wearShape = (node, name) => node.style.setProperty('--me', `var(--shape-${shapeOf(name)})`);
+export const shapeOf = (name) => SHAPES[nameHash(name) % SHAPES.length];
+function phaseOf(name) {
+  let x = (nameHash(name) ^ 736562) >>> 0;
+  x = (x ^ (x >>> 16)) >>> 0;
+  x = Math.imul(x, 0x45d9f3b) >>> 0;
+  x = (x ^ (x >>> 16)) >>> 0;
+  return (x % 96) * 50;
+}
+export function wearShape(node, name) {
+  node.style.setProperty('--me', `var(--shape-${shapeOf(name)})`);
+  // Into the 4.8 s morph cycle of a working tile; the turn keeps its own time
+  node.style.animationDelay = `-${phaseOf(name)}ms, 0ms`;
+}
 export const plural = (n, one, many) => (n === 1 ? one : `${n} ${many}`);
 
 export function dayLabel(t) {
@@ -188,7 +204,9 @@ function snackPlace() {
   const bottom = document.querySelector('body > .bottom');
   const base = page || (getComputedStyle(bottom).display === 'contents' ? $('composer') : bottom);
   const top = base && base.offsetParent !== null || base === bottom ? base.getBoundingClientRect().top : innerHeight;
-  s.style.bottom = `${Math.max(16, innerHeight - top + 8)}px`;
+  // final/ 19 and 20: 44 over the composer, 32 over the navigation bar
+  const gap = page || $('composer').offsetParent ? 44 : 32;
+  s.style.bottom = `${Math.max(16, innerHeight - top + gap)}px`;
 }
 // The keyboard, the navigation bar stepping aside or a page opening move that edge while the bar shows
 addEventListener('resize', () => { if (!$('snack').hidden) snackPlace(); });

@@ -127,6 +127,9 @@ import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import kotlinx.coroutines.delay
 import org.json.JSONObject
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.graphics.SolidColor
 
 // ---------- the chat list ----------
 
@@ -203,6 +206,9 @@ fun ChatTab(vm: Seimei, lane: String) {
             follow = false
         }
     }
+    // Going away brings the reader to the end, where the away block says so (as the web does)
+    val away = !vm.online && vm.awaySince != null
+    LaunchedEffect(away) { if (away) state.animateScrollToItem(0) }
     DisposableEffect(Unit) { onDispose { vm.laneSpot[lane] = Triple(state.firstVisibleItemIndex, state.firstVisibleItemScrollOffset, follow) } }
     LaunchedEffect(state) { snapshotFlow { state.canScrollBackward }.collect { vm.lifted = it } }
     // Rows that came in below since the reader left the end: the jump button counts them
@@ -355,27 +361,22 @@ fun SwipeReply(onReply: () -> Unit, content: @Composable () -> Unit) {
 /** A run of trajectory events, as one line in the chat. */
 @Composable
 fun FoldPill(f: Item.Fold, vm: Seimei) {
-    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        Row(
-            Modifier.heightIn(min = 32.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceContainer)
-                .clickable { vm.showLane("t", f.goto) }.padding(horizontal = 14.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(f.text, Modifier.weight(1f, fill = false), fontSize = 13.sp, fontWeight = FontWeight.Medium, color = LocalExtra.current.text3,
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Spacer(Modifier.width(8.dp))
-            Text("Trajectory", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary)
-        }
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(28.dp)).background(MaterialTheme.colorScheme.surfaceContainer)
+            .clickable { vm.showLane("t", f.goto) }.padding(horizontal = 20.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(f.text, Modifier.weight(1f), fontSize = 14.sp, lineHeight = 20.sp, color = LocalExtra.current.text3,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.width(12.dp))
+        Text("Trajectory", fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary)
     }
 }
 
 @Composable
 fun TrigRow(t: Item.Trig) {
-    Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(6.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary))
-        Spacer(Modifier.width(8.dp))
-        Text(t.text, fontSize = 12.5.sp, color = LocalExtra.current.text3)
-    }
+    // final/: the line alone, no dot
+    Text(t.text, Modifier.padding(top = 8.dp), fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium, color = LocalExtra.current.text3)
 }
 
 @Composable
@@ -416,17 +417,16 @@ fun dayLabel(t: Double): String {
 
 @Composable
 fun NotePill(text: String, level: String, day: Boolean = false) {
+    // final/: a note is a centred line, no pill; a usage warning reads in text-2, an error in the error colour
     val color = when (level) {
         "error" -> MaterialTheme.colorScheme.error
-        "warn" -> LocalExtra.current.warn
+        "warn" -> LocalExtra.current.text2
         else -> LocalExtra.current.text3
     }
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Text(
-            text, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = color, textAlign = TextAlign.Center,
-            modifier = Modifier.widthIn(max = 340.dp)
-                .then(if (day) Modifier else Modifier.clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.surfaceContainer))
-                .padding(horizontal = 12.dp, vertical = 4.dp),
+            text, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium, color = color, textAlign = TextAlign.Center,
+            modifier = Modifier.widthIn(max = 340.dp).padding(horizontal = 12.dp, vertical = 4.dp),
         )
     }
 }
@@ -442,12 +442,15 @@ fun Working() {
 
 @Composable
 fun Away(vm: Seimei) {
-    Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceContainer).padding(16.dp),
-    ) {
-        Text("Can't reach the server", fontWeight = FontWeight.SemiBold)
-        Text("Since ${clock(vm.awaySince!! / 1000.0)}. Reconnects on its own.",
-            fontSize = 14.sp, color = LocalExtra.current.text2)
+    // final/ 17: centred, the line at 22, when and what next at 16 in text-2, then Try now on tonal
+    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Text("Can't reach the server", fontSize = 22.sp, lineHeight = 34.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center)
+        Text("Since ${clock(vm.awaySince!! / 1000.0)}. Reconnects on its own.", Modifier.padding(top = 0.dp),
+            fontSize = 16.sp, lineHeight = 24.sp, color = LocalExtra.current.text2, textAlign = TextAlign.Center)
+        Text("Try now", Modifier.heightIn(min = 48.dp).clip(CircleShape).background(LocalTokens.current.tonal).clickable { vm.retryNow() }
+            .padding(horizontal = 24.dp, vertical = 14.dp), fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium,
+            color = LocalTokens.current.onTonal)
     }
 }
 
@@ -456,9 +459,10 @@ fun Away(vm: Seimei) {
 @Composable
 fun UserMsg(m: Item.Msg, vm: Seimei, onPicture: (String) -> Unit) {
     var time by remember { mutableStateOf(false) }
-    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+    // At most 88% of the lane, as the web's bubbles (final/ 02, 09)
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) { Box(Modifier.fillMaxWidth(.88f), contentAlignment = Alignment.CenterEnd) {
         Column(
-            Modifier.widthIn(max = 300.dp)
+            Modifier
                 .clip(RoundedCornerShape(20.dp, 20.dp, 4.dp, 20.dp))
                 .background(MaterialTheme.colorScheme.primaryContainer)
                 .clickable { time = !time }
@@ -480,20 +484,20 @@ fun UserMsg(m: Item.Msg, vm: Seimei, onPicture: (String) -> Unit) {
                 Spacer(Modifier.size(6.dp))
             }
             if (m.text.isNotEmpty()) SelectionContainer {
-                Text(m.text, color = MaterialTheme.colorScheme.onPrimaryContainer, lineHeight = 21.sp, fontSize = 15.sp)
+                Text(m.text, color = MaterialTheme.colorScheme.onPrimaryContainer, lineHeight = 23.2.sp, fontSize = 16.sp)
             }
             if (time) Text(clock(m.t), fontSize = 12.sp, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = .7f))
         }
-    }
+    } }
 }
 
 /** A sent message the server has not echoed yet: dimmed, or outlined with a retry when it failed. */
 @Composable
 fun PendingMsg(p: Pending, vm: Seimei) {
     val cs = MaterialTheme.colorScheme
-    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) { Box(Modifier.fillMaxWidth(.88f), contentAlignment = Alignment.CenterEnd) {
         Column(
-            Modifier.widthIn(max = 300.dp).alpha(if (p.failed) 1f else .6f)
+            Modifier.alpha(if (p.failed) 1f else .6f)
                 .clip(RoundedCornerShape(20.dp, 20.dp, 4.dp, 20.dp))
                 .background(cs.primaryContainer)
                 .then(if (p.failed) Modifier.border(1.5.dp, cs.error, RoundedCornerShape(20.dp, 20.dp, 4.dp, 20.dp)) else Modifier)
@@ -513,11 +517,11 @@ fun PendingMsg(p: Pending, vm: Seimei) {
                 Text(d.name, fontSize = 13.sp, color = cs.onPrimaryContainer, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.size(6.dp))
             }
-            if (p.text.isNotEmpty()) Text(p.text, color = cs.onPrimaryContainer, lineHeight = 21.sp, fontSize = 15.sp)
+            if (p.text.isNotEmpty()) Text(p.text, color = cs.onPrimaryContainer, lineHeight = 23.2.sp, fontSize = 16.sp)
             if (p.failed) Text("Not sent. Tap to retry", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = cs.error,
                 modifier = Modifier.padding(top = 4.dp).clip(RoundedCornerShape(8.dp)).clickable { vm.retry(p) }.padding(vertical = 12.dp, horizontal = 4.dp))
         }
-    }
+    } }
 }
 
 val KIND_LABEL = mapOf("pdf" to "PDF", "archive" to "Zip", "audio" to "Audio", "video" to "Video", "image" to "Image",
@@ -577,15 +581,16 @@ fun AssistantMsg(m: Item.Msg, vm: Seimei) {
         m.anchor?.let { AnchorChip(it, vm) }
         Md(m.text)
         if (time) Text(clock(m.t), fontSize = 12.sp, color = LocalExtra.current.text3, modifier = Modifier.padding(top = 4.dp))
-        if (m.reply > 0) androidx.compose.material3.OutlinedButton({ vm.replyIn(ReplyTo(m.reply, m.text, "t")) }, Modifier.padding(top = 8.dp).heightIn(min = 32.dp),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp)) { Text("Reply in chat", fontSize = 13.sp) }
+        if (m.reply > 0) Text("Reply in chat", Modifier.padding(top = 11.dp).heightIn(min = 48.dp).clip(CircleShape).background(LocalTokens.current.tonal)
+            .clickable { vm.replyIn(ReplyTo(m.reply, m.text, "t")) }.padding(horizontal = 16.dp, vertical = 14.dp),
+            fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium, color = LocalTokens.current.onTonal)
     }
 }
 
 // ---------- markdown ----------
 
 @Composable
-fun Md(src: String, size: Int = 15, color: Color = MaterialTheme.colorScheme.onSurface) {
+fun Md(src: String, size: Int = 16, color: Color = MaterialTheme.colorScheme.onSurface) {
     val colors = MdColors(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.surfaceContainerHigh)
     val blocks = remember(src, colors) { Markdown(colors).parse(src) }
     SelectionContainer { Blocks(blocks, size, color) }
@@ -596,8 +601,9 @@ fun Blocks(blocks: List<Block>, size: Int, color: Color) {
     Column(verticalArrangement = Arrangement.spacedBy((size * 0.6f).dp)) {
         for (b in blocks) when (b) {
             is Block.Para -> Text(b.text, fontSize = size.sp, lineHeight = (size * 1.5f).sp, color = color)
-            is Block.Heading -> Text(b.text, fontSize = (if (b.level == 1) size + 2 else size + 1).sp, fontWeight = FontWeight.SemiBold,
-                color = color, modifier = Modifier.padding(top = 6.dp))
+            // ### and below at the text's own size (final/ 11: "Plan" at 16 / 600 / 24)
+            is Block.Heading -> Text(b.text, fontSize = (when (b.level) { 1 -> size + 4; 2 -> size + 2; else -> size }).sp,
+                lineHeight = (size * 1.5f).sp, fontWeight = FontWeight.SemiBold, color = color, modifier = Modifier.padding(top = 6.dp))
             is Block.Code -> Text(
                 b.text, fontFamily = FontFamily.Monospace, fontSize = (size - 2).sp, lineHeight = ((size - 2) * 1.55f).sp,
                 color = color, softWrap = false,
@@ -611,25 +617,29 @@ fun Blocks(blocks: List<Block>, size: Int, color: Color) {
             }
             is Block.Bullets -> Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 b.items.forEachIndexed { i, it ->
+                    // The web's outside markers: a 1.4 em indent, the marker right-aligned in it
                     Row {
                         Text(if (b.ordered) "${b.start + i}." else "•", fontSize = size.sp, lineHeight = (size * 1.5f).sp, color = color,
-                            modifier = Modifier.width(if (b.ordered) 26.dp else 18.dp))
+                            textAlign = TextAlign.End, modifier = Modifier.width((size * 1.4f).dp).padding(end = 5.dp))
                         Blocks(it, size, color)
                     }
                 }
             }
             Block.Rule -> Box(Modifier.fillMaxWidth().padding(vertical = 4.dp).size(1.dp).background(MaterialTheme.colorScheme.surfaceContainerHigh))
-            is Block.Table -> {
+            is Block.Table -> androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth()) {
                 val scroll = rememberScrollState()
+                // At least the width of the text (final/ 11): the columns share it, 140dp each at the least
+                val cols = maxOf(1, b.head.size, b.rows.maxOfOrNull { it.size } ?: 0)
+                val cell = maxOf(140.dp, maxWidth / cols)
                 // A shade at an edge with more columns beyond it, so a cut on a column edge does not look complete.
                 Box(Modifier.clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceContainer).height(IntrinsicSize.Min)) {
                     Box(Modifier.horizontalScroll(scroll)) {
                         // Max intrinsic width, so the row dividers span the whole table.
                         Column(Modifier.width(IntrinsicSize.Max)) {
-                            TableRow(b.head, head = true, size)
+                            TableRow(b.head, head = true, size, cell)
                             for (r in b.rows) {
                                 Box(Modifier.fillMaxWidth().size(1.dp).background(MaterialTheme.colorScheme.surfaceContainerHighest))
-                                TableRow(r, head = false, size)
+                                TableRow(r, head = false, size, cell)
                             }
                         }
                     }
@@ -645,12 +655,12 @@ fun Blocks(blocks: List<Block>, size: Int, color: Color) {
 }
 
 @Composable
-fun TableRow(cells: List<androidx.compose.ui.text.AnnotatedString>, head: Boolean, size: Int) {
+fun TableRow(cells: List<androidx.compose.ui.text.AnnotatedString>, head: Boolean, size: Int, cell: androidx.compose.ui.unit.Dp = 140.dp) {
     Row {
         for (c in cells) Text(
-            c, fontSize = (size - 1).sp, fontWeight = if (head) FontWeight.SemiBold else null,
+            c, fontSize = (size - 2).sp, lineHeight = 20.sp, fontWeight = if (head) FontWeight.SemiBold else null,
             color = if (head) LocalExtra.current.text2 else MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.width(140.dp).padding(horizontal = 12.dp, vertical = 8.dp),
+            modifier = Modifier.width(cell).padding(horizontal = 12.dp, vertical = 10.dp),
         )
     }
 }
@@ -676,21 +686,22 @@ fun ActivityChip(a: Item.Activity, live: JSONObject? = null) {
     val failed = a.calls.count { it.error }
     val err = MaterialTheme.colorScheme.error
     Column(Modifier.animateContentSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // final/ 09: a 48 chip with 12 corners, the tool's icon (the shape loader while it runs), 14sp, a 20 chevron
         Row(
-            Modifier.clip(RoundedCornerShape(50))
+            Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(12.dp))
                 .background(if (failed > 0) err.copy(alpha = .14f).compositeOver(MaterialTheme.colorScheme.surfaceContainer) else MaterialTheme.colorScheme.surfaceContainer)
                 .clickable { open = !open }
-                .padding(start = 12.dp, end = 10.dp, top = 7.dp, bottom = 7.dp),
+                .padding(start = if (running) 8.dp else 12.dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (running) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-            else Icon(iconFor(a.calls.first().name), null, Modifier.size(16.dp), tint = if (failed > 0) err else LocalExtra.current.text3)
+            if (running) Loader(32.dp, contained = false)
+            else Icon(iconFor(a.calls.first().name), null, Modifier.size(16.dp), tint = if (failed > 0) err else LocalExtra.current.text2)
             Spacer(Modifier.width(8.dp))
-            Text(activityLabel(a.calls) + if (failed > 0) " · $failed failed" else "", fontSize = 13.sp,
+            Text(activityLabel(a.calls) + if (failed > 0) " · $failed failed" else "", fontSize = 14.sp, lineHeight = 20.sp,
                 color = if (failed > 0) err else LocalExtra.current.text2, modifier = Modifier.weight(1f, fill = false),
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Spacer(Modifier.width(4.dp))
-            Icon(Icons.chev, null, Modifier.size(14.dp).then(if (open) Modifier.rotate90() else Modifier), tint = LocalExtra.current.text3)
+            Spacer(Modifier.width(8.dp))
+            Icon(Icons.chev, null, Modifier.size(20.dp).then(if (open) Modifier.rotate90() else Modifier), tint = LocalExtra.current.text3)
         }
         if (open) Column(Modifier.padding(start = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             for (c in a.calls) CallRow(c)
@@ -711,9 +722,9 @@ fun LivePill(a: Item.Activity, live: JSONObject, open: Boolean, toggle: () -> Un
     val id = live.str("tool_id")
     val out = live.optJSONArray("output")?.let { o -> List(o.length()) { o.getString(it) } }.orEmpty()
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(cs.surfaceContainer).animateContentSize()) {
-        Row(Modifier.fillMaxWidth().clickable(onClick = toggle).padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 6.dp),
+        Row(Modifier.fillMaxWidth().clickable(onClick = toggle).padding(start = 6.dp, end = 12.dp, top = 4.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+            Loader(32.dp, contained = false)
             Spacer(Modifier.width(8.dp))
             Text(activityLabel(a.calls, id), fontSize = 13.5.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             val since = live.optDouble("since", 0.0)
@@ -787,7 +798,7 @@ val OK_BG: Color @Composable get() = LocalTokens.current.okContainer
 /** A quiet line naming a shikigami, one tap from its page: what seimei's own sentence above didn't say. */
 @Composable
 fun EvLine(name: String, rest: String, small: String, failed: Boolean = false, shape: Shape = RoundedCornerShape(12.dp),
-    modifier: Modifier = Modifier, open: () -> Unit) {
+    modifier: Modifier = Modifier, fill: Boolean = failed, open: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val fg = if (failed) cs.onErrorContainer else LocalExtra.current.text2
     Row(
@@ -803,7 +814,8 @@ fun EvLine(name: String, rest: String, small: String, failed: Boolean = false, s
                 pushStyle(androidx.compose.ui.text.SpanStyle(fontSize = 12.sp, color = LocalExtra.current.text3)); append("  $small"); pop()
             }
         }
-        Column(if (failed) Modifier.weight(1f) else Modifier.weight(1f, fill = false)) {
+        // A full-width line (a finished or failed shikigami) keeps its chevron at the end (final/ 05)
+        Column(if (fill) Modifier.weight(1f) else Modifier.weight(1f, fill = false)) {
             Text(line, fontSize = 14.sp, lineHeight = 20.sp, color = fg)
             if (failed && small.isNotEmpty()) Text(small, fontSize = 12.sp, lineHeight = 16.sp, color = fg.copy(alpha = .85f), modifier = Modifier.padding(top = 2.dp))
         }
@@ -825,7 +837,7 @@ fun WorkerCard(w: Item.Worker, vm: Seimei) {
         "summoned" -> EvLine(w.name, "", modelLine(w), open = open)
         "failed" -> EvLine(w.name, " failed", firstSentence(w.text), failed = true, shape = RoundedCornerShape(28.dp), modifier = Modifier.fillMaxWidth(), open = open)
         "done" -> Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            EvLine(w.name, " finished", "", shape = RoundedCornerShape(28.dp, 28.dp, 4.dp, 4.dp), modifier = Modifier.fillMaxWidth(), open = open)
+            EvLine(w.name, " finished", "", shape = RoundedCornerShape(28.dp, 28.dp, 4.dp, 4.dp), modifier = Modifier.fillMaxWidth(), fill = true, open = open)
             if (w.text.isNotEmpty()) Clipped(w.key, RoundedCornerShape(4.dp, 4.dp, 28.dp, 28.dp), MaterialTheme.colorScheme.surfaceContainer) {
                 Md(w.text, 14, MaterialTheme.colorScheme.onSurface)
             }
@@ -868,8 +880,7 @@ fun QuestionCard(w: Item.Worker, open: () -> Unit) {
                 Icon(Icons.question, null, Modifier.size(22.dp), tint = t.onWarn)
             }
             Spacer(Modifier.width(12.dp))
-            // An open question is the screen's one emphasized title
-            Text(w.name, fontSize = 16.sp, lineHeight = 24.sp, fontWeight = if (w.settled == null) FontWeight.Bold else FontWeight.Medium, color = t.onWarnContainer, modifier = Modifier.weight(1f))
+            Text(w.name, fontSize = 16.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold, color = t.onWarnContainer, modifier = Modifier.weight(1f))
             w.settled?.let { Text(it, fontSize = 12.sp, color = t.onWarnContainer.copy(alpha = .8f)) }
         }
         if (w.text.isNotEmpty()) Md(w.text, 14, t.onWarnContainer)
@@ -980,6 +991,7 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
     }
     val haptic = LocalHapticFeedback.current
     fun answer(approve: Boolean, option: String?, note: String? = null, key: String = option ?: "") {
+        if (sent) return
         sent = true
         tapped = key
         // Confirm once the server took the answer, Reject when it didn't go through (BEHAVIOR.md 7); nothing on the tap
@@ -987,15 +999,17 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
             haptic.performHapticFeedback(if (ok) HapticFeedbackType.Confirm else HapticFeedbackType.Reject)
         }) { sent = false }
     }
-    // The indicator sits over the hidden label, so the button keeps its size.
+    // The indicator sits over the hidden label, so the button keeps its size (final/ 18: the shape loader in the tapped button's colour).
     @Composable
     fun Label(key: String, text: String) {
         val busy = slow && tapped == key
         Box(contentAlignment = Alignment.Center) {
             Text(text, Modifier.alpha(if (busy) 0f else 1f))
-            if (busy) CircularProgressIndicator(Modifier.size(18.dp), color = LocalContentColor.current, strokeWidth = 2.dp)
+            if (busy) Loader(24.dp, contained = false, color = LocalContentColor.current)
         }
     }
+    // While an answer is on its way the tapped control keeps its colours and the rest are held at .38 (final/ 18)
+    fun held(key: String) = Modifier.alpha(if (sent && tapped != key) .38f else 1f)
     val who = if (a.subagent) "${a.who}'s subagent" else a.who
     Card(highlight = a.outcome == null, corner = 28.dp, pad = 16.dp) {
         CardHead(if (a.action == "plan") PLAN else Icons.lock, bg, fg, "$who wants to ${if (message) "message ${a.target}" else a.target}", sub, big = true)
@@ -1026,9 +1040,9 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
                     val bottom = if (n == extra.lastIndex) 20.dp else 4.dp
                     val t = LocalTokens.current
                     Text(optionText(o), fontSize = 14.sp, lineHeight = 22.sp, color = if (o.broad) t.onWarnContainer else cs.onSurface,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(top, top, bottom, bottom))
+                        modifier = held(o.id).fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(top, top, bottom, bottom))
                             .background(if (o.broad) t.warnContainer else cs.surfaceContainerHigh)
-                            .clickable(enabled = !sent) { answer(true, o.id) }.padding(horizontal = 16.dp, vertical = 13.dp))
+                            .clickable { answer(true, o.id) }.padding(horizontal = 16.dp, vertical = 13.dp))
                 }
             }
         }
@@ -1045,7 +1059,7 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (a.outcome != null) {
-                Text(settledText(a), fontSize = 13.sp,
+                Text(settledText(a), fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium,
                     color = if (a.outcome == "approved") LocalExtra.current.ok else cs.error, modifier = Modifier.weight(1f).padding(vertical = 10.dp))
             } else if (noting) {
                 Spacer(Modifier.weight(1f))
@@ -1053,18 +1067,9 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
                 Spacer(Modifier.width(4.dp))
                 Button({ answer(false, "deny", note.trim(), "note") }, enabled = !sent) { Label("note", if (a.action == "plan") "Keep planning" else "Deny with note") }
             } else {
-                if (a.expires > 0) {
-                    val left by produceState(minutesLeft(a.expires), a.expires) {
-                        while (true) {
-                            delay(20_000)
-                            value = minutesLeft(a.expires)
-                        }
-                    }
-                    Text(if (left > 0) "Auto-denies in $left min" else "Expiring", fontSize = 12.sp, color = LocalExtra.current.text3,
-                        modifier = Modifier.padding(end = 8.dp))
-                }
+                // final/ hides the auto-deny line while the card waits: the buttons say it waits
                 // A full-width group: the main action largest and on the thumb side
-                if (perm) FilledTonalIconButton({ noting = true }, Modifier.size(52.dp), enabled = !sent) { Icon(PEN, "Add a note", Modifier.size(20.dp)) }
+                if (perm) FilledTonalIconButton({ if (!sent) noting = true }, Modifier.size(52.dp).then(held("pen"))) { Icon(PEN, "Add a note", Modifier.size(20.dp)) }
                 if (perm) Spacer(Modifier.width(8.dp))
                 // Under the finger a button takes 12 corners and widens while the other gives way (final.css, the fast spring)
                 val denyPress = remember { MutableInteractionSource() }
@@ -1076,12 +1081,12 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
                 val allowW by animateFloatAsState(if (allowDown) 1.9f else if (denyDown) 1.1f else 1.4f, fast, label = "allowW")
                 val denyR by animateDpAsState(if (denyDown) 12.dp else 26.dp, label = "denyR")
                 val allowR by animateDpAsState(if (allowDown) 12.dp else 26.dp, label = "allowR")
-                FilledTonalButton({ answer(false, if (perm) "deny" else null, key = "deny") }, Modifier.weight(denyW).heightIn(min = 52.dp), enabled = !sent,
+                FilledTonalButton({ answer(false, if (perm) "deny" else null, key = "deny") }, Modifier.weight(denyW).heightIn(min = 52.dp).then(held("deny")),
                     shape = RoundedCornerShape(denyR), interactionSource = denyPress) {
                     Label("deny", deny?.label ?: "Deny")
                 }
                 Spacer(Modifier.width(8.dp))
-                Button({ answer(true, if (perm) "once" else null, key = "once") }, Modifier.weight(allowW).heightIn(min = 52.dp), enabled = !sent,
+                Button({ answer(true, if (perm) "once" else null, key = "once") }, Modifier.weight(allowW).heightIn(min = 52.dp).then(held("once")),
                     shape = RoundedCornerShape(allowR), interactionSource = allowPress) {
                     Icon(Icons.check, null, Modifier.size(20.dp).alpha(if (slow && tapped == "once") 0f else 1f))
                     Spacer(Modifier.width(8.dp))
@@ -1091,8 +1096,6 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
         }
     }
 }
-
-fun minutesLeft(expires: Double) = kotlin.math.ceil((expires - System.currentTimeMillis() / 1000.0) / 60).toInt()
 
 // ---------- pictures ----------
 
@@ -1183,7 +1186,7 @@ fun Composer(vm: Seimei) {
             keyboard?.show()
         }
     }
-    Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 8.dp)) {
+    Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 2.dp)) {
         vm.replyTo?.let { (_, text) ->
             Row(
                 Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(14.dp)).background(cs.surfaceContainerHigh)
@@ -1221,45 +1224,54 @@ fun Composer(vm: Seimei) {
                 }
             }
         }
+        // final/ 02: a 52 pill on surface-container-high (attach 48 inside it), then the 52 round send
         Row(verticalAlignment = Alignment.Bottom) {
-            TextField(
-                value = vm.draft,
-                onValueChange = vm::edit,
-                placeholder = { Text("Message seimei") },
-                leadingIcon = {
-                    Box {
-                        IconButton({ menu = true }) { Icon(Icons.attach, "Attach") }
-                        DropdownMenu(menu, { menu = false }) {
-                            DropdownMenuItem({ Text("Photos") }, {
-                                menu = false
-                                pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                            }, leadingIcon = { Icon(Icons.photo, null) })
-                            DropdownMenuItem({ Text("Files") }, {
-                                menu = false
-                                pickFiles.launch(arrayOf("*/*"))
-                            }, leadingIcon = { Icon(Icons.doc, null) })
-                        }
+            val x = LocalTokens.current
+            Row(Modifier.weight(1f).heightIn(min = 52.dp).clip(RoundedCornerShape(26.dp)).background(cs.surfaceContainerHigh),
+                verticalAlignment = Alignment.Bottom) {
+                Box(Modifier.padding(start = 4.dp, bottom = 2.dp)) {
+                    IconButton({ menu = true }, Modifier.size(48.dp)) { Icon(Icons.attach, "Attach", Modifier.size(22.dp), tint = x.text3) }
+                    DropdownMenu(menu, { menu = false }) {
+                        DropdownMenuItem({ Text("Photos") }, {
+                            menu = false
+                            pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        }, leadingIcon = { Icon(Icons.photo, null) })
+                        DropdownMenuItem({ Text("Files") }, {
+                            menu = false
+                            pickFiles.launch(arrayOf("*/*"))
+                        }, leadingIcon = { Icon(Icons.doc, null) })
                     }
-                },
-                maxLines = 7,
-                shape = RoundedCornerShape(28.dp),
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = cs.surfaceContainerHigh, unfocusedContainerColor = cs.surfaceContainerHigh,
-                    focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
-                ),
-                modifier = Modifier.weight(1f).heightIn(min = 56.dp).focusRequester(focus),
-            )
+                }
+                BasicTextField(
+                    value = vm.draft,
+                    onValueChange = vm::edit,
+                    maxLines = 7,
+                    textStyle = TextStyle(fontSize = 15.sp, lineHeight = 22.sp, color = x.text),
+                    cursorBrush = SolidColor(cs.primary),
+                    modifier = Modifier.weight(1f).padding(start = 8.dp, end = 16.dp, top = 15.dp, bottom = 15.dp).focusRequester(focus)
+                        .semantics { contentDescription = "Message seimei" },
+                    decorationBox = { field ->
+                        Box {
+                            if (vm.draft.isEmpty()) Text("Message seimei", fontSize = 15.sp, lineHeight = 22.sp, color = x.text3)
+                            field()
+                        }
+                    },
+                )
+            }
             Spacer(Modifier.width(8.dp))
             val typing = vm.draft.isNotBlank() || vm.attachments.isNotEmpty()
             if (vm.busy && !typing) {
-                FilledTonalIconButton(vm::interrupt, Modifier.size(56.dp)) {
-                    Box(Modifier.size(14.dp).clip(RoundedCornerShape(3.dp)).background(cs.onSecondaryContainer))
+                // The square Stop on the tonal FAB, 16 corners
+                Box(Modifier.size(52.dp).clip(RoundedCornerShape(16.dp)).background(cs.primaryContainer)
+                    .clickable(onClickLabel = "Stop", onClick = vm::interrupt).semantics { contentDescription = "Stop" },
+                    contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(16.dp).clip(RoundedCornerShape(4.dp)).background(cs.onPrimaryContainer))
                 }
             } else {
                 // Offline it stays tappable: send() then says why nothing went out (QA U15).
-                FilledIconButton(vm::send, Modifier.size(56.dp), enabled = typing,
+                FilledIconButton(vm::send, Modifier.size(52.dp), enabled = typing,
                     colors = IconButtonDefaults.filledIconButtonColors()) {
-                    Icon(Icons.send, "Send", Modifier.size(22.dp))
+                    Icon(Icons.send, "Send", Modifier.size(20.dp))
                 }
             }
         }

@@ -62,6 +62,17 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.json.JSONObject
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.foundation.layout.requiredSize
 
 // The Tasks lane, as on the web page (tasks.js): two views behind one connected button group. Now: what needs the
 // user (a question, a job to look over, their own tasks), what runs and how far, and each shikigami's next. All
@@ -228,7 +239,7 @@ private fun LazyListScope.nowItems(vm: Seimei, n: Now, moreMine: Boolean, more: 
     } else item(key = "clear") { AllClear(vm) }
     if (n.running.isNotEmpty()) {
         item(key = "running") { TaskGroupTitle("Running", n.running.size, MaterialTheme.colorScheme.primary) }
-        group("r", n.running.mapIndexed { i, t -> t.id to { s: Shape -> TaskRow(vm, t, s, "run", listOfNotNull(t.owner, t.current), bar = true, emph = i == 0) } })
+        group("r", n.running.mapIndexed { i, t -> t.id to { s: Shape -> TaskRow(vm, t, s, "run", listOfNotNull(t.owner, t.current), bar = true) } })
     }
     if (n.next.isNotEmpty()) {
         item(key = "next") { TaskGroupTitle("Up next", null, LocalExtra.current.text2) }
@@ -285,7 +296,7 @@ private fun LazyListScope.allItems(vm: Seimei, b: Board, doneShown: List<String>
 /** A row: optional tile, title, supporting line, optional bar. Rows inside an open project are set in by their text. */
 @Composable
 private fun TaskRow(vm: Seimei, t: Task, shape: Shape, kind: String, parts: List<String>, warm: Boolean = false, inset: Boolean = false,
-                    bar: Boolean = false, ref: Boolean = false, emph: Boolean = false) {
+                    bar: Boolean = false, ref: Boolean = false) {
     val tk = LocalTokens.current
     val x = LocalExtra.current
     val cs = MaterialTheme.colorScheme
@@ -312,9 +323,10 @@ private fun TaskRow(vm: Seimei, t: Task, shape: Shape, kind: String, parts: List
             Tick(vm, t, if (inset) Modifier.padding(end = 8.dp) else Modifier.padding(end = 16.dp))
         }
         Column(Modifier.weight(1f)) {
-            // The screen's one emphasized title: the running task
-            Text(t.title, fontSize = 16.sp, lineHeight = 24.sp, fontWeight = if (emph) FontWeight.Bold else FontWeight.Medium,
-                color = when { warm -> tk.onWarnContainer; kind == "done" -> x.text3; else -> cs.onSurface },
+            // What needs the user has emphasized titles (final/ 06)
+            val loud = warm && !inset
+            Text(t.title, fontSize = 16.sp, lineHeight = 24.sp, fontWeight = if (loud) FontWeight.Bold else FontWeight.Medium,
+                color = when { loud -> tk.onWarnContainer; kind == "done" -> x.text3; else -> cs.onSurface },
                 maxLines = if (warm || kind == "ask" || kind == "review") 2 else 1, overflow = TextOverflow.Ellipsis)
             Text(buildAnnotatedString {
                 val all = parts + (if (ref && t.id.startsWith("#")) listOf(t.id) else emptyList())
@@ -333,35 +345,55 @@ private fun TaskRow(vm: Seimei, t: Task, shape: Shape, kind: String, parts: List
 private fun Tick(vm: Seimei, t: Task, modifier: Modifier) {
     val done = t.state == "done"
     val tk = LocalTokens.current
-    Box(
-        modifier.size(48.dp).clip(CircleShape).clickable { vm.tick(t.id, !done) }.semantics {
-            role = Role.Checkbox
-            toggleableState = if (done) ToggleableState.On else ToggleableState.Off
-            contentDescription = if (done) "Reopen ${t.title}" else "Tick off ${t.title}"
-        },
-        contentAlignment = Alignment.Center,
-    ) {
-        if (done) Icon(Icons.check, null, Modifier.size(20.dp), tint = tk.ok)
-        else Box(Modifier.size(24.dp).drawBehind {
-            drawCircle(tk.warn, size.minDimension / 2 - 1.dp.toPx(), style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))
-        })
+    // It sits in the 40 spot of the tiles (final/ 06); the 48 touch target spills 4 around it
+    Box(modifier.size(40.dp), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier.requiredSize(48.dp).clip(CircleShape).clickable { vm.tick(t.id, !done) }.semantics {
+                role = Role.Checkbox
+                toggleableState = if (done) ToggleableState.On else ToggleableState.Off
+                contentDescription = if (done) "Reopen ${t.title}" else "Tick off ${t.title}"
+            },
+            contentAlignment = Alignment.Center,
+        ) {
+            if (done) Icon(Icons.check, null, Modifier.size(20.dp), tint = tk.ok)
+            else Box(Modifier.size(24.dp).drawBehind {
+                drawCircle(tk.warn, size.minDimension / 2 - 1.dp.toPx(), style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))
+            })
+        }
     }
 }
 
-/** Step progress: the active part, a 4dp gap, the track, and the count in words. */
+/** Step progress of a running task (final/ 06): the done part as the wavy indicator (amplitude 3, wavelength 40, 4 thick
+ *  in a 10 tall box, travelling one wavelength per 1.2 s), a 4dp gap, the flat track, and the count in words. */
 @Composable
 private fun StepBar(t: Task) {
     val cs = MaterialTheme.colorScheme
     val track = LocalTokens.current.containerHighest
     val f = if (t.steps.isEmpty()) 0f else t.stepsDone.toFloat() / t.steps.size
-    Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.weight(1f).height(4.dp).drawBehind {
-            val h = size.height
-            val r = CornerRadius(h / 2)
+    val still = reducedMotion()
+    val shift by rememberInfiniteTransition(label = "wave").animateFloat(0f, 1f,
+        infiniteRepeatable(tween(1200, easing = LinearEasing)), label = "shift")
+    Row(Modifier.fillMaxWidth().padding(top = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.weight(1f).height(10.dp).drawBehind {
+            val u = 1.dp.toPx()
+            val h = 4 * u
+            val mid = size.height / 2
             val w = size.width * f
-            val gap = if (f > 0f) 4.dp.toPx() else 0f
-            if (w > 0f) drawRoundRect(cs.primary, Offset.Zero, Size(w, h), r)
-            if (size.width - w - gap > 0f) drawRoundRect(track, Offset(w + gap, 0f), Size(size.width - w - gap, h), r)
+            val gap = if (f > 0f) 4 * u else 0f
+            if (w > 0f) clipRect(0f, 0f, w, size.height) {
+                // The svg's path, M0 5 C 5 1.05 15 1.05 20 5 S 35 8.95 40 5, repeated from one wavelength before the start
+                val lam = 40 * u
+                val path = Path()
+                var x0 = -lam + (if (still) 0f else shift) * lam
+                path.moveTo(x0, mid)
+                while (x0 < w + lam) {
+                    path.cubicTo(x0 + 5 * u, mid - 3.95f * u, x0 + 15 * u, mid - 3.95f * u, x0 + 20 * u, mid)
+                    path.cubicTo(x0 + 25 * u, mid + 3.95f * u, x0 + 35 * u, mid + 3.95f * u, x0 + 40 * u, mid)
+                    x0 += lam
+                }
+                drawPath(path, cs.primary, style = Stroke(h, cap = StrokeCap.Round))
+            }
+            if (size.width - w - gap > 0f) drawRoundRect(track, Offset(w + gap, mid - h / 2), Size(size.width - w - gap, h), CornerRadius(h / 2))
         })
         if (t.steps.isNotEmpty()) {
             Spacer(Modifier.width(12.dp))
@@ -430,11 +462,13 @@ private fun AllClear(vm: Seimei) {
     val since = remember(vm.board) { vm.board?.let(::board)?.tasks?.maxOfOrNull { it.doneAt }?.takeIf { it > 0 } ?: (System.currentTimeMillis() / 1000.0) }
     Row(Modifier.fillMaxWidth().padding(top = 16.dp).heightIn(min = 68.dp).clip(RoundedCornerShape(28.dp)).background(tk.okContainer)
         .padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        // The clover settles into the very sunny shape once, on a short spring
-        val settle = remember { Animatable(if (reduced) 1f else 0f) }
-        LaunchedEffect(Unit) { settle.animateTo(1f, tween(410, easing = SpringEasing)) }
-        Box(Modifier.size(40.dp).clip(PolyShape(SHAPES.getValue("clover4"), SHAPES.getValue("very-sunny"), settle.value)).background(tk.ok),
-            contentAlignment = Alignment.Center) {
+        // final/ 23: the very sunny tile arrives on the slow spring, then turns slowly
+        val arrive = remember { Animatable(if (reduced) 1f else .4f) }
+        LaunchedEffect(Unit) { arrive.animateTo(1f, spring(dampingRatio = .9f, stiffness = 200f)) }
+        val turn = if (reduced) 0f else rememberInfiniteTransition(label = "clear")
+            .animateFloat(0f, 360f, infiniteRepeatable(tween(24000, easing = LinearEasing)), label = "turn").value
+        Box(Modifier.size(40.dp).graphicsLayer { scaleX = arrive.value; scaleY = arrive.value; rotationZ = turn }
+            .clip(shape("very-sunny")).background(tk.ok), contentAlignment = Alignment.Center) {
             Icon(Icons.check, null, Modifier.size(24.dp), tint = tk.okContainer)
         }
         Spacer(Modifier.width(16.dp))

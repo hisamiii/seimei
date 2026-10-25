@@ -32,7 +32,8 @@ class Api(server: String) {
     @Volatile
     var token: String? = null
 
-    /** The password sign-in's browser session (name=value), held only until the phone is paired. */
+    /** The password sign-in's browser session (name=value): held until the phone is paired, or until it locks again
+     *  when the password opened it (the lock screen's Log in). */
     @Volatile
     private var cookie: String? = null
 
@@ -44,7 +45,8 @@ class Api(server: String) {
 
     private fun request(path: String) = Request.Builder().url(base + path).apply {
         token?.let { header("Authorization", "Bearer $it") }
-        cookie?.let { header("Cookie", it) }
+        // A page session goes with the page's Origin, as the browser sends it
+        cookie?.let { header("Cookie", it).header("Origin", base.trimEnd('/')) }
     }
 
     private suspend fun call(req: Request): ByteArray = withContext(Dispatchers.IO) {
@@ -77,6 +79,8 @@ class Api(server: String) {
             JSONObject(text)
         }
     }
+
+    val pageSession get() = cookie != null
 
     /** Ends the password sign-in's session; the phone logs in with its own key from now on. */
     suspend fun endPageSession() {

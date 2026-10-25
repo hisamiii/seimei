@@ -116,7 +116,7 @@ fun schemeOf(t: Tokens, dark: Boolean): ColorScheme {
 val MOCHA = Tokens(mapOf(
     "surface" to 0xFF1E1E2E, "surface-low" to 0xFF181825, "surface-lowest" to 0xFF11111B, "container" to 0xFF26263A,
     "container-high" to 0xFF313244, "container-highest" to 0xFF3A3B50, "primary" to 0xFFCBA6F7, "on-primary" to 0xFF2D1B47,
-    "primary-container" to 0xFF3D3552, "on-primary-container" to 0xFFECDCFF, "inverse-primary" to 0xFF8839EF, "tint" to 0xFF2A2633,
+    "primary-container" to 0xFF3D3552, "on-primary-container" to 0xFFECDCFF, "inverse-primary" to 0xFF7028D9, "tint" to 0xFF2A2633,
     "tonal" to 0xFF35384D, "on-tonal" to 0xFFDFE3FF, "ok" to 0xFFA6E3A1, "warn" to 0xFFFAB387, "error" to 0xFFF38BA8,
     "text" to 0xFFCDD6F4, "text-2" to 0xFFBAC2DE, "text-3" to 0xFFA6ADC8, "outline" to 0xFF6C7086,
     "warn-container" to 0xFF45393E, "on-warn-container" to 0xFFFFDCC4, "ok-container" to 0xFF364142, "on-ok-container" to 0xFFC8F3C3,

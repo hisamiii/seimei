@@ -130,6 +130,7 @@
 
 /* Needs you: the one group that asks for a tap gets the warm container */
 .agroup.ask .agent { background: var(--warn-container); }
+.agroup.ask .agent .top b { font-weight: var(--w-emph); }
 .agent.ask .line { color: var(--on-warn-container); }
 /* The question is the content: up to two lines instead of an ellipsis after 40 characters */
 .agroup.ask .agent .sub { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 20px; }
@@ -641,11 +642,13 @@ code, .wcard.approval .body.cmd, .arow code, .report .rbody code { font-size: 14
 .tgrp.needs > * { border-radius: var(--shape-sm); }
 .tgrp.needs > :first-child { border-top-left-radius: var(--shape-xl); border-top-right-radius: var(--shape-xl); }
 .tgrp.needs > :last-child { border-bottom-left-radius: var(--shape-xl); border-bottom-right-radius: var(--shape-xl); }
+.tgrp.needs .tr .tl { font: var(--title-m-emph); color: var(--on-warn-container); }
 .tgrp.needs .tt[style*="--me"] { border-radius: 0; clip-path: var(--me); }
 
 .agroup.ask .agent { border-radius: var(--shape-sm); }
 .agroup.ask > h2 + .agent { border-top-left-radius: var(--shape-xl); border-top-right-radius: var(--shape-xl); }
 .agroup.ask > .agent:last-child { border-bottom-left-radius: var(--shape-xl); border-bottom-right-radius: var(--shape-xl); }
+.agroup.ask .agent .top b { font: var(--title-m-emph); color: var(--on-warn-container); }
 
 /* 2. The decision on an approval card: Allow leads with its icon; under the finger it takes 12 corners and widens while
    Deny gives way. The buttons keep the showcase 52. */
@@ -695,7 +698,12 @@ code, .wcard.approval .body.cmd, .arow code, .report .rbody code { font-size: 14
 
 /* ===== app ===== */
 /* A snackbar sits above the composer (util.js snackPlace); the thread makes room under it */
-body.snacked .thread { padding-bottom: 72px; }
+body.snacked .thread { padding-bottom: 104px; }
+body.snacked .tasks { padding-bottom: 96px; }
+/* A paired phone's row keeps the sheet's 12 gap; the Tasks project row (tasks-after) shares the class name */
+.sheet .alist .prow { gap: 12px; }
+/* A button that is a link (Download the app) reads as a button */
+a.btn { text-decoration: none; }
 /* Tasks: a row with a shikigami opens its page; a ticked task of yours is a check on the done tone; the paused
    projects open under their row */
 .tr.go { cursor: pointer; }
@@ -705,15 +713,6 @@ body.snacked .thread { padding-bottom: 72px; }
 .tgrp.board.held { margin-top: 2px; }
 .tall.quiet:has(+ .tgrp.board.held) { border-bottom-left-radius: var(--shape-xs); border-bottom-right-radius: var(--shape-xs); }
 .tgrp.board.held > :first-child { border-top-left-radius: var(--shape-xs); border-top-right-radius: var(--shape-xs); }
-/* One emphasized element per screen, by weight only: the current question (the last question card in the chat, the
-   one on a shikigami's page) and the running task or working shikigami (tasks.js, agents.js mark it .emph) */
-:is(.tr .tl, .agent .top b).emph { font: var(--title-m-emph); }
-.thread .wcard.asking:not(:has(~ .wcard.asking)) > .head .title b, .qcard .qhead .qt b { font: var(--title-m-emph); }
-.tgrp.needs .tr .tl { color: var(--on-warn-container); }
-/* All clear arrives once: the clover settles into the very sunny shape on a short spring, then holds still */
-.allclear .shape { animation: settle var(--spring-ms) var(--spring) both; }
-@keyframes settle { from { clip-path: var(--shape-clover4); } to { clip-path: var(--shape-very-sunny); } }
-@media (prefers-reduced-motion: reduce) { .allclear .shape { animation: none; } }
 /* The top bar on scroll (app.js lift): it fills with surface-container once its screen has moved off its rest */
 .bar, .ltabs { transition: background-color var(--effects-ms, 200ms) var(--effects, ease); }
 body.lifted .bar, body.lifted[data-tab="chat"] .ltabs { background: var(--container); }
@@ -729,7 +728,6 @@ body:not([data-tab="chat"]) .jump, body[data-lane="k"] .jump, body.spage-open .j
 .dlg .acts { display: flex; justify-content: flex-end; gap: 8px; }
 .dlg .btn.text { min-height: 48px; padding: 0 12px; border: 0; border-radius: var(--shape-full); background: none; color: var(--primary); font: 500 14px/20px var(--sans); }
 @media (prefers-reduced-motion: reduce) { .thread > * { animation: fadeIn .2s; } }
-.qt .qrest { display: block; font: 400 14px/20px var(--sans); color: var(--on-warn-container); }
 /* Focus moved by the app (a page title, a settled card's outcome) shows no ring; the keyboard's own focus does */
 [tabindex="-1"]:focus:not(:focus-visible) { outline: none; }
 h1[tabindex="-1"]:focus { outline: none; }

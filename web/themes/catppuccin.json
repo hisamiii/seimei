@@ -12,7 +12,7 @@
   "on-primary": "#2d1b47",
   "primary-container": "#3d3552",
   "on-primary-container": "#ecdcff",
-  "inverse-primary": "#8839ef",
+  "inverse-primary": "#7028d9",
   "tint": "#2a2633",
   "tonal": "#35384d",
   "on-tonal": "#dfe3ff",
@@ -118,7 +118,7 @@
     "on-primary": "#2d1b47",
     "primary-container": "#3d3552",
     "on-primary-container": "#ecdcff",
-    "inverse-primary": "#8839ef",
+    "inverse-primary": "#7028d9",
     "tint": "#2a2633"
    },
    "red": {

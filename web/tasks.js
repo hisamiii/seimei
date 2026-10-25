@@ -329,6 +329,4 @@ export function renderTasks() {
     return;
   }
   box.replaceChildren(switcher(), ...(view === 'now' ? now(active()) : all()));
-  // One emphasized title on the screen: the running task
-  box.querySelector('.tr.k-run .tl')?.classList.add('emph');
 }

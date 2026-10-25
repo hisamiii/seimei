@@ -45,6 +45,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.height
 
 // ---------- the theme picker (#81): Menu, then Theme; each tile is a small chat in its theme's own tokens ----------
 
@@ -56,59 +57,62 @@ fun ThemeSheet(vm: Seimei, done: () -> Unit) {
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
     val dark = isDark(vm.themeMode)
-    ModalBottomSheet(done, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = cs.surfaceContainer) {
-        Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(start = 20.dp, end = 20.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Text("Theme", fontSize = 22.sp)
-            Choice("", MODES, vm.themeMode) { vm.setTheme(mode = it) }
-            var icon by remember { mutableStateOf(appIcon(ctx)) }
-            Choice("App icon", APP_ICONS, icon) { setAppIcon(ctx, it); icon = it }
-            for (pair in THEMES.chunked(2)) Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                for (name in pair) {
-                    val usable = name != "material-you" || dynamicColors
-                    val t = remember(name, dark, vm.accent) { themeTokens(ctx, name, dark, vm.accent) }
-                    val f = themeFile(ctx, name)
-                    val sub = when {
-                        !usable -> "Needs Android 12"
-                        name == "material-you" -> "From your wallpaper"
-                        else -> f.getJSONObject(if (dark) "dark" else "light").getString("label")
-                    }
-                    Tile(f.getString("name"), sub, t, name == vm.theme, usable, Modifier.weight(1f)) { vm.setTheme(name = name) }
+    Sheet(done, "Theme") {
+        Choice("", MODES, vm.themeMode) { vm.setTheme(mode = it) }
+        for (pair in THEMES.chunked(2)) Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            for (name in pair) {
+                val usable = name != "material-you" || dynamicColors
+                val t = remember(name, dark, vm.accent) { themeTokens(ctx, name, dark, vm.accent) }
+                val f = themeFile(ctx, name)
+                val sub = when {
+                    !usable -> "Needs Android 12"
+                    name == "material-you" -> "From your wallpaper"
+                    else -> f.getJSONObject(if (dark) "dark" else "light").getString("label")
                 }
-                if (pair.size == 1) Spacer(Modifier.weight(1f))
+                Tile(f.getString("name"), sub, t, name == vm.theme, usable, Modifier.weight(1f)) { vm.setTheme(name = name) }
             }
-            if (vm.theme == "catppuccin") {
-                val f = themeFile(ctx, "catppuccin")
-                val accents = f.getJSONObject("accents").getJSONObject(if (dark) "dark" else "light")
-                val on = vm.accent ?: f.getString("accent")
-                Text("Accent", fontSize = 14.sp, color = LocalExtra.current.text2)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    for (n in accents.keys()) {
-                        val c = hex(accents.getJSONObject(n).getString("primary"))
-                        Box(Modifier.size(32.dp)
-                            .then(if (n == on) Modifier.border(2.dp, cs.onSurface, CircleShape) else Modifier)
-                            .padding(4.dp).clip(CircleShape).background(c).clickable { vm.setTheme(accent = n) }
-                            .semantics { contentDescription = "Accent $n"; selected = n == on })
-                    }
+            if (pair.size == 1) Spacer(Modifier.weight(1f))
+        }
+        if (vm.theme == "catppuccin") {
+            val f = themeFile(ctx, "catppuccin")
+            val accents = f.getJSONObject("accents").getJSONObject(if (dark) "dark" else "light")
+            val on = vm.accent ?: f.getString("accent")
+            Text("Accent", fontSize = 14.sp, color = LocalExtra.current.text2)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                for (n in accents.keys()) {
+                    val c = hex(accents.getJSONObject(n).getString("primary"))
+                    Box(Modifier.size(32.dp)
+                        .then(if (n == on) Modifier.border(2.dp, cs.onSurface, CircleShape) else Modifier)
+                        .padding(4.dp).clip(CircleShape).background(c).clickable { vm.setTheme(accent = n) }
+                        .semantics { contentDescription = "Accent $n"; selected = n == on })
                 }
             }
         }
+        // The phone's own extra, after what final/ 14 shows
+        var icon by remember { mutableStateOf(appIcon(ctx)) }
+        Choice("App icon", APP_ICONS, icon) { setAppIcon(ctx, it); icon = it }
     }
 }
 
-/** A labelled row of pills; [options] are (value, label) pairs. */
+/** A labelled connected button group (final/ 14): 40 tall, 2 apart, 20 outer and 8 inner corners, the pick on primary. */
 @Composable
 private fun Choice(title: String, options: List<Pair<String, String>>, current: String, pick: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, Modifier.weight(1f), fontSize = 14.sp, color = LocalExtra.current.text2)
-        Row(Modifier.clip(CircleShape).border(1.dp, cs.outline, CircleShape)) {
-            for ((v, label) in options) Text(label,
-                Modifier.background(if (v == current) cs.secondaryContainer else Color.Transparent)
-                    .clickable { pick(v) }.padding(horizontal = 14.dp, vertical = 8.dp)
-                    .semantics { selected = v == current },
-                fontSize = 13.sp, fontWeight = if (v == current) FontWeight.SemiBold else FontWeight.Medium,
-                color = if (v == current) cs.onSecondaryContainer else LocalExtra.current.text2)
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (title.isNotEmpty()) Text(title, fontSize = 14.sp, color = LocalExtra.current.text2)
+        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            for ((n, o) in options.withIndex()) {
+                val (v, label) = o
+                val on = v == current
+                val start = if (n == 0) 20.dp else 8.dp
+                val end = if (n == options.lastIndex) 20.dp else 8.dp
+                Text(label,
+                    Modifier.height(40.dp).clip(RoundedCornerShape(start, end, end, start)).background(if (on) cs.primary else cs.primaryContainer)
+                        .clickable { pick(v) }.padding(horizontal = 16.dp, vertical = 10.dp)
+                        .semantics { selected = on },
+                    fontSize = 14.sp, lineHeight = 20.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
+                    color = if (on) cs.onPrimary else cs.onPrimaryContainer)
+            }
         }
     }
 }
@@ -116,8 +120,8 @@ private fun Choice(title: String, options: List<Pair<String, String>>, current: 
 @Composable
 private fun Tile(name: String, sub: String, t: Tokens, picked: Boolean, usable: Boolean, modifier: Modifier, pick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
-    Column(modifier.clip(RoundedCornerShape(20.dp)).background(cs.surfaceContainerHigh)
-        .then(if (picked) Modifier.border(2.dp, cs.primary, RoundedCornerShape(20.dp)) else Modifier)
+    Column(modifier.clip(RoundedCornerShape(28.dp)).background(cs.surfaceContainerHigh)
+        .then(if (picked) Modifier.border(2.dp, cs.primary, RoundedCornerShape(28.dp)) else Modifier)
         .clickable(enabled = usable, onClick = pick).alpha(if (usable) 1f else .5f).padding(6.dp)
         .semantics { selected = picked }, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Box {
@@ -127,8 +131,8 @@ private fun Tile(name: String, sub: String, t: Tokens, picked: Boolean, usable: 
             }
         }
         Column(Modifier.padding(start = 6.dp, end = 6.dp, bottom = 4.dp)) {
-            Text(name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-            Text(sub, fontSize = 12.sp, color = LocalExtra.current.text3)
+            Text(name, fontSize = 14.sp, lineHeight = 21.7.sp, fontWeight = FontWeight.Bold)
+            Text(sub, fontSize = 12.sp, lineHeight = 18.6.sp, color = LocalExtra.current.text3)
         }
     }
 }
@@ -139,21 +143,26 @@ private fun Preview(t: Tokens) {
     Column(Modifier.fillMaxWidth().heightIn(min = 150.dp).clip(RoundedCornerShape(15.dp)).background(t.surface)
         .padding(start = 10.dp, end = 10.dp, top = 12.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
         Text("ship it", Modifier.align(Alignment.End).clip(RoundedCornerShape(12.dp, 12.dp, 3.dp, 12.dp)).background(t.primaryContainer)
-            .padding(horizontal = 10.dp, vertical = 5.dp), color = t.onPrimaryContainer, fontSize = 11.5.sp)
+            .padding(horizontal = 10.dp, vertical = 5.dp), color = t.onPrimaryContainer, fontSize = 11.5.sp, lineHeight = 17.8.sp)
         Text(buildAnnotatedString {
             append("Deployed ")
-            withStyle(SpanStyle(color = t.primary, fontFamily = FontFamily.Monospace)) { append("0ea1eca") }
+            withStyle(SpanStyle(color = t.primary, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Medium)) { append("0ea1eca") }
             append(". Tests pass.")
-        }, color = t.text, fontSize = 11.5.sp, lineHeight = 15.sp)
+        }, color = t.text, fontSize = 11.5.sp, lineHeight = 15.5.sp)
         Spacer(Modifier.weight(1f, fill = false))
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(11.dp)).background(t.containerHigh).padding(horizontal = 9.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            Text("Run deploy.sh?", color = t.text, fontSize = 11.5.sp)
+            Text(buildAnnotatedString {
+                append("Run ")
+                withStyle(SpanStyle(color = t.text2, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp)) { append("deploy.sh") }
+                append("?")
+            }, color = t.text, fontSize = 11.5.sp, lineHeight = 17.8.sp)
+            // Deny, then Allow on the thumb side, as on the cards
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Allow", Modifier.clip(CircleShape).background(t.primary).padding(horizontal = 10.dp, vertical = 3.dp),
-                    color = t.onPrimary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                 Text("Deny", Modifier.clip(CircleShape).background(t.tonal).padding(horizontal = 10.dp, vertical = 3.dp),
-                    color = t.onTonal, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                    color = t.onTonal, fontSize = 11.sp, lineHeight = 17.sp, fontWeight = FontWeight.SemiBold)
+                Text("Allow", Modifier.clip(CircleShape).background(t.primary).padding(horizontal = 10.dp, vertical = 3.dp),
+                    color = t.onPrimary, fontSize = 11.sp, lineHeight = 17.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }

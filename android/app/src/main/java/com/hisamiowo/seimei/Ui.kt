@@ -120,6 +120,26 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.indication
+import androidx.compose.material3.ripple
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.unit.DpOffset
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.ui.text.rememberTextMeasurer
 
 // ---------- theme: the picked theme's tokens (Theme.kt) arranged as Material 3 tonal roles, as on the web page ----------
 
@@ -135,15 +155,16 @@ val Sans = FontFamily(listOf(400, 500, 600, 700).map { w ->
 })
 
 private val Base = Typography()
+// The web's letter spacing: none (M3's 0.1 to 0.5 sp widened every line and broke the wraps of final/)
 val SeimeiType = Typography(
-    displayLarge = Base.displayLarge.copy(fontFamily = Sans), displayMedium = Base.displayMedium.copy(fontFamily = Sans),
-    displaySmall = Base.displaySmall.copy(fontFamily = Sans), headlineLarge = Base.headlineLarge.copy(fontFamily = Sans),
-    headlineMedium = Base.headlineMedium.copy(fontFamily = Sans), headlineSmall = Base.headlineSmall.copy(fontFamily = Sans),
-    titleLarge = Base.titleLarge.copy(fontFamily = Sans), titleMedium = Base.titleMedium.copy(fontFamily = Sans),
-    titleSmall = Base.titleSmall.copy(fontFamily = Sans), bodyLarge = Base.bodyLarge.copy(fontFamily = Sans),
-    bodyMedium = Base.bodyMedium.copy(fontFamily = Sans), bodySmall = Base.bodySmall.copy(fontFamily = Sans),
-    labelLarge = Base.labelLarge.copy(fontFamily = Sans), labelMedium = Base.labelMedium.copy(fontFamily = Sans),
-    labelSmall = Base.labelSmall.copy(fontFamily = Sans),
+    displayLarge = Base.displayLarge.copy(fontFamily = Sans, letterSpacing = 0.sp), displayMedium = Base.displayMedium.copy(fontFamily = Sans, letterSpacing = 0.sp),
+    displaySmall = Base.displaySmall.copy(fontFamily = Sans, letterSpacing = 0.sp), headlineLarge = Base.headlineLarge.copy(fontFamily = Sans, letterSpacing = 0.sp),
+    headlineMedium = Base.headlineMedium.copy(fontFamily = Sans, letterSpacing = 0.sp), headlineSmall = Base.headlineSmall.copy(fontFamily = Sans, letterSpacing = 0.sp),
+    titleLarge = Base.titleLarge.copy(fontFamily = Sans, letterSpacing = 0.sp), titleMedium = Base.titleMedium.copy(fontFamily = Sans, letterSpacing = 0.sp),
+    titleSmall = Base.titleSmall.copy(fontFamily = Sans, letterSpacing = 0.sp), bodyLarge = Base.bodyLarge.copy(fontFamily = Sans, letterSpacing = 0.sp),
+    bodyMedium = Base.bodyMedium.copy(fontFamily = Sans, letterSpacing = 0.sp), bodySmall = Base.bodySmall.copy(fontFamily = Sans, letterSpacing = 0.sp),
+    labelLarge = Base.labelLarge.copy(fontFamily = Sans, letterSpacing = 0.sp), labelMedium = Base.labelMedium.copy(fontFamily = Sans, letterSpacing = 0.sp),
+    labelSmall = Base.labelSmall.copy(fontFamily = Sans, letterSpacing = 0.sp),
 )
 
 /** The current text style with tabular figures, for numbers that tick or line up (usage, timers). */
@@ -179,7 +200,11 @@ fun icon(vararg d: String, stroke: Float = 2f): ImageVector = ImageVector.Builde
 
 object Icons {
     val chat = icon("M6 4.5h12A2.5 2.5 0 0 1 20.5 7v8a2.5 2.5 0 0 1-2.5 2.5h-7L6.5 21v-3.5H6A2.5 2.5 0 0 1 3.5 15V7A2.5 2.5 0 0 1 6 4.5z", stroke = 1.8f)
-    val agents = icon("M12 3 13.9 8.6 19.5 10.5 13.9 12.4 12 18 10.1 12.4 4.5 10.5 10.1 8.6ZM18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z", stroke = 1.8f)
+    // The grid of final/ (the showcase's Agents tab): four rounded tiles
+    val agents = icon("M6 4h3.5A1.5 1.5 0 0 1 11 5.5V9a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 9V5.5A1.5 1.5 0 0 1 6 4zM14.5 4H18a1.5 1.5 0 0 1 " +
+        "1.5 1.5V9A1.5 1.5 0 0 1 18 10.5h-3.5A1.5 1.5 0 0 1 13 9V5.5A1.5 1.5 0 0 1 14.5 4zM6 13.5h3.5A1.5 1.5 0 0 1 11 15v3.5A1.5 1.5 0 0 1 9.5 " +
+        "20H6a1.5 1.5 0 0 1-1.5-1.5V15A1.5 1.5 0 0 1 6 13.5zM14.5 13.5H18a1.5 1.5 0 0 1 1.5 1.5v3.5A1.5 1.5 0 0 1 18 20h-3.5a1.5 1.5 0 0 " +
+        "1-1.5-1.5V15a1.5 1.5 0 0 1 1.5-1.5z", stroke = 1.8f)
     val usage = icon("M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 1 0 0-17z", stroke = 1.8f)
     val star = icon("M12 2 17.88 20.09 2.49 8.91h19.02L6.12 20.09Z", stroke = 1.6f)
     val check = icon("M5 12.5l4.5 4.5L19 7.5")
@@ -222,6 +247,11 @@ object Icons {
     val down = icon("M12 5v14M5.5 12.5 12 19l6.5-6.5", stroke = 2.2f)
     /** A job to look over: a clipboard with a check. */
     val review = icon("M9 4.5H6.5A1.5 1.5 0 0 0 5 6v13.5A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H15M9.8 3h4.4a.8.8 0 0 1 .8.8v1.4a.8.8 0 0 1-.8.8H9.8a.8.8 0 0 1-.8-.8V3.8a.8.8 0 0 1 .8-.8zM8.5 13.5l2.5 2.5 4.5-4.5")
+    val bell = icon("M6 10a6 6 0 0 1 12 0c0 4.5 1.5 6.5 2 7H4c.5-.5 2-2.5 2-7zM10 20.5a2.1 2.1 0 0 0 4 0", stroke = 1.8f)
+    val palette = icon("M12 21a9 9 0 1 1 0-18c4.97 0 9 3.58 9 8 0 2.76-2.24 4-4.5 4H15a2 2 0 0 0-1.5 3.3A1.6 1.6 0 0 1 12 21z",
+        "M7.5 11.5v.01M10 7.5v.01M14.5 7.5v.01M17 11v.01", stroke = 1.8f)
+    val shield = icon("M12 3 4.5 6v5.5c0 4.4 3.1 8.2 7.5 9.5 4.4-1.3 7.5-5.1 7.5-9.5V6L12 3z", "M9 12h6M9 15.5h4", stroke = 1.8f)
+    val logout = icon("M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h11", stroke = 1.8f)
     val question = icon("M4 5h16v11H9l-5 4zM10 9.2a2 2 0 1 1 2.6 1.9c-.4.2-.6.5-.6.9M12 13.6v.1")
 }
 
@@ -444,27 +474,57 @@ object CodeFormat : VisualTransformation {
     }
 }
 
+/**
+ * The lock screen of final/ 01, bottom-aligned: the seiman and "seimei", Use fingerprint, "or", then the password and
+ * Log in (as the web page logs in; the phone's key stays for the next time).
+ */
 @Composable
 fun LockScreen(vm: Seimei, activity: Activity) {
     LaunchedEffect(Unit) { vm.unlock(activity) }
+    // Not rememberSaveable: the password never goes into saved state.
+    var password by remember { mutableStateOf("") }
+    val cs = MaterialTheme.colorScheme
+    val x = LocalTokens.current
+    val login = { vm.passwordLogin(password) }
     Column(
-        Modifier.fillMaxSize().safeDrawingPadding().padding(24.dp),
+        Modifier.fillMaxSize().safeDrawingPadding().imePadding().verticalScroll(rememberScrollState()).padding(start = 26.dp, end = 26.dp, bottom = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
+        verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.Bottom),
     ) {
-        Mark()
-        Spacer(Modifier.height(20.dp))
-        Text("seimei", style = MaterialTheme.typography.headlineSmall)
-        vm.authError?.let {
-            Spacer(Modifier.height(16.dp))
-            Text(it, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center, fontSize = 14.sp)
+        Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+            Icon(painterResource(R.drawable.ic_seimei_monochrome), null, Modifier.requiredSize(72.dp), tint = cs.primary)
         }
-        Spacer(Modifier.height(32.dp))
-        Button({ vm.unlock(activity) }, enabled = !vm.authBusy, modifier = Modifier.height(52.dp)) {
+        Text("seimei", fontSize = 28.sp, lineHeight = 36.sp, fontWeight = FontWeight.Medium, letterSpacing = (-.56).sp)
+        Button({ vm.unlock(activity) }, enabled = !vm.authBusy, modifier = Modifier.fillMaxWidth().height(56.dp), shape = CircleShape) {
             Icon(Icons.fingerprint, null, Modifier.size(20.dp))
-            Spacer(Modifier.width(10.dp))
-            Text("Unlock", fontSize = 16.sp)
+            Spacer(Modifier.width(8.dp))
+            Text("Use fingerprint", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
         }
+        Text("or", fontSize = 12.sp, lineHeight = 16.sp, color = x.text3)
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            BasicTextField(
+                password, { password = it; vm.authError = null },
+                singleLine = true,
+                textStyle = TextStyle(fontSize = 16.sp, color = x.text),
+                cursorBrush = SolidColor(cs.primary),
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false, imeAction = ImeAction.Go),
+                keyboardActions = KeyboardActions(onGo = { login() }),
+                modifier = Modifier.fillMaxWidth().height(56.dp).semantics { contentDescription = "Password" },
+                decorationBox = { field ->
+                    Box(Modifier.clip(RoundedCornerShape(18.dp)).background(cs.surfaceContainerHigh).padding(horizontal = 20.dp),
+                        contentAlignment = Alignment.CenterStart) {
+                        if (password.isEmpty()) Text("Password", fontSize = 16.sp, color = x.text3)
+                        field()
+                    }
+                },
+            )
+            Button(login, enabled = !vm.authBusy, modifier = Modifier.fillMaxWidth().height(56.dp), shape = CircleShape,
+                colors = ButtonDefaults.buttonColors(containerColor = x.tonal, contentColor = x.onTonal)) {
+                Text("Log in", fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+        vm.authError?.let { Text(it, color = cs.error, textAlign = TextAlign.Center, fontSize = 14.sp, lineHeight = 21.7.sp) }
     }
 }
 
@@ -522,7 +582,8 @@ fun AppScreen(vm: Seimei) {
     Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().imePadding()) {
         Header(vm)
-        Box(Modifier.weight(1f)) {
+        // The page sheet of final/: surface-low under the header, 28 corners on top
+        Box(Modifier.weight(1f).clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)).background(MaterialTheme.colorScheme.surfaceContainerLow)) {
             // Top level between nav destinations: the old one fades out, then the new one fades in (BEHAVIOR.md 1)
             AnimatedContent(vm.tab, transitionSpec = {
                 if (still) EnterTransition.None togetherWith ExitTransition.None
@@ -535,7 +596,11 @@ fun AppScreen(vm: Seimei) {
                 }
             }
         }
-        Column(Modifier.onSizeChanged { vm.barPx = it.height }) {
+        // The bottom container of final/: composer and navigation bar on surface-container, 24 corners on top
+        // (the sheet shows in its corners)
+        Column(Modifier.onSizeChanged { vm.barPx = it.height }.background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainer)) {
             if (vm.tab == "chat" && vm.lane != "k") Composer(vm)
             // The keyboard covers the bottom of the screen: while typing, the navigation bar steps aside.
             if (!WindowInsets.isImeVisible) NavBar(vm)
@@ -544,10 +609,35 @@ fun AppScreen(vm: Seimei) {
     vm.page?.let { AgentPage(vm, it) }
     // The one polite live region TalkBack reads: a card that arrives, a reply, a card that settles (BEHAVIOR.md 6)
     Text(vm.said, Modifier.size(1.dp).alpha(0f).semantics { liveRegion = LiveRegionMode.Polite })
-    // Above whatever holds the bottom edge, measured: never over the field
-    val above = with(LocalDensity.current) { (if (vm.page != null) vm.pageBarPx else vm.barPx).toDp() } + 8.dp
+    // Above whatever holds the bottom edge, measured: never over the field (final/ 19 and 20: 44 over a composer, 32 over the bar)
+    val composer = vm.page != null || (vm.tab == "chat" && vm.lane != "k")
+    val above = with(LocalDensity.current) { (if (vm.page != null) vm.pageBarPx else vm.barPx).toDp() } + if (composer) 44.dp else 32.dp
     SnackbarHost(snacks, Modifier.align(Alignment.BottomCenter).then(if (vm.page != null) Modifier.navigationBarsPadding() else Modifier)
-        .imePadding().padding(bottom = above))
+        .imePadding().padding(bottom = above)) { d ->
+        // The web's snackbar: as wide as its text, 344 at the least, 8 corners, the action at 14 semibold
+        val cs = MaterialTheme.colorScheme
+        val measure = rememberTextMeasurer()
+        val density = LocalDensity.current
+        val label = d.visuals.actionLabel
+        val wide = with(density) {
+            val text = measure.measure(d.visuals.message, TextStyle(fontSize = 14.sp)).size.width.toDp()
+            val action = label?.let { measure.measure(it, TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold)).size.width.toDp() + 40.dp } ?: 0.dp
+            text + action + 32.dp
+        }
+        Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
+            // A plain row: M3's Snackbar drew a fixed-width action over the text
+            Surface(Modifier.width(wide.coerceIn(344.dp, 560.dp)), shape = RoundedCornerShape(8.dp), color = cs.inverseSurface,
+                contentColor = cs.inverseOnSurface, shadowElevation = 6.dp) {
+                Row(Modifier.heightIn(min = 48.dp).padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(d.visuals.message, Modifier.weight(1f).padding(vertical = 14.dp), fontSize = 14.sp, lineHeight = 20.sp)
+                    if (label != null) TextButton(d::performAction, Modifier.heightIn(min = 48.dp),
+                        colors = ButtonDefaults.textButtonColors(contentColor = cs.inversePrimary)) {
+                        Text(label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        }
+    }
     }
     if (vm.about) AboutSheet(vm) { vm.about = false }
 }
@@ -596,6 +686,8 @@ fun Header(vm: Seimei) {
     var menu by remember { mutableStateOf(false) }
     var themes by remember { mutableStateOf(false) }
     if (themes) ThemeSheet(vm) { themes = false }
+    var audit by remember { mutableStateOf(false) }
+    if (audit) ActivitySheet(vm) { audit = false }
     var notifications by remember { mutableStateOf(false) }
     if (notifications) NotificationsSheet(vm) { notifications = false }
     Row(Modifier.background(barColor(vm)).statusBarsPadding().fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -618,34 +710,32 @@ fun Header(vm: Seimei) {
                     if (vm.release != null) Box(Modifier.align(Alignment.TopEnd).size(8.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary))
                 }
             }
-            DropdownMenu(menu, { menu = false }) {
-                val ctx = LocalContext.current
+            // final/ 13: 220 wide, 16 corners on container-high, 48 rows with a 20 icon in text-3, 14sp
+            val x = LocalTokens.current
+            @Composable
+            fun Item(text: String, icon: ImageVector, color: Color = x.text, dot: Boolean = false, onClick: () -> Unit) = DropdownMenuItem(
+                text = { Text(text, fontSize = 14.sp, lineHeight = 20.sp, color = color) },
+                leadingIcon = { Icon(icon, null, Modifier.size(20.dp), tint = if (color == x.text) x.text3 else color) },
+                trailingIcon = if (dot) ({ Box(Modifier.size(8.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary)) }) else null,
+                onClick = { menu = false; onClick() },
+                modifier = Modifier.height(48.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp),
+            )
+            DropdownMenu(menu, { menu = false }, Modifier.width(220.dp), offset = DpOffset((-8).dp, 0.dp),
+                shape = RoundedCornerShape(16.dp), containerColor = MaterialTheme.colorScheme.surfaceContainerHigh, shadowElevation = 6.dp) {
                 val r = vm.release
-                DropdownMenuItem(
-                    text = { Text(if (r != null) "Update to ${r.version}" else "About seimei",
-                        color = if (r != null) MaterialTheme.colorScheme.primary else Color.Unspecified) },
-                    trailingIcon = if (r != null) ({ Box(Modifier.size(8.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary)) }) else null,
-                    onClick = {
-                        menu = false
-                        vm.about = true
-                        vm.checkUpdate()
-                    },
-                )
-                if (Delivery.available) DropdownMenuItem(
-                    text = { Text("Notifications") },
-                    onClick = {
-                        menu = false
-                        vm.pushTest = null
-                        notifications = true
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text("Theme") },
-                    onClick = {
-                        menu = false
-                        themes = true
-                    },
-                )
+                Item(if (r != null) "Update to ${r.version}" else "About seimei", Icons.info,
+                    if (r != null) MaterialTheme.colorScheme.primary else x.text, dot = r != null) {
+                    vm.about = true
+                    vm.checkUpdate()
+                }
+                if (Delivery.available) Item("Notifications", Icons.bell) {
+                    vm.pushTest = null
+                    notifications = true
+                }
+                Item("Theme", Icons.palette) { themes = true }
+                Item("Activity log", Icons.shield) { audit = true }
+                Item("Log out", Icons.logout) { vm.logOut() }
             }
         }
     }
@@ -661,30 +751,53 @@ fun dotColor(s: String): Color = when (s) {
     else -> LocalExtra.current.ok
 }
 
+/**
+ * The navigation bar of final/ (06, 08): 64 tall on the bottom container, a 56 x 32 primary pill under the selected
+ * icon (on-primary), the label in text, the others in text-3; what needs the user is a warn badge on the pill's corner.
+ */
 @Composable
 fun NavBar(vm: Seimei) {
     val (working, asks) = agentCounts(vm)
-    NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
+    val cs = MaterialTheme.colorScheme
+    val x = LocalTokens.current
+    Row(Modifier.fillMaxWidth().navigationBarsPadding().height(64.dp).padding(horizontal = 8.dp).selectableGroup()) {
         for (tab in TABS) {
-            NavigationBarItem(
-                selected = vm.tab == tab,
-                onClick = { vm.show(tab) },
-                label = { Text(TITLES[tab]!!.replaceFirstChar { it.uppercase() }.let { if (tab == "chat") "seimei" else it }) },
-                icon = {
-                    val ic = mapOf("chat" to Icons.chat, "agents" to Icons.agents, "usage" to Icons.usage)[tab]!!
-                    BadgedBox(badge = {
-                        when {
-                            // What needs the user counts first, in orange; otherwise how many work.
-                            tab == "agents" && (asks > 0 || working > 0) -> {
-                                val n = if (asks > 0) asks else working
-                                Badge(containerColor = if (asks > 0) LocalExtra.current.warn else MaterialTheme.colorScheme.primary,
-                                    contentColor = MaterialTheme.colorScheme.onPrimary) { Text(if (n > 99) "99+" else "$n") }
-                            }
-                            tab == "chat" && vm.tab != "chat" && (vm.unread || vm.waiting > 0) -> Badge(containerColor = MaterialTheme.colorScheme.primary)
+            val on = vm.tab == tab
+            val press = remember { MutableInteractionSource() }
+            val pressed by press.collectIsPressedAsState()
+            // Under the finger the pill widens inside its item (final/ 8)
+            val pill by animateDpAsState(if (pressed) 64.dp else 56.dp, spring(dampingRatio = .9f, stiffness = 1400f), label = "pill")
+            val label = if (tab == "chat") "seimei" else TITLES[tab]!!
+            Column(
+                Modifier.weight(1f).fillMaxHeight()
+                    .selectable(on, interactionSource = press, indication = null, role = Role.Tab) { vm.show(tab) }
+                    .padding(vertical = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Box(Modifier.size(pill, 32.dp).clip(RoundedCornerShape(16.dp)).background(if (on) cs.primary else Color.Transparent)
+                    .indication(press, ripple()), contentAlignment = Alignment.Center) {
+                    val tint = if (on) cs.onPrimary else x.text3
+                    if (tab == "usage") UsageRing(vm, on) else Icon(if (tab == "chat") Icons.chat else Icons.agents, null, Modifier.size(24.dp), tint = tint)
+                    val badge = when {
+                        // What needs the user counts first, in orange; otherwise how many work.
+                        tab == "agents" && asks > 0 -> "$asks" to x.warn
+                        tab == "agents" && working > 0 -> "$working" to cs.primary
+                        tab == "chat" && vm.tab != "chat" && (vm.unread || vm.waiting > 0) -> "" to cs.primary
+                        else -> null
+                    }
+                    badge?.let { (n, c) ->
+                        val big = n.isNotEmpty()
+                        Box(Modifier.align(Alignment.TopStart).offset(x = (pill - 56.dp) / 2 + 34.dp, y = if (big) (-1).dp else 4.dp)
+                            .size(if (big) 16.dp else 8.dp).clip(CircleShape).background(c), contentAlignment = Alignment.Center) {
+                            if (big) Text(if (n.length > 2) "99+" else n, color = if (c == x.warn) x.onWarn else cs.onPrimary,
+                                fontSize = 11.sp, lineHeight = 16.sp, fontWeight = FontWeight.SemiBold)
                         }
-                    }) { if (tab == "usage") UsageRing(vm) else Icon(ic, null) }
-                },
-            )
+                    }
+                }
+                Text(label, color = if (on) x.text else x.text3, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium,
+                    letterSpacing = .24.sp, maxLines = 1)
+            }
         }
     }
 }

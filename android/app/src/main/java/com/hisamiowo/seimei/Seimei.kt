@@ -393,6 +393,38 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * The lock screen's other way in (final/ 01): seimei's password, as the web page logs in. That session stands in
+     * for the phone's key until the app locks again; the key and the pairing stay as they are.
+     */
+    fun passwordLogin(password: String) {
+        if (authBusy || phase != Phase.Locked || password.isEmpty()) return
+        authBusy = true
+        authError = null
+        viewModelScope.launch {
+            try {
+                api.postAsPage("api/auth/password", JSONObject().put("password", password))
+                Push.live = api
+                phase = Phase.Ready
+                start()
+                checkUpdate()
+                pendingShare?.let { pendingShare = null; applyShare(it) }
+            } catch (e: HttpError) {
+                val wait = runCatching { JSONObject(e.body).optInt("wait") }.getOrDefault(0)
+                authError = when {
+                    e.code == 401 && wait > 0 -> "Too many wrong tries. Try again in $wait s."
+                    e.code == 401 -> "That password is wrong."
+                    e.code == 403 -> "The server refused this address. Use the one its config.toml gives as origin."
+                    else -> "Login failed (${e.code})."
+                }
+            } catch (e: IOException) {
+                authError = "Couldn't reach the server"
+            } finally {
+                authBusy = false
+            }
+        }
+    }
+
     /** The test's outcome, shown in the sheet itself: a snack would sit behind it. */
     var pushTest by mutableStateOf<String?>(null)
 
@@ -448,10 +480,14 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) { store.clear() }
     }
 
+    /** Menu, then Log out: the app locks; the fingerprint or the password lets the user back in. */
+    fun logOut() = lock()
+
     private fun lock() {
         stream?.cancel()
         api.closeStream()
         api.token = null
+        viewModelScope.launch(NonCancellable) { api.endPageSession() }
         Push.live = null
         online = false
         phase = Phase.Locked
@@ -513,6 +549,9 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         if (foreground) connect()
         sendSeed()
     }
+
+    /** Try now, on the away block: reconnect at once instead of at the next backoff step. */
+    fun retryNow() = connect()
 
     private fun connect() {
         stream?.cancel()
@@ -1324,7 +1363,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     /** Shared text joins the draft and shared files the attachments; nothing goes out until the user taps Send. */
     fun share(s: Shared) {
         show("chat")
-        if (phase == Phase.Ready && api.token != null) applyShare(s) else pendingShare = s
+        if (phase == Phase.Ready && (api.token != null || api.pageSession)) applyShare(s) else pendingShare = s
     }
 
     private fun applyShare(s: Shared) {

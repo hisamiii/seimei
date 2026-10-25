@@ -71,7 +71,7 @@ CAT_ACCENTS = {
 MOCHA_EXACT = {"on-primary": "#2d1b47", "primary-container": "#3d3552", "on-primary-container": "#ecdcff",
                "tonal": "#35384d", "on-tonal": "#dfe3ff", "warn-container": "#45393e", "on-warn-container": "#ffdcc4",
                "ok-container": "#364142", "on-ok-container": "#c8f3c3", "error-container": "#45293a",
-               "on-error-container": "#ffd0dc", "on-warn": "#3b2313", "inverse-primary": "#8839ef", "tint": "#2a2633"}
+               "on-error-container": "#ffd0dc", "on-warn": "#3b2313", "inverse-primary": "#7028d9", "tint": "#2a2633"}
 
 THEMES = {
     "catppuccin": {

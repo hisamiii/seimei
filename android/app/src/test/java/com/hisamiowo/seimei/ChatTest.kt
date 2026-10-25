@@ -24,7 +24,7 @@ class ChatTest {
         assertEquals(3, a.calls.size)
         assertEquals(false, a.calls[0].running)
         assertEquals("out", a.calls[0].out)
-        assertEquals("Ran 2 commands, read a file", activityLabel(a.calls))
+        assertEquals("Ran 2 commands, reading a file", activityLabel(a.calls))
         c.add(ev("assistant", kv = arrayOf("text" to "hi")))
         c.add(ev("tool", kv = arrayOf("name" to "Bash", "tool_id" to "d", "summary" to "x")))
         assertEquals(2, c.items.filterIsInstance<Item.Activity>().size)
@@ -107,7 +107,7 @@ class ChatTest {
         val a = c.items.filterIsInstance<Item.Activity>().single()
         assertEquals("su-2:0", a.key)
         assertEquals("Read a file, running a command", activityLabel(a.calls, "b"))
-        assertEquals("Read a file, ran a command", activityLabel(a.calls))
+        assertEquals("Read a file, running a command", activityLabel(a.calls))
         assertTrue(c.items.map { it.key }.toSet().size == c.items.size)
     }
 
@@ -158,7 +158,7 @@ class ChatTest {
             ev("assistant", kv = arrayOf("text" to "noted", "lane" to "t", "turn" to 5, "why" to "app-tester finished")),
         )
         val f = chat.items.filterIsInstance<Item.Fold>().single()
-        assertEquals("app-tester finished, asr-bench failed and 1 more", f.text)
+        assertEquals("app-tester finished, asr-bench failed, and 1 more", f.text)
         assertTrue(chat.items.none { it is Item.Worker })
         assertEquals(2, trail.items.filterIsInstance<Item.Worker>().size)
         assertEquals("after app-tester finished", trail.items.filterIsInstance<Item.Trig>().single().text)

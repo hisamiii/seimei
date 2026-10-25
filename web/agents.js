@@ -366,10 +366,8 @@ export function renderAgents() {
     empty.append(el('b', null, 'No shikigami or sessions yet'));
     parts.push(empty);
   }
-  // One emphasized title on the screen: the shikigami at work
   const top = page.scrollTop;
   page.replaceChildren(...parts);
-  page.querySelector('.agent.work .top b')?.classList.add('emph');
   page.scrollTop = top;
 }
 
@@ -475,11 +473,7 @@ function question(ask) {
   ic.append(svg(Q_ICON, 18));
   const t = el('span', 'qt');
   const q = ask.questions?.[0];
-  // The question's first sentence is its title (the screen's one emphasized line); what follows explains it
-  const text = q?.question || ask.text || '';
-  const cut = text.search(/(?<=[?.!])\s/);
-  t.append(el('b', null, cut > 0 ? text.slice(0, cut) : text));
-  if (cut > 0) t.append(el('span', 'qrest', text.slice(cut + 1)));
+  t.append(el('b', null, q?.question || ask.text || ''));
   top.append(ic, t);
   P.qbox.append(top);
   if (q) {
