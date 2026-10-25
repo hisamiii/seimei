@@ -43,7 +43,8 @@ config="${XDG_CONFIG_HOME:-$HOME/.config}/seimei/config.toml"
 server=$(python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb")).get("server", {}).get("origin", ""))' "$config" 2>/dev/null || true)
 case "$server" in https://*) ;; *) server="" ;; esac
 Flavor=$(echo "$flavor" | cut -c1 | tr a-z A-Z)$(echo "$flavor" | cut -c2-)
-nice -n 19 ./gradlew -q --console=plain "assemble${Flavor}Release" -Pseimei.versionCode="$code" -Pseimei.versionName="$name" \
+# No daemons left behind: a release build is a one-off, and a parked gradle or kotlin daemon holds gigabytes
+nice -n 19 ./gradlew -q --console=plain --no-daemon -Pkotlin.compiler.execution.strategy=in-process "assemble${Flavor}Release" -Pseimei.versionCode="$code" -Pseimei.versionName="$name" \
     -Pseimei.server="$server"
 apk="$here/app/build/outputs/apk/$flavor/release/app-$flavor-release.apk"
 cp "$apk" "$state/app/seimei.apk.tmp"
