@@ -201,3 +201,108 @@ code, .wcard.approval .body.cmd, .arow code, .report .rbody code { font-size: 14
 .snack.sc-on.sc-chat { bottom: 172px; }
 .jump { position: fixed; right: 16px; bottom: 156px; display: flex; align-items: center; gap: 8px; height: 48px; padding: 0 18px 0 14px; border: 0; border-radius: 16px; background: var(--tonal); color: var(--on-tonal); font: 500 14px/20px var(--sans); box-shadow: 0 2px 6px rgb(0 0 0 / .3); z-index: 5; }
 .jump b { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--primary); color: var(--on-primary); font: 600 12px/20px var(--sans); text-align: center; }
+
+/* audit_fixes.py: begin */
+:root { --caution: #f9e2af; --on-caution: #3a3016; }
+
+/* 12: 48 to touch. The lane tabs, event lines, Reply in chat, the fold, snackbar actions, menu and attach are 48;
+   the Now/All tasks group keeps its 40 look with a 48 hit area (its buttons clip nothing) */
+.ltab { height: 48px; }
+.evline, .reply-btn { min-height: 48px; }
+.snack button { min-height: 48px; padding: 0 16px; border-radius: 24px; }
+.snack:has(button) { padding: 4px 4px 4px 16px; }
+.icon-btn, .field .attach { width: 48px; height: 48px; }
+/* chips and the handoff keep their 40 look; their hit areas reach 48 past the clip of .sl */
+.chip.sl, .sbar .handoff.sl { overflow: visible; }
+.chip::before { inset: -4px 0; }
+.sbar .handoff::after { inset: 0; }
+.sbar .handoff::before { content: ""; position: absolute; inset: -4px 0; }
+.field .attach { margin: 2px 0 2px 4px; }
+.tview button, .tseg button { position: relative; overflow: visible; }
+.tview button::before, .tseg button::before { content: ""; position: absolute; inset: -4px 0; }
+.tdots { gap: 0; }
+/* the swatches are 48 boxes around their 40 discs: the inline background shorthand would reset the clip, so it is
+   forced; the selected ring sits in the box, 2 clear and 2 ring as before */
+.tdot { width: 48px; height: 48px; margin: 0; background-clip: content-box !important; padding: 4px; border: 0; box-sizing: border-box; }
+.tdot.on { box-shadow: inset 0 0 0 2px var(--text); }
+.tseed { width: 48px; height: 48px; }
+
+/* Nav: the active pill on primary (7.3:1 on the bar), its icon on-primary; the label stays as it was */
+.nav-item.on .ind { background: var(--primary); color: var(--on-primary); }
+.nav-item.on .ring-ico .t { stroke: color-mix(in srgb, var(--on-primary) 30%, transparent); }
+.nav-item.on .ring-ico .f, #nav-usage.on[data-tone] .ring-ico .f { stroke: var(--on-primary); }
+
+/* 15: usage caution in its own tone; warm means needs you */
+.note.warn { color: var(--caution); }
+.meter.warn { --tone: var(--caution); }
+.meter.warn .pct { color: var(--caution); }
+#nav-usage[data-tone="warn"] .ring-ico .f { stroke: var(--caution); }
+
+/* Wavy progress on a running task's step bar (amplitude 3, wavelength 40, 4 thick, a 4 gap, the flat track); usage
+   meters are amounts and stay flat */
+.tr.k-run .prog { height: 10px; align-items: center; }
+.tr.k-run .prog i { height: 10px; border-radius: 0; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='10' viewBox='0 0 40 10'%3E%3Cpath d='M0 5 C 5 1.05 15 1.05 20 5 S 35 8.95 40 5' fill='none' stroke='%23cba6f7' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E") left center / 40px 10px repeat-x;
+  animation: wave 1.2s linear infinite; }
+.tr.k-run .prog::after { height: 4px; }
+@keyframes wave { to { background-position-x: 40px; } }
+@media (prefers-reduced-motion: reduce) { .tr.k-run .prog i { animation: none; } }
+
+/* Contrast: choice descriptions on the warm options */
+.qcard .qopt small { color: var(--on-warn-container); opacity: .82; }
+
+/* 8: sending, the contained indicator in the button, widths fixed by the row, not the label */
+.btn.busy::before { content: none; }
+.wcard.approval .foot .btn.tonal { flex: 1 1 0; }
+.wcard.approval .foot .btn.filled { flex: 1.4 1 0; }
+.wcard.approval .choice.held:disabled { opacity: .38; }
+
+/* 19, 20: Tasks on the 16 grid; the toggle has room below it */
+.tasks { padding-left: 0; padding-right: 0; }
+.tview { margin: 4px 0; }
+.tview + .tgrp { margin-top: 20px; }
+
+/* 22 */
+.archrow .cnt { flex: none; font-size: 14px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+
+/* 24: the choices as one segmented group */
+.qcard .qopts { display: flex; flex-direction: column; }
+
+/* 25: a settled command fades only when it overflows (one line here fits); its tile stays neutral */
+.wcard.approval.settled .body { -webkit-mask-image: none; mask-image: none; }
+.wcard.approval.settled .badge { background: var(--container-high); color: var(--text-2); }
+
+/* 26: one monospace */
+.report .rbody code { font: 13px var(--mono); background: var(--container-high); border-radius: 6px; padding: .1em .35em; }
+
+/* 27: the note button round and tonal like Deny */
+.wcard.approval .foot .btn.icon { border-radius: var(--shape-full); background: var(--tonal); color: var(--on-tonal); }
+
+/* 14 */
+.usage-h { color: var(--text-2); }
+
+/* 17: the buttons under the title */
+.card .actions { margin: 12px 0 0; gap: 8px; }
+
+/* 36 */
+.tct code { background: none; padding: 0; }
+.tcard { border: 0; box-shadow: none; }
+
+/* 37, 38: one card shape in chat; the failure line spans the column */
+.card { border-radius: var(--shape-xl); }
+.report .evline { border-radius: var(--shape-xl) var(--shape-xl) var(--shape-xs) var(--shape-xs); }
+.report .rbody { border-radius: var(--shape-xs) var(--shape-xs) var(--shape-xl) var(--shape-xl); }
+.evline.failed { align-self: stretch; border-radius: var(--shape-xl); padding: 10px 12px 10px 20px; }
+.evline.failed > span { flex: 1; }
+
+/* 30: even sheet spacing, 14 under the title as between the blocks: no extra room before Today (15) or the version
+   line (16), and the same 14 between the line and each button (the block has its own 12 gap) */
+.alist > .aday:first-child { margin-top: 0; }
+#sheet-body .pblock { padding-top: 0; }
+#sheet-body .pblock .usage-note { margin: 0 0 2px; }
+
+/* 40: the fold as a row of the column, left aligned, nothing cut */
+.fold { align-self: stretch; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px;
+  max-width: none; padding: 12px 16px 12px 20px; border-radius: var(--shape-xl); text-align: left; font: 400 14px/20px var(--sans); }
+.fold span { white-space: normal; overflow: visible; text-overflow: clip; }
+.fold b { flex: none; }
+/* audit_fixes.py: end */
