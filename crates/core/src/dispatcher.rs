@@ -119,7 +119,7 @@ fn asks(text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::asks;
+    use super::{asks, own_input};
 
     #[test]
     fn a_question_in_the_last_paragraph_asks() {
@@ -127,6 +127,16 @@ mod tests {
         assert!(asks("Built it.\n\nShould I deploy, or wait for the review? Either works."));
         assert!(!asks("Why did it fail? The cache was stale.\n\nFixed and deployed."));
         assert!(!asks("Noted."));
+    }
+
+    #[test]
+    fn claude_codes_own_inputs_are_named() {
+        let bg = "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>";
+        assert_eq!(own_input(bg).as_deref(), Some("a background task ended"));
+        let peer = "<cross-session-message from=\"cleanup\">hi</cross-session-message>";
+        assert_eq!(own_input(peer).as_deref(), Some("a message from cleanup"));
+        assert_eq!(own_input("[Cross-session delivery notice] held").as_deref(), Some("a delivery notice"));
+        assert_eq!(own_input("just text"), None);
     }
 }
 
@@ -150,6 +160,20 @@ pub fn why(text: &str) -> String {
         })
         .collect();
     chars(&parts.join(", "), 80)
+}
+
+/// What Claude Code put in a turn by itself, named for the chat's mention of what started it.
+fn own_input(text: &str) -> Option<String> {
+    static FROM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"<cross-session-message from="([^"]*)""#).unwrap());
+    if text.contains("<task-notification>") {
+        Some("a background task ended".into())
+    } else if let Some(c) = FROM.captures(text) {
+        Some(format!("a message from {}", &c[1]))
+    } else if text.contains("Cross-session delivery notice") {
+        Some("a delivery notice".into())
+    } else {
+        None
+    }
 }
 
 /// A message of seimei's or a card the user replies to: (the chip's text, the line seimei gets), or empty strings for
@@ -487,7 +511,7 @@ impl Dispatcher {
     }
 
     /// Something the dispatcher should know, delivered with its next message. A note with a key replaces the
-    /// earlier one with the same key.
+    /// earlier one with the same key; an empty one takes it back.
     pub fn note(&self, text: &str, key: Option<&str>) {
         let _ = self.tx.send(Cmd::Note { text: text.into(), key: key.map(String::from) });
     }
@@ -690,6 +714,9 @@ struct Turns {
     held: Option<Map<String, Value>>,
     /// What was sent since the last model step; see step().
     inputs: Vec<Source>,
+    /// What Claude Code itself put in since the last model step (a background task ending, a peer's message), named
+    /// for an event turn that has no input of seimei's.
+    own: Option<String>,
     rate_limits: std::collections::HashMap<String, Value>,
     style_seen: (Option<(std::time::SystemTime, u64)>, String),
 }
@@ -717,6 +744,7 @@ impl Turns {
             block_lane: None,
             held: None,
             inputs: vec![],
+            own: None,
             rate_limits: Default::default(),
             style_seen: (None, String::new()),
         }
@@ -805,6 +833,9 @@ impl Turns {
                     Some(k) => {
                         let tag = format!("\0{k}\0");
                         self.notes.retain(|n| !n.starts_with(&tag));
+                        if text.is_empty() {
+                            return None;
+                        }
                         format!("{tag}{text}")
                     }
                     None => text,
@@ -927,6 +958,9 @@ impl Turns {
             Message::Assistant(a) => self.assistant(a),
             Message::User(u) => self.user(u),
             Message::System(s) => {
+                if s.subtype == "task_notification" {
+                    self.own = Some("a background task ended".into());
+                }
                 if s.subtype == "compact_boundary" {
                     let _ = std::fs::write(self.d.state.join("compacted"), "");
                     self.events.add(json!({"type": "system", "text": "Older context was compacted."}));
@@ -1051,8 +1085,14 @@ impl Turns {
         if msg.parent_tool_use_id.is_some() {
             return;
         }
-        let UserContent::Blocks(blocks) = msg.message.content else { return };
+        let blocks = match msg.message.content {
+            UserContent::Blocks(b) => b,
+            UserContent::Text(text) => vec![ContentBlock::Text { text }],
+        };
         for b in blocks {
+            if let ContentBlock::Text { text } = &b {
+                self.own = own_input(text).or(self.own.take());
+            }
             if let ContentBlock::ToolResult { tool_use_id, content, is_error } = b {
                 let text = result_text(&content);
                 let error = is_error.unwrap_or(false);
@@ -1087,6 +1127,9 @@ impl Turns {
     /// message), goes to the trajectory.
     fn step(&mut self) {
         let took = std::mem::take(&mut self.inputs);
+        if !took.is_empty() {
+            self.own = None;
+        }
         let user = took.iter().rev().find_map(|s| match s {
             Source::User(id) => Some(*id),
             Source::Event(_) => None,
@@ -1099,7 +1142,7 @@ impl Turns {
         } else if self.events.turn().is_empty() {
             let why = match took.first() {
                 Some(Source::Event(w)) => w.clone(),
-                _ => String::new(),
+                _ => self.own.take().unwrap_or_default(),
             };
             let mut turn = Map::new();
             turn.insert("lane".into(), json!("t"));

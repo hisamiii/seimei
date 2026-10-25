@@ -527,6 +527,64 @@
      null
     ]
    ]
+  },
+  {
+   "calls": [
+    [
+     "note",
+     "claude-queue: q1's command ended but pid 5 still holds npu",
+     false,
+     "cqd:detached:q1"
+    ],
+    [
+     "note",
+     "claude-queue: q1's command ended but pid 6 still holds npu",
+     false,
+     "cqd:detached:q1"
+    ],
+    [
+     "note",
+     "",
+     false,
+     "cqd:detached:q1"
+    ]
+   ],
+   "dispatcher": [
+    [
+     "note",
+     "",
+     "w:cqd:detached:q1"
+    ]
+   ]
+  },
+  {
+   "calls": [
+    [
+     "note",
+     "",
+     false,
+     "cqd:detached:q2"
+    ],
+    [
+     "tell",
+     "w1",
+     "finished: done it",
+     true,
+     "report:w1"
+    ]
+   ],
+   "dispatcher": [
+    [
+     "note",
+     "",
+     "w:cqd:detached:q2"
+    ],
+    [
+     "wake",
+     "shikigami runner (w1) finished: done it",
+     null
+    ]
+   ]
   }
  ]
 }

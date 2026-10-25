@@ -709,6 +709,8 @@ pub struct Watcher {
     /// A transient app event: {"type": "queue", "snap": cqd's snapshot}.
     pub flash: Box<dyn Fn(Value) + Send + Sync>,
     told: Mutex<HashSet<String>>,
+    /// Agents with a "detached" line out: taken back once none of their jobs is detached.
+    detached: Mutex<HashSet<String>>,
     /// At most one snapshot a second; one that comes sooner waits for the end of the second (newest wins).
     pending: Mutex<(Option<Value>, Option<Instant>, bool)>,
 }
@@ -726,7 +728,8 @@ impl Watcher {
         notify: Notify,
         flash: Box<dyn Fn(Value) + Send + Sync>,
     ) -> Arc<Watcher> {
-        Arc::new(Watcher { names, notify, flash, told: Mutex::default(), pending: Mutex::new((None, None, false)) })
+        let pending = Mutex::new((None, None, false));
+        Arc::new(Watcher { names, notify, flash, told: Mutex::default(), detached: Mutex::default(), pending })
     }
 
     /// Waits past their time, from devgate's records (cqd is down): (line, key) for each one not told yet. Blocking.
@@ -797,9 +800,23 @@ impl Watcher {
         }
     }
 
-    /// One cqd event. Events are keyed per job, so a repeat replaces the earlier note.
+    /// One cqd event. Events are keyed per job, so a repeat replaces the earlier note; "detached" ones per agent, taken
+    /// back when a snapshot shows none of its jobs detached any more.
     pub fn relay(self: &Arc<Self>, ev: &Value) {
         if ev["type"] == "snap" {
+            let held: HashSet<&str> = (ev["snap"]["holders"].as_array().into_iter().flatten())
+                .filter(|h| h["state"] == "detached")
+                .filter_map(|h| h["agent"].as_str())
+                .collect();
+            let gone: Vec<String> = {
+                let mut d = self.detached.lock().unwrap();
+                let gone = d.iter().filter(|a| !held.contains(a.as_str())).cloned().collect();
+                d.retain(|a| held.contains(a.as_str()));
+                gone
+            };
+            for agent in gone {
+                (self.notify)("", false, &format!("cqd:detached:{agent}"));
+            }
             let wait = {
                 let mut p = self.pending.lock().unwrap();
                 p.0 = Some(ev["snap"].clone());
@@ -833,7 +850,13 @@ impl Watcher {
         if let Some(who) = (self.names)().get(agent) {
             line = format!("{line} [{agent} = {who}]");
         }
-        (self.notify)(&format!("claude-queue: {line}"), ev["level"] == "wake", &format!("cqd:{}", s(&ev["key"])));
+        let key = if ev["event"] == "detached" {
+            self.detached.lock().unwrap().insert(agent.into());
+            format!("cqd:detached:{agent}")
+        } else {
+            format!("cqd:{}", s(&ev["key"]))
+        };
+        (self.notify)(&format!("claude-queue: {line}"), ev["level"] == "wake", &key);
     }
 
     /// Follows cqd's watch stream until it ends; false when cqd is not there.

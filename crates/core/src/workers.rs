@@ -1787,6 +1787,11 @@ pub enum Out {
 pub fn queue(batch: &mut Batch, line: &str, urgent: bool, key: Option<&str>) {
     let k = key.unwrap_or(line).to_string();
     let old = batch.iter().position(|b| b.0 == k).map(|i| batch.remove(i));
+    if line.is_empty() {
+        // Taken back: the line goes, here and in the dispatcher's notes.
+        batch.push((k, String::new(), false, 0));
+        return;
+    }
     let urgent = urgent || old.as_ref().is_some_and(|o| o.2);
     let n = match &old {
         Some(o) if key.is_none() => o.3 + 1,
@@ -1799,6 +1804,8 @@ pub fn queue(batch: &mut Batch, line: &str, urgent: bool, key: Option<&str>) {
 /// even while it is busy, since a line that reaches a turn just as it ends starts a turn of its own.
 pub fn flushed(batch: &Batch) -> Vec<Out> {
     let shown = |line: &str, n: u32| if n > 1 { format!("{line} (×{n})") } else { line.to_string() };
+    let (gone, batch): (Vec<_>, Vec<_>) = batch.iter().partition(|b| b.1.is_empty());
+    let mut out: Vec<Out> = gone.iter().map(|b| Out::Note(String::new(), format!("w:{}", b.0))).collect();
     if batch.iter().any(|b| b.2) {
         let lines: Vec<String> = batch.iter().map(|b| shown(&b.1, b.3)).collect();
         let text = if lines.len() == 1 {
@@ -1806,9 +1813,11 @@ pub fn flushed(batch: &Batch) -> Vec<Out> {
         } else {
             format!("Events:\n{}", lines.iter().map(|l| format!("- {l}")).collect::<Vec<_>>().join("\n"))
         };
-        return vec![Out::Wake(text)];
+        out.push(Out::Wake(text));
+        return out;
     }
-    batch.iter().map(|(k, line, _, n)| Out::Note(shown(line, *n), format!("w:{k}"))).collect()
+    out.extend(batch.iter().map(|(k, line, _, n)| Out::Note(shown(line, *n), format!("w:{k}"))));
+    out
 }
 
 /// What the pool needs from the rest of seimei.

@@ -535,8 +535,10 @@ impl Tools {
                             Some(a) => format!("{a} = \"{}\" [pid {}, to {}]", s.name, s.pid, address(s)),
                             None => format!("{} [pid {}]", s.name, s.pid),
                         };
+                        let mode = sessions::transcript_of(&s.rec).and_then(|p| sessions::mode_of(&p));
+                        let mode = mode.map(|m| format!(", mode {m}")).unwrap_or_default();
                         format!(
-                            "{head}: {} since {}, last activity {}, {}, in {}",
+                            "{head}: {} since {}, last activity {}, {}{mode}, in {}",
                             s.status,
                             sessions::ago(s.since),
                             sessions::ago(s.active),
@@ -673,8 +675,9 @@ impl Tools {
             v => v.to_string(),
         };
         let ts = |v: &Value| chars(v.as_str().unwrap_or(""), 19);
+        let mode = sessions::mode_of(&path).map(|m| format!(", mode {m}")).unwrap_or_default();
         let mut lines = vec![format!(
-            "{} [pid {}, {}]: {} since {}, last activity {}, in {}; SendMessage to {}",
+            "{} [pid {}, {}{mode}]: {} since {}, last activity {}, in {}; SendMessage to {}",
             s.name,
             s.pid,
             s.kind,

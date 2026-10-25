@@ -231,6 +231,20 @@ pub fn peek(path: &Path, count: usize) -> Value {
     json!({"user": last(&users), "assistant": last(&texts), "questions": questions, "open_calls": open})
 }
 
+/// The permission mode the session runs in, as its transcript last recorded it.
+pub fn mode_of(path: &Path) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    const KEY: &[u8] = b"\"permissionMode\":\"";
+    let mut f = std::fs::File::open(path).ok()?;
+    let size = f.metadata().ok()?.len();
+    let mut buf = vec![];
+    f.seek(SeekFrom::Start(size.saturating_sub(1 << 20))).ok()?;
+    f.read_to_end(&mut buf).ok()?;
+    let at = buf.windows(KEY.len()).rposition(|w| w == KEY)? + KEY.len();
+    let end = buf[at..].iter().position(|b| *b == b'"')?;
+    Some(String::from_utf8_lossy(&buf[at..at + end]).into_owned()).filter(|m| !m.is_empty())
+}
+
 /// The session as the chat log draws it: user and assistant texts, tool calls and their results. From byte start on
 /// (the next poll passes back "next"), or the transcript's last events on the first read. A start too far back (a
 /// page's copy from long ago) reads like a first read, with "reset": the copy is too old to extend.
