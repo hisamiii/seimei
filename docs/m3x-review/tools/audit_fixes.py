@@ -9,8 +9,7 @@ Miss -> fix (numbers as in AUDIT.md; P = a pick where the rule left a choice, fo
  3  context ring: the arc draws its number (34 draws 34)
  4  "Your answer" placeholder, no ellipsis
  5  shikigami header: the project goes when it is the name, "Needs you · 6m"
- 6  question in chat: one signal; the tile and the warm card stay, the question is the title (as 09 and 11),
-    "gentoo asks" goes
+ 6  question in chat: one signal; the tile and the warm card stay, "gentoo asks" becomes "gentoo"
  7  "open", not "queued" (07)
  8  sending: the loading indicator in place of the label, as the app does (a969739), so Allow keeps its width;
     the rule row is held too
@@ -21,8 +20,7 @@ Miss -> fix (numbers as in AUDIT.md; P = a pick where the rule left a choice, fo
     attach, swatches, seed, the Now/All tasks group)
  13 activity tags "Allowed", "Blocked: deletes files"
  14 usage section headers in text-2, not primary
- 15 P usage caution (5-hour note, 82%, its bar and the nav ring) moves off warm to its own caution tone: warm is
-    needs you only
+ 15 P usage warning moves off warm (round 2: to neutral, see N5); warm is needs you only
  16 badge and ring hue on 13 and 21: the PNGs were 256-colour palettes that lost the warm tone; shots are RGB now
  17 fingerprint card: buttons under the title, Set up filled
  18 P Tasks Now: the "All tasks" row goes, the toggle is the way there
@@ -49,6 +47,9 @@ Miss -> fix (numbers as in AUDIT.md; P = a pick where the rule left a choice, fo
  39 in-progress lines end in "…": "Working…", "Running a command…"
  40 P trajectory fold: a full-width row, left aligned, nothing cut
  41 "tokens, cost, and questions"
+ round 2 (AUDIT-2.md): N1 the chat question card titles the asker, the question its regular body; N2 one dot spacing in
+ the headers; N3 one 48 chip; N4 the shade's reply chips name the choices as the body does; N5 no hardcoded theme
+ colour: the wave masks the primary, the caution hue is gone (pick 15 now neutral: usage on primary, error at the limit)
  aria: "need you", "Chat, trajectory, or tasks", the ring label without a period; the hidden chat lane of the Tasks
  pages (an old QA dump) is emptied
  outside review: contrast (nav pill on primary, snackbar action #7028d9, choice descriptions), bottom tab "seimei"
@@ -99,9 +100,9 @@ sub("*", 'placeholder="Your answer…"', 'placeholder="Your answer"')
 sub("*", re.compile(r'(<h1>([^<]+)</h1><div class="sub"><i class="\w+"></i>)<b[^>]*>\2</b> · '), r"\1")
 sub("*", re.compile(r'<span class="ask">Needs you (\d+m)</span>'), r'<span class="ask">Needs you · \1</span>')
 
-# 6 the question in chat: the question is the title
-sub("*", re.compile(r'<div class="title"><b>[^<]+ asks</b></div></div><div class="body"><p>(.*?)</p></div>', re.S),
-    r'<div class="title"><b>\1</b></div></div>')
+# 6 the question in chat: the title is the asker alone ("asks" goes), the question stays the body in regular weight
+#   (round 2, N1: as a title it was a five-line bold paragraph)
+sub("*", re.compile(r'<div class="title"><b>([^<]+) asks</b></div>'), r'<div class="title"><b>\1</b></div>')
 
 # 7
 sub("07", re.compile(r"\bqueued\b"), "open")
@@ -196,6 +197,7 @@ sub("22", ".tile .dot { width: 20px; height: 20px; border-radius: 6px; border: 2
 # 12 the shade's actions are 48 to touch (same text position), its reply chips and Clear all get a 48 hit area
 sub("22", ".acts { display: flex; gap: 4px; margin: 8px -8px 0; }", ".acts { display: flex; gap: 4px; margin: 4px -8px -4px; }")
 sub("22", ".acts button { height: 40px;", ".acts button { height: 48px;")
+sub("22", '<div class="choices"><span>desktop</span><span>desktop/hardened</span></div>', '<div class="choices"><span>Desktop</span><span>Hardened</span></div>')
 sub("22", ".choices span { height: 32px;", ".choices span { position: relative; height: 32px;")
 sub("22", ".choices { display: flex; gap: 8px;", ".choices { display: flex; gap: 16px 8px;")
 sub("22", ".clear span { height: 36px;", '.clear span::before { content: ""; position: absolute; inset: -6px 0; }\n.clear span { position: relative; height: 36px;')
@@ -206,7 +208,6 @@ sub("*", "--inverse-primary: #8839ef;", "--inverse-primary: #7028d9;")
 
 CSS = """
 /* audit_fixes.py: begin */
-:root { --caution: #f9e2af; --on-caution: #3a3016; }
 
 /* 12: 48 to touch. The lane tabs, event lines, Reply in chat, the fold, snackbar actions, menu and attach are 48;
    the Now/All tasks group keeps its 40 look with a 48 hit area (its buttons clip nothing) */
@@ -216,8 +217,16 @@ CSS = """
 .snack:has(button) { padding: 4px 4px 4px 16px; }
 .icon-btn, .field .attach { width: 48px; height: 48px; }
 /* chips and the handoff keep their 40 look; their hit areas reach 48 past the clip of .sl */
-.chip.sl, .sbar .handoff.sl { overflow: visible; }
-.chip::before { inset: -4px 0; }
+.sbar .handoff.sl { overflow: visible; }
+/* one separator (round 2, N2): the line was a flex row, so a loose " · " lost its spaces and took the 6 gap each side */
+.sbar .sub { display: block; overflow: hidden; text-overflow: ellipsis; }
+/* tabular figures widen the spaces and the dot; one line of text, nothing to line up */
+.urow span { font-variant-numeric: normal; }
+/* one chip (round 2, N3): tool chips take the model chip's 48 height, padding, corners and type; no hit area tricks */
+.chip { min-height: 48px; padding: 8px 8px 8px 12px; border-radius: var(--shape-md); font: 400 14px/20px var(--sans); color: var(--text-2); }
+.chip::before { content: none; }
+.chip svg:last-child { width: 20px; height: 20px; color: var(--text-3); }
+.activity.running .chip { padding-left: 16px; }
 .sbar .handoff::after { inset: 0; }
 .sbar .handoff::before { content: ""; position: absolute; inset: -4px 0; }
 .field .attach { margin: 2px 0 2px 4px; }
@@ -235,19 +244,23 @@ CSS = """
 .nav-item.on .ring-ico .t { stroke: color-mix(in srgb, var(--on-primary) 30%, transparent); }
 .nav-item.on .ring-ico .f, #nav-usage.on[data-tone] .ring-ico .f { stroke: var(--on-primary); }
 
-/* 15: usage caution in its own tone; warm means needs you */
-.note.warn { color: var(--caution); }
-.meter.warn { --tone: var(--caution); }
-.meter.warn .pct { color: var(--caution); }
-#nav-usage[data-tone="warn"] .ring-ico .f { stroke: var(--caution); }
+/* 15: no warning hue of its own (round 2: no new color role). Usage is primary until the limit, error at it; the 5-hour note is
+   plain supporting text; warm means needs you */
+.note.warn { color: var(--text-2); }
+.meter, .meter.ok, .meter.warn { --tone: var(--primary); }
+.meter.bad { --tone: var(--error); }
+.ring-ico .f, #nav-usage[data-tone="warn"] .ring-ico .f { stroke: var(--primary); }
+#nav-usage[data-tone="bad"] .ring-ico .f { stroke: var(--error); }
+#nav-usage.on .ring-ico .f { stroke: var(--on-primary); }
 
 /* Wavy progress on a running task's step bar (amplitude 3, wavelength 40, 4 thick, a 4 gap, the flat track); usage
-   meters are amounts and stay flat */
+   meters are amounts and stay flat. The wave is a mask over the theme's primary, so accents and themes carry over */
 .tr.k-run .prog { height: 10px; align-items: center; }
-.tr.k-run .prog i { height: 10px; border-radius: 0; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='10' viewBox='0 0 40 10'%3E%3Cpath d='M0 5 C 5 1.05 15 1.05 20 5 S 35 8.95 40 5' fill='none' stroke='%23cba6f7' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E") left center / 40px 10px repeat-x;
+.tr.k-run .prog i { height: 10px; border-radius: 0; background: var(--primary);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='10' viewBox='0 0 40 10'%3E%3Cpath d='M0 5 C 5 1.05 15 1.05 20 5 S 35 8.95 40 5' fill='none' stroke='%23000' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E") left center / 40px 10px repeat-x; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='10' viewBox='0 0 40 10'%3E%3Cpath d='M0 5 C 5 1.05 15 1.05 20 5 S 35 8.95 40 5' fill='none' stroke='%23000' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E") left center / 40px 10px repeat-x;
   animation: wave 1.2s linear infinite; }
 .tr.k-run .prog::after { height: 4px; }
-@keyframes wave { to { background-position-x: 40px; } }
+@keyframes wave { to { -webkit-mask-position: 40px center; mask-position: 40px center; } }
 @media (prefers-reduced-motion: reduce) { .tr.k-run .prog i { animation: none; } }
 
 /* Contrast: choice descriptions on the warm options */
