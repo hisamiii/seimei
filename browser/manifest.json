@@ -1,11 +1,11 @@
 {
   "manifest_version": 2,
   "name": "seimei",
-  "version": "1.0.0",
-  "description": "Lets seimei on this computer list, read, open, switch and close tabs and start downloads.",
+  "version": "1.1.0",
+  "description": "Lets seimei on this computer list, read, open, switch and close tabs, act on pages, take tab screenshots and start downloads.",
   "browser_specific_settings": {"gecko": {"id": "seimei@localhost", "strict_min_version": "115.0",
     "data_collection_permissions": {"required": ["none"]}}},
-  "permissions": ["tabs", "nativeMessaging", "downloads", "<all_urls>"],
+  "permissions": ["tabs", "tabGroups", "webNavigation", "webRequest", "nativeMessaging", "downloads", "<all_urls>"],
   "background": {"scripts": ["background.js"], "persistent": true},
   "icons": {"48": "icon.svg", "96": "icon.svg"}
 }

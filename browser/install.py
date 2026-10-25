@@ -75,7 +75,7 @@ def pack(src: Path, eid: str, xpi: Path) -> None:
     tmp = xpi.with_suffix(".tmp")
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("manifest.json", json.dumps(manifest, indent=2) + "\n")
-        for f in ("background.js", "read.js", "icon.svg"):
+        for f in ("background.js", "page.js", "icon.svg"):
             z.write(src / f, f)
     tmp.replace(xpi)
 
