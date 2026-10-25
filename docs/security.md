@@ -46,6 +46,8 @@ plugins).
   - no agent writes, replaces, moves or deletes `guard.toml`, or moves or deletes its folder (reading, listing and
     writing other files there are fine);
   - a command nested too deep to check is refused.
+  - the browser plugin acts or navigates in a tab the user opened only after their card (once per tab and site), and
+    never reads or fills password, payment card, one-time code or file fields.
 - **An append-only audit log** of every call.
 
 **Claude Code's own permission prompts** become cards in every mode except bypass ([config.md](config.md)).

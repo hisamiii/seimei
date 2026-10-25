@@ -180,7 +180,7 @@ impl Plugins {
             let loaded = out.plugin(name, &own, exe, &dir).and_then(|p| {
                 match name {
                     "queue" => out.queue = Some(queue::Queue::new(&own)),
-                    "browser" => out.browser = Some(Arc::new(browser::Browser::new())),
+                    "browser" => out.browser = Some(Arc::new(browser::Browser::new(Some(state)))),
                     "discord" => out.discord = Some(Arc::new(discord::Discord::new(Some(state)))),
                     "desktop" => {
                         let s = |k: &str| own.get(k).and_then(|v| v.as_str()).filter(|v| !v.is_empty());

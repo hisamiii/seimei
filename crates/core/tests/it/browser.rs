@@ -67,14 +67,14 @@ async fn browser_cases() {
     let mut n = 0;
     for (k, sc) in doc["scenarios"].as_array().unwrap().iter().enumerate() {
         let shared = Arc::new(Mutex::new(Shared::default()));
-        let b = Browser::new();
+        let b = Browser::new(Some(&dir));
         let sock = dir.join(format!("{k}.sock"));
         tokio::spawn(b.link.clone().run(sock.clone()));
         connector(sock, shared.clone());
         // Wait for the connector.
         for _ in 0..100 {
             let r = b.call("browser_tabs", &json!({}), &User(shared.clone())).await;
-            if !r["content"][0]["text"].as_str().unwrap().starts_with("Waterfox is not connected") {
+            if !r["content"][0]["text"].as_str().unwrap().starts_with("The browser is not connected") {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
@@ -94,6 +94,15 @@ async fn browser_cases() {
             });
             for key in ["want", "error", "card", "sent"] {
                 n += 1;
+                // want_like: a regex, for text with a file name in it.
+                if key == "want"
+                    && let Some(like) = s["want_like"].as_str()
+                {
+                    if !regex::Regex::new(like).unwrap().is_match(got[key].as_str().unwrap_or("")) {
+                        fails.push(format!("{} #{i} {} want_like: {}", sc["name"], s["tool"], got[key]));
+                    }
+                    continue;
+                }
                 if got[key] != s[key] {
                     fails.push(format!("{} #{i} {} {key}: {}", sc["name"], s["tool"], got[key]));
                 }

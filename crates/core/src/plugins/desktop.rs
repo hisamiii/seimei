@@ -100,7 +100,7 @@ pub struct Desktop {
     offered: Mutex<Option<String>>,
 }
 
-fn number(v: &Value) -> f64 {
+pub(crate) fn number(v: &Value) -> f64 {
     v.as_f64().unwrap_or(0.0)
 }
 
@@ -800,7 +800,7 @@ impl Desktop {
                             text_of(&w["title"])
                         )),
                         Ok(None) => {
-                            Ok("Started, but no new window of its own showed up within 15 s (apps like Waterfox open \
+                            Ok("Started, but no new window of its own showed up within 15 s (apps like Firefox open \
                                         new windows in their running process; find it with the desktop tool)."
                                 .into())
                         }
@@ -969,7 +969,7 @@ impl Desktop {
 }
 
 /// Save a screenshot for a later Read; only the newest SHOTS_KEPT stay.
-fn shot_file(folder: &Path, data: &[u8], mime: &str) -> Result<PathBuf, String> {
+pub(crate) fn shot_file(folder: &Path, data: &[u8], mime: &str) -> Result<PathBuf, String> {
     use std::os::unix::fs::DirBuilderExt;
     let _ = std::fs::DirBuilder::new().mode(0o700).create(folder);
     let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
