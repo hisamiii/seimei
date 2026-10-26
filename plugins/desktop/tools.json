@@ -156,7 +156,7 @@
      "properties": {
       "command": {
        "type": "string",
-       "description": "shell command, like `kitty -d ~/src` or `waterfox https://...`"
+       "description": "shell command, like `kitty -d ~/src` or `firefox https://...`"
       },
       "workspace": {
        "type": "string",
@@ -595,7 +595,7 @@
      "properties": {
       "command": {
        "type": "string",
-       "description": "shell command, like `kitty -d ~/src` or `waterfox https://...`"
+       "description": "shell command, like `kitty -d ~/src` or `firefox https://...`"
       },
       "workspace": {
        "type": "string",
@@ -944,7 +944,7 @@
      "properties": {
       "command": {
        "type": "string",
-       "description": "shell command, like `kitty -d ~/src` or `waterfox https://...`"
+       "description": "shell command, like `kitty -d ~/src` or `firefox https://...`"
       },
       "workspace": {
        "type": "string",
@@ -1290,7 +1290,7 @@
      "properties": {
       "command": {
        "type": "string",
-       "description": "shell command, like `kitty -d ~/src` or `waterfox https://...`"
+       "description": "shell command, like `kitty -d ~/src` or `firefox https://...`"
       },
       "workspace": {
        "type": "string",
@@ -1664,7 +1664,7 @@
      "properties": {
       "command": {
        "type": "string",
-       "description": "shell command, like `kitty -d ~/src` or `waterfox https://...`"
+       "description": "shell command, like `kitty -d ~/src` or `firefox https://...`"
       },
       "workspace": {
        "type": "string",
@@ -2119,7 +2119,7 @@
      "properties": {
       "command": {
        "type": "string",
-       "description": "shell command, like `kitty -d ~/src` or `waterfox https://...`"
+       "description": "shell command, like `kitty -d ~/src` or `firefox https://...`"
       },
       "workspace": {
        "type": "string",

@@ -26,7 +26,7 @@ The Android app is `seimei.apk` on the release page; on first run it asks for yo
 
 ## Plugins
 
-Off until you enable them in setup or config: the desktop (windows, screenshots, keyboard and mouse), music, the browser (an extension for Firefox or Waterfox), Discord (a Vesktop plugin) and claude-queue. Each has its own cards. See [docs/plugins.md](docs/plugins.md).
+Off until you enable them in setup or config: the desktop (windows, screenshots, keyboard and mouse), music, the browser (an extension for Firefox), Discord (a Vesktop plugin) and claude-queue. Each has its own cards. See [docs/plugins.md](docs/plugins.md).
 
 ## Safety
 

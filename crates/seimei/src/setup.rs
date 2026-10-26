@@ -312,7 +312,7 @@ fn openrc_service(exe: &Path) {
 const EXTENSION_ID: &str = "seimei@hisamiowo.xyz";
 
 /// The browser plugin's native-messaging host for the Firefox family: a small script that runs this binary, and its
-/// manifest where Firefox and Waterfox (~/.mozilla) and LibreWolf look. A manifest that points elsewhere stays.
+/// manifest where Firefox and its forks (~/.mozilla, LibreWolf's own) look. A manifest that points elsewhere stays.
 fn browser_host(state: &Path, exe: &Path) {
     let Some(own) = plugin_on("browser") else { return };
     let id = own.get("extension_id").and_then(|i| i.as_str()).unwrap_or(EXTENSION_ID);

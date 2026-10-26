@@ -237,7 +237,7 @@ Apps in the agent display run as the user, with the user's files; the display is
 
 ## 8. Agent browser
 
-A Firefox (or Waterfox) of seimei's own, logged out, started in the agent display with `--no-remote --profile <state>/agent-display/browser` when a browser tool with `browser: "agent"` needs it. The signed extension from `<state>/seimei-waterfox.xpi` is copied into the profile (only when it changed: Firefox reinstalls a changed file, which drops the link once), and `user.js` turns off first-run pages and saved logins and caps drawing at 10 fps (`widget.wayland.vsync.enabled` false, `layout.frame_rate` 10).
+A Firefox of seimei's own, logged out, started in the agent display with `--no-remote --profile <state>/agent-display/browser` when a browser tool with `browser: "agent"` needs it. The signed extension from `<state>/seimei.xpi` is copied into the profile (only when it changed: Firefox reinstalls a changed file, which drops the link once), and `user.js` turns off first-run pages and saved logins and caps drawing at 10 fps (`widget.wayland.vsync.enabled` false, `layout.frame_rate` 10).
 
 The native host finds seimei's second socket, `agent-browser.sock`, through `SEIMEI_BROWSER_SOCK`, and the plugin keeps a second link for it. Every tab there is seimei's: no Approve cards, tabs open in front, close facts say so. Browser tools take `browser: "user" | "agent"`, default user. Pages that need trusted input get it from the agent display (`click` with `display: "agent"`).
 

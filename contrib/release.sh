@@ -39,4 +39,4 @@ cp plugins/browser/extension/seimei.xpi dist/seimei.xpi
 gh release create "v$v" "dist/$asset" "dist/$asset.minisig" dist/seimei.apk dist/seimei.xpi --target "$(git rev-parse HEAD)" \
     --title "seimei $v" --notes "Install or update with \`seimei update\`; the binary is signed with contrib/minisign.pub. \
 seimei.apk is the phone app (Android 11+): on first run it asks for your seimei's address. \
-seimei.xpi is the browser plugin's extension for Firefox, Waterfox and LibreWolf (about:addons, Install Add-on From File)."
+seimei.xpi is the browser plugin's extension for Firefox and its forks (about:addons, Install Add-on From File)."

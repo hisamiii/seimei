@@ -494,7 +494,7 @@ impl Desktop {
     pub async fn agent_browser(self: &Arc<Self>, sock: &Path) -> Result<bool, String> {
         let up = self.agent.start(self).await?;
         let (me, sock) = (self.clone(), sock.to_path_buf());
-        tokio::task::spawn_blocking(move || me.agent.browser(&up, &me.state.join("seimei-waterfox.xpi"), &sock))
+        tokio::task::spawn_blocking(move || me.agent.browser(&up, &me.state.join("seimei.xpi"), &sock))
             .await
             .map_err(|e| e.to_string())?
     }
