@@ -6,7 +6,7 @@ The goal in one line: an agent should be able to drive a web page or an app to t
 
 ## The starting point (before items 1 to 6 were built)
 
-### Browser (the extension in `browser/`, the plugin in `crates/core/src/plugins/browser.rs`)
+### Browser (the plugin and its extension in `plugins/browser/`)
 
 | tool | does | can't |
 |---|---|---|
@@ -19,7 +19,7 @@ The goal in one line: an agent should be able to drive a web page or an app to t
 
 Missing: click, fill, select, submit, key presses and scrolling inside a page; waiting for an element, a navigation or the network; a picture of a tab. Today the only way to press a button on a page is `browser_switch` plus the desktop tools, which steals focus, moves the user's pointer and fails when the screen is locked or off. The tool text says "Waterfox" while this machine now runs Firefox 158: the name should come from `runtime.getBrowserInfo()`.
 
-### Desktop (`crates/core/src/plugins/desktop.rs` and a backend per compositor)
+### Desktop (`plugins/desktop/`, a backend per compositor)
 
 | tool | does | can't |
 |---|---|---|
@@ -195,7 +195,7 @@ The niri backend picks the newest listening `niri.*.sock`; it should use `$NIRI_
 
 ## 7. Agent display
 
-Built for niri (`crates/core/src/plugins/desktop/agent.rs`, input in `vinput.rs`).
+Built for niri (`plugins/desktop/src/agent.rs`, input in `vinput.rs`).
 
 ### What it is
 

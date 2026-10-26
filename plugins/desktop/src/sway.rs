@@ -14,7 +14,7 @@ use super::backend::{
     Backend, Ctx, Emit, Env, Ours, grim_region, grim_screen, listening, nested, rect_shot, session_socket,
 };
 use super::text_of;
-use crate::util::py_json_compact;
+use seimei_core::util::{py_json, py_json_compact, token_urlsafe, truthy};
 
 const MAGIC: &[u8] = b"i3-ipc";
 const RUN_COMMAND: u32 = 0;
@@ -64,7 +64,7 @@ fn leaves<'a>(node: &'a Value, ws: Option<&'a Value>, out: &mut Vec<(&'a Value, 
         .chain(node["floating_nodes"].as_array().into_iter().flatten())
         .collect();
     let leaf = node["type"] == "con" || node["type"] == "floating_con";
-    if kids.is_empty() && leaf && (crate::util::truthy(&node["pid"]) || crate::util::truthy(&node["window"])) {
+    if kids.is_empty() && leaf && (truthy(&node["pid"]) || truthy(&node["window"])) {
         out.push((node, ws));
     }
     for k in kids {
@@ -74,11 +74,11 @@ fn leaves<'a>(node: &'a Value, ws: Option<&'a Value>, out: &mut Vec<(&'a Value, 
 
 fn window(n: &Value, ws: Option<&Value>, order: usize) -> Value {
     let props = &n["window_properties"];
-    let or = |a: &Value, b: &Value| if crate::util::truthy(a) { a.clone() } else { b.clone() };
+    let or = |a: &Value, b: &Value| if truthy(a) { a.clone() } else { b.clone() };
     let app = or(&n["app_id"], &or(&props["class"], &json!("")));
     let ws_id = ws.filter(|w| w["name"] != "__i3_scratch").map_or(Value::Null, |w| w["id"].clone());
     json!({"id": n["id"], "app_id": app, "title": or(&n["name"], &json!("")), "pid": n["pid"], "workspace_id": ws_id,
-           "is_focused": crate::util::truthy(&n["focused"]), "is_urgent": crate::util::truthy(&n["urgent"]),
+           "is_focused": truthy(&n["focused"]), "is_urgent": truthy(&n["urgent"]),
            "is_floating": n["type"] == "floating_con", "pos": [order], "rect": n["rect"]})
 }
 
@@ -111,8 +111,8 @@ impl Sway {
             .as_array()
             .into_iter()
             .flatten()
-            .filter(|r| !crate::util::truthy(&r["success"]))
-            .map(|r| if crate::util::truthy(&r["error"]) { text_of(&r["error"]) } else { "failed".into() })
+            .filter(|r| !truthy(&r["success"]))
+            .map(|r| if truthy(&r["error"]) { text_of(&r["error"]) } else { "failed".into() })
             .collect();
         if !bad.is_empty() {
             return Err(bad.join("; "));
@@ -137,7 +137,7 @@ impl Sway {
         if found.len() == 1 {
             d = found[0].clone();
         } else {
-            let out = std::env::temp_dir().join(format!("seimei-wl-{}", crate::util::token_urlsafe(6)));
+            let out = std::env::temp_dir().join(format!("seimei-wl-{}", token_urlsafe(6)));
             std::fs::write(&out, "").map_err(|e| e.to_string())?;
             self.spawn_script(&format!("echo \"$WAYLAND_DISPLAY\" > {}", out.display()))?;
             for _ in 0..40 {
@@ -158,7 +158,7 @@ impl Sway {
 
     /// sway splits commands at ; and , so the line goes through a script file that removes itself.
     fn spawn_script(&self, script: &str) -> Result<(), String> {
-        let path = std::env::temp_dir().join(format!("seimei-exec-{}.sh", crate::util::token_urlsafe(6)));
+        let path = std::env::temp_dir().join(format!("seimei-exec-{}.sh", token_urlsafe(6)));
         std::fs::write(&path, format!("rm -f {}\n{script}\n", path.display())).map_err(|e| e.to_string())?;
         self.command(&format!("exec sh {}", path.display())).map(drop)
     }
@@ -221,7 +221,7 @@ impl Backend for Sway {
         for (n, ws) in found {
             if let Some(ws) = ws {
                 let key = ws["id"].to_string();
-                if crate::util::truthy(&n["focused"]) || !focus.contains_key(&key) {
+                if truthy(&n["focused"]) || !focus.contains_key(&key) {
                     focus.insert(key, n["id"].clone());
                 }
             }
@@ -235,7 +235,7 @@ impl Backend for Sway {
                 let num = w["num"].as_i64().unwrap_or(-1);
                 let name = if w["name"].as_str() == Some(&num.to_string()) { Value::Null } else { w["name"].clone() };
                 json!({"id": w["id"], "idx": if num >= 0 { json!(num) } else { Value::Null }, "name": name,
-                       "output": w["output"], "is_active": crate::util::truthy(&w["visible"]),
+                       "output": w["output"], "is_active": truthy(&w["visible"]),
                        "active_window_id": focus.get(&w["id"].to_string()).cloned().unwrap_or(Value::Null)})
             })
             .collect())
@@ -247,10 +247,10 @@ impl Backend for Sway {
             .as_array()
             .into_iter()
             .flatten()
-            .filter(|o| crate::util::truthy(&o["active"]))
+            .filter(|o| truthy(&o["active"]))
             .map(|o| {
                 let r = &o["rect"];
-                let scale = if crate::util::truthy(&o["scale"]) { o["scale"].clone() } else { json!(1) };
+                let scale = if truthy(&o["scale"]) { o["scale"].clone() } else { json!(1) };
                 (
                     text_of(&o["name"]),
                     json!({"x": r["x"], "y": r["y"], "width": r["width"], "height": r["height"], "scale": scale}),
@@ -261,17 +261,11 @@ impl Backend for Sway {
 
     fn layouts(&self) -> Result<Option<Value>, String> {
         let inputs = self.ipc(GET_INPUTS, "")?;
-        let kb = inputs
-            .as_array()
-            .into_iter()
-            .flatten()
-            .find(|i| i["type"] == "keyboard" && crate::util::truthy(&i["xkb_layout_names"]));
+        let kb =
+            inputs.as_array().into_iter().flatten().find(|i| i["type"] == "keyboard" && truthy(&i["xkb_layout_names"]));
         Ok(kb.map(|k| {
-            let idx = if crate::util::truthy(&k["xkb_active_layout_index"]) {
-                k["xkb_active_layout_index"].clone()
-            } else {
-                json!(0)
-            };
+            let idx =
+                if truthy(&k["xkb_active_layout_index"]) { k["xkb_active_layout_index"].clone() } else { json!(0) };
             json!({"names": k["xkb_layout_names"], "current_idx": idx})
         }))
     }
@@ -346,7 +340,7 @@ impl Backend for Sway {
 
     fn move_to_workspace(&self, wid: i64, workspace: &str) -> Result<(), String> {
         let digits = !workspace.is_empty() && workspace.chars().all(|c| c.is_ascii_digit());
-        let ws = if digits { format!("number {workspace}") } else { crate::util::py_json(&json!(workspace)) };
+        let ws = if digits { format!("number {workspace}") } else { py_json(&json!(workspace)) };
         self.command(&format!("[con_id={wid}] move container to workspace {ws}")).map(drop)
     }
 

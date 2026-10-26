@@ -4,7 +4,7 @@ use std::os::unix::net::UnixListener;
 use std::path::Path;
 use std::time::Duration;
 
-use seimei_core::plugins::desktop::backend::{Ctx, session_socket};
+use seimei_plugin_desktop::backend::{Ctx, session_socket};
 
 fn listen(run: &Path, name: &str) -> UnixListener {
     std::thread::sleep(Duration::from_millis(20));

@@ -1,6 +1,9 @@
-//! tests/cases/browser.json: each scenario's tool calls on
+//! tests/cases.json: each scenario's tool calls on
 //! one browser, a fake connector at its link answering each op with the step's replies (or failing with its fails),
 //! the user deciding each card as the step says. Checks the text, the card and what the connector got.
+
+#[path = "../../../crates/core/tests/it/env.rs"]
+mod env;
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
@@ -8,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use seimei_core::plugins::{Fut, Session};
-use seimei_core::plugins::browser::Browser;
+use seimei_plugin_browser::Browser;
 use serde_json::{Value, json};
 
 /// The step being run, the ops the connector got, the cards the user saw.
@@ -59,7 +62,7 @@ fn connector(path: std::path::PathBuf, shared: Arc<Mutex<Shared>>) {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn browser_cases() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/cases/browser.json");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/cases.json");
     let doc: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     let dir = std::env::temp_dir().join(format!("seimei-browser-{}", std::process::id()));
     let mut env = crate::env::Env::lock();

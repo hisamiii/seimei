@@ -21,10 +21,6 @@ fn cases(file: &str) -> Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
-fn tools() -> Value {
-    serde_json::from_str(include_str!("../../../core/data/tools.json")).unwrap()
-}
-
 struct Server {
     child: Child,
     stdin: ChildStdin,
@@ -336,10 +332,10 @@ async fn browser_plugin_forwards_to_seimei() {
     rules.example_rules(&std::env::temp_dir().join(format!("seimei-browser_plugin_forwards_to_seimei-rules-{}", std::process::id())));
     let (d, events, approvals, plugins) = host("browser", "browser").await;
     let link = d.join("run/seimei/browser.sock");
-    tokio::spawn(plugins.browser.as_ref().unwrap().link.clone().run(link.clone()));
+    tokio::spawn(plugins.get::<seimei_plugin_browser::Browser>("browser").unwrap().link.clone().run(link.clone()));
     let seen = connector(link, browser_op);
     let env = plugins.servers("seimei", None, None)["browser"]["env"].as_object().unwrap().clone();
-    let spec = tools()["plugins"]["browser"].clone();
+    let spec: Value = serde_json::from_str(seimei_plugin_browser::PLUGIN.spec).unwrap();
     let env2 = env.clone();
     let mut srv = tokio::task::spawn_blocking(move || {
         let mut srv = Server::start("browser", &env2, &[]);

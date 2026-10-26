@@ -1,6 +1,7 @@
 //! seimei's own input devices through uinput. The pointer is absolute, like a VM's tablet mouse: it lands exactly
 //! where asked, where ydotool's relative moves go through pointer acceleration and miss.
 
+use seimei_core::util::py_repr;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
@@ -226,7 +227,7 @@ impl Device {
     pub fn combo(&mut self, spec: &str) -> Result<(), String> {
         let mut codes = vec![];
         for name in spec.to_lowercase().replace(' ', "").split('+') {
-            codes.push(*KEYS.get(name).ok_or_else(|| format!("unknown key {}", crate::util::py_repr(name)))?);
+            codes.push(*KEYS.get(name).ok_or_else(|| format!("unknown key {}", py_repr(name)))?);
         }
         for &c in &codes {
             self.emit(&[(EV_KEY, c, 1)])?;

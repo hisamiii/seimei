@@ -10,7 +10,7 @@ use regex::Regex;
 use serde_json::{Value, json};
 
 use super::backend::{Backend, Ctx, Emit, Env, Ours, exec, grim_region, grim_screen, listening, session_socket};
-use crate::util::{py_json_compact, sh_quote};
+use seimei_core::util::{py_json_compact, sh_quote, token_urlsafe, truthy};
 
 const QUERIES: [&str; 8] =
     ["outputs", "workspaces", "windows", "focused-window", "focused-output", "layers", "keyboard-layouts", "version"];
@@ -111,7 +111,7 @@ impl Niri {
         let r = match saved {
             None => self.act(&["spawn", "--", "wl-copy", "--clear"]),
             Some((kind, data)) => (|| {
-                let path = std::env::temp_dir().join(format!("seimei-clip-{}", crate::util::token_urlsafe(6)));
+                let path = std::env::temp_dir().join(format!("seimei-clip-{}", token_urlsafe(6)));
                 {
                     use std::os::unix::fs::OpenOptionsExt;
                     let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path);
@@ -212,11 +212,7 @@ impl Backend for Niri {
     fn outputs(&self) -> Result<Vec<(String, Value)>, String> {
         let outs = self.ipc("Outputs")?;
         let all = outs.as_object().cloned().unwrap_or_default();
-        Ok(all
-            .into_iter()
-            .filter(|(_, o)| crate::util::truthy(&o["logical"]))
-            .map(|(n, o)| (n, o["logical"].clone()))
-            .collect())
+        Ok(all.into_iter().filter(|(_, o)| truthy(&o["logical"])).map(|(n, o)| (n, o["logical"].clone())).collect())
     }
 
     fn focused_id(&self) -> Option<i64> {
@@ -304,7 +300,7 @@ impl Backend for Niri {
     fn window_shot(&self, wid: i64) -> Result<Vec<u8>, String> {
         let e = self.env()?;
         let saved = Self::save_clipboard(&e);
-        let dir = std::env::temp_dir().join(format!("seimei-shot-{}", crate::util::token_urlsafe(6)));
+        let dir = std::env::temp_dir().join(format!("seimei-shot-{}", token_urlsafe(6)));
         std::fs::create_dir(&dir).map_err(|e| e.to_string())?;
         let path = dir.join("w.png");
         let p = path.display().to_string();

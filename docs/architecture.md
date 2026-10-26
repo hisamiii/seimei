@@ -22,7 +22,7 @@ phone app / web page ──https──> proxy ──> 127.0.0.1:8417  seimei
                  the user's installed `claude` (its own login)
 ```
 
-The workspace: `crates/proto` (the clients for Claude Code's stream-json protocol, ACP and Codex), `crates/core` (state, sessions, the guard, push, the plugin host), `plugins/*` (one crate per built-in plugin: music, queue, discord; desktop and browser are still in core), `crates/server` (HTTP routes; the web page in `web/` is built into the binary), `crates/seimei` (the binary: serve, setup, update and the account commands). `crates/core/data/tools.json` holds seimei's own MCP tools as Claude Code sees them; the descriptions are prompt text.
+The workspace: `crates/proto` (the clients for Claude Code's stream-json protocol, ACP and Codex), `crates/core` (state, sessions, the guard, push, the plugin host), `plugins/*` (one crate per built-in plugin: desktop, browser, music, queue, discord), `crates/server` (HTTP routes; the web page in `web/` is built into the binary), `crates/seimei` (the binary: serve, setup, update and the account commands). `crates/core/data/tools.json` holds seimei's own MCP tools as Claude Code sees them; the descriptions are prompt text.
 
 ## Sessions
 
@@ -71,11 +71,11 @@ Production never runs from the working tree. `contrib/maintainer/deploy.sh [rev]
 - `crates/core`, the sessions: `dispatcher.rs` (the permanent session, its prompt in `dispatcher.md`, routing of event turns), `workers.rs` (shikigami: summon, resume, hand-over), `tools.rs` (the dispatcher's MCP tools, schemas in `data/tools.json`), `sessions.rs`, `transcripts.rs`, `adopt.rs`, `kitty.rs` (the user's own sessions), `tasks.rs` (the board), `plan.rs`, `style.rs`, `recall.rs` (what survives a compaction).
 - `crates/core`, the checks: `guard.rs` (rules and the built-in denies, with `shell.rs` and `paths.rs` to read commands and paths), `permissions.rs` (Claude Code's prompts as cards), `approvals.rs` (cards waiting for the user).
 - `crates/core`, state and the user: `events.rs` (the log), `auth.rs`, `push.rs`, `files.rs` and `uploads.rs`, `usage.rs`, `cost.rs`, `metrics.rs`, `watches.rs`, `archive.rs`, `aliases.rs`, `wake.rs`, `deploys.rs`, `util.rs`.
-- `crates/core/src/plugins`: `mod.rs` (the host: the `Builtin` trait and `Factory`, enabling, the plugin socket, prompt sections), `link.rs` (a connector's socket), and desktop and browser, each a file with its helpers in the folder of the same name.
+- `crates/core/src/plugins`: `mod.rs` (the host: the `Builtin` trait and `Factory`, enabling, the plugin socket, prompt sections), and `link.rs` (a connector's socket).
 - `plugins/<name>`: a built-in plugin's crate (`src/lib.rs` exports its `PLUGIN: Factory`), its `plugin.toml`, `prompt.md`, `tools.json`, tests and connector. `crates/seimei/src/lib.rs` lists the ones the binary has. `plugins/template` is a user plugin (Python, no build) to copy.
 - `crates/server/src/lib.rs`: every HTTP route; `crates/seimei/src`: `main.rs` (startup and the account commands), `lib.rs` (the built-in plugins), `setup.rs`, `update.rs`.
 - `web/`: `app.js` (start, stream, routing), `chat.js`, `agents.js`, `tasks.js`, `account.js`, `usage.js`, `sw.js` (notifications). `android/`: the app, the same screens in Compose.
 
 ## Tests
 
-`cargo test --workspace` runs the offline suite: unit tests, the case files in `tests/cases/` and integration tests against the fakes in `tests/fakes/` (a fake `claude`, ACP agent, Codex and window manager). `tests/live.sh NAME` runs the ignored live tests (headless haiku sessions, dsh, Codex) in a scrubbed environment with the test Claude config dir. `tests/qa/start.sh` starts the QA server on port 8431: seeded state, the debug build as it runs live, with `tests/fakes/claude.py` in place of Claude Code and a fake kitty and terminal; `tests/qa/stop.sh` ends it.
+`cargo test --workspace` runs the offline suite: unit tests, the case files in `tests/cases/` and integration tests against the fakes in `tests/fakes/` (a fake `claude`, ACP agent and Codex) and `plugins/desktop/tests/fakes/` (window managers). `tests/live.sh NAME` runs the ignored live tests (headless haiku sessions, dsh, Codex) in a scrubbed environment with the test Claude config dir. `tests/qa/start.sh` starts the QA server on port 8431: seeded state, the debug build as it runs live, with `tests/fakes/claude.py` in place of Claude Code and a fake kitty and terminal; `tests/qa/stop.sh` ends it.

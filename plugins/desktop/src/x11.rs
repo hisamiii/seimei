@@ -12,7 +12,7 @@ use regex::Regex;
 use serde_json::{Value, json};
 
 use super::backend::{Backend, Ctx, Emit, Env, Ours, exec, run};
-use crate::util::py_json_compact;
+use seimei_core::util::py_json_compact;
 
 const QUERIES: [&str; 4] = ["windows", "workspaces", "outputs", "root"];
 const ROOT_PROPS: [&str; 6] = [

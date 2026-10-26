@@ -15,8 +15,8 @@ use super::backend::{Backend, Ctx, listening, newest};
 use super::niri::Niri;
 use super::vinput::{self, Op};
 use super::{Desktop, Session, int, text_of, uinput};
-use crate::tools::text;
-use crate::util::{sh_quote, truthy};
+use seimei_core::tools::text;
+use seimei_core::util::{chars, sh_quote, token_urlsafe, truthy};
 
 /// seimei's own config for the inner niri. repeat-rate 0: a virtual keyboard's keys must not repeat.
 const CONFIG: &str = r#"// seimei's agent display: written by seimei on every start.
@@ -266,7 +266,7 @@ impl Agent {
         if !xpi.exists() {
             return Err(format!(
                 "the agent browser installs the seimei extension from {}, which is missing: save seimei.xpi from the \
-                 release page there (a checkout's browser/install.py writes it)",
+                 release page there (a checkout's plugins/browser/extension/install.py writes it)",
                 xpi.display()
             ));
         }
@@ -512,7 +512,7 @@ impl Desktop {
     }
 
     fn agent_spawn(&self, up: &Up, command: &str) -> Result<Option<Value>, String> {
-        let pidfile = std::env::temp_dir().join(format!("seimei-agent-{}", crate::util::token_urlsafe(6)));
+        let pidfile = std::env::temp_dir().join(format!("seimei-agent-{}", token_urlsafe(6)));
         up.b.spawn_sh(&format!("echo $$ > {}; exec {command}", pidfile.display()))?;
         let mut pid = None;
         for _ in 0..40 {
@@ -580,6 +580,6 @@ fn read_clipboard(env: &super::backend::Env) -> Result<String, String> {
     let out = super::backend::exec(&["wl-paste", "-n", "-t", "text"], env, None, 3.0)?;
     let all = String::from_utf8_lossy(&out.stdout).into_owned();
     let n = all.chars().count();
-    let cut = crate::util::chars(&all, 20000);
+    let cut = chars(&all, 20000);
     Ok(if n > 20000 { format!("{cut}\n[cut at 20000 of {n} characters]") } else { cut })
 }

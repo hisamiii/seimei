@@ -1,5 +1,5 @@
 {
- "about": "The desktop plugin on fakes: no compositor, a fake niri socket and fake command line tools (tests/fakes/desktop), input devices writing to a file. {home} is the test's HOME. checks: the card a tool call needs (null: none), with ours the windows seimei opened, and no window manager running, so a close names no window. layout_command, layout_describe: how a remembered window starts again and how a restore card lists them. keys: the input events (type, code, value; each call ends with a sync) a device sends. niri: tool calls and checks against a fake niri with this state; log is what the fake tools were run with, keys what the input devices sent.",
+ "about": "The desktop plugin on fakes: no compositor, a fake niri socket and fake command line tools (tests/fakes here), input devices writing to a file. {home} is the test's HOME. checks: the card a tool call needs (null: none), with ours the windows seimei opened, and no window manager running, so a close names no window. layout_command, layout_describe: how a remembered window starts again and how a restore card lists them. keys: the input events (type, code, value; each call ends with a sync) a device sends. niri: tool calls and checks against a fake niri with this state; log is what the fake tools were run with, keys what the input devices sent.",
  "checks": [
   {
    "backend": "niri",

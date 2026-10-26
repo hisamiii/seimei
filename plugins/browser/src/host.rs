@@ -13,7 +13,7 @@ fn socket() -> PathBuf {
     std::env::var_os("SEIMEI_BROWSER_SOCK")
         .filter(|s| !s.is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| crate::plugins::link::runtime_path("browser", false))
+        .unwrap_or_else(|| seimei_core::plugins::link::runtime_path("browser", false))
 }
 
 fn to_browser(out: &Mutex<std::io::Stdout>, msg: &[u8]) -> std::io::Result<()> {

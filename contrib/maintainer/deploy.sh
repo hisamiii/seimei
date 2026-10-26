@@ -131,7 +131,7 @@ if [ -z "${SEIMEI_DEPLOY_TEST:-}" ]; then
     # (~/.mozilla, or ~/.config/mozilla with XDG paths); the extension (signed when sign.py made it) is for the user to
     # install once (about:addons, Install Add-on From File).
     cfg=${XDG_CONFIG_HOME:-$HOME/.config}
-    python3 "$app/browser/install.py" "$app/browser" "$HOME/.local/share/seimei/seimei-waterfox.xpi" \
+    python3 "$app/plugins/browser/extension/install.py" "$app/plugins/browser/extension" "$HOME/.local/share/seimei/seimei-waterfox.xpi" \
         "$cfg/seimei/config.toml" "$HOME/.mozilla/native-messaging-hosts" "$cfg/mozilla/native-messaging-hosts" >/dev/null
     # The Discord connector: Vencord with the SeimeiConnector plugin, for Vesktop to load from its Vencord Location.
     # Without pnpm the last build stays in place; the rest of the deploy goes on.

@@ -28,12 +28,12 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
 
-use super::{Session, int, py};
-use crate::approvals::Approvals;
-use crate::events::EventLog;
-use crate::tools::text;
-use crate::util::{chars, now, py_json, py_repr, truthy};
 pub use backend::{Backend, Ctx};
+use seimei_core::approvals::Approvals;
+use seimei_core::events::EventLog;
+use seimei_core::plugins::{Builtin, Factory, Fut, Host, Session, Windows, ask_guard, int, py, shot_file, strip};
+use seimei_core::tools::text;
+use seimei_core::util::{b64, chars, now, py_json, py_json_utf8, py_repr, token_urlsafe, truthy};
 use uinput::Device;
 
 /// The workspace apps opened for a task go to.
@@ -43,8 +43,7 @@ const SHOT_EDGE: f64 = 1568.0;
 const DOWN_GRACE: Duration = Duration::from_secs(8);
 /// A region shot stays under this, so it fits a tool result and the model's image budget.
 const REGION_MAX: usize = 800_000;
-const SHOTS_KEPT: usize = 30;
-const HELPER: &str = include_str!("desktop/a11y_helper.py");
+const HELPER: &str = include_str!("../a11y_helper.py");
 const STOPPED: &str = "the user pressed the stop key at the desktop; ask them before driving the desktop again";
 
 const PROMPT: &str = "## Desktop
@@ -58,6 +57,79 @@ Drive the {about} with your desktop tools (start with desktop), not {cli} in Bas
 /// A value as Python's str() shows it.
 pub(crate) fn text_of(v: &Value) -> String {
     py(v)
+}
+
+pub const PLUGIN: Factory = Factory {
+    name: "desktop",
+    what: "the desktop: windows, workspaces, screenshots, keyboard and mouse",
+    needs: "niri, sway, Hyprland or X11",
+    found: || std::env::var_os("WAYLAND_DISPLAY").is_some() || std::env::var_os("DISPLAY").is_some(),
+    manifest: include_str!("../plugin.toml"),
+    // It depends on the window manager and the computer: Builtin::prompt makes it.
+    prompt: "",
+    // One spec per window manager: variant() says which.
+    spec: include_str!("../tools.json"),
+    hosted: true,
+    make: |own, state| {
+        let s = |k: &str| own.get(k).and_then(|v| v.as_str()).filter(|v| !v.is_empty());
+        let d = Desktop::new(s("backend"), Ctx::system(), state, s("shell"), None)?;
+        if let Some(m) = own.get("agent_idle_minutes").and_then(|v| v.as_float().or(v.as_integer().map(|i| i as f64))) {
+            d.agent.set_idle(m);
+        }
+        eprintln!("seimei: desktop backend: {}", d.b.name());
+        Ok(Arc::new(DesktopPlugin(Arc::new(d))))
+    },
+};
+
+/// The desktop as seimei holds it: its tools need the Arc.
+pub struct DesktopPlugin(pub Arc<Desktop>);
+
+impl Builtin for DesktopPlugin {
+    fn call<'a>(&'a self, tool: &'a str, args: &'a Value, session: &'a dyn Session) -> Fut<'a, Value> {
+        Box::pin(self.0.call(tool, args, session))
+    }
+
+    fn prompt(&self, about: &str) -> Option<String> {
+        Some(self.0.prompt(about))
+    }
+
+    fn variant(&self) -> Option<String> {
+        Some(self.0.b.name().to_string())
+    }
+
+    fn halt(&self) -> String {
+        self.0.halt()
+    }
+
+    fn windows(self: Arc<Self>) -> Option<Arc<dyn Windows>> {
+        Some(self)
+    }
+
+    /// Follows the WM's events and keeps the layout; its cards and notes go to seimei, and the guard asks it whose
+    /// a window is.
+    fn start(self: Arc<Self>, host: Arc<Host>) {
+        let d = self.0.clone();
+        let h = host.clone();
+        d.attach(Hooks {
+            events: host.events.clone(),
+            note: Box::new(move |t| (h.note)(t)),
+            approvals: host.approvals.clone(),
+        });
+        let desk = d.clone();
+        seimei_core::guard::add_facts(Arc::new(move |tool, inp| checks::check(tool, inp, &desk)));
+        tokio::spawn(d.clone().run());
+        tokio::spawn(d.layout());
+    }
+}
+
+impl Windows for DesktopPlugin {
+    fn window_open(&self, id: &Value) -> Option<bool> {
+        self.0.window_open(id)
+    }
+
+    fn spawn<'a>(&'a self, command: &'a str, own_workspace: bool) -> Fut<'a, Result<Option<Value>, String>> {
+        Box::pin(self.0.spawn(command, own_workspace))
+    }
 }
 
 /// What seimei hands the plugin once it runs: the event log, the dispatcher's notes, the cards.
@@ -116,9 +188,7 @@ fn need<'a>(args: &'a Value, k: &str) -> Result<&'a Value, String> {
 fn float(v: &Value) -> Result<f64, String> {
     match v {
         Value::Number(n) => Ok(n.as_f64().unwrap_or(0.0)),
-        Value::String(s) => {
-            super::strip(s).parse().map_err(|_| format!("could not convert string to float: {}", py_repr(s)))
-        }
+        Value::String(s) => strip(s).parse().map_err(|_| format!("could not convert string to float: {}", py_repr(s))),
         v => Err(format!("float() argument must be a string or a real number, not {v}")),
     }
 }
@@ -498,7 +568,7 @@ impl Desktop {
     /// the window it opens, which counts as seimei's; None when no window of its own showed up in time.
     pub async fn spawn(self: &Arc<Self>, command: &str, own_workspace: bool) -> Result<Option<Value>, String> {
         let wait = Duration::from_secs(15);
-        let pidfile = std::env::temp_dir().join(format!("seimei-spawn-{}", crate::util::token_urlsafe(6)));
+        let pidfile = std::env::temp_dir().join(format!("seimei-spawn-{}", token_urlsafe(6)));
         {
             use std::os::unix::fs::OpenOptionsExt;
             std::fs::OpenOptions::new()
@@ -776,7 +846,7 @@ impl Desktop {
         let full = format!("mcp__desktop__{tool}");
         let a = args.clone();
         let about = self.blocking(move |d| checks::check(&full, &a, d)).await;
-        if let Some(no) = super::ask_guard(session, "desktop", tool, args, about, &[], "desktop").await {
+        if let Some(no) = ask_guard(session, "desktop", tool, args, about, &[], "desktop").await {
             return no;
         }
         if tool == "agent_display" || args["display"] == "agent" {
@@ -882,7 +952,7 @@ impl Desktop {
     /// A screenshot as the tool returns it: a path to Read, or the image in the chat with show=true.
     fn deliver(&self, data: &[u8], mime: &str, mut note: String, args: &Value) -> Value {
         if truthy(&args["show"]) {
-            let files = crate::files::Files::new(&self.state);
+            let files = seimei_core::files::Files::new(&self.state);
             let name = match files.save(data) {
                 Ok((name, _)) => name,
                 Err(e) => return text(&e, true),
@@ -890,7 +960,7 @@ impl Desktop {
             let caption = chars(&if truthy(&args["caption"]) { text_of(&args["caption"]) } else { String::new() }, 300);
             self.system(json!({"type": "image", "file": name, "caption": caption}), None);
             note += " Shown to the user.";
-            return json!({"content": [{"type": "image", "data": crate::util::b64(data), "mimeType": mime},
+            return json!({"content": [{"type": "image", "data": b64(data), "mimeType": mime},
                                       {"type": "text", "text": note}]});
         }
         // A path, not the pixels: an image in every result was 8% of the dispatcher's context growth.
@@ -946,7 +1016,7 @@ impl Desktop {
             return Err(text_of(e));
         }
         if tool == "ui_action" {
-            return Ok(crate::util::py_json_utf8(&r));
+            return Ok(py_json_utf8(&r));
         }
         let nodes = r["nodes"].as_array().cloned().unwrap_or_default();
         let mut head = format!("{}: {} elements", text_of(&r["app"]), nodes.len());
@@ -1001,25 +1071,6 @@ impl Desktop {
             Ok(_) => text(&self.restore(&plan).await.join("\n"), false),
         }
     }
-}
-
-/// Save a screenshot for a later Read; only the newest SHOTS_KEPT stay.
-pub(crate) fn shot_file(folder: &Path, data: &[u8], mime: &str) -> Result<PathBuf, String> {
-    use std::os::unix::fs::DirBuilderExt;
-    let _ = std::fs::DirBuilder::new().mode(0o700).create(folder);
-    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
-    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
-    let ext = if mime == "image/png" { ".png" } else { ".jpg" };
-    let path = folder.join(format!("{stamp}-{:06}{ext}", (t.as_nanos() % 1_000_000) as u64));
-    std::fs::write(&path, data).map_err(|e| e.to_string())?;
-    let mut all: Vec<PathBuf> =
-        std::fs::read_dir(folder).map_err(|e| e.to_string())?.flatten().map(|e| e.path()).collect();
-    all.sort();
-    let extra = all.len().saturating_sub(SHOTS_KEPT);
-    for old in &all[..extra] {
-        let _ = std::fs::remove_file(old);
-    }
-    Ok(path)
 }
 
 /// The AT-SPI helper on the system Python (it has PyGObject); -I keeps it from importing anything next to it.

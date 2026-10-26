@@ -16,8 +16,6 @@
 //! grants it, with the plugin's prompt section. A plugin raises a card through seimei's socket, with the token of the
 //! session it serves: the card names that session, and a plugin cannot answer cards.
 
-pub mod browser;
-pub mod desktop;
 pub mod link;
 
 use std::any::Any;
@@ -33,12 +31,6 @@ use crate::events::EventLog;
 use crate::util::{config_file, token_urlsafe};
 use crate::watches::Watches;
 
-/// What the browser and desktop plugins ship (their manifest and prompt section); the other built-ins are Factories.
-const BUILTIN: [(&str, &str, &str); 2] = [
-    ("browser", include_str!("browser/plugin.toml"), include_str!("browser/prompt.md")),
-    // Its prompt depends on the window manager and the computer: Plugins::about sets it.
-    ("desktop", include_str!("desktop/plugin.toml"), ""),
-];
 /// The names of the built-ins the binary has: their own tools ask the guard themselves.
 static BUILTIN_NAMES: RwLock<Vec<&'static str>> = RwLock::new(Vec::new());
 
@@ -107,6 +99,27 @@ pub trait Builtin: Any + Send + Sync {
     }
     /// Its background work inside seimei (a connector's socket, a watcher), started once when the server is up.
     fn start(self: Arc<Self>, _host: Arc<Host>) {}
+    /// Which variant of its spec its `seimei plugin` process serves (the desktop: one per window manager), for a spec
+    /// that is a map of them.
+    fn variant(&self) -> Option<String> {
+        None
+    }
+    /// The stop key: end what it is driving; what it stopped, for the dispatcher ("" for nothing).
+    fn halt(&self) -> String {
+        String::new()
+    }
+    /// The desktop's windows, when it drives them: sessions opened in a terminal use them.
+    fn windows(self: Arc<Self>) -> Option<Arc<dyn Windows>> {
+        None
+    }
+}
+
+/// The desktop's windows, as the worker pool uses them for a session it opens in a terminal.
+pub trait Windows: Send + Sync {
+    /// Whether a window seimei opened is still there; None when it cannot tell.
+    fn window_open(&self, id: &Value) -> Option<bool>;
+    /// Runs a command on the desktop (on seimei's own workspace, or the user's); the window it opened, when known.
+    fn spawn<'a>(&'a self, command: &'a str, own_workspace: bool) -> Fut<'a, Result<Option<Value>, String>>;
 }
 
 /// What a plugin's background work in seimei may use.
@@ -115,16 +128,14 @@ pub struct Host {
     /// A dev server: connector sockets get their -dev names.
     pub dev: bool,
     pub events: Arc<EventLog>,
+    pub approvals: Arc<Approvals>,
     /// A line for the dispatcher, batched with the others.
     pub notify: Notify,
+    /// A line for the dispatcher at once, unbatched.
+    pub note: Box<dyn Fn(&str) + Send + Sync>,
 }
 /// What an external entry may pass on to Claude Code (its mcpServers format).
 const MCP_KEYS: [&str; 6] = ["type", "command", "args", "env", "url", "headers"];
-/// Each built-in's MCP server as Claude Code sees it (initialize and tools/list).
-static SPECS: LazyLock<Value> = LazyLock::new(|| {
-    let all: Value = serde_json::from_str(include_str!("../../data/tools.json")).expect("tools.json");
-    all["plugins"].clone()
-});
 /// The shikigami's own server (ask, board): in-process for Claude Code, `seimei plugin shikigami` for an ACP agent.
 static OWN: LazyLock<Value> = LazyLock::new(|| {
     let all: Value = serde_json::from_str(include_str!("../../data/tools.json")).expect("tools.json");
@@ -152,8 +163,6 @@ pub struct Plugins {
     list: Vec<Plugin>,
     /// The enabled built-ins that are Factories, made.
     made: Vec<(&'static str, Arc<dyn Builtin>)>,
-    pub browser: Option<Arc<browser::Browser>>,
-    pub desktop: Option<Arc<desktop::Desktop>>,
     state: PathBuf,
     socket: PathBuf,
     /// The seimei binary the built-ins run as.
@@ -238,14 +247,12 @@ impl Plugins {
         {
             let mut names = BUILTIN_NAMES.write().unwrap();
             names.clear();
-            names.extend(builtins.iter().map(|f| f.name).chain(BUILTIN.iter().map(|b| b.0)));
+            names.extend(builtins.iter().map(|f| f.name));
         }
         let dir = config_file().with_file_name("plugins");
         let mut out = Plugins {
             list: vec![],
             made: vec![],
-            browser: None,
-            desktop: None,
             state: state.into(),
             socket: state.join("plugins.sock"),
             exe: exe.into(),
@@ -262,36 +269,10 @@ impl Plugins {
                 }
                 continue;
             }
-            let loaded = out.plugin(name, &own, exe, &dir).and_then(|p| {
-                match name {
-                    "browser" => out.browser = Some(Arc::new(browser::Browser::new(Some(state)))),
-                    "desktop" => {
-                        let s = |k: &str| own.get(k).and_then(|v| v.as_str()).filter(|v| !v.is_empty());
-                        let d = desktop::Desktop::new(s("backend"), desktop::Ctx::system(), state, s("shell"), None)?;
-                        if let Some(m) = own
-                            .get("agent_idle_minutes")
-                            .and_then(|v| v.as_float().or(v.as_integer().map(|i| i as f64)))
-                        {
-                            d.agent.set_idle(m);
-                        }
-                        eprintln!("seimei: desktop backend: {}", d.b.name());
-                        out.desktop = Some(Arc::new(d));
-                    }
-                    _ => {}
-                }
-                Ok(p)
-            });
-            match loaded {
+            match out.plugin(name, &own, &dir) {
                 Ok(p) => out.list.push(p),
                 Err(e) => eprintln!("seimei: plugin {name}: {e}; seimei goes on without it"),
             }
-        }
-        if let (Some(b), Some(d)) = (&out.browser, &out.desktop) {
-            let d = d.clone();
-            b.set_starter(Box::new(move |sock| {
-                let d = d.clone();
-                Box::pin(async move { d.agent_browser(&sock).await })
-            }));
         }
         let names = out.names();
         eprintln!("seimei: plugins: {}", if names.is_empty() { "none".into() } else { names.join(", ") });
@@ -323,6 +304,17 @@ impl Plugins {
         any.downcast().ok()
     }
 
+    /// The desktop's windows, when a built-in drives them.
+    pub fn windows(&self) -> Option<Arc<dyn Windows>> {
+        self.made.iter().find_map(|(_, b)| b.clone().windows())
+    }
+
+    /// The stop key: every built-in ends what it is driving; what they stopped, for the dispatcher.
+    pub fn halt(&self) -> String {
+        let parts: Vec<String> = self.made.iter().map(|(_, b)| b.halt()).filter(|h| !h.is_empty()).collect();
+        parts.join(" ")
+    }
+
     /// Starts the built-ins' background work.
     pub fn start(&self, host: Arc<Host>) {
         for (_, b) in &self.made {
@@ -330,7 +322,7 @@ impl Plugins {
         }
     }
 
-    fn plugin(&self, name: &str, own: &toml::Table, exe: &str, dir: &Path) -> Result<Plugin, String> {
+    fn plugin(&self, name: &str, own: &toml::Table, dir: &Path) -> Result<Plugin, String> {
         let base = |mcp, prompt: String, worker_note: String, own, linked| Plugin {
             name: name.into(),
             mcp,
@@ -339,12 +331,6 @@ impl Plugins {
             own,
             linked,
         };
-        if let Some((_, text, prompt)) = BUILTIN.iter().find(|b| b.0 == name) {
-            let (command, args, _, note) = manifest(text)?;
-            let command = if command == "seimei" { exe.to_string() } else { command };
-            let mcp = Map::from_iter([("command".into(), json!(command)), ("args".into(), json!(args))]);
-            return Ok(base(mcp, prompt.to_string(), note, true, true));
-        }
         let folder = dir.join(name);
         if let Ok(text) = std::fs::read_to_string(folder.join("plugin.toml")) {
             let (command, args, prompt, note) = manifest(&text)?;
@@ -380,11 +366,6 @@ impl Plugins {
             {
                 p.prompt = text;
             }
-        }
-        if let Some(d) = &self.desktop
-            && let Some(p) = self.list.iter_mut().find(|p| p.name == "desktop")
-        {
-            p.prompt = d.prompt(about);
         }
         self
     }
@@ -453,9 +434,9 @@ impl Plugins {
             if p.linked {
                 let mut env = json!({"SEIMEI_SOCKET": self.socket.display().to_string(),
                                      "SEIMEI_TOKEN": self.token(who, worker, &names), "SEIMEI_STATE": self.state.display().to_string()});
-                // The desktop's tools are named after its window manager.
-                if let Some(d) = self.desktop.as_ref().filter(|_| p.name == "desktop") {
-                    env["SEIMEI_DESKTOP"] = json!(d.b.name());
+                // Which of its specs the process serves (the desktop's tools are named after its window manager).
+                if let Some(v) = self.made.iter().find(|(n, _)| *n == p.name).and_then(|(_, b)| b.variant()) {
+                    env["SEIMEI_VARIANT"] = json!(v);
                 }
                 entry.insert("env".into(), env);
             }
@@ -655,13 +636,9 @@ pub trait Session: Send + Sync {
 impl Plugins {
     /// A hosted plugin's tool call.
     async fn call(&self, plugin: &str, tool: &str, args: &Value, session: &dyn Session) -> Value {
-        if let Some((_, b)) = self.made.iter().find(|(n, _)| *n == plugin) {
-            return b.call(tool, args, session).await;
-        }
-        match (plugin, &self.browser, &self.desktop) {
-            ("browser", Some(b), _) => b.call(tool, args, session).await,
-            ("desktop", _, Some(d)) => d.call(tool, args, session).await,
-            _ => crate::tools::text(&format!("{plugin} is not on"), true),
+        match self.made.iter().find(|(n, _)| *n == plugin) {
+            Some((_, b)) => b.call(tool, args, session).await,
+            None => crate::tools::text(&format!("{plugin} is not on"), true),
         }
     }
 }
@@ -693,6 +670,28 @@ pub fn space(c: char) -> bool {
 /// s without whitespace at either end, as Python's strip() leaves it.
 pub fn strip(s: &str) -> &str {
     s.trim_matches(space)
+}
+
+/// Screenshots shot_file keeps.
+const SHOTS_KEPT: usize = 30;
+
+/// Save a screenshot for a later Read; only the newest SHOTS_KEPT stay.
+pub fn shot_file(folder: &Path, data: &[u8], mime: &str) -> Result<PathBuf, String> {
+    use std::os::unix::fs::DirBuilderExt;
+    let _ = std::fs::DirBuilder::new().mode(0o700).create(folder);
+    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let ext = if mime == "image/png" { ".png" } else { ".jpg" };
+    let path = folder.join(format!("{stamp}-{:06}{ext}", (t.as_nanos() % 1_000_000) as u64));
+    std::fs::write(&path, data).map_err(|e| e.to_string())?;
+    let mut all: Vec<PathBuf> =
+        std::fs::read_dir(folder).map_err(|e| e.to_string())?.flatten().map(|e| e.path()).collect();
+    all.sort();
+    let extra = all.len().saturating_sub(SHOTS_KEPT);
+    for old in &all[..extra] {
+        let _ = std::fs::remove_file(old);
+    }
+    Ok(path)
 }
 
 /// A byte count for people: 512 B, 3 KB, 1.5 MB.
@@ -769,7 +768,7 @@ pub async fn serve_stdio(name: &str, builtins: &[Factory]) -> Result<(), String>
     let mut spec = match (name, factory) {
         ("shikigami", _) => OWN.clone(),
         (_, Some(f)) => serde_json::from_str(f.spec).map_err(|e| format!("{name}'s tools: {e}"))?,
-        _ => SPECS.get(name).cloned().ok_or(format!("no built-in plugin {name}"))?,
+        _ => return Err(format!("no built-in plugin {name}")),
     };
     // Its own instance, from the same [plugins.<name>] table seimei read.
     let local = match factory.filter(|f| !f.hosted) {
@@ -781,10 +780,10 @@ pub async fn serve_stdio(name: &str, builtins: &[Factory]) -> Result<(), String>
         }
         None => None,
     };
-    if name == "desktop" {
-        // One spec per window manager; seimei says which.
-        let b = var("SEIMEI_DESKTOP");
-        spec = spec.get(&b).cloned().ok_or(format!("no desktop backend {b:?}"))?;
+    let variant = var("SEIMEI_VARIANT");
+    if !variant.is_empty() {
+        // One spec per variant (the desktop's window managers); seimei says which.
+        spec = spec.get(&variant).cloned().ok_or(format!("{name} has no variant {variant:?}"))?;
     }
     let remote = Arc::new(Remote {
         plugin: name.into(),

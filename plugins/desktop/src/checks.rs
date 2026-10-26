@@ -7,10 +7,15 @@ use std::sync::LazyLock;
 use regex::Regex;
 use serde_json::{Value, json};
 
+use seimei_core::guard::About;
+use seimei_core::shell::commands;
+use seimei_core::util::truthy;
+
 use super::{Desktop, text_of};
-use crate::approvals::REDIRECT;
-use crate::guard::About;
-use crate::shell::commands;
+
+// Redirect targets: > file, >> file, &> file, 2> file; not 2>&1 or >&2 (no file).
+static REDIRECT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?:^|[^<>&\w-])(?:\d|&)?>>?\|?\s*("[^"]*"|'[^']*'|[^\s;&|<>()]+)"#).unwrap());
 
 /// Changes every operand: any config path among them is a write.
 const ANY_OPERAND: [&str; 7] = ["tee", "rm", "truncate", "mv", "touch", "shred", "unlink"];
@@ -41,7 +46,7 @@ fn expand(text: &str, home: &Path) -> String {
 fn in_config(path: &str, conf: &Path, home: &Path) -> bool {
     let p = PathBuf::from(expand(path, home));
     let p = if p.is_absolute() { p } else { std::env::current_dir().unwrap_or_default().join(p) };
-    crate::paths::realpath(&p).starts_with(crate::paths::realpath(conf))
+    seimei_core::paths::realpath(&p).starts_with(seimei_core::paths::realpath(conf))
 }
 
 /// A word of a command names something under the WM's config (relative words too, after a cd there).
@@ -140,7 +145,7 @@ pub fn check(tool: &str, inp: &Value, desk: &Desktop) -> Option<About> {
     let conf = b.config_dir();
     let edit = format!("edit the {} config", b.label());
     let ours = desk.ours();
-    let field = |k: &str| inp.get(k).filter(|v| crate::util::truthy(v)).map(text_of);
+    let field = |k: &str| inp.get(k).filter(|v| truthy(v)).map(text_of);
     if tool == "Bash" {
         let cmd = inp.get("command").map(text_of).unwrap_or_default();
         for c in commands(&cmd).into_iter().flatten() {
@@ -163,7 +168,7 @@ pub fn check(tool: &str, inp: &Value, desk: &Desktop) -> Option<About> {
         }
     } else if tool == format!("mcp__desktop__{}", b.name()) && inp["display"] != "agent" {
         let mut args = vec![inp.get("action").map(text_of).unwrap_or_default()];
-        if inp.get("args").is_some_and(crate::util::truthy) {
+        if inp.get("args").is_some_and(seimei_core::util::truthy) {
             match &inp["args"] {
                 Value::Array(a) => args.extend(a.iter().map(text_of)),
                 Value::String(s) => args.extend(s.chars().map(String::from)),

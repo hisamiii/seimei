@@ -1939,6 +1939,8 @@ dependencies = [
  "minisign-verify",
  "reqwest",
  "seimei-core",
+ "seimei-plugin-browser",
+ "seimei-plugin-desktop",
  "seimei-plugin-discord",
  "seimei-plugin-music",
  "seimei-plugin-queue",
@@ -1974,6 +1976,28 @@ dependencies = [
  "webauthn-rs",
  "webauthn-rs-proto",
  "webp",
+]
+
+[[package]]
+name = "seimei-plugin-browser"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "seimei-core",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "seimei-plugin-desktop"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "libc",
+ "regex",
+ "seimei-core",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

@@ -4,6 +4,7 @@
 //!
 //! Each call uploads a keymap with one key per keysym it needs, so any character types without a layout switch.
 
+use seimei_core::util::py_repr;
 use std::io::{Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::net::UnixStream;
@@ -84,7 +85,7 @@ fn combo(spec: &str) -> Result<(u32, u32), String> {
             "shift" => mods |= SHIFT,
             "alt" => mods |= ALT,
             "super" | "meta" | "win" => mods |= SUPER,
-            k => sym = Some(keysym(k).ok_or_else(|| format!("unknown key {}", crate::util::py_repr(k)))?),
+            k => sym = Some(keysym(k).ok_or_else(|| format!("unknown key {}", py_repr(k)))?),
         }
     }
     Ok((mods, sym.ok_or_else(|| format!("{spec} has no key besides its modifiers"))?))
@@ -115,7 +116,7 @@ fn string(s: &str) -> Vec<u8> {
     let mut b = (s.len() as u32 + 1).to_le_bytes().to_vec();
     b.extend(s.as_bytes());
     b.push(0);
-    while !b.len().is_multiple_of(4) {
+    while b.len() % 4 != 0 {
         b.push(0);
     }
     b

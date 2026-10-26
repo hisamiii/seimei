@@ -1,4 +1,4 @@
-//! The browser plugin: the user's Firefox (or Waterfox) tabs through the seimei extension (browser/), whose
+//! The browser plugin: the user's Firefox (or Waterfox) tabs through the seimei extension (extension/ here), whose
 //! native-messaging host connects to seimei's link socket. Its tools run inside seimei, which holds the link and knows
 //! which tabs seimei opened; `seimei plugin browser` forwards each call. Page text and downloads are untrusted data.
 //! Acting in a tab the user opened needs their Approve card once per tab and site; closing one goes by guard.toml.
@@ -15,10 +15,10 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
-use super::link::Link;
-use super::{Session, int, py, size, strip};
-use crate::tools::text;
-use crate::util::{now, truthy};
+use seimei_core::plugins::link::{Link, runtime_path};
+use seimei_core::plugins::{Builtin, Factory, Fut, Host, Session, ask_guard, int, py, shot_file, size, strip};
+use seimei_core::tools::text;
+use seimei_core::util::{b64_decode, now, truthy};
 
 const READ_LIMIT: i64 = 20000;
 /// A read is kept this long so paging through a page does not reload it.
@@ -228,6 +228,30 @@ pub fn filename(name: &str) -> Result<String, String> {
     Ok(parts.join("/"))
 }
 
+pub const PLUGIN: Factory = Factory {
+    name: "browser",
+    what: "Firefox, Waterfox or LibreWolf, through the seimei extension",
+    needs: "seimei.xpi from the release page",
+    found: || false,
+    manifest: include_str!("../plugin.toml"),
+    prompt: include_str!("../prompt.md"),
+    spec: include_str!("../tools.json"),
+    hosted: true,
+    make: |_, state| Ok(Arc::new(Browser::new(Some(state)))),
+};
+
+impl Builtin for Browser {
+    fn call<'a>(&'a self, tool: &'a str, args: &'a Value, session: &'a dyn Session) -> Fut<'a, Value> {
+        Box::pin(Browser::call(self, tool, args, session))
+    }
+
+    /// The extension's link and the agent browser's.
+    fn start(self: Arc<Self>, host: Arc<Host>) {
+        tokio::spawn(self.link.clone().run(runtime_path("browser", host.dev)));
+        tokio::spawn(self.serve_agent(runtime_path("agent-browser", host.dev)));
+    }
+}
+
 const WAITS: [&str; 5] = ["selector", "text", "gone", "navigation", "idle"];
 const ACTIONS: [&str; 9] = ["click", "fill", "select", "check", "uncheck", "press", "scroll", "submit", "focus"];
 
@@ -385,8 +409,8 @@ impl Browser {
         let data = py(&r["data"]);
         let (head, body) = data.split_once(',').ok_or("the browser sent no image")?;
         let png = head.contains("image/png");
-        let bytes = crate::util::b64_decode(body).ok_or("the browser sent a broken image")?;
-        let path = super::desktop::shot_file(&self.shots, &bytes, if png { "image/png" } else { "image/jpeg" })?;
+        let bytes = b64_decode(body).ok_or("the browser sent a broken image")?;
+        let path = shot_file(&self.shots, &bytes, if png { "image/png" } else { "image/jpeg" })?;
         let what = if truthy(&a["ref"]) {
             format!("element {}", py(&a["ref"]))
         } else if truthy(&a["full"]) {
@@ -458,7 +482,7 @@ impl Browser {
             ids.iter().filter(|i| !self.mine() && !opened.contains(i)).copied().collect()
         };
         // Facts for the guard's rules: tabs = theirs when any of them seimei did not open.
-        let mut about = crate::guard::About::default();
+        let mut about = seimei_core::guard::About::default();
         about.facts.insert("tabs".into(), json!(if theirs.is_empty() { "mine" } else { "theirs" }));
         if !theirs.is_empty() {
             let ts = self.link.call("info", 30, json!({"tabs": theirs})).await?;
@@ -477,7 +501,7 @@ impl Browser {
                 .collect();
             (about.what, about.detail) = (target, detail.join("\n"));
         }
-        if let Some(no) = super::ask_guard(session, "browser", "browser_close", a, Some(about), &[], "desktop").await {
+        if let Some(no) = ask_guard(session, "browser", "browser_close", a, Some(about), &[], "desktop").await {
             return Ok(no);
         }
         let n = self.link.call("close", 30, json!({"tabs": ids})).await?;
@@ -532,7 +556,7 @@ impl Browser {
                     return Err(format!("waiting for {what} needs a value"));
                 }
                 let timeout =
-                    if truthy(&a["timeout"]) { super::desktop::number(&a["timeout"]).clamp(1.0, 60.0) } else { 10.0 };
+                    if truthy(&a["timeout"]) { a["timeout"].as_f64().unwrap_or(0.0).clamp(1.0, 60.0) } else { 10.0 };
                 let mut args = json!({"tab": tab, "for": what, "timeout": timeout});
                 if truthy(&a["value"]) {
                     args["value"] = a["value"].clone();
@@ -557,7 +581,7 @@ impl Browser {
     pub async fn call(&self, tool: &str, a: &Value, session: &dyn Session) -> Value {
         // browser_close asks the guard itself, with which tabs are whose.
         if tool != "browser_close"
-            && let Some(no) = super::ask_guard(session, "browser", tool, a, None, &[], "desktop").await
+            && let Some(no) = ask_guard(session, "browser", tool, a, None, &[], "desktop").await
         {
             return no;
         }

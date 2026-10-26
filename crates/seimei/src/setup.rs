@@ -18,18 +18,6 @@ const EXAMPLE: &str = include_str!("../../../config.example.toml");
 const TESTED_CLAUDE: (u32, u32) = (2, 1);
 
 /// A plugin as setup offers it: name, what it is, what it needs, whether it looks present.
-type Offer = (&'static str, &'static str, &'static str, fn() -> bool);
-
-/// The built-ins still in core.
-const PLUGINS: [Offer; 2] = [
-    ("desktop", "the desktop: windows, workspaces, screenshots, keyboard and mouse", "niri, sway, Hyprland or X11", || {
-        std::env::var_os("WAYLAND_DISPLAY").is_some() || std::env::var_os("DISPLAY").is_some()
-    }),
-    ("browser", "Firefox, Waterfox or LibreWolf, through the seimei extension", "seimei.xpi from the release page", || {
-        false
-    }),
-];
-
 /// Terminals setup knows, each with how it opens in a folder under a title (the command follows).
 const TERMINALS: [(&str, &str); 8] = [
     ("kitty", "kitty -d {cwd} --title {title}"),
@@ -493,11 +481,10 @@ pub fn run(read_secret: impl Fn(&str) -> String, builtins: &[seimei_core::plugin
             "\nPlugins: tool groups on top of the core, each with its own cards. You can change them in config later."
         );
         let mut enabled = vec![];
-        let offered = PLUGINS.into_iter().chain(builtins.iter().map(|f| (f.name, f.what, f.needs, f.found)));
-        for (name, what, needs, found) in offered {
-            let hint = if found() { " (found)" } else { "" };
-            if yes(&format!("  {name}: {what}; needs {needs}{hint}. Enable"), false) {
-                enabled.push(name);
+        for f in builtins {
+            let hint = if (f.found)() { " (found)" } else { "" };
+            if yes(&format!("  {}: {}; needs {}{hint}. Enable", f.name, f.what, f.needs), false) {
+                enabled.push(f.name);
             }
         }
         if let Some(dir) = cfg_path.parent() {

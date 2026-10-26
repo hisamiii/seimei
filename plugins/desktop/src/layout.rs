@@ -9,7 +9,7 @@ use std::time::Duration;
 use serde_json::{Map, Value, json};
 
 use super::{Desktop, WORKSPACE, text_of};
-use crate::util::{now, read_json, sh_quote, truthy, write_json};
+use seimei_core::util::{chars, now, read_json, sh_quote, truthy, write_json};
 
 const EVERY: Duration = Duration::from_secs(30);
 const MAX_AGE: f64 = 3.0 * 86400.0;
@@ -69,7 +69,7 @@ fn kitty(proc: &Path, sessions: &Path, pid: i64, kids: &HashMap<i64, Vec<i64>>) 
             && !out.contains_key("claude")
         {
             // A session can continue into a new transcript; resume the newest.
-            let id = match crate::sessions::transcript_of(&rec) {
+            let id = match seimei_core::sessions::transcript_of(&rec) {
                 Some(p) => json!(p.file_stem().map(|s| s.to_string_lossy()).unwrap_or_default()),
                 None => rec["sessionId"].clone(),
             };
@@ -125,11 +125,7 @@ pub fn describe(plan: &[Value]) -> String {
         .map(|r| {
             let c = &r["claude"];
             let what = if truthy(c) {
-                let name = if truthy(&c["name"]) {
-                    text_of(&c["name"])
-                } else {
-                    crate::util::chars(&text_of(&c["session_id"]), 8)
-                };
+                let name = if truthy(&c["name"]) { text_of(&c["name"]) } else { chars(&text_of(&c["session_id"]), 8) };
                 format!("resume Claude session \"{name}\"")
             } else {
                 text_of(&r["app_id"])

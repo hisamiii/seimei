@@ -134,7 +134,7 @@ async fn run(work: std::path::PathBuf, state: std::path::PathBuf) {
     tokio::spawn(plugins.clone().listen(app.approvals.clone()));
     let links = state.join("links");
     std::fs::create_dir_all(&links).unwrap();
-    tokio::spawn(plugins.browser.as_ref().unwrap().link.clone().run(links.join("browser.sock")));
+    tokio::spawn(plugins.get::<seimei_plugin_browser::Browser>("browser").unwrap().link.clone().run(links.join("browser.sock")));
     tokio::spawn(plugins.get::<seimei_plugin_discord::Discord>("discord").unwrap().link.clone().run(links.join("discord.sock")));
     let tabs_seen = connector(links.join("browser.sock"), browser_op);
     let guilds_seen = connector(links.join("discord.sock"), discord_op);

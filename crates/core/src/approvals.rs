@@ -2,22 +2,14 @@
 //! of the harnesses wait here for the user's tap. Unanswered, a card is denied after WAIT.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use regex::Regex;
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
 
 use crate::events::EventLog;
 use crate::util::{chars, hex, now, random_bytes};
-
-fn re(pattern: &str) -> Regex {
-    Regex::new(pattern).unwrap()
-}
-// Redirect targets: > file, >> file, &> file, 2> file; not 2>&1 or >&2 (no file).
-pub(crate) static REDIRECT: LazyLock<Regex> =
-    LazyLock::new(|| re(r#"(?:^|[^<>&\w-])(?:\d|&)?>>?\|?\s*("[^"]*"|'[^']*'|[^\s;&|<>()]+)"#));
 
 /// How long a card waits for the user, by default.
 pub const WAIT: Duration = Duration::from_secs(600);

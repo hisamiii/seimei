@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 
 use super::backend::{Backend, Ctx, Emit, Env, Ours, grim_region, grim_screen, listening, rect_shot};
 use super::text_of;
-use crate::util::{py_json_compact, truthy};
+use seimei_core::util::{py_json_compact, token_urlsafe, truthy};
 
 const QUERIES: [&str; 7] = ["clients", "workspaces", "monitors", "activewindow", "devices", "layers", "version"];
 const CLOSE: [&str; 5] = ["killactive", "forcekillactive", "closewindow", "killwindow", "forcekillwindow"];
@@ -107,7 +107,7 @@ impl Hyprland {
 
     /// An exec through a script file that removes itself.
     fn spawn_script(&self, script: &str) -> Result<(), String> {
-        let path = std::env::temp_dir().join(format!("seimei-exec-{}.sh", crate::util::token_urlsafe(6)));
+        let path = std::env::temp_dir().join(format!("seimei-exec-{}.sh", token_urlsafe(6)));
         std::fs::write(&path, format!("rm -f {}\n{script}\n", path.display())).map_err(|e| e.to_string())?;
         self.dispatch(&["exec", &format!("sh {}", path.display())]).map(drop)
     }

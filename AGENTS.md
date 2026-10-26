@@ -8,13 +8,12 @@ seimei runs Claude Code from a phone: one permanent dispatcher session and worke
 
 Layout:
 
-- `crates/`: the Rust workspace. `proto` (the stream-json client for Claude Code, ACP and Codex), `core` (state, login, push, the guard; `core/src/plugins/`: the plugin host, and desktop and browser until they move; `core/data/tools.json`: seimei's own MCP tools), `server` (HTTP routes), `seimei` (the binary; `src/lib.rs` lists the plugins built in).
-- `plugins/`: the plugins, each self-contained (its crate, manifest, prompt, tools, tests and connector): `music`, `queue`, `discord` (with its Vencord connector, GPL, in `plugins/discord/vencord/`), and `template`, the one to copy for a plugin of your own.
+- `crates/`: the Rust workspace. `proto` (the stream-json client for Claude Code, ACP and Codex), `core` (state, login, push, the guard; `core/src/plugins/`: the plugin host; `core/data/tools.json`: seimei's own MCP tools), `server` (HTTP routes), `seimei` (the binary; `src/lib.rs` lists the plugins built in).
+- `plugins/`: the plugins, each self-contained (its crate, manifest, prompt, tools, tests and connector): `desktop`, `browser` (with the extension in `plugins/browser/extension/`), `music`, `queue`, `discord` (with its Vencord connector, GPL, in `plugins/discord/vencord/`), and `template`, the one to copy for a plugin of your own.
 - `web/`: the web page, built into the binary. Plain JS and CSS, no build step.
 - `android/`: the app (Kotlin).
-- `browser/`: the browser extension the browser plugin talks to.
 - `contrib/`: the guard example, the release script and its minisign key, the theme generator, the dsh profile; `contrib/maintainer/`: the author's own deploy and machine setup.
-- `tests/`: `cases/` (case files the Rust tests run; a plugin's own are in its `tests/`), `fakes/` (a fake Claude Code CLI, ACP agent, Codex and window manager), `qa/` (the QA server), `live.sh` (see Tests).
+- `tests/`: `cases/` (case files the Rust tests run; a plugin's own are in its `tests/`), `fakes/` (a fake Claude Code CLI, ACP agent and Codex; the desktop's fake window managers are in `plugins/desktop/tests/fakes/`), `qa/` (the QA server), `live.sh` (see Tests).
 - `docs/`: see Docs below.
 
 ## Code

@@ -3,10 +3,8 @@
 mod acp_worker;
 mod builtin;
 mod approvals;
-mod browser;
 mod cases;
 mod codex_worker;
-mod compositor;
 mod env;
 mod guard;
 mod live;

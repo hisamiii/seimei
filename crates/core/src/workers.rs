@@ -543,7 +543,7 @@ impl Worker {
         if self.state() != "laptop" {
             return false;
         }
-        if let Some(d) = &self.pool().plugins.desktop
+        if let Some(d) = self.pool().plugins.windows()
             && d.window_open(&self.get("laptop_window")) == Some(true)
         {
             return true;
@@ -2315,7 +2315,7 @@ impl Pool {
         let term =
             self.terminal.replace("{cwd}", &sh_quote(&str_of(&w.get("cwd")))).replace("{title}", &sh_quote(title));
         let cmd = format!("{term} {}", words.join(" "));
-        match &self.plugins.desktop {
+        match self.plugins.windows() {
             Some(d) => d.spawn(&cmd, false).await,
             None => spawn_detached(&cmd).map(Some),
         }

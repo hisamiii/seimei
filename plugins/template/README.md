@@ -47,5 +47,5 @@ clear raises a card on the phone. A shikigami gets the plugin when its summon gr
 - A plugin's tool calls also pass through Claude Code's permission prompts and seimei's guard, like any MCP tool's.
   "Always allow" on the first one leaves only the plugin's own cards.
 
-The built-in plugins (`plugins/music`, `plugins/queue`, `plugins/discord`) are Rust crates linked into the binary; see
+The built-in plugins (`plugins/desktop`, `plugins/browser`, `plugins/music`, `plugins/queue`, `plugins/discord`) are Rust crates linked into the binary; see
 [docs/plugins.md](../../docs/plugins.md).

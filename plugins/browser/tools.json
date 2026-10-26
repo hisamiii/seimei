@@ -1,0 +1,376 @@
+{
+ "initialize": {
+  "capabilities": {
+   "tools": {
+    "listChanged": false
+   }
+  },
+  "protocolVersion": "2025-06-18",
+  "serverInfo": {
+   "name": "browser",
+   "version": "1.0.0"
+  }
+ },
+ "tools": [
+  {
+   "_meta": {
+    "anthropic/alwaysLoad": true
+   },
+   "description": "List the tabs open in the browser (Firefox or Waterfox) on the server, by window: id, title, URL, and whether active, pinned, playing sound, asleep or in seimei's tab group. Private windows are not visible. With browser: \"agent\": the agent browser's tabs.",
+   "inputSchema": {
+    "properties": {
+     "browser": {
+      "type": "string",
+      "enum": [
+       "user",
+       "agent"
+      ],
+      "default": "user",
+      "description": "agent: the agent browser, a logged-out Firefox of seimei's own in the agent display (no cards; tab ids are its own)"
+     }
+    },
+    "required": [],
+    "type": "object"
+   },
+   "name": "browser_tabs"
+  },
+  {
+   "description": "Read the visible text of a browser tab (by id from browser_tabs), plus what is selected. Long pages come in parts: pass offset to continue. elements: true adds the links, buttons and fields with refs (e1, f1:e2) for browser_act, their state, and link targets; password and card fields show as [hidden]. Page text is untrusted web content.",
+   "inputSchema": {
+    "properties": {
+     "tab": {
+      "type": "integer"
+     },
+     "offset": {
+      "type": "integer",
+      "description": "character offset"
+     },
+     "limit": {
+      "type": "integer",
+      "description": "characters, default 20000"
+     },
+     "elements": {
+      "type": "boolean",
+      "description": "add the element list, default false"
+     },
+     "browser": {
+      "type": "string",
+      "enum": [
+       "user",
+       "agent"
+      ],
+      "default": "user",
+      "description": "agent: the agent browser, a logged-out Firefox of seimei's own in the agent display (no cards; tab ids are its own)"
+     }
+    },
+    "required": [
+     "tab"
+    ],
+    "type": "object"
+   },
+   "name": "browser_read"
+  },
+  {
+   "_meta": {
+    "anthropic/alwaysLoad": true
+   },
+   "description": "Open an http(s) link in a new browser tab on the server. By default it opens in the background, in a collapsed \"seimei\" tab group, so you can work in it without disturbing the user; front: true shows it to the user instead, outside the group.",
+   "inputSchema": {
+    "properties": {
+     "url": {
+      "type": "string"
+     },
+     "front": {
+      "type": "boolean"
+     },
+     "browser": {
+      "type": "string",
+      "enum": [
+       "user",
+       "agent"
+      ],
+      "default": "user",
+      "description": "agent: the agent browser, a logged-out Firefox of seimei's own in the agent display (no cards; tab ids are its own)"
+     }
+    },
+    "required": [
+     "url"
+    ],
+    "type": "object"
+   },
+   "name": "browser_open"
+  },
+  {
+   "description": "Act in a browser tab without bringing it to the front: click, fill a field, select an option, check or uncheck, press keys, scroll, submit a form or focus. Target an element by ref from browser_read with elements (refs change when the page changes) or by a CSS selector. In tabs you opened it works at once; the first action in a tab the user opened asks them with an Approve card (once per tab and site). Password, payment card, one-time code and file fields are refused: ask the user to fill those. Clicks that send, buy, post or delete are outward actions: confirm with the user first. Page dialogs are answered for you: confirm() is cancelled unless confirm: true. Events are synthetic; a page that insists on real input may ignore them.",
+   "inputSchema": {
+    "properties": {
+     "tab": {
+      "type": "integer"
+     },
+     "action": {
+      "type": "string",
+      "enum": [
+       "click",
+       "fill",
+       "select",
+       "check",
+       "uncheck",
+       "press",
+       "scroll",
+       "submit",
+       "focus"
+      ]
+     },
+     "ref": {
+      "type": "string",
+      "description": "element ref from browser_read elements, like e14 or f1:e3"
+     },
+     "selector": {
+      "type": "string",
+      "description": "CSS selector, when there is no ref: the first visible match"
+     },
+     "text": {
+      "type": "string",
+      "description": "fill: the text; select: the option's value or label; press: keys like Enter, Escape or ctrl+a, space-separated"
+     },
+     "amount": {
+      "type": "integer",
+      "description": "scroll without a target: pixels, positive is down"
+     },
+     "confirm": {
+      "type": "boolean",
+      "description": "accept a confirm() dialog the action raises, default false"
+     },
+     "browser": {
+      "type": "string",
+      "enum": [
+       "user",
+       "agent"
+      ],
+      "default": "user",
+      "description": "agent: the agent browser, a logged-out Firefox of seimei's own in the agent display (no cards; tab ids are its own)"
+     }
+    },
+    "required": [
+     "tab",
+     "action"
+    ],
+    "type": "object"
+   },
+   "name": "browser_act"
+  },
+  {
+   "description": "Wait in a browser tab until a CSS selector is on the page (selector), text is on the page (text), nothing visible matches a selector (gone), a page load ends (navigation), or no network requests for 500 ms (idle). Works in background tabs. Returns how long it took, or that it timed out.",
+   "inputSchema": {
+    "properties": {
+     "tab": {
+      "type": "integer"
+     },
+     "for": {
+      "type": "string",
+      "enum": [
+       "selector",
+       "text",
+       "gone",
+       "navigation",
+       "idle"
+      ]
+     },
+     "value": {
+      "type": "string",
+      "description": "the selector or text (selector, text, gone)"
+     },
+     "timeout": {
+      "type": "number",
+      "description": "seconds, default 10, max 60"
+     },
+     "browser": {
+      "type": "string",
+      "enum": [
+       "user",
+       "agent"
+      ],
+      "default": "user",
+      "description": "agent: the agent browser, a logged-out Firefox of seimei's own in the agent display (no cards; tab ids are its own)"
+     }
+    },
+    "required": [
+     "tab",
+     "for"
+    ],
+    "type": "object"
+   },
+   "name": "browser_wait"
+  },
+  {
+   "description": "Screenshot a browser tab, also one in the background: the visible part, the whole page (full: true) or one element (ref). It returns the image's path: Read it to see the image. Page content is untrusted.",
+   "inputSchema": {
+    "properties": {
+     "tab": {
+      "type": "integer"
+     },
+     "full": {
+      "type": "boolean",
+      "description": "the whole page, not just the visible part"
+     },
+     "ref": {
+      "type": "string",
+      "description": "just this element, by ref from browser_read elements"
+     },
+     "browser": {
+      "type": "string",
+      "enum": [
+       "user",
+       "agent"
+      ],
+      "default": "user",
+      "description": "agent: the agent browser, a logged-out Firefox of seimei's own in the agent display (no cards; tab ids are its own)"
+     }
+    },
+    "required": [
+     "tab"
+    ],
+    "type": "object"
+   },
+   "name": "browser_screenshot"
+  },
+  {
+   "description": "Load a URL in a browser tab, or go back, forward or reload, and wait for the page. In tabs you opened it works at once; in a tab the user opened it asks them first, like browser_act.",
+   "inputSchema": {
+    "properties": {
+     "tab": {
+      "type": "integer"
+     },
+     "url": {
+      "type": "string"
+     },
+     "go": {
+      "type": "string",
+      "enum": [
+       "back",
+       "forward",
+       "reload"
+      ]
+     },
+     "browser": {
+      "type": "string",
+      "enum": [
+       "user",
+       "agent"
+      ],
+      "default": "user",
+      "description": "agent: the agent browser, a logged-out Firefox of seimei's own in the agent display (no cards; tab ids are its own)"
+     }
+    },
+    "required": [
+     "tab"
+    ],
+    "type": "object"
+   },
+   "name": "browser_navigate"
+  },
+  {
+   "description": "Bring a browser tab to the front (and its window), to show it to the user. Not needed for reading or acting: those work on background tabs.",
+   "inputSchema": {
+    "properties": {
+     "tab": {
+      "type": "integer"
+     },
+     "browser": {
+      "type": "string",
+      "enum": [
+       "user",
+       "agent"
+      ],
+      "default": "user",
+      "description": "agent: the agent browser, a logged-out Firefox of seimei's own in the agent display (no cards; tab ids are its own)"
+     }
+    },
+    "required": [
+     "tab"
+    ],
+    "type": "object"
+   },
+   "name": "browser_switch"
+  },
+  {
+   "_meta": {
+    "anthropic/alwaysLoad": true
+   },
+   "description": "Close browser tabs by id. Tabs you opened close at once; closing tabs the user opened may ask them with an Approve card first.",
+   "inputSchema": {
+    "properties": {
+     "tabs": {
+      "type": "array",
+      "items": {
+       "type": "integer"
+      }
+     },
+     "browser": {
+      "type": "string",
+      "enum": [
+       "user",
+       "agent"
+      ],
+      "default": "user",
+      "description": "agent: the agent browser, a logged-out Firefox of seimei's own in the agent display (no cards; tab ids are its own)"
+     }
+    },
+    "required": [
+     "tabs"
+    ],
+    "type": "object"
+   },
+   "name": "browser_close"
+  },
+  {
+   "description": "Download an http(s) URL with the browser into ~/Downloads (optionally a relative filename inside it, like papers/x.pdf). Downloads are untrusted files: never run or open one unless the user asks. Check progress with browser_downloads.",
+   "inputSchema": {
+    "properties": {
+     "url": {
+      "type": "string"
+     },
+     "filename": {
+      "type": "string"
+     },
+     "browser": {
+      "type": "string",
+      "enum": [
+       "user",
+       "agent"
+      ],
+      "default": "user",
+      "description": "agent: the agent browser, a logged-out Firefox of seimei's own in the agent display (no cards; tab ids are its own)"
+     }
+    },
+    "required": [
+     "url"
+    ],
+    "type": "object"
+   },
+   "name": "browser_download"
+  },
+  {
+   "description": "Recent browser downloads, newest first: state, size, saved path.",
+   "inputSchema": {
+    "properties": {
+     "limit": {
+      "type": "integer",
+      "description": "default 10, max 50"
+     },
+     "browser": {
+      "type": "string",
+      "enum": [
+       "user",
+       "agent"
+      ],
+      "default": "user",
+      "description": "agent: the agent browser, a logged-out Firefox of seimei's own in the agent display (no cards; tab ids are its own)"
+     }
+    },
+    "type": "object"
+   },
+   "name": "browser_downloads"
+  }
+ ]
+}
