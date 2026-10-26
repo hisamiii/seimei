@@ -426,10 +426,10 @@ async fn discord_plugin_forwards_to_seimei() {
     rules.example_rules(&std::env::temp_dir().join(format!("seimei-discord_plugin_forwards_to_seimei-rules-{}", std::process::id())));
     let (d, events, approvals, plugins) = host("discord", "discord").await;
     let link = d.join("run/seimei/discord.sock");
-    tokio::spawn(plugins.get::<seimei_core::plugins::discord::Discord>("discord").unwrap().link.clone().run(link.clone()));
+    tokio::spawn(plugins.get::<seimei_plugin_discord::Discord>("discord").unwrap().link.clone().run(link.clone()));
     let seen = connector(link, discord_op);
     let env = plugins.servers("seimei", None, None)["discord"]["env"].as_object().unwrap().clone();
-    let spec: Value = serde_json::from_str(seimei_core::plugins::discord::PLUGIN.spec).unwrap();
+    let spec: Value = serde_json::from_str(seimei_plugin_discord::PLUGIN.spec).unwrap();
     let mut srv = tokio::task::spawn_blocking(move || {
         let mut srv = Server::start("discord", &env, &[]);
         assert_eq!(srv.ask(1, "tools/list", json!({}))["tools"], spec["tools"]);

@@ -1,5 +1,5 @@
 #!/bin/sh
-# discord/build.sh: build Vencord with the seimei connector plugin into ~/.local/share/seimei/vencord, the dist dir
+# plugins/discord/vencord/build.sh: build Vencord with the seimei connector plugin into ~/.local/share/seimei/vencord, the dist dir
 # Vesktop loads once its Vencord Location points there (Vesktop settings, Developer Settings).
 # Vencord stays at the commit in vencord-commit, the one Vesktop had shipped, so only the plugin is new.
 set -eu

@@ -1,4 +1,4 @@
-//! The Discord plugin: a Vencord plugin in Vesktop (discord/seimeiConnector) connects to seimei's link socket and
+//! The Discord plugin: a Vencord plugin in Vesktop (vencord/seimeiConnector here) connects to seimei's link socket and
 //! answers with Discord's own in-client stores and API. The token never leaves the client.
 //!
 //! Messages are untrusted data. Reads are capped per call and per ten minutes, so nothing can page through history in
@@ -12,21 +12,21 @@ use std::sync::{Arc, Mutex};
 use base64::Engine;
 use serde_json::{Value, json};
 
-use super::link::Link;
-use super::{Builtin, Factory, Fut, Host, Session, int, py, size, space, strip};
-use crate::paths::{home, realpath};
-use crate::tools::text;
-use crate::uploads::Uploads;
-use crate::util::{now, truthy};
+use seimei_core::paths::{home, realpath};
+use seimei_core::plugins::link::{Link, runtime_path};
+use seimei_core::plugins::{Builtin, Factory, Fut, Host, Session, ask_guard, int, py, size, space, strip};
+use seimei_core::tools::text;
+use seimei_core::uploads::{self, Uploads};
+use seimei_core::util::{now, on_path, truthy};
 
 pub const PLUGIN: Factory = Factory {
     name: "discord",
-    what: "Discord through the Vesktop plugin in discord/",
+    what: "Discord through the Vesktop plugin in plugins/discord/vencord",
     needs: "Vesktop with the plugin",
-    found: || crate::util::on_path("vesktop"),
-    manifest: include_str!("discord/plugin.toml"),
-    prompt: include_str!("discord/prompt.md"),
-    spec: include_str!("discord/tools.json"),
+    found: || on_path("vesktop"),
+    manifest: include_str!("../plugin.toml"),
+    prompt: include_str!("../prompt.md"),
+    spec: include_str!("../tools.json"),
     hosted: true,
     make: |_, state| Ok(Arc::new(Discord::new(Some(state)))),
 };
@@ -37,7 +37,7 @@ impl Builtin for Discord {
     }
 
     fn start(self: Arc<Self>, host: Arc<Host>) {
-        tokio::spawn(self.link.clone().run(super::link::runtime_path("discord", host.dev)));
+        tokio::spawn(self.link.clone().run(runtime_path("discord", host.dev)));
     }
 }
 
@@ -220,7 +220,7 @@ impl Discord {
         let r = if truthy(r) { py(r) } else { String::new() };
         let r = strip(&r);
         if let Some(u) = &self.uploads
-            && crate::uploads::is_id(r)
+            && uploads::is_id(r)
         {
             return u.path(r).ok_or(format!("no upload {r}"));
         }
@@ -260,11 +260,11 @@ impl Discord {
         detail: String,
         reads: &[PathBuf],
     ) -> Option<Value> {
-        let mut about = crate::guard::About { what: target, detail, ..Default::default() };
+        let mut about = seimei_core::guard::About { what: target, detail, ..Default::default() };
         if let Some(m) = author {
             about.facts.insert("author".into(), json!(if truthy(&m["own"]) { "you" } else { "someone else" }));
         }
-        super::ask_guard(session, "discord", tool, a, Some(about), reads, "discord").await
+        ask_guard(session, "discord", tool, a, Some(about), reads, "discord").await
     }
 
     /// Where a message is, and the message.
@@ -506,7 +506,7 @@ impl Discord {
     pub async fn call(&self, tool: &str, a: &Value, session: &dyn Session) -> Value {
         // The calls that act on Discord ask the guard themselves, with what exactly goes out.
         let acts = ["discord_send", "discord_edit", "discord_delete", "discord_react"].contains(&tool);
-        if !acts && let Some(no) = super::ask_guard(session, "discord", tool, a, None, &[], "discord").await {
+        if !acts && let Some(no) = ask_guard(session, "discord", tool, a, None, &[], "discord").await {
             return no;
         }
         self.run(tool, a, session).await.unwrap_or_else(|e| text(&e, true))

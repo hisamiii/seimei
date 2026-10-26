@@ -1,4 +1,4 @@
-//! tests/cases/music.json: the music tool's text, and the
+//! tests/cases.json: the music tool's text, and the
 //! card a call raises with the request a fake Quod Libet bridge then gets.
 
 #[path = "../../../crates/core/tests/it/env.rs"]

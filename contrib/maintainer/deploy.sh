@@ -136,7 +136,7 @@ if [ -z "${SEIMEI_DEPLOY_TEST:-}" ]; then
     # The Discord connector: Vencord with the SeimeiConnector plugin, for Vesktop to load from its Vencord Location.
     # Without pnpm the last build stays in place; the rest of the deploy goes on.
     if command -v pnpm >/dev/null; then
-        "$app/discord/build.sh"
+        "$app/plugins/discord/vencord/build.sh"
     else
         echo "deploy: no pnpm, the Discord connector build is skipped" >&2
     fi

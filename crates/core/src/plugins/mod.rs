@@ -18,7 +18,6 @@
 
 pub mod browser;
 pub mod desktop;
-pub mod discord;
 pub mod link;
 pub mod queue;
 
@@ -42,7 +41,7 @@ const BUILTIN: [(&str, &str, &str); 2] = [
     ("desktop", include_str!("desktop/plugin.toml"), ""),
 ];
 /// The Factories that live in core until they move to plugins/.
-pub const FACTORIES: [Factory; 2] = [queue::PLUGIN, discord::PLUGIN];
+pub const FACTORIES: [Factory; 1] = [queue::PLUGIN];
 /// The names of the built-ins the binary has: their own tools ask the guard themselves.
 static BUILTIN_NAMES: RwLock<Vec<&'static str>> = RwLock::new(Vec::new());
 

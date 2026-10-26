@@ -2,4 +2,4 @@
 
 use seimei_core::plugins::{FACTORIES, Factory};
 
-pub const BUILTINS: [Factory; 3] = [seimei_plugin_music::PLUGIN, FACTORIES[0], FACTORIES[1]];
+pub const BUILTINS: [Factory; 3] = [seimei_plugin_music::PLUGIN, FACTORIES[0], seimei_plugin_discord::PLUGIN];

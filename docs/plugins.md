@@ -17,7 +17,7 @@ enabled = ["desktop", "music", "mytool"]
 | plugin | what | needs |
 |---|---|---|
 | `desktop` | windows, workspaces, screenshots, typing and pointer (uinput), AT-SPI, layout memory, screen unlock | niri, sway, Hyprland or an X11 EWMH window manager |
-| `discord` | read and send through the user's Discord client | the Vencord plugin in `discord/` built into Vesktop |
+| `discord` | read and send through the user's Discord client | the Vencord plugin in `plugins/discord/vencord/` built into Vesktop |
 | `browser` | tabs, page text and elements, acting on pages, waiting, tab screenshots, open, download | the seimei extension in Firefox, Waterfox or LibreWolf (`seimei.xpi` on the release page) |
 | `music` | Quod Libet and MPRIS players | the Quod Libet bridge (`plugins/music/seimei_bridge.py`) for tags and playlists |
 | `queue` | claude-queue / cqd: GPU turns for every session | claude-queue installed |

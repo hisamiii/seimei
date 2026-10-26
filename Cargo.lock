@@ -1939,6 +1939,7 @@ dependencies = [
  "minisign-verify",
  "reqwest",
  "seimei-core",
+ "seimei-plugin-discord",
  "seimei-plugin-music",
  "seimei-server",
  "serde_json",
@@ -1972,6 +1973,16 @@ dependencies = [
  "webauthn-rs",
  "webauthn-rs-proto",
  "webp",
+]
+
+[[package]]
+name = "seimei-plugin-discord"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "seimei-core",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
