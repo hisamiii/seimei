@@ -251,7 +251,7 @@ impl Browser {
 
     /// Whether seimei may act in the tab: its own tabs (opened by it, or in its tab group) always, the user's
     /// only after their Approve card, which holds until the tab leaves that site. None to go on, or the reply.
-    async fn may_act(&self, tab: i64, doing: &str, session: &impl Session) -> Result<Option<Value>, String> {
+    async fn may_act(&self, tab: i64, doing: &str, session: &dyn Session) -> Result<Option<Value>, String> {
         if self.opened.lock().unwrap().contains(&tab) {
             return Ok(None);
         }
@@ -278,7 +278,7 @@ impl Browser {
         }
     }
 
-    async fn act(&self, a: &Value, session: &impl Session) -> Result<Value, String> {
+    async fn act(&self, a: &Value, session: &dyn Session) -> Result<Value, String> {
         let tab = int(&a["tab"])?;
         let action = py(&a["action"]);
         if !ACTIONS.contains(&action.as_str()) {
@@ -307,7 +307,7 @@ impl Browser {
         Ok(text(&act_text(tab, a, &r), false))
     }
 
-    async fn navigate(&self, a: &Value, session: &impl Session) -> Result<Value, String> {
+    async fn navigate(&self, a: &Value, session: &dyn Session) -> Result<Value, String> {
         let tab = int(&a["tab"])?;
         let mut args = json!({"tab": tab});
         if truthy(&a["url"]) {
@@ -397,7 +397,7 @@ impl Browser {
         Ok(reads[&tab].1.clone())
     }
 
-    async fn close(&self, a: &Value, session: &impl Session) -> Result<Value, String> {
+    async fn close(&self, a: &Value, session: &dyn Session) -> Result<Value, String> {
         let ids: BTreeSet<i64> = a["tabs"].as_array().into_iter().flatten().map(int).collect::<Result<_, _>>()?;
         if ids.is_empty() {
             return Err("no tabs given".into());
@@ -435,7 +435,7 @@ impl Browser {
         Ok(text(&format!("Closed {n} tab{}.", if n == 1 { "" } else { "s" }), false))
     }
 
-    async fn run(&self, tool: &str, a: &Value, session: &impl Session) -> Result<Value, String> {
+    async fn run(&self, tool: &str, a: &Value, session: &dyn Session) -> Result<Value, String> {
         let ok = |t: String| Ok(text(&t, false));
         match tool {
             "browser_tabs" => ok(tabs_text(&self.link.call("tabs", 30, json!({})).await?)),
@@ -501,7 +501,7 @@ impl Browser {
     }
 
     /// One tool call, for the session that makes it.
-    pub async fn call(&self, tool: &str, a: &Value, session: &impl Session) -> Value {
+    pub async fn call(&self, tool: &str, a: &Value, session: &dyn Session) -> Value {
         // browser_close asks the guard itself, with which tabs are whose.
         if tool != "browser_close"
             && let Some(no) = super::ask_guard(session, "browser", tool, a, None, &[], "desktop").await

@@ -2,13 +2,12 @@
 //! one browser, a fake connector at its link answering each op with the step's replies (or failing with its fails),
 //! the user deciding each card as the step says. Checks the text, the card and what the connector got.
 
-use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use seimei_core::plugins::Session;
+use seimei_core::plugins::{Fut, Session};
 use seimei_core::plugins::browser::Browser;
 use serde_json::{Value, json};
 
@@ -23,13 +22,15 @@ struct Shared {
 struct User(Arc<Mutex<Shared>>);
 
 impl Session for User {
-    fn names(&self) -> HashMap<String, String> {
-        HashMap::new()
+    fn state(&self) -> &std::path::Path {
+        std::path::Path::new("/nonexistent")
     }
-    async fn card(&self, what: Value) -> Result<String, String> {
-        let mut s = self.0.lock().unwrap();
-        s.cards.push(what);
-        Ok(s.step["outcome"].as_str().unwrap_or("approved").into())
+    fn card(&self, what: Value) -> Fut<'_, Result<String, String>> {
+        Box::pin(async move {
+            let mut s = self.0.lock().unwrap();
+            s.cards.push(what);
+            Ok(s.step["outcome"].as_str().unwrap_or("approved").into())
+        })
     }
 }
 

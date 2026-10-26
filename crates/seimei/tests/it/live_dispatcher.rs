@@ -114,7 +114,7 @@ async fn run(work: std::path::PathBuf, state: std::path::PathBuf) {
     )
     .parse()
     .unwrap();
-    let plugins = Arc::new(Plugins::load_at(&cfg, &state, env!("CARGO_BIN_EXE_seimei")).about("test machine"));
+    let plugins = Arc::new(Plugins::load_at(&cfg, &state, env!("CARGO_BIN_EXE_seimei"), &seimei_core::plugins::FACTORIES).about("test machine"));
     let disp: toml::Table =
         format!("model = \"haiku\"\ncwd = \"{}\"\nname = \"seimei-live\"", work.display()).parse().unwrap();
     let app = seimei_server::App::new(seimei_server::Setup {
@@ -135,7 +135,7 @@ async fn run(work: std::path::PathBuf, state: std::path::PathBuf) {
     let links = state.join("links");
     std::fs::create_dir_all(&links).unwrap();
     tokio::spawn(plugins.browser.as_ref().unwrap().link.clone().run(links.join("browser.sock")));
-    tokio::spawn(plugins.discord.as_ref().unwrap().link.clone().run(links.join("discord.sock")));
+    tokio::spawn(plugins.get::<seimei_core::plugins::discord::Discord>("discord").unwrap().link.clone().run(links.join("discord.sock")));
     let tabs_seen = connector(links.join("browser.sock"), browser_op);
     let guilds_seen = connector(links.join("discord.sock"), discord_op);
 

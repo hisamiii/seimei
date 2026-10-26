@@ -5,7 +5,6 @@
 //! `seimei plugin desktop` end to end: its spec, a call forwarded to seimei, and the close-window card through the
 //! guard facts. Nothing reaches the real desktop.
 
-use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -16,7 +15,7 @@ use seimei_core::approvals::Approvals;
 use seimei_core::guard::{self, About};
 use seimei_core::events::EventLog;
 use seimei_core::plugins::desktop::{Ctx, Desktop, checks, layout, uinput::Device};
-use seimei_core::plugins::{Plugins, Session};
+use seimei_core::plugins::{Fut, Plugins, Session};
 use serde_json::{Value, json};
 
 const TOOLS: [&str; 13] = [
@@ -114,12 +113,13 @@ fn which(name: &str) -> Option<PathBuf> {
 struct Denies;
 
 impl Session for Denies {
-    fn names(&self) -> HashMap<String, String> {
-        HashMap::new()
+    fn state(&self) -> &std::path::Path {
+        std::path::Path::new("/nonexistent")
     }
-
-    async fn card(&self, _what: Value) -> Result<String, String> {
-        Ok("denied".into())
+    fn card(&self, _what: Value) -> Fut<'_, Result<String, String>> {
+        Box::pin(async move {
+            Ok("denied".into())
+        })
     }
 }
 
@@ -233,7 +233,7 @@ async fn end_to_end(t: &mut T, g: &Value) {
     let approvals = Arc::new(Approvals::new(events.clone()));
     let cfg: toml::Table = "enabled = [\"desktop\"]\n[desktop]\nbackend = \"niri\"".parse().unwrap();
     let plugins =
-        Arc::new(Plugins::load_at(&cfg, &state, env!("CARGO_BIN_EXE_seimei")).about("laptop (Arch, niri)"));
+        Arc::new(Plugins::load_at(&cfg, &state, env!("CARGO_BIN_EXE_seimei"), &seimei_core::plugins::FACTORIES).about("laptop (Arch, niri)"));
     let desk = plugins.desktop.clone().unwrap();
     assert_eq!(desk.b.ctx().run, t.run, "the plugin's desktop is not the test's");
     let spec = &serde_json::from_str::<Value>(&std::fs::read_to_string(repo().join("crates/core/data/tools.json")).unwrap())

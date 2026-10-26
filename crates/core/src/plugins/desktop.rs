@@ -759,7 +759,7 @@ impl Desktop {
     }
 
     /// One of the desktop tools, for the session the call came from.
-    pub async fn call(self: &Arc<Self>, tool: &str, args: &Value, session: &impl Session) -> Value {
+    pub async fn call(self: &Arc<Self>, tool: &str, args: &Value, session: &dyn Session) -> Value {
         let full = format!("mcp__desktop__{tool}");
         let a = args.clone();
         let about = self.blocking(move |d| checks::check(&full, &a, d)).await;
@@ -946,7 +946,7 @@ impl Desktop {
         Ok(lines.join("\n"))
     }
 
-    async fn restore_tool(self: &Arc<Self>, args: &Value, session: &impl Session) -> Value {
+    async fn restore_tool(self: &Arc<Self>, args: &Value, session: &dyn Session) -> Value {
         let plan = match self.blocking(|d| d.plan()).await {
             Ok(p) => p,
             Err(e) => return text(&e, true),

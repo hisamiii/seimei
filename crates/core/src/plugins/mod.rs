@@ -23,31 +23,106 @@ pub mod link;
 pub mod music;
 pub mod queue;
 
+use std::any::Any;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, LazyLock, Mutex, OnceLock};
+use std::sync::{Arc, LazyLock, Mutex, OnceLock, RwLock};
 
 use serde_json::{Map, Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
 use crate::approvals::Approvals;
+use crate::events::EventLog;
 use crate::util::{config_file, token_urlsafe};
 use crate::watches::Watches;
 
-/// The built-ins, whose own tools ask the guard themselves.
-pub const BUILTIN_NAMES: [&str; 5] = ["browser", "desktop", "discord", "music", "queue"];
-
-/// What a built-in ships: its manifest and its prompt section.
-const BUILTIN: [(&str, &str, &str); 5] = [
+/// What the browser and desktop plugins ship (their manifest and prompt section); the other built-ins are Factories.
+const BUILTIN: [(&str, &str, &str); 2] = [
     ("browser", include_str!("browser/plugin.toml"), include_str!("browser/prompt.md")),
     // Its prompt depends on the window manager and the computer: Plugins::about sets it.
     ("desktop", include_str!("desktop/plugin.toml"), ""),
-    ("discord", include_str!("discord/plugin.toml"), include_str!("discord/prompt.md")),
-    ("music", include_str!("music/plugin.toml"), ""),
-    ("queue", include_str!("queue/plugin.toml"), include_str!("queue/prompt.md")),
 ];
-/// Built-ins whose tools run inside seimei (they share a connector and what it knows); their process forwards calls.
-const HOSTED: [&str; 3] = ["browser", "desktop", "discord"];
+/// The Factories that live in core until they move to plugins/.
+pub const FACTORIES: [Factory; 3] = [music::PLUGIN, queue::PLUGIN, discord::PLUGIN];
+/// The names of the built-ins the binary has: their own tools ask the guard themselves.
+static BUILTIN_NAMES: RwLock<Vec<&'static str>> = RwLock::new(Vec::new());
+
+/// Whether a plugin of this name is built into the binary (its risky tools carry their own cards).
+pub fn is_builtin(name: &str) -> bool {
+    BUILTIN_NAMES.read().unwrap().contains(&name)
+}
+
+/// A plugin built into the binary, from its crate under plugins/: what it ships and how it is made.
+#[derive(Clone, Copy)]
+pub struct Factory {
+    pub name: &'static str,
+    /// For setup's list: what it does, and what it needs on the machine.
+    pub what: &'static str,
+    pub needs: &'static str,
+    /// Whether what it needs looks present here, for setup's hint.
+    pub found: fn() -> bool,
+    /// Its plugin.toml and its prompt section.
+    pub manifest: &'static str,
+    pub prompt: &'static str,
+    /// Its MCP server as Claude Code sees it: {"initialize", "tools"} as JSON.
+    pub spec: &'static str,
+    /// Its tools run inside seimei (they share a connector), and its `seimei plugin` process forwards each call.
+    pub hosted: bool,
+    /// The plugin from its [plugins.<name>] table and seimei's state folder, in seimei or in its own process; Err
+    /// keeps it off.
+    pub make: Make,
+}
+
+/// How a Factory makes its plugin.
+pub type Make = fn(&toml::Table, &Path) -> Result<Arc<dyn Builtin>, String>;
+/// A line for the dispatcher: (text, urgent, key).
+pub type Notify = Box<dyn Fn(&str, bool, &str) + Send + Sync>;
+
+/// A built-in plugin once made. Only `call` is required; the rest are hooks into seimei a plugin may use.
+pub trait Builtin: Any + Send + Sync {
+    /// One tool call, for the session it serves: the tool's result, errors as an error result.
+    fn call<'a>(&'a self, tool: &'a str, args: &'a Value, session: &'a dyn Session) -> Fut<'a, Value>;
+    /// Its prompt section when it depends on the machine (config [host] about); None keeps the shipped one.
+    fn prompt(&self, _about: &str) -> Option<String> {
+        None
+    }
+    /// plugin.toml's worker_note, with what only the plugin knows filled in.
+    fn worker_note(&self, note: &str) -> String {
+        note.to_string()
+    }
+    /// Environment for every session (seimei's own and each shikigami's), whether it has the plugin or not.
+    fn env(&self, _session: &str) -> Vec<(String, String)> {
+        vec![]
+    }
+    /// How a session's command runs when it opens in a terminal (a release or a loan).
+    fn wrap(&self, _session: &str, argv: Vec<String>) -> Vec<String> {
+        argv
+    }
+    /// Watch triggers it adds: (name, what fires it).
+    fn triggers(&self) -> &'static [(&'static str, &'static str)] {
+        &[]
+    }
+    /// Whether a watch rule on one of its triggers makes sense; Err says why not.
+    fn check_trigger(&self, _trigger: &str, _target: &str) -> Result<(), String> {
+        Ok(())
+    }
+    /// One watch tick while a rule uses one of its triggers.
+    fn watch<'a>(&'a self, _watches: &'a Watches, _state: &'a Path) -> Fut<'a, ()> {
+        Box::pin(async {})
+    }
+    /// Its background work inside seimei (a connector's socket, a watcher), started once when the server is up.
+    fn start(self: Arc<Self>, _host: Arc<Host>) {}
+}
+
+/// What a plugin's background work in seimei may use.
+pub struct Host {
+    pub state: PathBuf,
+    /// A dev server: connector sockets get their -dev names.
+    pub dev: bool,
+    pub events: Arc<EventLog>,
+    /// A line for the dispatcher, batched with the others.
+    pub notify: Notify,
+}
 /// What an external entry may pass on to Claude Code (its mcpServers format).
 const MCP_KEYS: [&str; 6] = ["type", "command", "args", "env", "url", "headers"];
 /// Each built-in's MCP server as Claude Code sees it (initialize and tools/list).
@@ -80,9 +155,9 @@ pub struct Plugin {
 /// The enabled plugins, built once from config at startup.
 pub struct Plugins {
     list: Vec<Plugin>,
-    pub queue: Option<queue::Queue>,
+    /// The enabled built-ins that are Factories, made.
+    made: Vec<(&'static str, Arc<dyn Builtin>)>,
     pub browser: Option<Arc<browser::Browser>>,
-    pub discord: Option<Arc<discord::Discord>>,
     pub desktop: Option<Arc<desktop::Desktop>>,
     state: PathBuf,
     socket: PathBuf,
@@ -124,18 +199,19 @@ fn descends(pid: u32, root: u32) -> bool {
 
 /// A built-in's tools inside seimei, for the session a token names: its cards go to the user.
 struct Local<'a> {
+    state: &'a Path,
     approvals: &'a Approvals,
     who: &'a str,
     worker: Option<&'a str>,
 }
 
 impl Session for Local<'_> {
-    fn names(&self) -> HashMap<String, String> {
-        HashMap::new()
+    fn state(&self) -> &Path {
+        self.state
     }
 
-    async fn card(&self, what: Value) -> Result<String, String> {
-        Ok(self.approvals.hold(what, self.who, self.worker).await.to_string())
+    fn card(&self, what: Value) -> Fut<'_, Result<String, String>> {
+        Box::pin(async move { Ok(self.approvals.hold(what, self.who, self.worker).await.to_string()) })
     }
 }
 
@@ -155,20 +231,25 @@ fn manifest(text: &str) -> Result<(String, Vec<Value>, String, String), String> 
 }
 
 impl Plugins {
-    /// The enabled plugins from config [plugins]; one that cannot load is skipped with a warning.
-    pub fn load(cfg: &toml::Table, state: &Path) -> Plugins {
+    /// The enabled plugins from config [plugins], with the built-ins the binary has; one that cannot load is skipped
+    /// with a warning.
+    pub fn load(cfg: &toml::Table, state: &Path, builtins: &[Factory]) -> Plugins {
         let exe = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or("seimei".into());
-        Plugins::load_at(cfg, state, &exe)
+        Plugins::load_at(cfg, state, &exe, builtins)
     }
 
     /// The same, with the built-ins run by exe (a test runs the built seimei, not itself).
-    pub fn load_at(cfg: &toml::Table, state: &Path, exe: &str) -> Plugins {
+    pub fn load_at(cfg: &toml::Table, state: &Path, exe: &str, builtins: &[Factory]) -> Plugins {
+        {
+            let mut names = BUILTIN_NAMES.write().unwrap();
+            names.clear();
+            names.extend(builtins.iter().map(|f| f.name).chain(BUILTIN.iter().map(|b| b.0)));
+        }
         let dir = config_file().with_file_name("plugins");
         let mut out = Plugins {
             list: vec![],
-            queue: None,
+            made: vec![],
             browser: None,
-            discord: None,
             desktop: None,
             state: state.into(),
             socket: state.join("plugins.sock"),
@@ -179,11 +260,16 @@ impl Plugins {
         let enabled = cfg.get("enabled").and_then(|e| e.as_array()).cloned().unwrap_or_default();
         for name in enabled.iter().filter_map(|n| n.as_str()) {
             let own = cfg.get(name).and_then(|t| t.as_table()).cloned().unwrap_or_default();
+            if let Some(f) = builtins.iter().find(|f| f.name == name) {
+                match out.factory(f, &own, state, exe) {
+                    Ok(p) => out.list.push(p),
+                    Err(e) => eprintln!("seimei: plugin {name}: {e}; seimei goes on without it"),
+                }
+                continue;
+            }
             let loaded = out.plugin(name, &own, exe, &dir).and_then(|p| {
                 match name {
-                    "queue" => out.queue = Some(queue::Queue::new(&own)),
                     "browser" => out.browser = Some(Arc::new(browser::Browser::new(Some(state)))),
-                    "discord" => out.discord = Some(Arc::new(discord::Discord::new(Some(state)))),
                     "desktop" => {
                         let s = |k: &str| own.get(k).and_then(|v| v.as_str()).filter(|v| !v.is_empty());
                         let d = desktop::Desktop::new(s("backend"), desktop::Ctx::system(), state, s("shell"), None)?;
@@ -204,6 +290,38 @@ impl Plugins {
         out
     }
 
+    /// A built-in Factory, made and listed.
+    fn factory(&mut self, f: &Factory, own: &toml::Table, state: &Path, exe: &str) -> Result<Plugin, String> {
+        let (command, args, _, note) = manifest(f.manifest)?;
+        let made = (f.make)(own, state)?;
+        let command = if command == "seimei" { exe.to_string() } else { command };
+        let mcp = Map::from_iter([("command".into(), json!(command)), ("args".into(), json!(args))]);
+        let p = Plugin {
+            name: f.name.into(),
+            mcp,
+            prompt: f.prompt.trim().into(),
+            worker_note: made.worker_note(&note).trim().into(),
+            own: true,
+            linked: true,
+        };
+        self.made.push((f.name, made));
+        Ok(p)
+    }
+
+    /// A made built-in of type T, for the binary's own wiring.
+    pub fn get<T: Builtin>(&self, name: &str) -> Option<Arc<T>> {
+        let (_, b) = self.made.iter().find(|(n, _)| *n == name)?;
+        let any: Arc<dyn Any + Send + Sync> = b.clone();
+        any.downcast().ok()
+    }
+
+    /// Starts the built-ins' background work.
+    pub fn start(&self, host: Arc<Host>) {
+        for (_, b) in &self.made {
+            b.clone().start(host.clone());
+        }
+    }
+
     fn plugin(&self, name: &str, own: &toml::Table, exe: &str, dir: &Path) -> Result<Plugin, String> {
         let base = |mcp, prompt: String, worker_note: String, own, linked| Plugin {
             name: name.into(),
@@ -217,7 +335,7 @@ impl Plugins {
             let (command, args, _, note) = manifest(text)?;
             let command = if command == "seimei" { exe.to_string() } else { command };
             let mcp = Map::from_iter([("command".into(), json!(command)), ("args".into(), json!(args))]);
-            return Ok(base(mcp, prompt.to_string(), note.replace("{launch}", queue::launch()), true, true));
+            return Ok(base(mcp, prompt.to_string(), note, true, true));
         }
         let folder = dir.join(name);
         if let Ok(text) = std::fs::read_to_string(folder.join("plugin.toml")) {
@@ -248,6 +366,13 @@ impl Plugins {
 
     /// The computer seimei runs on, from config [host] about: the desktop's prompt names it.
     pub fn about(mut self, about: &str) -> Plugins {
+        for (name, b) in &self.made {
+            if let Some(text) = b.prompt(about)
+                && let Some(p) = self.list.iter_mut().find(|p| p.name == *name)
+            {
+                p.prompt = text;
+            }
+        }
         if let Some(d) = &self.desktop
             && let Some(p) = self.list.iter_mut().find(|p| p.name == "desktop")
         {
@@ -368,32 +493,32 @@ impl Plugins {
 
     /// Environment for a session named name (seimei's own and each shikigami's).
     pub fn env(&self, name: &str) -> Vec<(String, String)> {
-        self.queue.as_ref().map(|q| q.env(name)).unwrap_or_default()
+        self.made.iter().flat_map(|(_, b)| b.env(name)).collect()
     }
 
     /// How a session's own command runs when it is opened in a terminal (a release or a loan).
     pub fn wrap(&self, name: &str, argv: Vec<String>) -> Vec<String> {
-        match &self.queue {
-            Some(q) => q.wrap(name, argv),
-            None => argv,
-        }
+        self.made.iter().fold(argv, |argv, (_, b)| b.wrap(name, argv))
     }
 
     /// Watch triggers the plugins add: (name, what fires it).
     pub fn triggers(&self) -> Vec<(&'static str, &'static str)> {
-        if self.queue.is_some() { queue::TRIGGERS.to_vec() } else { vec![] }
+        self.made.iter().flat_map(|(_, b)| b.triggers().iter().copied()).collect()
     }
 
     /// Whether a watch rule's plugin trigger and target make sense; Err says why not.
     pub fn check_trigger(&self, trigger: &str, target: &str) -> Result<(), String> {
-        self.queue.as_ref().map_or(Ok(()), |q| q.check_trigger(trigger, target))
+        let owner = self.made.iter().find(|(_, b)| b.triggers().iter().any(|(t, _)| *t == trigger));
+        owner.map_or(Ok(()), |(_, b)| b.check_trigger(trigger, target))
     }
 
     /// Every watch tick: fire the plugin triggers some rule uses.
     pub async fn watch(&self, watches: &Watches) {
-        let used = watches.rules().iter().any(|r| self.triggers().iter().any(|(t, _)| r["trigger"] == *t));
-        if let Some(q) = self.queue.as_ref().filter(|_| used) {
-            q.watch(watches, &self.state).await;
+        let rules = watches.rules();
+        for (_, b) in &self.made {
+            if rules.iter().any(|r| b.triggers().iter().any(|(t, _)| r["trigger"] == *t)) {
+                b.watch(watches, &self.state).await;
+            }
         }
     }
 
@@ -441,7 +566,7 @@ impl Plugins {
                                 None => json!({"error": "this session has no shikigami tools"}),
                             }
                         } else {
-                            let session = Local { approvals: &approvals, who: &g.who, worker: g.worker.as_deref() };
+                            let session = Local { state: &me.state, approvals: &approvals, who: &g.who, worker: g.worker.as_deref() };
                             let (tool, args) = (req["tool"].as_str().unwrap_or(""), &req["args"]);
                             // The call went away (cancelled, or its session ended): drop it, cards and all.
                             tokio::select! {
@@ -472,7 +597,7 @@ impl Plugins {
 /// guard.toml's rules for a built-in's own tool call: None to go on, or the reply that ends it. about: what the plugin
 /// knows (facts for the rules, and the card's title and detail); reads: files the call reads; kind: the card's action.
 pub(crate) async fn ask_guard(
-    session: &impl Session,
+    session: &dyn Session,
     plugin: &str,
     tool: &str,
     args: &Value,
@@ -509,20 +634,25 @@ pub(crate) async fn ask_guard(
     }
 }
 
-/// What a built-in's tools need from the session they serve: who is who in the queue, and the user's OK.
+/// A boxed future, for the plugin traits' async methods.
+pub type Fut<'a, T> = std::pin::Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
+/// What a built-in's tools need from the session they serve: seimei's state folder, and the user's OK.
 pub trait Session: Send + Sync {
-    fn names(&self) -> HashMap<String, String>;
+    fn state(&self) -> &Path;
     /// Show an Approve/Deny card: approved, denied or expired; Err when seimei cannot be reached.
-    fn card(&self, what: Value) -> impl Future<Output = Result<String, String>> + Send;
+    fn card(&self, what: Value) -> Fut<'_, Result<String, String>>;
 }
 
 impl Plugins {
     /// A hosted plugin's tool call.
-    async fn call(&self, plugin: &str, tool: &str, args: &Value, session: &impl Session) -> Value {
-        match (plugin, &self.browser, &self.discord, &self.desktop) {
-            ("browser", Some(b), _, _) => b.call(tool, args, session).await,
-            ("discord", _, Some(d), _) => d.call(tool, args, session).await,
-            ("desktop", _, _, Some(d)) => d.call(tool, args, session).await,
+    async fn call(&self, plugin: &str, tool: &str, args: &Value, session: &dyn Session) -> Value {
+        if let Some((_, b)) = self.made.iter().find(|(n, _)| *n == plugin) {
+            return b.call(tool, args, session).await;
+        }
+        match (plugin, &self.browser, &self.desktop) {
+            ("browser", Some(b), _) => b.call(tool, args, session).await,
+            ("desktop", _, Some(d)) => d.call(tool, args, session).await,
             _ => crate::tools::text(&format!("{plugin} is not on"), true),
         }
     }
@@ -577,11 +707,17 @@ struct Remote {
 }
 
 impl Session for Remote {
-    fn names(&self) -> HashMap<String, String> {
-        queue::names(&self.state)
+    fn state(&self) -> &Path {
+        &self.state
     }
 
-    async fn card(&self, what: Value) -> Result<String, String> {
+    fn card(&self, what: Value) -> Fut<'_, Result<String, String>> {
+        Box::pin(self.ask(what))
+    }
+}
+
+impl Remote {
+    async fn ask(&self, what: Value) -> Result<String, String> {
         let lost = || "seimei restarted, ask again".to_string();
         let sock = tokio::net::UnixStream::connect(&self.socket).await.map_err(|_| lost())?;
         let (rd, mut wr) = sock.into_split();
@@ -618,11 +754,24 @@ impl Remote {
 }
 
 /// `seimei plugin <name>`: a built-in plugin as an MCP server on stdin and stdout, one JSON-RPC message per line.
-pub async fn serve_stdio(name: &str) -> Result<(), String> {
+/// A hosted one forwards each call to seimei; the others run their tools in this process.
+pub async fn serve_stdio(name: &str, builtins: &[Factory]) -> Result<(), String> {
     let var = |k: &str| std::env::var(k).unwrap_or_default();
-    let mut spec = match name {
-        "shikigami" => OWN.clone(),
+    let factory = builtins.iter().find(|f| f.name == name);
+    let mut spec = match (name, factory) {
+        ("shikigami", _) => OWN.clone(),
+        (_, Some(f)) => serde_json::from_str(f.spec).map_err(|e| format!("{name}'s tools: {e}"))?,
         _ => SPECS.get(name).cloned().ok_or(format!("no built-in plugin {name}"))?,
+    };
+    // Its own instance, from the same [plugins.<name>] table seimei read.
+    let local = match factory.filter(|f| !f.hosted) {
+        Some(f) => {
+            let cfg: toml::Table =
+                std::fs::read_to_string(config_file()).ok().and_then(|t| t.parse().ok()).unwrap_or_default();
+            let own = cfg.get("plugins").and_then(|p| p.get(name)).and_then(|t| t.as_table()).cloned();
+            Some((f.make)(&own.unwrap_or_default(), Path::new(&var("SEIMEI_STATE")))?)
+        }
+        None => None,
     };
     if name == "desktop" {
         // One spec per window manager; seimei says which.
@@ -651,14 +800,14 @@ pub async fn serve_stdio(name: &str) -> Result<(), String> {
         }
         let key = msg.get("id").map(|i| i.to_string());
         let (spec, remote, out, done, id) = (spec.clone(), remote.clone(), out.clone(), running.clone(), key.clone());
+        let local = local.clone();
         let mut calls = running.lock().unwrap();
         // Each call on its own: a card that waits for the user does not hold up the other tools.
         let task = tokio::spawn(async move {
             let reply = crate::tools::serve(&spec, msg, |tool, args| async move {
-                match remote.plugin.as_str() {
-                    p if HOSTED.contains(&p) || p == "shikigami" => remote.forward(&tool, &args).await,
-                    "music" => music::call(&tool, &args, remote.as_ref()).await,
-                    _ => queue::call(&tool, &args, remote.as_ref()).await,
+                match &local {
+                    Some(b) => b.call(&tool, &args, remote.as_ref()).await,
+                    None => remote.forward(&tool, &args).await,
                 }
             })
             .await;

@@ -1039,7 +1039,7 @@ pub fn about(tool: &str, inp: &Value) -> Option<About> {
 fn in_place(tool: &str) -> bool {
     tool.strip_prefix("mcp__")
         .and_then(|t| t.split_once("__"))
-        .is_some_and(|(plugin, _)| crate::plugins::BUILTIN_NAMES.contains(&plugin))
+        .is_some_and(|(plugin, _)| crate::plugins::is_builtin(plugin))
 }
 
 /// Recent tool calls from the audit log, newest first, each with its outcome folded in.

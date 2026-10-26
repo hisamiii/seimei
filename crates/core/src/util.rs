@@ -49,6 +49,11 @@ pub fn now() -> f64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0)
 }
 
+/// Whether a program of this name is on PATH.
+pub fn on_path(name: &str) -> bool {
+    std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(name).is_file()))
+}
+
 /// A failed turn's reason for the chat. Claude Code's missing-login error says to run /login, which a phone cannot.
 pub fn turn_error(why: &str) -> String {
     if why.contains("/login") || why.contains("Not logged in") {

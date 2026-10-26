@@ -7,7 +7,7 @@
 - HTTPS in front of seimei for the phone: [reach.md](reach.md) has recipes for Tailscale and a Cloudflare tunnel. Without it, seimei works in this machine's browser only.
 - For the phone app: Android 11 or later. An iPhone uses the web page (add it to the Home Screen for notifications).
 - Each plugin needs its own programs (a supported window manager, playerctl, the browser extension, ...): see [plugins.md](plugins.md).
-- To build from source: Rust 1.85 or later (edition 2024) and a C compiler (openssl is vendored).
+- To build from source: Rust 1.86 or later (edition 2024) and a C compiler (openssl is vendored).
 
 ## From a release
 

@@ -13,11 +13,33 @@ use base64::Engine;
 use serde_json::{Value, json};
 
 use super::link::Link;
-use super::{Session, int, py, size, space, strip};
+use super::{Builtin, Factory, Fut, Host, Session, int, py, size, space, strip};
 use crate::paths::{home, realpath};
 use crate::tools::text;
 use crate::uploads::Uploads;
 use crate::util::{now, truthy};
+
+pub const PLUGIN: Factory = Factory {
+    name: "discord",
+    what: "Discord through the Vesktop plugin in discord/",
+    needs: "Vesktop with the plugin",
+    found: || crate::util::on_path("vesktop"),
+    manifest: include_str!("discord/plugin.toml"),
+    prompt: include_str!("discord/prompt.md"),
+    spec: include_str!("discord/tools.json"),
+    hosted: true,
+    make: |_, state| Ok(Arc::new(Discord::new(Some(state)))),
+};
+
+impl Builtin for Discord {
+    fn call<'a>(&'a self, tool: &'a str, args: &'a Value, session: &'a dyn Session) -> Fut<'a, Value> {
+        Box::pin(Discord::call(self, tool, args, session))
+    }
+
+    fn start(self: Arc<Self>, host: Arc<Host>) {
+        tokio::spawn(self.link.clone().run(super::link::runtime_path("discord", host.dev)));
+    }
+}
 
 const MAX_READ: i64 = 100;
 const MAX_DMS: i64 = 100;
@@ -230,7 +252,7 @@ impl Discord {
     #[allow(clippy::too_many_arguments)]
     async fn ask(
         &self,
-        session: &impl Session,
+        session: &dyn Session,
         tool: &str,
         a: &Value,
         author: Option<&Value>,
@@ -333,7 +355,7 @@ impl Discord {
         Ok(head + &ms.iter().map(hit).collect::<Vec<_>>().join("\n"))
     }
 
-    async fn send(&self, a: &Value, session: &impl Session) -> Result<Value, String> {
+    async fn send(&self, a: &Value, session: &dyn Session) -> Result<Value, String> {
         let channel = id(&a["channel"], "channel")?;
         let body = if truthy(&a["text"]) { py(&a["text"]) } else { String::new() };
         let reply_to = if truthy(&a["reply_to"]) { Some(id(&a["reply_to"], "reply_to")?) } else { None };
@@ -395,7 +417,7 @@ impl Discord {
         Ok(text(&format!("Sent to {} (message {}).", py(&r["where"]), py(&r["id"])), false))
     }
 
-    async fn edit(&self, a: &Value, session: &impl Session) -> Result<Value, String> {
+    async fn edit(&self, a: &Value, session: &dyn Session) -> Result<Value, String> {
         let (channel, msg) = (id(&a["channel"], "channel")?, id(&a["message"], "message")?);
         let body = if truthy(&a["text"]) { py(&a["text"]) } else { String::new() };
         if strip(&body).is_empty() {
@@ -419,7 +441,7 @@ impl Discord {
         Ok(text(&format!("Edited message {msg} in {place}."), false))
     }
 
-    async fn delete(&self, a: &Value, session: &impl Session) -> Result<Value, String> {
+    async fn delete(&self, a: &Value, session: &dyn Session) -> Result<Value, String> {
         let (channel, msg) = (id(&a["channel"], "channel")?, id(&a["message"], "message")?);
         let (place, m) = self.message(&channel, &msg).await?;
         let target = format!("delete {} Discord message in {place}", whose(&m));
@@ -430,7 +452,7 @@ impl Discord {
         Ok(text(&format!("Deleted message {msg} in {place}."), false))
     }
 
-    async fn react(&self, a: &Value, session: &impl Session) -> Result<Value, String> {
+    async fn react(&self, a: &Value, session: &dyn Session) -> Result<Value, String> {
         let (channel, msg) = (id(&a["channel"], "channel")?, id(&a["message"], "message")?);
         let emoji = if truthy(&a["emoji"]) { py(&a["emoji"]) } else { String::new() };
         let emoji = strip(&emoji);
@@ -448,7 +470,7 @@ impl Discord {
         Ok(text(&format!("Reacted {emoji} to message {msg}."), false))
     }
 
-    async fn run(&self, tool: &str, a: &Value, session: &impl Session) -> Result<Value, String> {
+    async fn run(&self, tool: &str, a: &Value, session: &dyn Session) -> Result<Value, String> {
         let ok = |t: String| Ok(text(&t, false));
         match tool {
             "discord_guilds" => ok(self.guilds(a).await?),
@@ -481,7 +503,7 @@ impl Discord {
     }
 
     /// One tool call, for the session that makes it.
-    pub async fn call(&self, tool: &str, a: &Value, session: &impl Session) -> Value {
+    pub async fn call(&self, tool: &str, a: &Value, session: &dyn Session) -> Value {
         // The calls that act on Discord ask the guard themselves, with what exactly goes out.
         let acts = ["discord_send", "discord_edit", "discord_delete", "discord_react"].contains(&tool);
         if !acts && let Some(no) = super::ask_guard(session, "discord", tool, a, None, &[], "discord").await {

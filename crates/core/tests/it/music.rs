@@ -1,13 +1,12 @@
 //! tests/cases/music.json: the music tool's text, and the
 //! card a call raises with the request a fake Quod Libet bridge then gets.
 
-use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use seimei_core::plugins::{Session, music};
+use seimei_core::plugins::{Fut, Session, music};
 use serde_json::{Value, json};
 
 /// The user, approving every card and keeping it.
@@ -15,12 +14,14 @@ use serde_json::{Value, json};
 struct User(Mutex<Vec<Value>>);
 
 impl Session for User {
-    fn names(&self) -> HashMap<String, String> {
-        HashMap::new()
+    fn state(&self) -> &std::path::Path {
+        std::path::Path::new("/nonexistent")
     }
-    async fn card(&self, what: Value) -> Result<String, String> {
-        self.0.lock().unwrap().push(what);
-        Ok("approved".into())
+    fn card(&self, what: Value) -> Fut<'_, Result<String, String>> {
+        Box::pin(async move {
+            self.0.lock().unwrap().push(what);
+            Ok("approved".into())
+        })
     }
 }
 

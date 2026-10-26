@@ -42,6 +42,9 @@ use seimei_core::push::{Fcm, Push, WebPush};
 use seimei_core::util::{config_file, data_dir};
 use serde_json::Value;
 
+/// The plugins built into this binary, each from its crate under plugins/.
+const BUILTINS: [seimei_core::plugins::Factory; 3] = seimei_core::plugins::FACTORIES;
+
 const COMMANDS: [&str; 13] = [
     "serve",
     "setup",
@@ -271,13 +274,13 @@ fn main() {
         // Claude Code starts it for a session: an MCP server on stdin and stdout.
         let name = a.plugin.clone().unwrap_or_else(|| die("usage: seimei plugin NAME"));
         let rt = tokio::runtime::Runtime::new().expect("a runtime");
-        return rt.block_on(seimei_core::plugins::serve_stdio(&name)).unwrap_or_else(|e| die(&e));
+        return rt.block_on(seimei_core::plugins::serve_stdio(&name, &BUILTINS)).unwrap_or_else(|e| die(&e));
     }
     if a.command == "browser-host" {
         return seimei_core::plugins::browser::host::run();
     }
     if a.command == "setup" {
-        return setup::run(secret);
+        return setup::run(secret, &BUILTINS);
     }
     if a.command == "version" {
         return println!("seimei {}", env!("CARGO_PKG_VERSION"));
@@ -370,7 +373,7 @@ fn main() {
             .map(String::from)
             .unwrap_or_else(|| setup::terminal_default(std::env::var("TERMINAL").ok().as_deref(), setup::on_path).into()),
         plugins: Arc::new(
-            Plugins::load(&cfg.get("plugins").and_then(|p| p.as_table()).cloned().unwrap_or_default(), &state)
+            Plugins::load(&cfg.get("plugins").and_then(|p| p.as_table()).cloned().unwrap_or_default(), &state, &BUILTINS)
                 .about(about),
         ),
     };
@@ -400,9 +403,6 @@ fn main() {
         if let Some(b) = &app.pool.plugins.browser {
             tokio::spawn(b.link.clone().run(seimei_core::plugins::link::runtime_path("browser", a.dev)));
         }
-        if let Some(d) = &app.pool.plugins.discord {
-            tokio::spawn(d.link.clone().run(seimei_core::plugins::link::runtime_path("discord", a.dev)));
-        }
         if let Some(d) = &app.pool.plugins.desktop {
             let disp = app.dispatcher.clone();
             d.attach(seimei_core::plugins::desktop::Hooks {
@@ -417,15 +417,13 @@ fn main() {
             tokio::spawn(d.clone().run());
             tokio::spawn(d.clone().layout());
         }
-        if app.pool.plugins.queue.is_some() {
-            let (st, p, ev) = (state.clone(), app.pool.clone(), events.clone());
-            let watcher = seimei_core::plugins::queue::Watcher::new(
-                Box::new(move || seimei_core::plugins::queue::names(&st)),
-                Box::new(move |line, urgent, key| p.notify(line, urgent, Some(key))),
-                Box::new(move |snap| ev.flash(snap)),
-            );
-            tokio::spawn(watcher.run());
-        }
+        let pool = app.pool.clone();
+        app.pool.plugins.start(Arc::new(seimei_core::plugins::Host {
+            state: state.clone(),
+            dev: a.dev,
+            events: events.clone(),
+            notify: Box::new(move |line, urgent, key| pool.notify(line, urgent, Some(key))),
+        }));
         let wake = seimei_core::wake::WakeWatch::new(events.clone(), app.pool.clone());
         tokio::spawn(wake.run(std::time::Duration::from_secs(10)));
         // `systemctl --user kill -s USR1 seimei` from a key binding: end the turn.

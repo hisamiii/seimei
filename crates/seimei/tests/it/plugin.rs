@@ -90,7 +90,7 @@ async fn queue_plugin_over_stdio() {
     assert_eq!(entry["args"], json!(["plugin", "queue"]));
 
     // Blocking stdio: each step runs off the runtime, which serves the card socket meanwhile.
-    let spec = tools()["plugins"]["queue"].clone();
+    let spec: Value = serde_json::from_str(seimei_core::plugins::queue::PLUGIN.spec).unwrap();
     let (env2, sock2) = (env.clone(), cqd_sock.clone());
     let mut srv = tokio::task::spawn_blocking(move || {
         let mut srv = Server::queue(&env2, &sock2);
@@ -187,7 +187,7 @@ async fn host(name: &str, enabled: &str) -> (std::path::PathBuf, Arc<EventLog>, 
     let events = Arc::new(EventLog::open(&state.join("events.jsonl")).unwrap());
     let approvals = Arc::new(Approvals::new(events.clone()));
     let cfg: toml::Table = format!("enabled = [\"{enabled}\"]").parse().unwrap();
-    let plugins = Arc::new(Plugins::load(&cfg, &state));
+    let plugins = Arc::new(Plugins::load(&cfg, &state, &seimei_core::plugins::FACTORIES));
     plugins.servers("seimei", None, None);
     plugins.root("seimei", None, Some(std::process::id()));
     tokio::spawn(plugins.clone().listen(approvals.clone()));
@@ -236,7 +236,7 @@ async fn music_plugin_over_stdio() {
     let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
     let more = [("SEIMEI_QL_SOCK", sock.display().to_string()), ("PATH", path)];
 
-    let spec = tools()["plugins"]["music"].clone();
+    let spec: Value = serde_json::from_str(seimei_core::plugins::music::PLUGIN.spec).unwrap();
     let want = status["want"].as_str().unwrap().to_string();
     let mut srv = tokio::task::spawn_blocking(move || {
         let mut srv = Server::start("music", &env, &more);
@@ -425,10 +425,10 @@ async fn discord_plugin_forwards_to_seimei() {
     rules.example_rules(&std::env::temp_dir().join(format!("seimei-discord_plugin_forwards_to_seimei-rules-{}", std::process::id())));
     let (d, events, approvals, plugins) = host("discord", "discord").await;
     let link = d.join("run/seimei/discord.sock");
-    tokio::spawn(plugins.discord.as_ref().unwrap().link.clone().run(link.clone()));
+    tokio::spawn(plugins.get::<seimei_core::plugins::discord::Discord>("discord").unwrap().link.clone().run(link.clone()));
     let seen = connector(link, discord_op);
     let env = plugins.servers("seimei", None, None)["discord"]["env"].as_object().unwrap().clone();
-    let spec = tools()["plugins"]["discord"].clone();
+    let spec: Value = serde_json::from_str(seimei_core::plugins::discord::PLUGIN.spec).unwrap();
     let mut srv = tokio::task::spawn_blocking(move || {
         let mut srv = Server::start("discord", &env, &[]);
         assert_eq!(srv.ask(1, "tools/list", json!({}))["tools"], spec["tools"]);

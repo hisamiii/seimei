@@ -68,7 +68,7 @@ async fn dsh_shikigami_live() {
     rules.example_rules(&base.join("config"));
     let events = Arc::new(EventLog::open(&state.join("events.jsonl")).unwrap());
     let approvals = Arc::new(Approvals::new(events.clone()));
-    let plugins = Arc::new(Plugins::load_at(&toml::Table::new(), &state, env!("CARGO_BIN_EXE_seimei")));
+    let plugins = Arc::new(Plugins::load_at(&toml::Table::new(), &state, env!("CARGO_BIN_EXE_seimei"), &seimei_core::plugins::FACTORIES));
     let parts = Parts {
         events: events.clone(),
         board: Arc::new(Mutex::new(Board::open(&state.join("tasks.json"), Some(events.clone())))),

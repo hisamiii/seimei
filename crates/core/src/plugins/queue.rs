@@ -18,12 +18,65 @@ use regex::Regex;
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
-use super::Session;
+use super::{Builtin, Factory, Fut, Host, Notify, Session};
 use crate::guard::name_matches;
 use crate::sessions::{self, Own};
 use crate::tools::text;
 use crate::util::{chars, now, read_json};
 use crate::watches::{Watches, mins};
+
+pub const PLUGIN: Factory = Factory {
+    name: "queue",
+    what: "claude-queue: every session's commands take GPU turns",
+    needs: "claude-queue",
+    found: || crate::util::on_path("claude-queue"),
+    manifest: include_str!("queue/plugin.toml"),
+    prompt: include_str!("queue/prompt.md"),
+    spec: include_str!("queue/tools.json"),
+    hosted: false,
+    make: |cfg, _| Ok(Arc::new(Queue::new(cfg))),
+};
+
+impl Builtin for Queue {
+    fn call<'a>(&'a self, tool: &'a str, args: &'a Value, session: &'a dyn Session) -> Fut<'a, Value> {
+        Box::pin(call(tool, args, session))
+    }
+
+    fn worker_note(&self, note: &str) -> String {
+        note.replace("{launch}", launch())
+    }
+
+    fn env(&self, session: &str) -> Vec<(String, String)> {
+        Queue::env(self, session)
+    }
+
+    fn wrap(&self, session: &str, argv: Vec<String>) -> Vec<String> {
+        Queue::wrap(self, session, argv)
+    }
+
+    fn triggers(&self) -> &'static [(&'static str, &'static str)] {
+        &TRIGGERS
+    }
+
+    fn check_trigger(&self, trigger: &str, target: &str) -> Result<(), String> {
+        Queue::check_trigger(self, trigger, target)
+    }
+
+    fn watch<'a>(&'a self, watches: &'a Watches, state: &'a Path) -> Fut<'a, ()> {
+        Box::pin(Queue::watch(self, watches, state))
+    }
+
+    /// cqd's events go to the dispatcher and the pages.
+    fn start(self: Arc<Self>, host: Arc<Host>) {
+        let (state, h, events) = (host.state.clone(), host.clone(), host.events.clone());
+        let watcher = Watcher::new(
+            Box::new(move || names(&state)),
+            Box::new(move |line, urgent, key| (h.notify)(line, urgent, key)),
+            Box::new(move |snap| events.flash(snap)),
+        );
+        tokio::spawn(watcher.run());
+    }
+}
 
 const DEVICES: &str = "/dev/kfd:/dev/dri/renderD*:/dev/nvidia*:/dev/accel/accel*";
 /// A holder whose command ended this long ago is stuck.
@@ -531,7 +584,7 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
 }
 
 /// One tool call.
-pub async fn call(tool: &str, a: &Value, session: &impl Session) -> Value {
+pub async fn call(tool: &str, a: &Value, session: &dyn Session) -> Value {
     let not_running = || text("cqd is not running.", true);
     // queue_control asks the guard itself, with the job a kill would stop.
     if tool != "queue_control"
@@ -541,7 +594,7 @@ pub async fn call(tool: &str, a: &Value, session: &impl Session) -> Value {
     }
     match tool {
         "queue" => {
-            let names = session.names();
+            let names = names(session.state());
             text(&blocking(move || describe(&snapshot(&names))).await, false)
         }
         "queue_control" => {
@@ -676,8 +729,6 @@ fn wait_minutes(target: &str) -> Option<f64> {
     }
 }
 
-/// A line for the dispatcher: (text, urgent, key).
-pub type Notify = Box<dyn Fn(&str, bool, &str) + Send + Sync>;
 
 /// Relays cqd's events (long waits, memory blocks, idle or detached holders, desktop apps moved out of the queue, GPU
 /// faults) to the dispatcher. While cqd is down it tells once per wait when a queued GPU/NPU open has waited too long.

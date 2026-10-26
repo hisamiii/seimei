@@ -30,7 +30,7 @@ async fn queue_plugin_live() {
     // No claude-queue prefix: lib is an empty folder.
     let cfg: toml::Table =
         format!("enabled = [\"queue\"]\nqueue = {{ lib = \"{}\" }}", state.join("nolib").display()).parse().unwrap();
-    let plugins = Arc::new(Plugins::load_at(&cfg, &state, env!("CARGO_BIN_EXE_seimei")));
+    let plugins = Arc::new(Plugins::load_at(&cfg, &state, env!("CARGO_BIN_EXE_seimei"), &seimei_core::plugins::FACTORIES));
     tokio::spawn(plugins.clone().listen(approvals.clone()));
     let (pool, _heard) = pool_with(&state.join("a"), "default", &events, &approvals, plugins);
 

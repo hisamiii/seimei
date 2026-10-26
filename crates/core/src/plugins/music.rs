@@ -2,15 +2,36 @@
 //! (contrib/quodlibet/seimei_bridge.py), and any MPRIS player through playerctl.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::{Map, Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
-use super::Session;
+use super::{Builtin, Factory, Fut, Session};
 use crate::guard::About;
 use crate::tools::text;
 use crate::util::truthy;
+
+pub const PLUGIN: Factory = Factory {
+    name: "music",
+    what: "Quod Libet and the session's media players",
+    needs: "quodlibet or an MPRIS player, playerctl",
+    found: || crate::util::on_path("quodlibet") || crate::util::on_path("playerctl"),
+    manifest: include_str!("music/plugin.toml"),
+    prompt: "",
+    spec: include_str!("music/tools.json"),
+    hosted: false,
+    make: |_, _| Ok(Arc::new(Music)),
+};
+
+struct Music;
+
+impl Builtin for Music {
+    fn call<'a>(&'a self, tool: &'a str, args: &'a Value, session: &'a dyn Session) -> Fut<'a, Value> {
+        Box::pin(call(tool, args, session))
+    }
+}
 
 const NO_BRIDGE: &str = "Quod Libet is not running, or its seimei bridge plugin is off (Quod Libet > Preferences > \
                          Plugins > seimei bridge).";
@@ -162,7 +183,7 @@ async fn ask(cmd: &str, mut args: Map<String, Value>) -> Result<Option<(About, M
     }
 }
 
-async fn music(a: &Value, session: &impl Session) -> Value {
+async fn music(a: &Value, session: &dyn Session) -> Value {
     let cmd = a["command"].as_str().unwrap_or("");
     let mut args = a["args"].as_object().cloned().unwrap_or_default();
     let about = match ask(cmd, args.clone()).await {
@@ -219,7 +240,7 @@ async fn media(a: &Value) -> Value {
 }
 
 /// One tool call.
-pub async fn call(tool: &str, a: &Value, session: &impl Session) -> Value {
+pub async fn call(tool: &str, a: &Value, session: &dyn Session) -> Value {
     match tool {
         "music" => music(a, session).await,
         "media" => match super::ask_guard(session, "music", "media", a, None, &[], "desktop").await {

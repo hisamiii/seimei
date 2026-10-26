@@ -79,9 +79,9 @@ fn text(o: &Output) -> String {
 #[test]
 fn setup_first_run_then_again() {
     let h = Home::new("first");
-    // port, origin, about, plan, terminal, five plugins (only music), a too-short password, then a good one twice, the
+    // port, origin, about, plan, terminal, five plugins (desktop, browser, music, queue, discord: only music), a too-short password, then a good one twice, the
     // kitty bridge, start now.
-    let answers = "9100\nhttps://seimei.example.net\ntest box\npro\nfoot -D {cwd} -T {title}\nn\ny\n\nn\nn\nshort\nshort\n\
+    let answers = "9100\nhttps://seimei.example.net\ntest box\npro\nfoot -D {cwd} -T {title}\nn\nn\ny\n\nn\nshort\nshort\n\
                    correct horse\ncorrect horse\ny\ny\n";
     let o = h.run(&["setup"], answers);
     let out = text(&o);
@@ -217,7 +217,7 @@ fn setup_browser_host() {
     let h = Home::new("browser");
     std::fs::create_dir_all(h.base.join(".librewolf")).unwrap();
     // port, reach, about, plan, terminal; plugins: only the browser; the password twice, no bridge, no start.
-    let answers = "\n\n\n\n\nn\nn\nn\ny\nn\nlong enough\nlong enough\nn\nn\n";
+    let answers = "\n\n\n\n\nn\ny\nn\nn\nn\nlong enough\nlong enough\nn\nn\n";
     let o = h.run(&["setup"], answers);
     let out = text(&o);
     assert!(o.status.success(), "{out}");

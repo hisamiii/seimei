@@ -17,13 +17,17 @@ const EXAMPLE: &str = include_str!("../../../config.example.toml");
 /// The Claude Code seimei's protocol client was built against; older ones may lack parts of it.
 const TESTED_CLAUDE: (u32, u32) = (2, 1);
 
-/// The built-ins, as setup offers them: name, what it is, what it needs.
-const PLUGINS: [(&str, &str, &str); 5] = [
-    ("desktop", "the desktop: windows, workspaces, screenshots, keyboard and mouse", "niri, sway, Hyprland or X11"),
-    ("music", "Quod Libet and the session's media players", "quodlibet or an MPRIS player, playerctl"),
-    ("queue", "claude-queue: every session's commands take GPU turns", "claude-queue"),
-    ("browser", "Firefox, Waterfox or LibreWolf, through the seimei extension", "seimei.xpi from the release page"),
-    ("discord", "Discord through the Vesktop plugin in discord/", "Vesktop with the plugin"),
+/// A plugin as setup offers it: name, what it is, what it needs, whether it looks present.
+type Offer = (&'static str, &'static str, &'static str, fn() -> bool);
+
+/// The built-ins still in core.
+const PLUGINS: [Offer; 2] = [
+    ("desktop", "the desktop: windows, workspaces, screenshots, keyboard and mouse", "niri, sway, Hyprland or X11", || {
+        std::env::var_os("WAYLAND_DISPLAY").is_some() || std::env::var_os("DISPLAY").is_some()
+    }),
+    ("browser", "Firefox, Waterfox or LibreWolf, through the seimei extension", "seimei.xpi from the release page", || {
+        false
+    }),
 ];
 
 /// Terminals setup knows, each with how it opens in a folder under a title (the command follows).
@@ -109,9 +113,7 @@ pub fn reach_origin(answer: &str, port: u16, tailnet: Option<&str>) -> Result<St
     }
 }
 
-pub fn on_path(name: &str) -> bool {
-    std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(name).is_file()))
-}
+pub use seimei_core::util::on_path;
 
 /// Claude Code's version, from `claude --version` (or $SEIMEI_CLAUDE's).
 fn claude_version() -> Option<String> {
@@ -410,7 +412,7 @@ fn kitty_bridge(state: &Path) {
 }
 
 /// The interactive first run; `read_secret` reads the password without echo (tests pass a scripted one).
-pub fn run(read_secret: impl Fn(&str) -> String) {
+pub fn run(read_secret: impl Fn(&str) -> String, builtins: &[seimei_core::plugins::Factory]) {
     println!("seimei setup: what is already set up stays as it is.\n");
 
     // Claude Code: seimei drives the user's own, on its own login.
@@ -491,14 +493,9 @@ pub fn run(read_secret: impl Fn(&str) -> String) {
             "\nPlugins: tool groups on top of the core, each with its own cards. You can change them in config later."
         );
         let mut enabled = vec![];
-        for (name, what, needs) in PLUGINS {
-            let found = match name {
-                "desktop" => std::env::var_os("WAYLAND_DISPLAY").is_some() || std::env::var_os("DISPLAY").is_some(),
-                "music" => on_path("quodlibet") || on_path("playerctl"),
-                "queue" => on_path("claude-queue"),
-                _ => false,
-            };
-            let hint = if found { " (found)" } else { "" };
+        let offered = PLUGINS.into_iter().chain(builtins.iter().map(|f| (f.name, f.what, f.needs, f.found)));
+        for (name, what, needs, found) in offered {
+            let hint = if found() { " (found)" } else { "" };
             if yes(&format!("  {name}: {what}; needs {needs}{hint}. Enable"), false) {
                 enabled.push(name);
             }
