@@ -48,6 +48,9 @@ pub struct Options {
     pub sdk_mcp_servers: Vec<String>,
     /// Other MCP servers, passed as they are (command/args/env or url).
     pub mcp_servers: Map<String, Value>,
+    /// Hand the MCP config over in this file (written 0600 at connect) instead of on the command line, where every
+    /// local user can read the plugin tokens in it.
+    pub mcp_config_file: Option<PathBuf>,
     /// stream_event messages with the text as it is written.
     pub include_partial_messages: bool,
     /// Permission prompts go to the handler (`can_use_tool`) instead of being denied.
@@ -84,6 +87,7 @@ impl Default for Options {
             session_id: None,
             sdk_mcp_servers: vec![],
             mcp_servers: Map::new(),
+            mcp_config_file: None,
             include_partial_messages: false,
             can_use_tool: false,
             settings: None,
@@ -99,6 +103,15 @@ impl Default for Options {
 }
 
 impl Options {
+    /// The --mcp-config JSON; None without MCP servers.
+    pub fn mcp_config(&self) -> Option<String> {
+        let mut servers = self.mcp_servers.clone();
+        for n in &self.sdk_mcp_servers {
+            servers.insert(n.clone(), json!({"type": "sdk", "name": n}));
+        }
+        (!servers.is_empty()).then(|| json!({"mcpServers": servers}).to_string())
+    }
+
     pub fn cli_path(&self) -> PathBuf {
         if let Some(p) = &self.cli {
             return p.clone();
@@ -154,13 +167,9 @@ impl Options {
             a.push("--settings".into());
             a.push(s.clone());
         }
-        let mut servers = self.mcp_servers.clone();
-        for n in &self.sdk_mcp_servers {
-            servers.insert(n.clone(), json!({"type": "sdk", "name": n}));
-        }
-        if !servers.is_empty() {
+        if let Some(config) = self.mcp_config() {
             a.push("--mcp-config".into());
-            a.push(json!({"mcpServers": servers}).to_string());
+            a.push(self.mcp_config_file.as_ref().map(|f| f.display().to_string()).unwrap_or(config));
         }
         if self.include_partial_messages {
             a.push("--include-partial-messages".into());
@@ -242,6 +251,20 @@ mod tests {
             serde_json::json!({"mcpServers": {"seimei": {"name": "seimei", "type": "sdk"}}})
         );
         assert!(s.ends_with("--setting-sources=user,project --name seimei --input-format stream-json"));
+    }
+
+    #[test]
+    fn tokens_stay_off_the_command_line() {
+        let servers = serde_json::json!({"desktop": {"command": "seimei", "env": {"SEIMEI_TOKEN": "secret"}}});
+        let o = Options {
+            mcp_servers: servers.as_object().unwrap().clone(),
+            mcp_config_file: Some("/run/x/mcp/seimei.json".into()),
+            ..Options::default()
+        };
+        let a = o.argv();
+        assert!(a.windows(2).any(|w| w == ["--mcp-config", "/run/x/mcp/seimei.json"]), "{a:?}");
+        assert!(!a.join(" ").contains("secret"));
+        assert!(o.mcp_config().unwrap().contains("secret"));
     }
 
     #[test]

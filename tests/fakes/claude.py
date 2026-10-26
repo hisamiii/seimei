@@ -54,6 +54,9 @@ class Fake:
         self.mode = str(opts.get("permission-mode") or "default")
         self.cwd = os.getcwd()
         mcp = opts.get("mcp-config")
+        # Like Claude Code: a JSON string or a file holding it.
+        if isinstance(mcp, str) and not mcp.lstrip().startswith("{") and os.path.isfile(mcp):
+            mcp = Path(mcp).read_text()
         try:
             servers = json.loads(mcp)["mcpServers"] if isinstance(mcp, str) else {}
         except (ValueError, KeyError):

@@ -40,6 +40,18 @@ pub enum Error {
     Refused(String),
 }
 
+/// Mode 600 from the start, in a 700 folder: the file holds plugin tokens.
+fn write_private(path: &std::path::Path, text: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+    if let Some(dir) = path.parent() {
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
+    }
+    let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(path)?;
+    f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    f.write_all(text.as_bytes())
+}
+
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -148,6 +160,9 @@ pub struct Client {
 impl Client {
     /// Start the session and initialize it. Fails when the executable is missing or initialize gets no answer.
     pub async fn connect(opts: Options, handler: Arc<dyn Handler>) -> Result<Client, Error> {
+        if let (Some(path), Some(config)) = (&opts.mcp_config_file, opts.mcp_config()) {
+            write_private(path, &config).map_err(Error::Spawn)?;
+        }
         let mut cmd = Command::new(opts.cli_path());
         cmd.args(opts.argv())
             .stdin(Stdio::piped())

@@ -460,6 +460,7 @@ impl Worker {
             system_prompt: SystemPrompt::Preset { append: Some(self.prompt()) },
             sdk_mcp_servers: vec!["shikigami".into()],
             mcp_servers: plugins.servers(&str_of(&r["name"]), Some(&self.id), Some(&groups)),
+            mcp_config_file: Some(plugins.config_file(&self.id)),
             // Workers talk to the user through their report and ask, never to other sessions directly.
             disallowed_tools: OFF_TOOLS.iter().map(|t| t.to_string()).collect(),
             skills: Some(SKILLS.iter().map(|s| s.to_string()).collect()),

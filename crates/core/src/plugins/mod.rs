@@ -300,6 +300,11 @@ impl Plugins {
         self.tokens.lock().unwrap().retain(|_, g| !(g.who == who && g.worker.as_deref() == worker));
     }
 
+    /// Where a session's MCP config goes (it holds its plugin token): `id` is "seimei" or a shikigami's id.
+    pub fn config_file(&self, id: &str) -> PathBuf {
+        self.state.join("mcp").join(format!("{id}.json"))
+    }
+
     /// MCP servers for a session: all plugins (seimei, groups None), or the granted groups (a shikigami).
     pub fn servers(&self, who: &str, worker: Option<&str>, groups: Option<&[String]>) -> Map<String, Value> {
         let mut out = Map::new();

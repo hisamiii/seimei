@@ -630,6 +630,7 @@ impl Dispatcher {
             skills: Some(vec![]),
             sdk_mcp_servers: vec!["seimei".into()],
             mcp_servers: plugins.servers("seimei", None, None),
+            mcp_config_file: Some(plugins.config_file("seimei")),
             hooks: vec![
                 (
                     "PreToolUse".into(),
