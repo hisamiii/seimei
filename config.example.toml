@@ -3,6 +3,7 @@
 [server]
 port = 8417                         # --dev uses port + 1
 origin = "http://localhost:8417"    # where the app and the web reach seimei (a tunnel's https URL); also the passkey domain
+# web = false                       # no phone server: the agent queue and the plugins only
 
 [dispatcher]
 model = "opus"
@@ -77,3 +78,6 @@ enabled = []
 # command = "codex"
 # args = ["app-server"]
 # protocol = "codex"
+
+[queue]
+# mode = "shadow"                   # the agent queue: off, shadow (beside claude-queue's cqd), on (after the cutover)

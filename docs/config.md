@@ -6,6 +6,7 @@ seimei reads `~/.config/seimei/config.toml`. Every key is optional; `config.exam
 |---|---|---|---|
 | `[server]` | `port` | 8417 | listens on 127.0.0.1 (`--dev` uses port + 1) |
 | | `origin` | `http://localhost:8417` | the address phones and browsers use, behind HTTPS ([reach.md](reach.md)); also the passkey domain and the only Host served besides localhost |
+| | `web` | `true` | `false` runs seimei without the phone server: the agent queue and the plugins only |
 | `[dispatcher]` | `model` | `[models] work` | the dispatcher's model |
 | | `name` | `seimei` (`seimei-dev` with `--dev`) | its session's name in Claude Code's registry |
 | | `cwd` | `~` | its working folder |
@@ -21,6 +22,7 @@ seimei reads `~/.config/seimei/config.toml`. Every key is optional; `config.exam
 | `[plugins]` | `enabled` | `[]` | the plugins to load; `[plugins.<name>]` tables configure them ([plugins.md](plugins.md)) |
 | `[agents.<name>]` | `command`, `args`, `env` | none | an ACP agent a shikigami can run on (summon's `harness = "acp:<name>"`); it keeps its own login and model |
 | | `protocol` | `acp` | `codex` for `codex app-server` |
+| `[queue]` | `mode` | `shadow` while claude-queue's cqd runs, else `off` | the agent queue ([queue/DESIGN.md](queue/DESIGN.md)); `shadow` watches beside cqd and logs where it would differ, `on` comes with the cutover |
 
 ## Permission modes
 
@@ -47,6 +49,7 @@ seimei devices [--revoke ID] list or unpair phones
 seimei logout-all            end every session
 seimei lockdown              end every session, remove every passkey, unpair every phone
 seimei screen-password [--clear]  the screen lock password the desktop plugin types
+seimei queue scheduler [--help]   the agent queue alone, with claude-queue's cqd flags (the conformance suite runs it)
 ```
 
 Run them on the server, as the user seimei runs as.

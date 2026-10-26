@@ -1944,6 +1944,7 @@ dependencies = [
  "seimei-plugin-discord",
  "seimei-plugin-music",
  "seimei-plugin-queue",
+ "seimei-queue",
  "seimei-server",
  "serde_json",
  "tokio",
@@ -2044,6 +2045,16 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-util",
+]
+
+[[package]]
+name = "seimei-queue"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "regex",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

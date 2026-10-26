@@ -33,16 +33,15 @@ use std::io::Write;
 use std::sync::Arc;
 use std::time::Duration;
 
+use seimei::BUILTINS;
 use seimei_core::auth::Auth;
 use seimei_core::dispatcher;
 use seimei_core::events::EventLog;
 use seimei_core::permissions::configured;
 use seimei_core::plugins::Plugins;
 use seimei_core::push::{Fcm, Push, WebPush};
-use seimei::BUILTINS;
 use seimei_core::util::{config_file, data_dir};
 use serde_json::Value;
-
 
 const COMMANDS: [&str; 13] = [
     "serve",
@@ -75,6 +74,7 @@ usage: seimei [COMMAND] [OPTIONS]
   logout-all                    end every session
   lockdown                      end every session, remove every passkey, unpair every phone
   screen-password [--clear]     the screen lock password the desktop plugin types
+  queue scheduler [--help]      the agent queue alone, with claude-queue's cqd flags
 
 Config: ~/.config/seimei/config.toml. Docs: docs/config.md in the source.
 ";
@@ -268,6 +268,14 @@ fn account(auth: &Auth, a: &Args, state: &std::path::Path) {
 
 fn main() {
     tune_alloc();
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    if argv.first().map(String::as_str) == Some("queue") {
+        // The agent queue's own commands; `scheduler` runs it alone, with claude-queue's cqd flags.
+        match argv.get(1).map(String::as_str) {
+            Some("scheduler") => seimei_queue::scheduler_main(&argv[2..]),
+            _ => die("usage: seimei queue scheduler [--help]"),
+        }
+    }
     let a = args();
     if a.command == "plugin" {
         // Claude Code starts it for a session: an MCP server on stdin and stdout.
@@ -308,6 +316,14 @@ fn main() {
     if a.command != "serve" {
         return account(&Auth::new(&state, &origin), &a, &state);
     }
+    // Never inside an agent's queue slice: a bench would freeze seimei with its agents (docs/queue/DESIGN.md).
+    if !a.dev
+        && let Err(e) = seimei_queue::host::leave_queue_for_serve()
+    {
+        die(&e);
+    }
+    // `[server] web = false`: the queue and the plugins without the phone server.
+    let web_on = server.get("web").and_then(|w| w.as_bool()).unwrap_or(true);
 
     let (origins, auth): (HashSet<String>, Option<Arc<Auth>>) = if a.dev {
         port += 1;
@@ -330,9 +346,21 @@ fn main() {
     // The port before anything else: a second server (a respawn while another one runs) has to stop here, before it
     // replaces the plugin sockets, writes the event log or resumes the shikigami of the one that runs.
     let rt = tokio::runtime::Runtime::new().expect("a runtime");
-    let listener = rt
-        .block_on(tokio::net::TcpListener::bind(("127.0.0.1", port)))
-        .unwrap_or_else(|e| die(&format!("port {port}: {e}")));
+    let listener = web_on.then(|| {
+        rt.block_on(tokio::net::TcpListener::bind(("127.0.0.1", port)))
+            .unwrap_or_else(|e| die(&format!("port {port}: {e}")))
+    });
+    // The agent queue, on a thread of its own; a dev instance never runs it.
+    let queue = if a.dev {
+        None
+    } else {
+        let configured = cfg.get("queue").and_then(|q| q.get("mode")).and_then(|m| m.as_str());
+        let mode = seimei_queue::host::mode(configured).unwrap_or_else(|e| {
+            eprintln!("seimei: {e}");
+            if configured == Some("on") { seimei_queue::host::Mode::Shadow } else { seimei_queue::host::Mode::Off }
+        });
+        seimei_queue::host::start(mode, &state)
+    };
 
     let events = Arc::new(EventLog::open(&state.join("events.jsonl")).unwrap_or_else(|e| die(&format!("events: {e}"))));
     let push = Push::new(
@@ -370,10 +398,16 @@ fn main() {
             .and_then(|t| t.as_str())
             .filter(|t| !t.is_empty())
             .map(String::from)
-            .unwrap_or_else(|| setup::terminal_default(std::env::var("TERMINAL").ok().as_deref(), setup::on_path).into()),
+            .unwrap_or_else(|| {
+                setup::terminal_default(std::env::var("TERMINAL").ok().as_deref(), setup::on_path).into()
+            }),
         plugins: Arc::new(
-            Plugins::load(&cfg.get("plugins").and_then(|p| p.as_table()).cloned().unwrap_or_default(), &state, &BUILTINS)
-                .about(about),
+            Plugins::load(
+                &cfg.get("plugins").and_then(|p| p.as_table()).cloned().unwrap_or_default(),
+                &state,
+                &BUILTINS,
+            )
+            .about(about),
         ),
     };
     let app = Arc::new(seimei_server::App::new(setup).unwrap_or_else(|e| die(&format!("workers: {e}"))));
@@ -426,6 +460,18 @@ fn main() {
         });
         tokio::spawn(push.run());
         tokio::spawn(app.uploads.clone().run());
+        // A queue thread that stops ticking (a deadlock, safe mode) is said once in the log.
+        if let Some(q) = queue {
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+                    if q.stale() > 30.0 || q.safe.load(std::sync::atomic::Ordering::Relaxed) {
+                        eprintln!("seimei: queue: the scheduler stopped ticking ({:.0} s ago)", q.stale());
+                        break;
+                    }
+                }
+            });
+        }
         let (d, pool, ev) = (app.dispatcher.clone(), app.pool.clone(), events.clone());
         tokio::spawn(update::restart_when_idle(
             state.clone(),
@@ -458,7 +504,12 @@ fn main() {
                 });
             }
         };
-        axum::serve(listener, seimei_server::router(app)).with_graceful_shutdown(stop).await.unwrap();
+        match listener {
+            Some(listener) => {
+                axum::serve(listener, seimei_server::router(app)).with_graceful_shutdown(stop).await.unwrap()
+            }
+            None => stop.await,
+        }
     });
     // A plain drop waits for every blocking thread, and a plugin's socket reader blocks until the plugin hangs up:
     // seimei would never exit. Tasks still drop here (their children are killed); stuck readers end with the process.
