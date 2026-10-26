@@ -79,7 +79,7 @@ fn dispatcher_live() {
 
 async fn run(work: std::path::PathBuf, state: std::path::PathBuf) {
     let c = Checks::default();
-    let queue: Value = serde_json::from_str(include_str!("../../../../tests/cases/queue.json")).unwrap();
+    let queue: Value = serde_json::from_str(include_str!("../../../../plugins/queue/tests/cases.json")).unwrap();
     let music: Value = serde_json::from_str(include_str!("../../../../plugins/music/tests/cases.json")).unwrap();
     let cqd_seen = cqd::fake_cqd(state.join("cqd.sock"), queue["describe"][0]["cqd"].clone());
     // The Quod Libet bridge: answers status as music.json says.

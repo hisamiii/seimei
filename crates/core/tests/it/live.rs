@@ -68,7 +68,7 @@ pub fn transcript(cwd: &Path, session_id: &str) -> PathBuf {
 
 /// A pool on a state folder of its own, wired like the server's: the guard tells it, it tells `heard`.
 pub fn pool(state: &Path, mode: &str, events: &Arc<EventLog>, approvals: &Arc<Approvals>) -> (Arc<Pool>, Arc<Heard>) {
-    let plugins = Arc::new(Plugins::load(&Default::default(), state, &seimei_core::plugins::FACTORIES));
+    let plugins = Arc::new(Plugins::load(&Default::default(), state, &[]));
     pool_with(state, mode, events, approvals, plugins)
 }
 

@@ -1,10 +1,13 @@
-//! tests/cases/queue.json: the queue tool's text,
+//! tests/cases.json: the queue tool's text,
 //! queue_history's, wrap, env and the queue_wait target check.
+
+#[path = "../../../crates/core/tests/it/env.rs"]
+mod env;
 
 use std::collections::HashMap;
 use std::path::Path;
 
-use seimei_core::plugins::queue::{Queue, describe, from_cqd, history_text, launch};
+use seimei_plugin_queue::{Queue, describe, from_cqd, history_text, launch};
 use serde_json::Value;
 
 fn report(fails: &[String], total: usize) {
@@ -19,7 +22,7 @@ fn queue_cases() {
     let mut env = crate::env::Env::lock();
     env.set("TZ", "UTC");
     env.example_rules(&std::env::temp_dir().join(format!("seimei-queue-rules-{}", std::process::id())));
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/cases/queue.json");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/cases.json");
     let doc: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     let names: HashMap<String, String> = serde_json::from_value(doc["names"].clone()).unwrap();
     let (mut fails, mut total) = (vec![], 0);
@@ -33,7 +36,8 @@ fn queue_cases() {
         let snap = if c.get("cqd").is_some() { from_cqd(&c["cqd"], &names) } else { c["snap"].clone() };
         let got = describe(&snap);
         // The case holds the systemd launcher; the text names this machine's.
-        let want = c["want"].as_str().unwrap().replace("env -u LD_PRELOAD systemd-run --user --collect <app>", launch());
+        let want =
+            c["want"].as_str().unwrap().replace("env -u LD_PRELOAD systemd-run --user --collect <app>", launch());
         check(c["name"].to_string(), got == want, got);
     }
     for c in doc["history"].as_array().unwrap() {

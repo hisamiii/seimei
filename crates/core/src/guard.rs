@@ -445,7 +445,7 @@ fn is_glob(s: &str) -> bool {
 }
 
 /// Whether a name matches one glob component: `*`, `?`, `[a-z]`, `[!x]`; hidden names too. An unclosed `[` is itself.
-pub(crate) fn name_matches(pat: &[char], name: &[char]) -> bool {
+pub fn name_matches(pat: &[char], name: &[char]) -> bool {
     match pat.first() {
         None => name.is_empty(),
         Some('*') => (0..=name.len()).any(|i| name_matches(&pat[1..], &name[i..])),

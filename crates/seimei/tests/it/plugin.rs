@@ -83,7 +83,7 @@ async fn queue_plugin_over_stdio() {
     let mut rules = crate::env::Env::lock();
     rules.example_rules(&std::env::temp_dir().join(format!("seimei-queue_plugin_over_stdio-rules-{}", std::process::id())));
     let (d, events, approvals, plugins) = host("queue", "queue").await;
-    let cases_queue = cases("tests/cases/queue.json");
+    let cases_queue = cases("plugins/queue/tests/cases.json");
     let cqd_sock = d.join("cqd.sock");
     let seen = fake_cqd(cqd_sock.clone(), cases_queue["describe"][0]["cqd"].clone());
     let entry = plugins.servers("seimei", None, None)["queue"].clone();
@@ -91,7 +91,7 @@ async fn queue_plugin_over_stdio() {
     assert_eq!(entry["args"], json!(["plugin", "queue"]));
 
     // Blocking stdio: each step runs off the runtime, which serves the card socket meanwhile.
-    let spec: Value = serde_json::from_str(seimei_core::plugins::queue::PLUGIN.spec).unwrap();
+    let spec: Value = serde_json::from_str(seimei_plugin_queue::PLUGIN.spec).unwrap();
     let (env2, sock2) = (env.clone(), cqd_sock.clone());
     let mut srv = tokio::task::spawn_blocking(move || {
         let mut srv = Server::queue(&env2, &sock2);

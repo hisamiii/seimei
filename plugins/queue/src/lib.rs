@@ -18,21 +18,21 @@ use regex::Regex;
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
-use super::{Builtin, Factory, Fut, Host, Notify, Session};
-use crate::guard::name_matches;
-use crate::sessions::{self, Own};
-use crate::tools::text;
-use crate::util::{chars, now, read_json};
-use crate::watches::{Watches, mins};
+use seimei_core::guard::name_matches;
+use seimei_core::plugins::{Builtin, Factory, Fut, Host, Notify, Session, ask_guard, strip};
+use seimei_core::sessions::{self, Own};
+use seimei_core::tools::text;
+use seimei_core::util::{self, chars, now, read_json, truthy};
+use seimei_core::watches::{Watches, mins};
 
 pub const PLUGIN: Factory = Factory {
     name: "queue",
     what: "claude-queue: every session's commands take GPU turns",
     needs: "claude-queue",
-    found: || crate::util::on_path("claude-queue"),
-    manifest: include_str!("queue/plugin.toml"),
-    prompt: include_str!("queue/prompt.md"),
-    spec: include_str!("queue/tools.json"),
+    found: || util::on_path("claude-queue"),
+    manifest: include_str!("../plugin.toml"),
+    prompt: include_str!("../prompt.md"),
+    spec: include_str!("../tools.json"),
     hosted: false,
     make: |cfg, _| Ok(Arc::new(Queue::new(cfg))),
 };
@@ -417,7 +417,7 @@ pub fn holder_line(h: &Value) -> String {
         }
         let left = if !h["eta_s"].is_null() {
             format!("~{} left", mins(f(&h["eta_s"])))
-        } else if crate::util::truthy(&h["known"]) {
+        } else if truthy(&h["known"]) {
             "past its usual duration".into()
         } else {
             "duration unknown".into()
@@ -447,7 +447,7 @@ pub fn holder_line(h: &Value) -> String {
 }
 
 pub fn blocker_text(w: &Value, snap: &Value) -> String {
-    if crate::util::truthy(&w["blocked_by"]) {
+    if truthy(&w["blocked_by"]) {
         return s(&w["blocked_by"]);
     }
     match w["kind"].as_str() {
@@ -478,7 +478,7 @@ pub fn describe(snap: &Value) -> String {
                 .into(),
         );
     }
-    if crate::util::truthy(&snap["bench"]) {
+    if truthy(&snap["bench"]) {
         lines.push("A bench is running: queued GPU/NPU opens wait for it.".into());
     }
     let holders = snap["holders"].as_array().cloned().unwrap_or_default();
@@ -527,7 +527,7 @@ pub fn describe(snap: &Value) -> String {
             s(&h["idle_min"])
         ));
     }
-    if !crate::util::truthy(&snap["cqd"]) {
+    if !truthy(&snap["cqd"]) {
         lines.push("(cqd is not running: this view comes from /proc, without ETAs.)".into());
     }
     if holders.iter().any(|h| h["stuck"] == true) {
@@ -542,7 +542,7 @@ pub fn describe(snap: &Value) -> String {
 
 /// How an agent starts a desktop app outside the queue: a transient systemd unit, or niri's spawn without systemd.
 pub fn launch() -> &'static str {
-    static SYSTEMD: LazyLock<bool> = LazyLock::new(crate::util::systemd);
+    static SYSTEMD: LazyLock<bool> = LazyLock::new(util::systemd);
     if *SYSTEMD {
         "env -u LD_PRELOAD systemd-run --user --collect <app>"
     } else {
@@ -565,7 +565,7 @@ pub fn history_text(rows: &[Value]) -> String {
                 .unwrap_or_default();
             let class = x.get("class").map_or("batch".into(), s);
             let mut line = format!("{when} {} [{class}] ran {}", s(&x["agent"]), mins(f(&x["dur"])));
-            if crate::util::truthy(&x["wait"]) {
+            if truthy(&x["wait"]) {
                 line += &format!(", waited {}", mins(f(&x["wait"])));
             }
             line += &format!(", peaks anon {} GB, GTT {} GB", s(&x["peak_anon_gb"]), s(&x["peak_gtt_gb"]));
@@ -588,7 +588,7 @@ pub async fn call(tool: &str, a: &Value, session: &dyn Session) -> Value {
     let not_running = || text("cqd is not running.", true);
     // queue_control asks the guard itself, with the job a kill would stop.
     if tool != "queue_control"
-        && let Some(no) = super::ask_guard(session, "queue", tool, a, None, &[], "desktop").await
+        && let Some(no) = ask_guard(session, "queue", tool, a, None, &[], "desktop").await
     {
         return no;
     }
@@ -599,7 +599,7 @@ pub async fn call(tool: &str, a: &Value, session: &dyn Session) -> Value {
         }
         "queue_control" => {
             let mut action = s(&a["action"]);
-            if action == "revoke" && crate::util::truthy(&a["kill"]) {
+            if action == "revoke" && truthy(&a["kill"]) {
                 let snap = blocking(|| snapshot(&HashMap::new())).await;
                 let t = &a["target"];
                 let h = (snap["holders"].as_array().into_iter().flatten())
@@ -612,16 +612,16 @@ pub async fn call(tool: &str, a: &Value, session: &dyn Session) -> Value {
                     ),
                     None => s(t),
                 };
-                let about = crate::guard::About {
+                let about = seimei_core::guard::About {
                     what: format!("stop the GPU/NPU job {what}"),
                     detail: "SIGTERM to the whole command (its scope)".into(),
                     ..Default::default()
                 };
-                if let Some(no) = super::ask_guard(session, "queue", tool, a, Some(about), &[], "desktop").await {
+                if let Some(no) = ask_guard(session, "queue", tool, a, Some(about), &[], "desktop").await {
                     return no;
                 }
                 action = "kill".into();
-            } else if let Some(no) = super::ask_guard(session, "queue", tool, a, None, &[], "desktop").await {
+            } else if let Some(no) = ask_guard(session, "queue", tool, a, None, &[], "desktop").await {
                 return no;
             }
             let req = json!({"op": "control", "action": action, "target": a["target"], "to": a["to"]});
@@ -632,7 +632,7 @@ pub async fn call(tool: &str, a: &Value, session: &dyn Session) -> Value {
         }
         "queue_policy" => {
             let mut req = json!({"op": "policy"});
-            if crate::util::truthy(&a["key"]) {
+            if truthy(&a["key"]) {
                 req["key"] = a["key"].clone();
             }
             if let Some(v) = a.get("value") {
@@ -664,7 +664,7 @@ pub struct Queue {
 impl Queue {
     pub fn new(cfg: &toml::Table) -> Queue {
         let lib = cfg.get("lib").and_then(|l| l.as_str()).filter(|l| !l.is_empty()).unwrap_or(DEFAULT_LIB);
-        Queue { lib: PathBuf::from(crate::paths::expand(lib)), told: Mutex::default() }
+        Queue { lib: PathBuf::from(seimei_core::paths::expand(lib)), told: Mutex::default() }
     }
 
     /// Run a session's commands through claude-queue, like `claude-queue <name>`, so benches freeze it.
@@ -693,7 +693,7 @@ impl Queue {
 
     pub fn check_trigger(&self, trigger: &str, target: &str) -> Result<(), String> {
         if trigger == "queue_wait" && wait_minutes(target).is_none() {
-            return Err(format!("queue_wait's target is minutes, not {}", crate::util::py_repr(target)));
+            return Err(format!("queue_wait's target is minutes, not {}", util::py_repr(target)));
         }
         Ok(())
     }
@@ -723,12 +723,11 @@ impl Queue {
 
 /// queue_wait's target in minutes: "" or * is 10.
 fn wait_minutes(target: &str) -> Option<f64> {
-    match super::strip(target) {
+    match strip(target) {
         "" | "*" => Some(10.0),
         t => t.parse().ok().filter(|m: &f64| m.is_finite()),
     }
 }
-
 
 /// Relays cqd's events (long waits, memory blocks, idle or detached holders, desktop apps moved out of the queue, GPU
 /// faults) to the dispatcher. While cqd is down it tells once per wait when a queued GPU/NPU open has waited too long.

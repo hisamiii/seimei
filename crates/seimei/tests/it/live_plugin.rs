@@ -23,7 +23,7 @@ async fn queue_plugin_live() {
     // Set before the session starts; the plugin inherits it through Claude Code.
     let mut env = crate::env::Env::lock();
     env.set("SEIMEI_CQD_SOCK", &cqd_sock);
-    let cases: Value = serde_json::from_str(include_str!("../../../../tests/cases/queue.json")).unwrap();
+    let cases: Value = serde_json::from_str(include_str!("../../../../plugins/queue/tests/cases.json")).unwrap();
     let seen = cqd::fake_cqd(cqd_sock, cases["describe"][0]["cqd"].clone());
     let events = Arc::new(EventLog::open(&state.join("events.jsonl")).unwrap());
     let approvals = Arc::new(Approvals::new(events.clone()));

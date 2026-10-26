@@ -19,7 +19,6 @@
 pub mod browser;
 pub mod desktop;
 pub mod link;
-pub mod queue;
 
 use std::any::Any;
 use std::collections::HashMap;
@@ -40,8 +39,6 @@ const BUILTIN: [(&str, &str, &str); 2] = [
     // Its prompt depends on the window manager and the computer: Plugins::about sets it.
     ("desktop", include_str!("desktop/plugin.toml"), ""),
 ];
-/// The Factories that live in core until they move to plugins/.
-pub const FACTORIES: [Factory; 1] = [queue::PLUGIN];
 /// The names of the built-ins the binary has: their own tools ask the guard themselves.
 static BUILTIN_NAMES: RwLock<Vec<&'static str>> = RwLock::new(Vec::new());
 

@@ -14,7 +14,6 @@ mod live_perm;
 mod live_tune;
 mod markers;
 mod password;
-mod queue;
 mod screens;
 mod sessionevents;
 mod tasks;
