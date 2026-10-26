@@ -314,14 +314,8 @@ const EXTENSION_ID: &str = "seimei@hisamiowo.xyz";
 /// The browser plugin's native-messaging host for the Firefox family: a small script that runs this binary, and its
 /// manifest where Firefox and Waterfox (~/.mozilla) and LibreWolf look. A manifest that points elsewhere stays.
 fn browser_host(state: &Path, exe: &Path) {
-    let cfg: toml::Table = std::fs::read_to_string(config_file()).ok().and_then(|s| s.parse().ok()).unwrap_or_default();
-    let plugins = cfg.get("plugins").and_then(|p| p.as_table());
-    let on = plugins.and_then(|p| p.get("enabled")).and_then(|e| e.as_array());
-    if !on.is_some_and(|e| e.iter().any(|n| n.as_str() == Some("browser"))) {
-        return;
-    }
-    let id = (plugins.and_then(|p| p.get("browser")).and_then(|b| b.get("extension_id")).and_then(|i| i.as_str()))
-        .unwrap_or(EXTENSION_ID);
+    let Some(own) = plugin_on("browser") else { return };
+    let id = own.get("extension_id").and_then(|i| i.as_str()).unwrap_or(EXTENSION_ID);
     let home = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
     let script = state.join("browser-host");
     let text = format!("#!/bin/sh\nexec {} browser-host\n", seimei_core::util::sh_quote(&exe.to_string_lossy()));
@@ -355,6 +349,56 @@ fn browser_host(state: &Path, exe: &Path) {
         "The browser plugin needs the seimei extension: seimei.xpi from the release page, in about:addons, Install \
          Add-on From File. Chromium-based browsers are not supported: the extension is a Firefox one."
     );
+}
+
+/// The plugin's own [plugins.<name>] table (empty when there is none) when config.toml enables it.
+fn plugin_on(name: &str) -> Option<toml::Table> {
+    let cfg: toml::Table = std::fs::read_to_string(config_file()).ok().and_then(|s| s.parse().ok()).unwrap_or_default();
+    let plugins = cfg.get("plugins").and_then(|p| p.as_table())?;
+    let on = plugins.get("enabled").and_then(|e| e.as_array())?;
+    if !on.iter().any(|n| n.as_str() == Some(name)) {
+        return None;
+    }
+    Some(plugins.get(name).and_then(|t| t.as_table()).cloned().unwrap_or_default())
+}
+
+/// The desktop plugin on GNOME reaches windows through seimei's GNOME Shell extension: written to the extensions
+/// folder and added to the enabled ones. GNOME on Wayland loads a new extension at the next login.
+fn gnome_extension() {
+    let Some(own) = plugin_on("desktop") else { return };
+    let gnome = match own.get("backend").and_then(|b| b.as_str()) {
+        Some(b) => b == "gnome",
+        None => std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|d| d.contains("GNOME")),
+    };
+    if !gnome {
+        return;
+    }
+    use seimei_plugin_desktop::gnome::{UUID, install_extension};
+    let home = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+    println!();
+    match install_extension(&home) {
+        Ok(dir) => println!("Wrote seimei's GNOME Shell extension to {}.", dir.display()),
+        Err(e) => {
+            println!("seimei's GNOME Shell extension: {e}");
+            return;
+        }
+    }
+    let key = ["org.gnome.shell", "enabled-extensions"];
+    let out = Command::new("gsettings").arg("get").args(key).output();
+    let list = out.map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
+    if list.contains(&format!("'{UUID}'")) {
+        println!("It is enabled.");
+        return;
+    }
+    // A GVariant list of strings, like ['a@b', 'c@d'] or @as []: the names are the quoted parts.
+    let mut names: Vec<&str> = list.split('\'').skip(1).step_by(2).collect();
+    names.push(UUID);
+    let value = format!("[{}]", names.iter().map(|n| format!("'{n}'")).collect::<Vec<_>>().join(", "));
+    if all_ok(&[&["gsettings", "set", key[0], key[1], &value]]) {
+        println!("Enabled it; GNOME loads it at your next login (log out and back in).");
+    } else {
+        println!("Enable it with `gnome-extensions enable {UUID}` after logging out and back in.");
+    }
 }
 
 fn write_file(path: &Path, text: &str, mode: u32) {
@@ -524,6 +568,7 @@ pub fn run(read_secret: impl Fn(&str) -> String, builtins: &[seimei_core::plugin
 
     let exe = std::env::current_exe().unwrap_or_else(|e| fail(&format!("this binary: {e}")));
     browser_host(&state, &exe);
+    gnome_extension();
 
     // The service.
     if seimei_core::util::systemd() {

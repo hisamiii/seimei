@@ -7,6 +7,7 @@ publish = false
 
 [dependencies]
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
 libc.workspace = true
 regex = "1.13.1"
 seimei-core = { path = "../../crates/core" }

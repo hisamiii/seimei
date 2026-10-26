@@ -1,7 +1,8 @@
 //! The agent display: a nested niri that seimei runs in a window of the user's niri, parked on the "seimei"
-//! workspace. Agent apps live there and get input through its own seat (vinput.rs), so the user's focus, pointer and
-//! clipboard stay theirs. Started on demand, stopped after a stretch without use, adopted again after a seimei
-//! restart. It isolates input and screen, not permissions: its apps run as the user.
+//! workspace; on KDE Plasma and GNOME a headless KWin or GNOME Shell on a bus of its own, seen through screenshots
+//! only. Agent apps live there and get input through its own seat, so the user's focus, pointer and clipboard stay
+//! theirs. Started on demand, stopped after a stretch without use, adopted again after a seimei restart. It isolates
+//! input and screen, not permissions: its apps run as the user.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -11,9 +12,11 @@ use serde_json::{Value, json};
 
 use std::sync::Arc;
 
-use super::backend::{Backend, Ctx, listening, newest};
+use super::backend::{Backend, Ctx, Env, listening, newest};
+use super::gnome::{self, Gnome};
+use super::kde::Kde;
 use super::niri::Niri;
-use super::vinput::{self, Op};
+use super::vinput::Op;
 use super::{Desktop, Session, int, text_of, uinput};
 use seimei_core::tools::text;
 use seimei_core::util::{chars, sh_quote, token_urlsafe, truthy};
@@ -58,13 +61,19 @@ user_pref("widget.wayland.vsync.enabled", false);
 user_pref("layout.frame_rate", 10);
 "#;
 
-/// The running agent display: its niri, that niri's pid, IPC socket and Wayland socket.
+/// The headless display's Wayland socket name, in the runtime dir.
+const HEADLESS: &str = "seimei-agent";
+const SIZE: (u32, u32) = (1280, 800);
+
+/// The running agent display: its compositor, that compositor's pid, and what its apps carry in their environment.
 #[derive(Clone)]
 pub struct Up {
-    pub b: Niri,
+    pub b: Arc<dyn Backend>,
     pub pid: i64,
-    pub sock: PathBuf,
-    pub wayland: PathBuf,
+    /// NIRI_SOCKET of the nested niri, WAYLAND_DISPLAY of a headless one: apps leave the compositor's process tree.
+    pub mark: String,
+    /// In a window of the user's niri; a headless one has no window.
+    pub nested: bool,
 }
 
 pub struct Agent {
@@ -82,10 +91,9 @@ fn cmdline(ctx: &Ctx, pid: &str) -> String {
     String::from_utf8_lossy(&raw).replace('\0', " ")
 }
 
-/// The agent display's processes: its niri and every app started in it. Apps leave niri's process tree when they
-/// start, so they are found by the NIRI_SOCKET they inherited.
+/// The agent display's processes: its compositor and every app started in it, found by the variable they inherited.
 fn members(ctx: &Ctx, up: &Up) -> Vec<i64> {
-    let mark = format!("NIRI_SOCKET={}", up.sock.display());
+    let mark = &up.mark;
     let mut out = vec![up.pid];
     for e in std::fs::read_dir(&ctx.proc).into_iter().flatten().flatten() {
         let Some(pid) = e.file_name().to_str().and_then(|n| n.parse::<i64>().ok()) else { continue };
@@ -127,25 +135,63 @@ impl Agent {
         self.dir.join("browser")
     }
 
-    /// The agent display's niri among the running ones: the nested niri started with seimei's config.
+    /// The agent display among the running compositors: the nested niri started with seimei's config, or the headless
+    /// one.
     fn find(&self) -> Option<Up> {
+        self.find_nested().or_else(|| self.find_headless())
+    }
+
+    fn find_nested(&self) -> Option<Up> {
         let conf = self.config().display().to_string();
         for sock in newest(&self.ctx.run, "niri.", ".sock") {
             let name = sock.file_name()?.to_str()?.to_string();
             let mut parts = name.trim_end_matches(".sock").rsplitn(2, '.');
-            let (Some(pid), Some(rest)) = (parts.next(), parts.next()) else { continue };
+            let (Some(pid), Some(_)) = (parts.next(), parts.next()) else { continue };
             if !cmdline(&self.ctx, pid).contains(&conf) || !listening(&sock) {
                 continue;
             }
-            let display = rest.trim_start_matches("niri.");
             return Some(Up {
-                b: Niri::pinned(self.ctx.clone(), sock.clone()),
+                b: Arc::new(Niri::pinned(self.ctx.clone(), sock.clone())),
                 pid: pid.parse().ok()?,
-                sock: sock.clone(),
-                wayland: self.ctx.run.join(display),
+                mark: format!("NIRI_SOCKET={}", sock.display()),
+                nested: true,
             });
         }
         None
+    }
+
+    /// The headless KWin or GNOME Shell: its pid and private bus as start_headless wrote them.
+    fn find_headless(&self) -> Option<Up> {
+        let text = std::fs::read_to_string(self.dir.join("headless")).ok()?;
+        let (pid, bus) = text.trim().split_once(' ')?;
+        let line = cmdline(&self.ctx, pid);
+        let desk = if line.contains("kwin_wayland") {
+            "KDE"
+        } else if line.contains("gnome-shell") {
+            "GNOME"
+        } else {
+            return None;
+        };
+        if !listening(&self.ctx.run.join(HEADLESS)) {
+            return None;
+        }
+        // DISPLAY empty: X11 apps must not open on the user's screen.
+        let env: Env = [
+            ("WAYLAND_DISPLAY", HEADLESS),
+            ("DBUS_SESSION_BUS_ADDRESS", bus),
+            ("XDG_CURRENT_DESKTOP", desk),
+            ("XDG_SESSION_TYPE", "wayland"),
+            ("DISPLAY", ""),
+        ]
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        let b: Arc<dyn Backend> = if desk == "KDE" {
+            Arc::new(Kde::pinned(self.ctx.clone(), env))
+        } else {
+            Arc::new(Gnome::pinned(self.ctx.clone(), env))
+        };
+        Some(Up { b, pid: pid.parse().ok()?, mark: format!("WAYLAND_DISPLAY={HEADLESS}"), nested: false })
     }
 
     /// The agent display when it runs (also one a previous seimei started).
@@ -173,16 +219,89 @@ impl Agent {
         self.used.lock().unwrap().elapsed() > *self.idle.lock().unwrap()
     }
 
-    /// Start it in a window of the user's niri, parked on the "seimei" workspace, and give the user's focus back.
+    /// Start it: nested in niri, headless on KDE Plasma and GNOME.
     pub async fn start(&self, desk: &Arc<Desktop>) -> Result<Up, String> {
         let _one = self.starting.lock().await;
         self.touch();
         if let Some(up) = self.current() {
             return Ok(up);
         }
-        if desk.b.name() != "niri" {
-            return Err(format!("the agent display needs niri; this desktop is {}", desk.b.label()));
+        match desk.b.name() {
+            "niri" => self.start_nested(desk).await,
+            name @ ("kde" | "gnome") => {
+                let me = desk.clone();
+                tokio::task::spawn_blocking(move || me.agent.start_headless(name)).await.map_err(|e| e.to_string())?
+            }
+            _ => Err(format!("the agent display needs niri, KDE Plasma or GNOME; this desktop is {}", desk.b.label())),
         }
+    }
+
+    /// A headless KWin or GNOME Shell ("kde", "gnome") on a session bus of its own, so its D-Bus names do not meet
+    /// the user's. GNOME Shell gets seimei's extension and a settings database of its own.
+    pub fn start_headless(&self, desk: &str) -> Result<Up, String> {
+        std::fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
+        let state = self.dir.join("headless");
+        let _ = std::fs::remove_file(&state);
+        let (w, h) = SIZE;
+        let (setup, compositor) = match desk {
+            "kde" => (
+                String::new(),
+                format!(
+                    "kwin_wayland --virtual --width {w} --height {h} --socket {HEADLESS} --no-lockscreen \
+                     --no-global-shortcuts"
+                ),
+            ),
+            _ => {
+                gnome::install_extension(&self.ctx.home)?;
+                let profile = self.dir.join("dconf-profile");
+                std::fs::write(&profile, "user-db:seimei_agent\n").map_err(|e| e.to_string())?;
+                (
+                    format!(
+                        "export DCONF_PROFILE={}; gsettings set org.gnome.shell enabled-extensions \"['{}']\"; ",
+                        sh_quote(&profile.display().to_string()),
+                        gnome::UUID
+                    ),
+                    format!(
+                        "gnome-shell --headless --virtual-monitor {w}x{h} --wayland --no-x11 --wayland-display {HEADLESS}"
+                    ),
+                )
+            }
+        };
+        // The shell's pid is the compositor's after exec.
+        let script = format!(
+            "{setup}echo \"$$ $DBUS_SESSION_BUS_ADDRESS\" > {}; exec {compositor}",
+            sh_quote(&state.display().to_string())
+        );
+        let log = std::fs::File::create(self.dir.join("headless.log")).map_err(|e| e.to_string())?;
+        let mut c = std::process::Command::new("dbus-run-session");
+        c.args(["--", "sh", "-c", &script])
+            .env_remove("WAYLAND_DISPLAY")
+            .env_remove("DISPLAY")
+            .env_remove("DBUS_SESSION_BUS_ADDRESS")
+            .stdin(std::process::Stdio::null())
+            .stdout(log.try_clone().map_err(|e| e.to_string())?)
+            .stderr(log);
+        // SAFETY: setsid only moves the child into a session of its own; it runs between fork and exec.
+        unsafe {
+            std::os::unix::process::CommandExt::pre_exec(&mut c, || {
+                libc::setsid();
+                Ok(())
+            });
+        }
+        let mut child = c.spawn().map_err(|e| format!("dbus-run-session: {e}"))?;
+        std::thread::spawn(move || child.wait());
+        // Up once it lists windows: GNOME Shell's extension answers a moment after the socket appears.
+        for _ in 0..150 {
+            if let Some(up) = self.current().filter(|u| u.b.windows().is_ok()) {
+                return Ok(up);
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        Err(format!("the agent display did not come up in 15 s; see {}", self.dir.join("headless.log").display()))
+    }
+
+    /// Start it in a window of the user's niri, parked on the "seimei" workspace, and give the user's focus back.
+    async fn start_nested(&self, desk: &Arc<Desktop>) -> Result<Up, String> {
         std::fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
         std::fs::write(self.config(), CONFIG).map_err(|e| e.to_string())?;
         let me = desk.clone();
@@ -225,7 +344,13 @@ impl Agent {
     pub fn stop(&self) -> String {
         let Some(up) = self.current() else { return "The agent display is not running.".into() };
         let pids = members(&self.ctx, &up);
-        let _ = up.b.action(&["quit".into(), "--skip-confirmation".into()]);
+        if up.nested {
+            let _ = up.b.action(&["quit".into(), "--skip-confirmation".into()]);
+        } else {
+            // SAFETY: kill only sends a signal, to the headless compositor; its bus ends with it.
+            unsafe { libc::kill(up.pid as i32, libc::SIGTERM) };
+            let _ = std::fs::remove_file(self.dir.join("headless"));
+        }
         // Apps exit once their compositor is gone; wait for them, so a new start finds the browser profile free.
         let alive = |pid: &i64| self.ctx.proc.join(pid.to_string()).exists();
         for _ in 0..50 {
@@ -322,7 +447,8 @@ fn geometry(up: &Up) -> Result<(f64, f64, f64), String> {
 /// What the agent display shows: its size and windows.
 fn overview(up: &Up) -> Result<String, String> {
     let (w, h, _) = geometry(up)?;
-    let mut lines = vec![format!("Agent display: {w}x{h} logical (each window fills it; the focused one is shown)")];
+    let how = if up.nested { "each window fills it; the focused one is shown" } else { "headless, windows float" };
+    let mut lines = vec![format!("Agent display: {w}x{h} logical ({how})")];
     let wins = up.b.windows()?;
     if wins.is_empty() {
         lines.push("  no windows".into());
@@ -397,7 +523,7 @@ impl Desktop {
                         };
                     }
                     "clipboard_read" => return self.clipboard(Some(up), session).await,
-                    "ui_tree" | "ui_action" => self.a11y_tool(tool, args, Some(up.b)).await,
+                    "ui_tree" | "ui_action" => self.a11y_tool(tool, args, Some(up.b.clone())).await,
                     _ => {
                         let (a, t) = (args.clone(), tool.to_string());
                         self.blocking(move |d| d.agent_sync(&up, &t, &a)).await
@@ -437,21 +563,21 @@ impl Desktop {
         let need = |k: &str| a.get(k).filter(|v| !v.is_null()).ok_or_else(|| format!("{k} is missing"));
         match tool {
             "desktop" => overview(up),
-            "niri" => {
+            t if t == up.b.name() => {
                 let mut argv = vec![text_of(need("action")?)];
                 argv.extend(a["args"].as_array().into_iter().flatten().map(text_of));
                 up.b.action(&argv).map(|o| if o.is_empty() { "Done.".into() } else { o })
             }
-            "niri_query" => up.b.query(&text_of(need("what")?)),
+            t if t.strip_suffix("_query") == Some(up.b.name()) => up.b.query(&text_of(need("what")?)),
             "type_text" => {
                 self.agent_drive(up, need("window")?)?;
-                vinput::run(&up.wayland, &[Op::Text(text_of(need("text")?))]).map(|_| "Typed.".into())
+                up.b.input(&[Op::Text(text_of(need("text")?))]).map(|_| "Typed.".into())
             }
             "press_keys" => {
                 self.agent_drive(up, need("window")?)?;
                 let ops: Vec<Op> =
                     need("keys")?.as_array().into_iter().flatten().map(|k| Op::Combo(text_of(k))).collect();
-                vinput::run(&up.wayland, &ops).map(|_| "Pressed.".into())
+                up.b.input(&ops).map(|_| "Pressed.".into())
             }
             "click" | "scroll" => {
                 self.agent_drive(up, &a["window"])?;
@@ -469,7 +595,7 @@ impl Desktop {
                     Op::Click { count: 0, .. } => "Moved.",
                     _ => "Clicked.",
                 };
-                vinput::run(&up.wayland, &[op]).map(|_| done.into())
+                up.b.input(&[op]).map(|_| done.into())
             }
             _ => Err(format!("{tool} works on the user's display only")),
         }

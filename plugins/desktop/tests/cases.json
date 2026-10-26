@@ -892,7 +892,11 @@
    "input": {
     "command": "echo x > ~/.config/kwinrc"
    },
-   "want": null
+   "want": {
+    "action": "command",
+    "target": "edit the KDE Plasma config",
+    "detail": "echo x > ~/.config/kwinrc"
+   }
   },
   {
    "backend": "kde",

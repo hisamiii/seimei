@@ -1,15 +1,15 @@
 //! Keyboard and pointer input for a Wayland display seimei runs itself (the agent display), through the virtual
 //! keyboard and virtual pointer protocols on the display's own socket. That display has its own seat, so nothing
-//! here touches the user's focus or pointer. Plain Wayland wire protocol, one connection per call.
+//! here touches the user's focus or pointer. Plain Wayland wire protocol (wire.rs), one connection per call.
 //!
 //! Each call uploads a keymap with one key per keysym it needs, so any character types without a layout switch.
 
 use seimei_core::util::py_repr;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-use std::os::unix::net::UnixStream;
 use std::path::Path;
-use std::time::Duration;
+
+use crate::wire::{Conn, fixed, words};
 
 /// What one call does on the display.
 pub enum Op {
@@ -23,10 +23,13 @@ pub enum Op {
     Scroll { x: f64, y: f64, w: f64, h: f64, amount: i64 },
 }
 
-const SHIFT: u32 = 1;
-const CONTROL: u32 = 4;
-const ALT: u32 = 8;
-const SUPER: u32 = 64;
+pub const SHIFT: u32 = 1;
+pub const CONTROL: u32 = 4;
+pub const ALT: u32 = 8;
+pub const SUPER: u32 = 64;
+
+/// Each modifier bit with its left key's keysym.
+pub const MOD_KEYS: [(u32, u32); 4] = [(SHIFT, 0xffe1), (CONTROL, 0xffe3), (ALT, 0xffe9), (SUPER, 0xffeb)];
 
 /// A key name of press_keys to its keysym; modifiers are not keys here.
 fn keysym(name: &str) -> Option<u32> {
@@ -65,7 +68,7 @@ fn keysym(name: &str) -> Option<u32> {
 }
 
 /// A character's keysym: Latin-1 as itself, the rest as Unicode keysyms.
-fn char_sym(c: char) -> u32 {
+pub fn char_sym(c: char) -> u32 {
     match c {
         '\n' => 0xff0d,
         '\t' => 0xff09,
@@ -75,7 +78,7 @@ fn char_sym(c: char) -> u32 {
 }
 
 /// A combination like "ctrl+shift+t": its modifier mask and keysym.
-fn combo(spec: &str) -> Result<(u32, u32), String> {
+pub fn combo(spec: &str) -> Result<(u32, u32), String> {
     let spec = spec.to_lowercase().replace(' ', "");
     let parts: Vec<&str> = if spec == "+" { vec!["+"] } else { spec.split('+').collect() };
     let (mut mods, mut sym) = (0, None);
@@ -106,114 +109,6 @@ fn keymap(syms: &[u32]) -> String {
     out + "};\n};\n"
 }
 
-struct Conn {
-    sock: UnixStream,
-    next: u32,
-    buf: Vec<u8>,
-}
-
-fn string(s: &str) -> Vec<u8> {
-    let mut b = (s.len() as u32 + 1).to_le_bytes().to_vec();
-    b.extend(s.as_bytes());
-    b.push(0);
-    while b.len() % 4 != 0 {
-        b.push(0);
-    }
-    b
-}
-
-fn words(v: &[u32]) -> Vec<u8> {
-    v.iter().flat_map(|w| w.to_le_bytes()).collect()
-}
-
-/// A Wayland 24.8 fixed-point number.
-fn fixed(v: f64) -> u32 {
-    ((v * 256.0).round() as i32) as u32
-}
-
-impl Conn {
-    fn open(socket: &Path) -> Result<Conn, String> {
-        let sock = UnixStream::connect(socket).map_err(|e| format!("the agent display: {e}"))?;
-        sock.set_read_timeout(Some(Duration::from_secs(5))).ok();
-        Ok(Conn { sock, next: 2, buf: vec![] })
-    }
-
-    fn id(&mut self) -> u32 {
-        self.next += 1;
-        self.next - 1
-    }
-
-    fn send(&mut self, obj: u32, op: u16, args: &[u8]) -> Result<(), String> {
-        let mut m = words(&[obj, ((8 + args.len() as u32) << 16) | op as u32]);
-        m.extend(args);
-        self.sock.write_all(&m).map_err(|e| e.to_string())
-    }
-
-    /// A request carrying one file descriptor (SCM_RIGHTS).
-    fn send_fd(&mut self, obj: u32, op: u16, args: &[u8], fd: i32) -> Result<(), String> {
-        let mut m = words(&[obj, ((8 + args.len() as u32) << 16) | op as u32]);
-        m.extend(args);
-        let mut iov = libc::iovec { iov_base: m.as_mut_ptr().cast(), iov_len: m.len() };
-        let space = unsafe { libc::CMSG_SPACE(size_of::<i32>() as u32) } as usize;
-        let mut ctrl = vec![0u8; space];
-        // SAFETY: msghdr points at iov and ctrl, both alive for the call; the cmsg header fits in ctrl.
-        let sent = unsafe {
-            let mut msg: libc::msghdr = std::mem::zeroed();
-            msg.msg_iov = &mut iov;
-            msg.msg_iovlen = 1;
-            msg.msg_control = ctrl.as_mut_ptr().cast();
-            msg.msg_controllen = space as _;
-            let c = libc::CMSG_FIRSTHDR(&msg);
-            (*c).cmsg_level = libc::SOL_SOCKET;
-            (*c).cmsg_type = libc::SCM_RIGHTS;
-            (*c).cmsg_len = libc::CMSG_LEN(size_of::<i32>() as u32) as _;
-            std::ptr::write_unaligned(libc::CMSG_DATA(c).cast::<i32>(), fd);
-            libc::sendmsg(self.sock.as_raw_fd(), &msg, 0)
-        };
-        if sent as usize != m.len() {
-            return Err(format!("sending the keymap: {}", std::io::Error::last_os_error()));
-        }
-        Ok(())
-    }
-
-    /// Read events until the callback is done; the display's protocol error ends it with Err.
-    fn until(&mut self, callback: u32, mut each: impl FnMut(u32, u16, &[u8])) -> Result<(), String> {
-        loop {
-            while self.buf.len() >= 8 {
-                let obj = u32::from_le_bytes(self.buf[0..4].try_into().unwrap());
-                let so = u32::from_le_bytes(self.buf[4..8].try_into().unwrap());
-                let (size, op) = ((so >> 16) as usize, (so & 0xffff) as u16);
-                if size < 8 || self.buf.len() < size {
-                    break;
-                }
-                let body: Vec<u8> = self.buf[8..size].to_vec();
-                self.buf.drain(..size);
-                if obj == 1 && op == 0 {
-                    let n = u32::from_le_bytes(body[8..12].try_into().unwrap()) as usize;
-                    let text = String::from_utf8_lossy(&body[12..12 + n.saturating_sub(1)]).into_owned();
-                    return Err(format!("the agent display refused input: {text}"));
-                }
-                if obj == callback && op == 0 {
-                    return Ok(());
-                }
-                each(obj, op, &body);
-            }
-            let mut chunk = [0u8; 8192];
-            let n = self.sock.read(&mut chunk).map_err(|e| format!("the agent display did not answer: {e}"))?;
-            if n == 0 {
-                return Err("the agent display closed the connection".into());
-            }
-            self.buf.extend(&chunk[..n]);
-        }
-    }
-
-    fn sync(&mut self, each: impl FnMut(u32, u16, &[u8])) -> Result<(), String> {
-        let cb = self.id();
-        self.send(1, 0, &words(&[cb]))?;
-        self.until(cb, each)
-    }
-}
-
 fn now_ms() -> u32 {
     let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
     t.as_millis() as u32
@@ -236,33 +131,11 @@ pub fn run(socket: &Path, ops: &[Op]) -> Result<(), String> {
         }
     }
 
-    let mut c = Conn::open(socket)?;
-    let registry = c.id();
-    c.send(1, 1, &words(&[registry]))?;
-    let mut globals: Vec<(u32, String)> = vec![];
-    c.sync(|obj, op, body| {
-        if obj == registry && op == 0 && body.len() >= 8 {
-            let name = u32::from_le_bytes(body[0..4].try_into().unwrap());
-            let n = u32::from_le_bytes(body[4..8].try_into().unwrap()) as usize;
-            if body.len() >= 8 + n && n > 0 {
-                globals.push((name, String::from_utf8_lossy(&body[8..8 + n - 1]).into_owned()));
-            }
-        }
-    })?;
-    let bind = |c: &mut Conn, iface: &str| -> Result<u32, String> {
-        let name = globals.iter().find(|g| g.1 == iface).map(|g| g.0);
-        let name = name.ok_or_else(|| format!("the agent display does not offer {iface}"))?;
-        let id = c.id();
-        let mut args = words(&[name]);
-        args.extend(string(iface));
-        args.extend(words(&[1, id]));
-        c.send(registry, 0, &args)?;
-        Ok(id)
-    };
-    let seat = bind(&mut c, "wl_seat")?;
+    let mut c = Conn::open(socket, "the agent display")?;
+    let (seat, _) = c.bind("wl_seat", 1)?;
 
     if !keyed.is_empty() {
-        let manager = bind(&mut c, "zwp_virtual_keyboard_manager_v1")?;
+        let (manager, _) = c.bind("zwp_virtual_keyboard_manager_v1", 1)?;
         let kb = c.id();
         c.send(manager, 0, &words(&[seat, kb]))?;
         let mut text = keymap(&syms).into_bytes();
@@ -292,7 +165,7 @@ pub fn run(socket: &Path, ops: &[Op]) -> Result<(), String> {
 
     let pointing = ops.iter().any(|o| matches!(o, Op::Click { .. } | Op::Scroll { .. }));
     if pointing {
-        let manager = bind(&mut c, "zwlr_virtual_pointer_manager_v1")?;
+        let (manager, _) = c.bind("zwlr_virtual_pointer_manager_v1", 1)?;
         let p = c.id();
         c.send(manager, 0, &words(&[seat, p]))?;
         let t = now_ms();

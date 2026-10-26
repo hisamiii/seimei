@@ -243,7 +243,7 @@ The native host finds seimei's second socket, `agent-browser.sock`, through `SEI
 
 ## 9. GNOME and KDE on Wayland
 
-Until now both got the `Unsupported` backend: every desktop tool said so. What each one lets an unsandboxed client of the user's session do was probed in headless instances (GNOME Shell 51.1, KWin 6 on Arch, in a scratch user namespace).
+Both used to get the `Unsupported` backend, where every desktop tool said so; now each has its own (`kde.rs`, `gnome.rs`). What each one lets an unsandboxed client of the user's session do was probed in headless instances (GNOME Shell 51.1, KWin 6 on Arch, in a scratch user namespace).
 
 ### What is reachable
 
@@ -256,29 +256,41 @@ Until now both got the `Unsupported` backend: every desktop tool said so. What e
 
 ### GNOME: a shell extension
 
-Nothing outside the shell lists windows, so seimei ships a small GNOME Shell extension (GNOME 45 and later), the way the browser connector ships a WebExtension. It exports one D-Bus method on the session bus, `org.seimei.Desktop.Call(s) -> s`, JSON in and out:
+Nothing outside the shell lists windows, so seimei ships a small GNOME Shell extension (GNOME 45 and later, `plugins/desktop/gnome/`), the way the browser connector ships a WebExtension. It exports one D-Bus method on the session bus, `org.seimei.Desktop.Call(s) -> s`, JSON in and out:
 
-- `windows`, `workspaces`, `outputs` from `global.get_window_actors()`, the workspace manager and the monitors;
-- `focus` (`Main.activateWindow`), `move` (`change_workspace_by_index`), `close` (`delete`);
-- `screen` and `region` with `Shell.Screenshot`, `window` by painting the window's actor (also on another workspace), written as PNG to a path seimei gives;
-- `input`: Clutter virtual keyboard and pointer devices made inside the shell (keysyms, absolute motion, buttons, wheel steps), and text committed through the shell's input method when a text field has focus, keysyms otherwise.
+- `windows`, `workspaces`, `outputs` from `global.get_window_actors()`, the workspace manager and the monitors; window ids are small numbers the extension gives in the order it first sees windows;
+- `act`: activate, close, minimize, maximize, fullscreen, above, to-workspace (a number, or a name: a new name takes the empty last workspace GNOME keeps, and names stay on the workspace objects, since GNOME drops empty workspaces and the positions shift), workspace;
+- `shot`: the screen and areas with `Shell.Screenshot`, a window by painting its actor (also on another workspace), written as PNG to a path seimei gives;
+- `input`: Clutter virtual keyboard and pointer devices made inside the shell on first use (keysyms, absolute motion, buttons, wheel steps), and text committed through the shell's input method when a text field has it, keysyms otherwise (so text needs no keymap: `ü` arrives).
 
-seimei calls it with `gdbus` (part of GLib, there on every GNOME). `seimei setup` installs and enables it; GNOME on Wayland loads a newly installed extension at the next login. Until then the tools say so. The method trusts any process of the user, like the session bus itself; it adds nothing a process of the user cannot do with uinput.
+seimei calls it over the session bus with its own small D-Bus client (`dbus.rs`, nothing to install). `seimei setup` writes the extension and adds it to `enabled-extensions`; GNOME on Wayland loads a newly installed extension at the next login. Until then the tools say so. The method trusts any process of the user, like the session bus itself; it adds nothing a process of the user cannot do with uinput.
+
+Two things a headless shell taught: a new virtual pointer's first motion can land with y at 0, so a click looks where the pointer went and moves again; and a window focused before the virtual keyboard existed gets no keyboard until focus comes again, so the extension refocuses it once after making the devices.
 
 The screenshot portal and Mutter's RemoteDesktop with a ScreenCast stream would do screenshots and input without an extension, but the window list needs the extension anyway, the portal asks the user, and the stream needs PipeWire; one extension is less to go wrong.
 
 ### KDE: Wayland and one D-Bus call
 
-All from seimei, nothing installed: window list, focus (`set_state` active), close, virtual desktops and moving between them through the two Plasma protocols, over the raw wire like `vinput.rs`; screenshots from ScreenShot2 (screen, area, window by its uuid), converted from the raw image to PNG or JPEG. Window ids are small numbers seimei gives each window uuid while it runs. Input on the user's display stays uinput; `fake_input` drives the agent display.
+All from seimei, nothing installed: window list, focus (`set_state` active), close, minimize, maximize, fullscreen, keep above, virtual desktops (switch, create, move a window) through the two Plasma protocols, over the raw wire like `vinput.rs` (`wire.rs`); screenshots from ScreenShot2 (screen, area, window by its uuid), raw pixels through a pipe, converted to PNG or JPEG. Window ids are small numbers seimei gives each window uuid while it runs. The event stream follows the Plasma window objects and reports changes. Input on the user's display stays uinput; `fake_input` drives the agent display, on a connection kept open (a headless seat has a pointer only while the fake device lives).
 
 ### Agent display
 
-The nested niri cannot be had there, but both have a headless mode with a virtual monitor:
+The nested niri cannot be had there, but both have a headless mode with a virtual monitor. `agent.rs` starts one with `dbus-run-session`, so its D-Bus names (`org.kde.KWin`, `org.gnome.Shell`) do not meet the user's, records the compositor's pid and that bus, and adopts it again after a seimei restart:
 
-- KDE: `kwin_wayland --virtual --width 1280 --height 800 --socket <name>` on a private session bus (so its `org.kde.KWin` does not meet the user's). The KDE backend pinned to that socket and bus drives it; input through `fake_input`.
-- GNOME: `gnome-shell --headless --virtual-monitor 1280x800 --wayland-display <name>` on a private session bus, with the seimei extension; input through the extension.
+- KDE: `kwin_wayland --virtual --width 1280 --height 800 --socket seimei-agent`; the KDE backend pinned to that socket and bus drives it, input through `fake_input`.
+- GNOME: `gnome-shell --headless --virtual-monitor 1280x800 --wayland-display seimei-agent` with seimei's extension enabled in a settings database of its own (`DCONF_PROFILE`), so the user's extensions and settings stay out; input through the extension.
 
-A headless display has no window on the user's screen: the user sees it through screenshots only. That is the price of not nesting.
+Apps started there get `WAYLAND_DISPLAY=seimei-agent`, the private bus and an empty `DISPLAY`; that variable also finds them for the memory count and the stop. ui_tree asks the private bus, where their accessibility bus lives. A headless display has no window on the user's screen: the user sees it through screenshots only. That is the price of not nesting.
+
+### Tested
+
+In a scratch Arch root (user namespace, no GPU, uinput bound to /dev/null), GNOME Shell 51.1 and KWin 6:
+
+- both backends: window list, focus, workspaces and named moves, outputs, screenshots (screen as JPEG, area as PNG, a window), the event stream;
+- input: typing with `ü` into foot, enter, ctrl+d, a click on zenity's "No" (exit 1);
+- the agent display from seimei's own start code: up in under a second (GNOME 220 MB, KDE 170 MB with a foot), adopted again, typing, a screenshot, ui_tree of a zenity, stopped with its apps.
+
+Not tested: a real Plasma or GNOME login (the user's display with uinput, the extension loaded at login), and GNOME releases other than 51.
 
 ## How it degrades for other users
 
@@ -287,7 +299,7 @@ A headless display has no window on the user's screen: the user sees it through 
 | browser 1 to 5 | yes | yes | yes | yes |
 | `captureTab`, `openOrClosedShadowRoot`, `tabs.hide` | Firefox only; Chromium would need `chrome.debugger` (shows a bar) for background shots, so the first build is Firefox-only | | | |
 | 6 | yes | yes (their own sockets) | n/a | n/a |
-| 7 agent display | nested niri (built) | headless sway/labwc, or nested sway | headless KWin or GNOME Shell (9) | headless sway/labwc, or Xvfb + XTEST later |
+| 7 agent display | nested niri (built) | headless sway/labwc, or nested sway | headless KWin or GNOME Shell (built, 9) | headless sway/labwc, or Xvfb + XTEST later |
 | 8 agent browser | with 7 | with 7 | with 7 | with 7 |
 
 ## Sources

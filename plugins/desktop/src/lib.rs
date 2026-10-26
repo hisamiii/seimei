@@ -1,23 +1,28 @@
 //! The desktop plugin: drive the user's graphical session (windows, screenshots, keys, clicks, accessibility trees,
 //! notifications, the lock screen), remember its layout across restarts, and open released or lent sessions in
-//! windows there. The window manager is a backend: niri, sway, Hyprland or any X11 WM. Its tools run inside seimei,
-//! which follows the WM's events and knows which windows seimei opened; `seimei plugin desktop` forwards each call.
+//! windows there. The window manager is a backend: niri, sway, Hyprland, KDE Plasma, GNOME or any X11 WM. Its tools
+//! run inside seimei, which follows the WM's events and knows which windows seimei opened; `seimei plugin desktop`
+//! forwards each call.
 //!
 //! ```toml
 //! [plugins.desktop]
-//! backend = "niri"      # niri, sway, hyprland or x11; found from the running session when left out
+//! backend = "niri"      # niri, sway, hyprland, kde, gnome or x11; found from the running session when left out
 //! shell = "fish"        # the shell a restored Claude session runs in; $SHELL when left out
 //! ```
 
 pub mod agent;
 pub mod backend;
 pub mod checks;
+pub mod dbus;
+pub mod gnome;
 pub mod hyprland;
+pub mod kde;
 pub mod layout;
 pub mod niri;
 pub mod sway;
 pub mod uinput;
 pub mod vinput;
+pub mod wire;
 pub mod x11;
 
 use std::collections::HashMap;
@@ -62,7 +67,7 @@ pub(crate) fn text_of(v: &Value) -> String {
 pub const PLUGIN: Factory = Factory {
     name: "desktop",
     what: "the desktop: windows, workspaces, screenshots, keyboard and mouse",
-    needs: "niri, sway, Hyprland or X11",
+    needs: "niri, sway, Hyprland, KDE Plasma, GNOME or X11",
     found: || std::env::var_os("WAYLAND_DISPLAY").is_some() || std::env::var_os("DISPLAY").is_some(),
     manifest: include_str!("../plugin.toml"),
     // It depends on the window manager and the computer: Builtin::prompt makes it.
@@ -172,7 +177,7 @@ pub struct Desktop {
     times: Mutex<Times>,
     /// The layout memory: which session it last offered to bring back.
     offered: Mutex<Option<String>>,
-    /// The agent display (niri only): a nested niri for agent apps.
+    /// The agent display (niri, KDE Plasma, GNOME): a screen of seimei's own for agent apps.
     pub agent: agent::Agent,
 }
 
@@ -210,7 +215,7 @@ impl Desktop {
             Some(n) => n,
             None => backend::detect(&ctx, &|k| std::env::var(k).unwrap_or_default()).unwrap_or_else(|| {
                 eprintln!(
-                    "seimei: desktop: no niri, sway, Hyprland or X11 session found; set [plugins.desktop] backend"
+                    "seimei: desktop: no niri, sway, Hyprland, KDE Plasma, GNOME or X11 session found; set [plugins.desktop] backend"
                 );
                 "x11"
             }),
@@ -264,7 +269,7 @@ impl Desktop {
                 .into_iter()
                 .flatten()
                 .collect();
-        let focus = if b.name() == "niri" {
+        let focus = if matches!(b.name(), "niri" | "kde" | "gnome") {
             "- Work in the agent display (display: \"agent\" on the desktop tools, browser: \"agent\" on the browser tools): it has its own screen, keyboard and pointer, so the user's focus and mouse stay theirs. Touch the user's display only when the task is about something there; then focus stealing is fine, and apps you open go to the \"seimei\" workspace (open_app does that)."
         } else {
             "- Focus stealing is fine and you may use the user's workspaces, but apps you open for a task go to the \"seimei\" workspace (open_app does that)."
@@ -985,18 +990,19 @@ impl Desktop {
         Ok(if moved { "Moved." } else { "Clicked." }.into())
     }
 
-    /// ui_tree and ui_action on a window of the user's display, or of the agent display's niri when inner is given.
+    /// ui_tree and ui_action on a window of the user's display, or of the agent display when inner is given.
     async fn a11y_tool(
         self: &Arc<Self>,
         tool: &str,
         args: &Value,
-        inner: Option<niri::Niri>,
+        inner: Option<Arc<dyn Backend>>,
     ) -> Result<String, String> {
         let wid = int(need(args, "window")?)?;
-        let found = self
+        // A headless agent display's apps are on a session bus of their own, and so is their accessibility bus.
+        let (found, env) = self
             .blocking(move |d| match &inner {
-                Some(b) => b.window(wid),
-                None => d.b.window(wid),
+                Some(b) => Ok::<_, String>((b.window(wid)?, b.env()?)),
+                None => Ok((d.b.window(wid)?, vec![])),
             })
             .await?;
         let pid = found.ok_or_else(|| format!("no window {wid}"))?["pid"].clone();
@@ -1004,11 +1010,11 @@ impl Desktop {
         let r = if tool == "ui_tree" {
             let depth = args.get("depth").map_or(Ok(12), int)?.to_string();
             let filter = if truthy(&args["filter"]) { text_of(&args["filter"]) } else { String::new() };
-            a11y(&["tree", &pid, &depth, &filter]).await
+            a11y(&["tree", &pid, &depth, &filter], env).await
         } else if args.get("set_text").is_some_and(|t| !t.is_null()) {
-            a11y(&["set-text", &pid, &text_of(need(args, "path")?), &text_of(&args["set_text"])]).await
+            a11y(&["set-text", &pid, &text_of(need(args, "path")?), &text_of(&args["set_text"])], env).await
         } else if args.get("action").is_some_and(|t| !t.is_null()) {
-            a11y(&["act", &pid, &text_of(need(args, "path")?), &text_of(&args["action"])]).await
+            a11y(&["act", &pid, &text_of(need(args, "path")?), &text_of(&args["action"])], env).await
         } else {
             return Err("Give action or set_text.".into());
         };
@@ -1074,13 +1080,13 @@ impl Desktop {
 }
 
 /// The AT-SPI helper on the system Python (it has PyGObject); -I keeps it from importing anything next to it.
-async fn a11y(args: &[&str]) -> Value {
+async fn a11y(args: &[&str], env: backend::Env) -> Value {
     let mut argv = vec!["/usr/bin/python3", "-I", "-W", "ignore", "-c", HELPER];
     argv.extend(args);
     let argv: Vec<String> = argv.into_iter().map(String::from).collect();
     let r = tokio::task::spawn_blocking(move || {
         let refs: Vec<&str> = argv.iter().map(String::as_str).collect();
-        backend::exec(&refs, &vec![], None, 30.0)
+        backend::exec(&refs, &env, None, 30.0)
     })
     .await
     .expect("a11y");

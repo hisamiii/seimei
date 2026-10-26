@@ -1,0 +1,8 @@
+{
+  "uuid": "seimei@hisamiowo.xyz",
+  "name": "seimei",
+  "description": "Lets the seimei desktop plugin list, focus and move windows, take screenshots and send input, over the session bus.",
+  "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
+  "url": "https://github.com/hisamiii/seimei",
+  "version": 1
+}

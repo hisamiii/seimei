@@ -14,6 +14,9 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
+use super::vinput::{self, Op};
+use super::wire::socket_path;
+
 const LOCKERS: [&str; 8] = ["swaylock", "hyprlock", "gtklock", "waylock", "i3lock", "xsecurelock", "slock", "physlock"];
 pub const NAMES: [&str; 6] = ["niri", "sway", "hyprland", "x11", "kde", "gnome"];
 
@@ -117,6 +120,14 @@ pub trait Backend: Send + Sync {
     }
     fn layouts(&self) -> Result<Option<Value>, String> {
         Ok(None)
+    }
+    /// Input through the compositor's own devices, for a display seimei runs itself (the user's display gets uinput):
+    /// the Wayland virtual keyboard and pointer unless the backend has its own way.
+    fn input(&self, ops: &[Op]) -> Result<(), String> {
+        let env = self.env()?;
+        let wl =
+            env.iter().find(|(k, _)| k == "WAYLAND_DISPLAY").map(|(_, v)| v.as_str()).ok_or("no Wayland display")?;
+        vinput::run(&socket_path(&self.ctx().run, wl), ops)
     }
     fn queries(&self) -> &'static [&'static str];
     /// Read-only state as compact JSON.
@@ -314,81 +325,65 @@ pub fn rect_shot(env: &Env, rect: &Value) -> Result<Vec<u8>, String> {
     Ok(r.stdout)
 }
 
-/// A desktop seimei cannot drive yet (KDE Plasma, GNOME on Wayland): every call says so.
-pub struct Unsupported {
-    pub name: &'static str,
-    pub label: &'static str,
-    pub ctx: Ctx,
+/// The environment of the user's session on a desktop that names itself in XDG_CURRENT_DESKTOP (KDE, GNOME): seimei's
+/// own when it runs inside that session, else that of one of the session's processes (seimei may run as a service).
+/// Its Wayland socket has to listen.
+pub fn desktop_env(ctx: &Ctx, desk: &str) -> Option<Env> {
+    const KEYS: [&str; 6] = [
+        "WAYLAND_DISPLAY",
+        "DBUS_SESSION_BUS_ADDRESS",
+        "DISPLAY",
+        "XDG_CURRENT_DESKTOP",
+        "XDG_SESSION_TYPE",
+        "XAUTHORITY",
+    ];
+    let pick = |vars: &dyn Fn(&str) -> Option<String>| -> Option<Env> {
+        if !vars("XDG_CURRENT_DESKTOP")?.to_uppercase().split(':').any(|d| d == desk) {
+            return None;
+        }
+        let wl = vars("WAYLAND_DISPLAY")?;
+        if !listening(&crate::wire::socket_path(&ctx.run, &wl)) {
+            return None;
+        }
+        Some(KEYS.iter().filter_map(|k| Some((k.to_string(), vars(k)?))).collect())
+    };
+    if let Some(e) = pick(&|k| std::env::var(k).ok().filter(|v| !v.is_empty())) {
+        return Some(e);
+    }
+    for p in std::fs::read_dir(&ctx.proc).ok()?.flatten() {
+        if !p.file_name().to_str().is_some_and(|n| n.bytes().all(|b| b.is_ascii_digit())) {
+            continue;
+        }
+        let Ok(raw) = std::fs::read(p.path().join("environ")) else { continue };
+        let vars: std::collections::HashMap<&[u8], &[u8]> = raw
+            .split(|b| *b == 0)
+            .filter_map(|kv| kv.iter().position(|b| *b == b'=').map(|i| (&kv[..i], &kv[i + 1..])))
+            .collect();
+        let get =
+            |k: &str| vars.get(k.as_bytes()).filter(|v| !v.is_empty()).map(|v| String::from_utf8_lossy(v).into_owned());
+        if let Some(e) = pick(&get) {
+            return Some(e);
+        }
+    }
+    None
 }
 
-impl Unsupported {
-    fn why(&self) -> String {
-        format!(
-            "the desktop plugin cannot drive {} on Wayland yet; on an X11 session set [plugins.desktop] backend = \"x11\"",
-            self.label
-        )
+/// An image scaled by scale and encoded as "png" or "jpeg" (at quality).
+pub fn encode(img: image::DynamicImage, scale: f64, kind: &str, quality: i64) -> Result<Vec<u8>, String> {
+    let img = if (scale - 1.0).abs() > 1e-3 {
+        let (w, h) = ((img.width() as f64 * scale).round().max(1.0), (img.height() as f64 * scale).round().max(1.0));
+        img.resize_exact(w as u32, h as u32, image::imageops::FilterType::Triangle)
+    } else {
+        img
+    };
+    let mut out = std::io::Cursor::new(vec![]);
+    if kind == "jpeg" {
+        let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, quality.clamp(1, 100) as u8);
+        img.to_rgb8().write_with_encoder(enc).map_err(|e| e.to_string())?;
+    } else {
+        img.write_to(&mut out, image::ImageFormat::Png).map_err(|e| e.to_string())?;
     }
-}
-
-impl Backend for Unsupported {
-    fn name(&self) -> &'static str {
-        self.name
-    }
-    fn label(&self) -> &'static str {
-        self.label
-    }
-    fn ctx(&self) -> &Ctx {
-        &self.ctx
-    }
-    fn env(&self) -> Result<Env, String> {
-        Err(self.why())
-    }
-    fn windows(&self) -> Result<Vec<Value>, String> {
-        Err(self.why())
-    }
-    fn workspaces(&self) -> Result<Vec<Value>, String> {
-        Err(self.why())
-    }
-    fn outputs(&self) -> Result<Vec<(String, Value)>, String> {
-        Err(self.why())
-    }
-    fn focused_id(&self) -> Option<i64> {
-        None
-    }
-    fn window(&self, _wid: i64) -> Result<Option<Value>, String> {
-        Ok(None)
-    }
-    fn queries(&self) -> &'static [&'static str] {
-        &[]
-    }
-    fn query(&self, _what: &str) -> Result<String, String> {
-        Err(self.why())
-    }
-    fn action(&self, _args: &[String]) -> Result<String, String> {
-        Err(self.why())
-    }
-    fn focus(&self, _wid: i64) -> Result<(), String> {
-        Err(self.why())
-    }
-    fn move_to_workspace(&self, _wid: i64, _ws: &str) -> Result<(), String> {
-        Err(self.why())
-    }
-    fn spawn_sh(&self, _script: &str) -> Result<(), String> {
-        Err(self.why())
-    }
-    fn screen(&self, _s: f64, _q: i64) -> Result<Vec<u8>, String> {
-        Err(self.why())
-    }
-    fn region(&self, _g: &str, _s: f64, _k: &str, _q: i64) -> Result<Vec<u8>, String> {
-        Err(self.why())
-    }
-    fn window_shot(&self, _wid: i64) -> Result<Vec<u8>, String> {
-        Err(self.why())
-    }
-    fn events(&self, _emit: Emit) -> Result<(), String> {
-        std::thread::sleep(Duration::from_secs(3600));
-        Ok(())
-    }
+    Ok(out.into_inner())
 }
 
 /// The backend called name.
@@ -398,14 +393,14 @@ pub fn make(name: &str, ctx: Ctx) -> Result<Box<dyn Backend>, String> {
         "sway" => Box::new(super::sway::Sway::new(ctx)),
         "hyprland" => Box::new(super::hyprland::Hyprland::new(ctx)),
         "x11" => Box::new(super::x11::X11::new(ctx)),
-        "kde" => Box::new(Unsupported { name: "kde", label: "KDE Plasma", ctx }),
-        "gnome" => Box::new(Unsupported { name: "gnome", label: "GNOME", ctx }),
+        "kde" => Box::new(super::kde::Kde::new(ctx)),
+        "gnome" => Box::new(super::gnome::Gnome::new(ctx)),
         _ => return Err(format!("[plugins.desktop] backend is one of {}", NAMES.join(", "))),
     })
 }
 
 /// The running desktop: its socket variables first (seimei may start before them, so the sockets themselves too),
-/// then a KDE or GNOME Wayland session (not supported yet), then any X display.
+/// then a KDE or GNOME Wayland session, then any X display.
 pub fn detect(ctx: &Ctx, env: &dyn Fn(&str) -> String) -> Option<&'static str> {
     let desk = env("XDG_CURRENT_DESKTOP").to_lowercase();
     if !env("NIRI_SOCKET").is_empty() || !newest(&ctx.run, "niri.", ".sock").is_empty() || desk == "niri" {

@@ -36,17 +36,18 @@ shikigami = "default"
 [plugins]
 enabled = []
 # Built in:
-#   desktop  the desktop (niri, sway, Hyprland or X11): windows, workspaces, screenshots, input (uinput), AT-SPI
+#   desktop  the desktop (niri, sway, Hyprland, KDE Plasma, GNOME or X11): windows, workspaces, screenshots, input (uinput), AT-SPI
 #   discord  Discord through the Vesktop plugin in discord/
 #   browser  Waterfox (or Firefox) through the extension in plugins/browser/extension/
 #   music    Quod Libet and the session's media players (MPRIS)
 #   queue    claude-queue / cqd: every session's commands take GPU turns through it
 
 # [plugins.desktop]
-# backend = "niri"     # niri, sway, hyprland or x11 (any EWMH window manager); found from the session when left out.
-#                      # KDE Plasma and GNOME on Wayland are not supported yet (on X11 they work as x11).
+# backend = "niri"     # niri, sway, hyprland, kde, gnome or x11 (any EWMH window manager); found from the session when
+#                      # left out. kde and gnome are Plasma 6 and GNOME 45 or later on Wayland; gnome needs seimei's
+#                      # GNOME Shell extension, which `seimei setup` installs (it loads at the next login).
 # shell = "fish"       # the shell a restored Claude session runs in; $SHELL when left out
-# agent_idle_minutes = 30   # niri: the agent display stops after this long without an agent using it
+# agent_idle_minutes = 30   # niri, kde, gnome: the agent display stops after this long without an agent using it
 
 # [plugins.browser]
 # extension_id = "seimei@localhost"   # the extension's id; deploy.sh keeps the installed one when left out

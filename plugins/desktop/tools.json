@@ -1530,9 +1530,19 @@
     "_meta": {
      "anthropic/alwaysLoad": true
     },
-    "description": "The KDE Plasma desktop: outputs, workspaces with their windows (id, app, title; focused, urgent, opened by seimei), the keyboard layout and whether the screen is locked (input tools refuse while it is). Start here before acting.",
+    "description": "The KDE Plasma desktop: outputs, workspaces with their windows (id, app, title; focused, urgent, opened by seimei), the keyboard layout and whether the screen is locked (input tools refuse while it is). Start here before acting. With display: \"agent\": the agent display's windows.",
     "inputSchema": {
-     "properties": {},
+     "properties": {
+      "display": {
+       "type": "string",
+       "enum": [
+        "user",
+        "agent"
+       ],
+       "default": "user",
+       "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
+      }
+     },
      "required": [],
      "type": "object"
     },
@@ -1542,7 +1552,7 @@
     "_meta": {
      "anthropic/alwaysLoad": true
     },
-    "description": "See the screen. Without a window: the whole screen as JPEG; click and scroll take pixel coordinates from this image. With a window id: that window alone at full resolution, even on another workspace, for reading (not for click coordinates). region [x, y, w, h] (pixels of the whole-screen image) or target (bar: the status bar; top or bottom: half the screen): that part at full resolution, under 800 KB, for reading small text. It returns the image's path: Read it to see the image (only when you need to look; the path stays valid for the last 30 shots). show=true puts the image in the chat and returns the image itself.",
+    "description": "See the screen. Without a window: the whole screen as JPEG; click and scroll take pixel coordinates from this image. With a window id: that window alone at full resolution, even on another workspace, for reading (not for click coordinates). region [x, y, w, h] (pixels of the whole-screen image) or target (bar: the status bar; top or bottom: half the screen): that part at full resolution, under 800 KB, for reading small text. It returns the image's path: Read it to see the image (only when you need to look; the path stays valid for the last 30 shots). show=true puts the image in the chat and returns the image itself. With display: \"agent\": the agent display; a window id there is focused first.",
     "inputSchema": {
      "properties": {
       "window": {
@@ -1568,6 +1578,15 @@
       },
       "caption": {
        "type": "string"
+      },
+      "display": {
+       "type": "string",
+       "enum": [
+        "user",
+        "agent"
+       ],
+       "default": "user",
+       "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
       }
      },
      "type": "object"
@@ -1578,7 +1597,7 @@
     "_meta": {
      "anthropic/alwaysLoad": true
     },
-    "description": "",
+    "description": "Run a KDE window action: activate, close, minimize, maximize, fullscreen or keep-above with a window id (and on or off to set instead of toggle), to-desktop with a window id and a desktop number or name, desktop with a number or name to switch to it, new-desktop with a name. Closing a window seimei did not open waits for the user's OK on their phone.",
     "inputSchema": {
      "properties": {
       "action": {
@@ -1589,6 +1608,15 @@
        "items": {
         "type": "string"
        }
+      },
+      "display": {
+       "type": "string",
+       "enum": [
+        "user",
+        "agent"
+       ],
+       "default": "user",
+       "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
       }
      },
      "required": [
@@ -1599,12 +1627,25 @@
     "name": "kde"
    },
    {
-    "description": "",
+    "description": "Read-only KDE state as JSON: windows, desktops (virtual desktops) or outputs. For details the desktop tool leaves out.",
     "inputSchema": {
      "properties": {
       "what": {
        "type": "string",
-       "enum": []
+       "enum": [
+        "windows",
+        "desktops",
+        "outputs"
+       ]
+      },
+      "display": {
+       "type": "string",
+       "enum": [
+        "user",
+        "agent"
+       ],
+       "default": "user",
+       "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
       }
      },
      "required": [
@@ -1618,7 +1659,7 @@
     "_meta": {
      "anthropic/alwaysLoad": true
     },
-    "description": "Start an app or command in the desktop session. It runs outside seimei, so it survives seimei restarts. Its window goes to the \"seimei\" workspace unless workspace is \"current\", and counts as seimei's (closing it needs no OK). Returns the new window's id.",
+    "description": "Start an app or command in the desktop session. It runs outside seimei, so it survives seimei restarts. Its window goes to the \"seimei\" workspace unless workspace is \"current\", and counts as seimei's (closing it needs no OK). Returns the new window's id. With display: \"agent\" it opens in the agent display instead, which starts on first use (Firefox there: use the browser tools with browser: \"agent\"). Returns the new window's id.",
     "inputSchema": {
      "properties": {
       "command": {
@@ -1632,6 +1673,15 @@
         "current"
        ],
        "default": "seimei"
+      },
+      "display": {
+       "type": "string",
+       "enum": [
+        "user",
+        "agent"
+       ],
+       "default": "user",
+       "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
       }
      },
      "required": [
@@ -1642,10 +1692,28 @@
     "name": "open_app"
    },
    {
+    "description": "The agent display: a screen of seimei's own (a headless KWin on a bus of its own, seen through screenshots only) with its own keyboard and pointer, where agent apps get input without taking the user's focus or mouse. It starts on first use by open_app or the agent browser and stops itself after a while unused, closing its apps. go: status (size, windows, memory), start or stop.",
+    "inputSchema": {
+     "properties": {
+      "go": {
+       "type": "string",
+       "enum": [
+        "status",
+        "start",
+        "stop"
+       ],
+       "default": "status"
+      }
+     },
+     "type": "object"
+    },
+    "name": "agent_display"
+   },
+   {
     "_meta": {
      "anthropic/alwaysLoad": true
     },
-    "description": "Type text into a window: it is focused first, and typing stops if focus moves away. ASCII only; the US layout is switched on while typing.",
+    "description": "Type text into a window: it is focused first, and typing stops if focus moves away. ASCII only; the US layout is switched on while typing. With display: \"agent\" it types into a window of the agent display, any characters, without touching the user's focus.",
     "inputSchema": {
      "properties": {
       "window": {
@@ -1653,6 +1721,15 @@
       },
       "text": {
        "type": "string"
+      },
+      "display": {
+       "type": "string",
+       "enum": [
+        "user",
+        "agent"
+       ],
+       "default": "user",
+       "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
       }
      },
      "required": [
@@ -1667,7 +1744,7 @@
     "_meta": {
      "anthropic/alwaysLoad": true
     },
-    "description": "Press keys or combinations in a window, in order, like [\"ctrl+l\"], [\"enter\"], [\"alt+tab\"], [\"super+shift+e\"]. Names: letters, digits, punctuation, enter, esc, tab, backspace, delete, space, arrows (up/down/left/right), home, end, pageup, pagedown, f1-f12, ctrl, shift, alt, super.",
+    "description": "Press keys or combinations in a window, in order, like [\"ctrl+l\"], [\"enter\"], [\"alt+tab\"], [\"super+shift+e\"]. Names: letters, digits, punctuation, enter, esc, tab, backspace, delete, space, arrows (up/down/left/right), home, end, pageup, pagedown, f1-f12, ctrl, shift, alt, super. With display: \"agent\": a window of the agent display.",
     "inputSchema": {
      "properties": {
       "window": {
@@ -1678,6 +1755,15 @@
        "items": {
         "type": "string"
        }
+      },
+      "display": {
+       "type": "string",
+       "enum": [
+        "user",
+        "agent"
+       ],
+       "default": "user",
+       "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
       }
      },
      "required": [
@@ -1692,7 +1778,7 @@
     "_meta": {
      "anthropic/alwaysLoad": true
     },
-    "description": "Click at pixel coordinates of the latest whole-screen screenshot. Pass the window you expect there: the click is refused if it is no longer focused. count=2 double-clicks, count=0 only moves.",
+    "description": "Click at pixel coordinates of the latest whole-screen screenshot. Pass the window you expect there: the click is refused if it is no longer focused. count=2 double-clicks, count=0 only moves. With display: \"agent\": pixels of the latest agent display screenshot; the window, if given, is focused first.",
     "inputSchema": {
      "properties": {
       "x": {
@@ -1716,6 +1802,15 @@
       "count": {
        "type": "integer",
        "default": 1
+      },
+      "display": {
+       "type": "string",
+       "enum": [
+        "user",
+        "agent"
+       ],
+       "default": "user",
+       "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
       }
      },
      "required": [
@@ -1727,7 +1822,7 @@
     "name": "click"
    },
    {
-    "description": "Scroll with the wheel at pixel coordinates of the latest whole-screen screenshot; positive amount scrolls down, in wheel clicks.",
+    "description": "Scroll with the wheel at pixel coordinates of the latest whole-screen screenshot; positive amount scrolls down, in wheel clicks. With display: \"agent\": pixels of the latest agent display screenshot.",
     "inputSchema": {
      "properties": {
       "x": {
@@ -1741,6 +1836,15 @@
       },
       "window": {
        "type": "integer"
+      },
+      "display": {
+       "type": "string",
+       "enum": [
+        "user",
+        "agent"
+       ],
+       "default": "user",
+       "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
       }
      },
      "required": [
@@ -1768,6 +1872,15 @@
       },
       "filter": {
        "type": "string"
+      },
+      "display": {
+       "type": "string",
+       "enum": [
+        "user",
+        "agent"
+       ],
+       "default": "user",
+       "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
       }
      },
      "required": [
@@ -1796,6 +1909,15 @@
       },
       "set_text": {
        "type": "string"
+      },
+      "display": {
+       "type": "string",
+       "enum": [
+        "user",
+        "agent"
+       ],
+       "default": "user",
+       "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
       }
      },
      "required": [
@@ -1863,9 +1985,19 @@
     "_meta": {
      "anthropic/alwaysLoad": true
     },
-    "description": "The GNOME desktop: outputs, workspaces with their windows (id, app, title; focused, urgent, opened by seimei), the keyboard layout and whether the screen is locked (input tools refuse while it is). Start here before acting.",
+    "description": "The GNOME desktop: outputs, workspaces with their windows (id, app, title; focused, urgent, opened by seimei), the keyboard layout and whether the screen is locked (input tools refuse while it is). Start here before acting. With display: \"agent\": the agent display's windows.",
     "inputSchema": {
-     "properties": {},
+     "properties": {
+      "display": {
+       "type": "string",
+       "enum": [
+        "user",
+        "agent"
+       ],
+       "default": "user",
+       "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
+      }
+     },
      "required": [],
      "type": "object"
     },
@@ -1875,7 +2007,7 @@
     "_meta": {
      "anthropic/alwaysLoad": true
     },
-    "description": "See the screen. Without a window: the whole screen as JPEG; click and scroll take pixel coordinates from this image. With a window id: that window alone at full resolution, even on another workspace, for reading (not for click coordinates). region [x, y, w, h] (pixels of the whole-screen image) or target (bar: the status bar; top or bottom: half the screen): that part at full resolution, under 800 KB, for reading small text. It returns the image's path: Read it to see the image (only when you need to look; the path stays valid for the last 30 shots). show=true puts the image in the chat and returns the image itself.",
+    "description": "See the screen. Without a window: the whole screen as JPEG; click and scroll take pixel coordinates from this image. With a window id: that window alone at full resolution, even on another workspace, for reading (not for click coordinates). region [x, y, w, h] (pixels of the whole-screen image) or target (bar: the status bar; top or bottom: half the screen): that part at full resolution, under 800 KB, for reading small text. It returns the image's path: Read it to see the image (only when you need to look; the path stays valid for the last 30 shots). show=true puts the image in the chat and returns the image itself. With display: \"agent\": the agent display; a window id there is focused first.",
     "inputSchema": {
      "properties": {
       "window": {
@@ -1901,6 +2033,15 @@
       },
       "caption": {
        "type": "string"
+      },
+      "display": {
+       "type": "string",
+       "enum": [
+        "user",
+        "agent"
+       ],
+       "default": "user",
+       "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
       }
      },
      "type": "object"
@@ -1911,7 +2052,7 @@
     "_meta": {
      "anthropic/alwaysLoad": true
     },
-    "description": "",
+    "description": "Run a GNOME window action: activate, close, minimize, maximize, fullscreen or above with a window id (and on or off to set instead of toggle), to-workspace with a window id and a workspace number or name (a new name takes the empty last workspace), workspace with a number to switch to it. Closing a window seimei did not open waits for the user's OK on their phone.",
     "inputSchema": {
      "properties": {
       "action": {
@@ -1922,6 +2063,15 @@
        "items": {
         "type": "string"
        }
+      },
+      "display": {
+       "type": "string",
+       "enum": [
+        "user",
+        "agent"
+       ],
+       "default": "user",
+       "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
       }
      },
      "required": [
@@ -1932,12 +2082,25 @@
     "name": "gnome"
    },
    {
-    "description": "",
+    "description": "Read-only GNOME state as JSON: windows, workspaces or outputs. For details the desktop tool leaves out.",
     "inputSchema": {
      "properties": {
       "what": {
        "type": "string",
-       "enum": []
+       "enum": [
+        "windows",
+        "workspaces",
+        "outputs"
+       ]
+      },
+      "display": {
+       "type": "string",
+       "enum": [
+        "user",
+        "agent"
+       ],
+       "default": "user",
+       "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
       }
      },
      "required": [
@@ -1951,7 +2114,7 @@
     "_meta": {
      "anthropic/alwaysLoad": true
     },
-    "description": "Start an app or command in the desktop session. It runs outside seimei, so it survives seimei restarts. Its window goes to the \"seimei\" workspace unless workspace is \"current\", and counts as seimei's (closing it needs no OK). Returns the new window's id.",
+    "description": "Start an app or command in the desktop session. It runs outside seimei, so it survives seimei restarts. Its window goes to the \"seimei\" workspace unless workspace is \"current\", and counts as seimei's (closing it needs no OK). Returns the new window's id. With display: \"agent\" it opens in the agent display instead, which starts on first use (Firefox there: use the browser tools with browser: \"agent\"). Returns the new window's id.",
     "inputSchema": {
      "properties": {
       "command": {
@@ -1965,6 +2128,15 @@
         "current"
        ],
        "default": "seimei"
+      },
+      "display": {
+       "type": "string",
+       "enum": [
+        "user",
+        "agent"
+       ],
+       "default": "user",
+       "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
       }
      },
      "required": [
@@ -1975,10 +2147,28 @@
     "name": "open_app"
    },
    {
+    "description": "The agent display: a screen of seimei's own (a headless GNOME Shell on a bus of its own, seen through screenshots only) with its own keyboard and pointer, where agent apps get input without taking the user's focus or mouse. It starts on first use by open_app or the agent browser and stops itself after a while unused, closing its apps. go: status (size, windows, memory), start or stop.",
+    "inputSchema": {
+     "properties": {
+      "go": {
+       "type": "string",
+       "enum": [
+        "status",
+        "start",
+        "stop"
+       ],
+       "default": "status"
+      }
+     },
+     "type": "object"
+    },
+    "name": "agent_display"
+   },
+   {
     "_meta": {
      "anthropic/alwaysLoad": true
     },
-    "description": "Type text into a window: it is focused first, and typing stops if focus moves away. ASCII only; the US layout is switched on while typing.",
+    "description": "Type text into a window: it is focused first, and typing stops if focus moves away. ASCII only; the US layout is switched on while typing. With display: \"agent\" it types into a window of the agent display, any characters, without touching the user's focus.",
     "inputSchema": {
      "properties": {
       "window": {
@@ -1986,6 +2176,15 @@
       },
       "text": {
        "type": "string"
+      },
+      "display": {
+       "type": "string",
+       "enum": [
+        "user",
+        "agent"
+       ],
+       "default": "user",
+       "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
       }
      },
      "required": [
@@ -2000,7 +2199,7 @@
     "_meta": {
      "anthropic/alwaysLoad": true
     },
-    "description": "Press keys or combinations in a window, in order, like [\"ctrl+l\"], [\"enter\"], [\"alt+tab\"], [\"super+shift+e\"]. Names: letters, digits, punctuation, enter, esc, tab, backspace, delete, space, arrows (up/down/left/right), home, end, pageup, pagedown, f1-f12, ctrl, shift, alt, super.",
+    "description": "Press keys or combinations in a window, in order, like [\"ctrl+l\"], [\"enter\"], [\"alt+tab\"], [\"super+shift+e\"]. Names: letters, digits, punctuation, enter, esc, tab, backspace, delete, space, arrows (up/down/left/right), home, end, pageup, pagedown, f1-f12, ctrl, shift, alt, super. With display: \"agent\": a window of the agent display.",
     "inputSchema": {
      "properties": {
       "window": {
@@ -2011,6 +2210,15 @@
        "items": {
         "type": "string"
        }
+      },
+      "display": {
+       "type": "string",
+       "enum": [
+        "user",
+        "agent"
+       ],
+       "default": "user",
+       "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
       }
      },
      "required": [
@@ -2025,7 +2233,7 @@
     "_meta": {
      "anthropic/alwaysLoad": true
     },
-    "description": "Click at pixel coordinates of the latest whole-screen screenshot. Pass the window you expect there: the click is refused if it is no longer focused. count=2 double-clicks, count=0 only moves.",
+    "description": "Click at pixel coordinates of the latest whole-screen screenshot. Pass the window you expect there: the click is refused if it is no longer focused. count=2 double-clicks, count=0 only moves. With display: \"agent\": pixels of the latest agent display screenshot; the window, if given, is focused first.",
     "inputSchema": {
      "properties": {
       "x": {
@@ -2049,6 +2257,15 @@
       "count": {
        "type": "integer",
        "default": 1
+      },
+      "display": {
+       "type": "string",
+       "enum": [
+        "user",
+        "agent"
+       ],
+       "default": "user",
+       "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
       }
      },
      "required": [
@@ -2060,7 +2277,7 @@
     "name": "click"
    },
    {
-    "description": "Scroll with the wheel at pixel coordinates of the latest whole-screen screenshot; positive amount scrolls down, in wheel clicks.",
+    "description": "Scroll with the wheel at pixel coordinates of the latest whole-screen screenshot; positive amount scrolls down, in wheel clicks. With display: \"agent\": pixels of the latest agent display screenshot.",
     "inputSchema": {
      "properties": {
       "x": {
@@ -2074,6 +2291,15 @@
       },
       "window": {
        "type": "integer"
+      },
+      "display": {
+       "type": "string",
+       "enum": [
+        "user",
+        "agent"
+       ],
+       "default": "user",
+       "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
       }
      },
      "required": [
@@ -2101,6 +2327,15 @@
       },
       "filter": {
        "type": "string"
+      },
+      "display": {
+       "type": "string",
+       "enum": [
+        "user",
+        "agent"
+       ],
+       "default": "user",
+       "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
       }
      },
      "required": [
@@ -2129,6 +2364,15 @@
       },
       "set_text": {
        "type": "string"
+      },
+      "display": {
+       "type": "string",
+       "enum": [
+        "user",
+        "agent"
+       ],
+       "default": "user",
+       "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
       }
      },
      "required": [
