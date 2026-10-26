@@ -39,11 +39,10 @@ use seimei_core::events::EventLog;
 use seimei_core::permissions::configured;
 use seimei_core::plugins::Plugins;
 use seimei_core::push::{Fcm, Push, WebPush};
+use seimei::BUILTINS;
 use seimei_core::util::{config_file, data_dir};
 use serde_json::Value;
 
-/// The plugins built into this binary, each from its crate under plugins/.
-const BUILTINS: [seimei_core::plugins::Factory; 3] = seimei_core::plugins::FACTORIES;
 
 const COMMANDS: [&str; 13] = [
     "serve",

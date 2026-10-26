@@ -1939,6 +1939,7 @@ dependencies = [
  "minisign-verify",
  "reqwest",
  "seimei-core",
+ "seimei-plugin-music",
  "seimei-server",
  "serde_json",
  "tokio",
@@ -1971,6 +1972,16 @@ dependencies = [
  "webauthn-rs",
  "webauthn-rs-proto",
  "webp",
+]
+
+[[package]]
+name = "seimei-plugin-music"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "seimei-core",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

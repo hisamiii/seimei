@@ -14,8 +14,9 @@ use serde_json::{Value, json};
 
 use crate::cqd::fake_cqd;
 
+/// A case file, from the repo root.
 fn cases(file: &str) -> Value {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/cases").join(file);
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join(file);
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
@@ -82,7 +83,7 @@ async fn queue_plugin_over_stdio() {
     let mut rules = crate::env::Env::lock();
     rules.example_rules(&std::env::temp_dir().join(format!("seimei-queue_plugin_over_stdio-rules-{}", std::process::id())));
     let (d, events, approvals, plugins) = host("queue", "queue").await;
-    let cases_queue = cases("queue.json");
+    let cases_queue = cases("tests/cases/queue.json");
     let cqd_sock = d.join("cqd.sock");
     let seen = fake_cqd(cqd_sock.clone(), cases_queue["describe"][0]["cqd"].clone());
     let entry = plugins.servers("seimei", None, None)["queue"].clone();
@@ -187,7 +188,7 @@ async fn host(name: &str, enabled: &str) -> (std::path::PathBuf, Arc<EventLog>, 
     let events = Arc::new(EventLog::open(&state.join("events.jsonl")).unwrap());
     let approvals = Arc::new(Approvals::new(events.clone()));
     let cfg: toml::Table = format!("enabled = [\"{enabled}\"]").parse().unwrap();
-    let plugins = Arc::new(Plugins::load(&cfg, &state, &seimei_core::plugins::FACTORIES));
+    let plugins = Arc::new(Plugins::load(&cfg, &state, &seimei::BUILTINS));
     plugins.servers("seimei", None, None);
     plugins.root("seimei", None, Some(std::process::id()));
     tokio::spawn(plugins.clone().listen(approvals.clone()));
@@ -208,7 +209,7 @@ async fn music_plugin_over_stdio() {
     let (d, events, approvals, plugins) = host("music", "music").await;
     let env = plugins.servers("seimei", None, None)["music"]["env"].as_object().unwrap().clone();
     // A Quod Libet bridge that answers status and keeps the rest, and a playerctl that logs its args.
-    let status = cases("music.json")["describe"][3].clone();
+    let status = cases("plugins/music/tests/cases.json")["describe"][3].clone();
     let sock = d.join("ql.sock");
     let listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
     let sent = Arc::new(std::sync::Mutex::new(vec![]));
@@ -236,7 +237,7 @@ async fn music_plugin_over_stdio() {
     let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
     let more = [("SEIMEI_QL_SOCK", sock.display().to_string()), ("PATH", path)];
 
-    let spec: Value = serde_json::from_str(seimei_core::plugins::music::PLUGIN.spec).unwrap();
+    let spec: Value = serde_json::from_str(seimei_plugin_music::PLUGIN.spec).unwrap();
     let want = status["want"].as_str().unwrap().to_string();
     let mut srv = tokio::task::spawn_blocking(move || {
         let mut srv = Server::start("music", &env, &more);

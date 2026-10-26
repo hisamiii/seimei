@@ -1,12 +1,16 @@
 //! tests/cases/music.json: the music tool's text, and the
 //! card a call raises with the request a fake Quod Libet bridge then gets.
 
+#[path = "../../../crates/core/tests/it/env.rs"]
+mod env;
+
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use seimei_core::plugins::{Fut, Session, music};
+use seimei_core::plugins::{Fut, Session};
+use seimei_plugin_music as music;
 use serde_json::{Value, json};
 
 /// The user, approving every card and keeping it.
@@ -27,7 +31,7 @@ impl Session for User {
 
 #[tokio::test]
 async fn music_cases() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/cases/music.json");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/cases.json");
     let doc: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     let mut fails = vec![];
     for c in doc["describe"].as_array().unwrap() {

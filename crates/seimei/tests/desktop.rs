@@ -233,7 +233,7 @@ async fn end_to_end(t: &mut T, g: &Value) {
     let approvals = Arc::new(Approvals::new(events.clone()));
     let cfg: toml::Table = "enabled = [\"desktop\"]\n[desktop]\nbackend = \"niri\"".parse().unwrap();
     let plugins =
-        Arc::new(Plugins::load_at(&cfg, &state, env!("CARGO_BIN_EXE_seimei"), &seimei_core::plugins::FACTORIES).about("laptop (Arch, niri)"));
+        Arc::new(Plugins::load_at(&cfg, &state, env!("CARGO_BIN_EXE_seimei"), &seimei::BUILTINS).about("laptop (Arch, niri)"));
     let desk = plugins.desktop.clone().unwrap();
     assert_eq!(desk.b.ctx().run, t.run, "the plugin's desktop is not the test's");
     let spec = &serde_json::from_str::<Value>(&std::fs::read_to_string(repo().join("crates/core/data/tools.json")).unwrap())

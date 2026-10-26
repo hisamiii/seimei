@@ -80,7 +80,7 @@ fn dispatcher_live() {
 async fn run(work: std::path::PathBuf, state: std::path::PathBuf) {
     let c = Checks::default();
     let queue: Value = serde_json::from_str(include_str!("../../../../tests/cases/queue.json")).unwrap();
-    let music: Value = serde_json::from_str(include_str!("../../../../tests/cases/music.json")).unwrap();
+    let music: Value = serde_json::from_str(include_str!("../../../../plugins/music/tests/cases.json")).unwrap();
     let cqd_seen = cqd::fake_cqd(state.join("cqd.sock"), queue["describe"][0]["cqd"].clone());
     // The Quod Libet bridge: answers status as music.json says.
     let status = music["describe"][3].clone();
@@ -114,7 +114,7 @@ async fn run(work: std::path::PathBuf, state: std::path::PathBuf) {
     )
     .parse()
     .unwrap();
-    let plugins = Arc::new(Plugins::load_at(&cfg, &state, env!("CARGO_BIN_EXE_seimei"), &seimei_core::plugins::FACTORIES).about("test machine"));
+    let plugins = Arc::new(Plugins::load_at(&cfg, &state, env!("CARGO_BIN_EXE_seimei"), &seimei::BUILTINS).about("test machine"));
     let disp: toml::Table =
         format!("model = \"haiku\"\ncwd = \"{}\"\nname = \"seimei-live\"", work.display()).parse().unwrap();
     let app = seimei_server::App::new(seimei_server::Setup {

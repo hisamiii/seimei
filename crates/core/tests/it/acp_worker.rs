@@ -76,7 +76,7 @@ async fn acp_shikigami() {
                             acptest-web = { url = \"http://127.0.0.1:9/mcp\" }"
         .parse()
         .unwrap();
-    let plugins = Arc::new(Plugins::load_at(&cfg, &state, "seimei", &seimei_core::plugins::FACTORIES));
+    let plugins = Arc::new(Plugins::load_at(&cfg, &state, "seimei", &[crate::builtin::MUSIC]));
     let parts = Parts {
         events: events.clone(),
         board: Arc::new(Mutex::new(Board::open(&state.join("tasks.json"), Some(events.clone())))),

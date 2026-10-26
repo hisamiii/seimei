@@ -20,7 +20,6 @@ pub mod browser;
 pub mod desktop;
 pub mod discord;
 pub mod link;
-pub mod music;
 pub mod queue;
 
 use std::any::Any;
@@ -43,7 +42,7 @@ const BUILTIN: [(&str, &str, &str); 2] = [
     ("desktop", include_str!("desktop/plugin.toml"), ""),
 ];
 /// The Factories that live in core until they move to plugins/.
-pub const FACTORIES: [Factory; 3] = [music::PLUGIN, queue::PLUGIN, discord::PLUGIN];
+pub const FACTORIES: [Factory; 2] = [queue::PLUGIN, discord::PLUGIN];
 /// The names of the built-ins the binary has: their own tools ask the guard themselves.
 static BUILTIN_NAMES: RwLock<Vec<&'static str>> = RwLock::new(Vec::new());
 
@@ -596,7 +595,7 @@ impl Plugins {
 
 /// guard.toml's rules for a built-in's own tool call: None to go on, or the reply that ends it. about: what the plugin
 /// knows (facts for the rules, and the card's title and detail); reads: files the call reads; kind: the card's action.
-pub(crate) async fn ask_guard(
+pub async fn ask_guard(
     session: &dyn Session,
     plugin: &str,
     tool: &str,
@@ -659,7 +658,7 @@ impl Plugins {
 }
 
 /// A value as Python's str() shows it.
-pub(crate) fn py(v: &Value) -> String {
+pub fn py(v: &Value) -> String {
     match v {
         Value::String(s) => s.clone(),
         Value::Null => "None".into(),
@@ -669,7 +668,7 @@ pub(crate) fn py(v: &Value) -> String {
 }
 
 /// An integer argument, as Python's int() reads it.
-pub(crate) fn int(v: &Value) -> Result<i64, String> {
+pub fn int(v: &Value) -> Result<i64, String> {
     match v {
         Value::Number(n) => n.as_i64().or(n.as_f64().map(|f| f as i64)).ok_or(format!("not an integer: {n}")),
         Value::String(s) => strip(s).parse().map_err(|_| format!("not an integer: {s}")),
@@ -678,17 +677,17 @@ pub(crate) fn int(v: &Value) -> Result<i64, String> {
 }
 
 /// Whitespace as Python's isspace() sees it: Unicode's, plus the four ASCII separators \x1c to \x1f.
-pub(crate) fn space(c: char) -> bool {
+pub fn space(c: char) -> bool {
     c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c)
 }
 
 /// s without whitespace at either end, as Python's strip() leaves it.
-pub(crate) fn strip(s: &str) -> &str {
+pub fn strip(s: &str) -> &str {
     s.trim_matches(space)
 }
 
 /// A byte count for people: 512 B, 3 KB, 1.5 MB.
-pub(crate) fn size(n: i64) -> String {
+pub fn size(n: i64) -> String {
     if n < 1024 {
         format!("{n} B")
     } else if n < 1 << 20 {

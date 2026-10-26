@@ -1,5 +1,5 @@
-//! The music plugin: Quod Libet's library and player through its seimei bridge plugin
-//! (contrib/quodlibet/seimei_bridge.py), and any MPRIS player through playerctl.
+//! The music plugin: Quod Libet's library and player through its seimei bridge plugin (seimei_bridge.py here), and
+//! any MPRIS player through playerctl.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -8,19 +8,19 @@ use std::time::Duration;
 use serde_json::{Map, Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
-use super::{Builtin, Factory, Fut, Session};
-use crate::guard::About;
-use crate::tools::text;
-use crate::util::truthy;
+use seimei_core::guard::About;
+use seimei_core::plugins::{Builtin, Factory, Fut, Session, ask_guard};
+use seimei_core::tools::text;
+use seimei_core::util::{on_path, truthy};
 
 pub const PLUGIN: Factory = Factory {
     name: "music",
     what: "Quod Libet and the session's media players",
     needs: "quodlibet or an MPRIS player, playerctl",
-    found: || crate::util::on_path("quodlibet") || crate::util::on_path("playerctl"),
-    manifest: include_str!("music/plugin.toml"),
+    found: || on_path("quodlibet") || on_path("playerctl"),
+    manifest: include_str!("../plugin.toml"),
     prompt: "",
-    spec: include_str!("music/tools.json"),
+    spec: include_str!("../tools.json"),
     hosted: false,
     make: |_, _| Ok(Arc::new(Music)),
 };
@@ -194,7 +194,7 @@ async fn music(a: &Value, session: &dyn Session) -> Value {
         }
         Ok(None) => None,
     };
-    if let Some(no) = super::ask_guard(session, "music", "music", a, about, &[], "desktop").await {
+    if let Some(no) = ask_guard(session, "music", "music", a, about, &[], "desktop").await {
         return no;
     }
     match bridge(cmd, &args).await {
@@ -243,7 +243,7 @@ async fn media(a: &Value) -> Value {
 pub async fn call(tool: &str, a: &Value, session: &dyn Session) -> Value {
     match tool {
         "music" => music(a, session).await,
-        "media" => match super::ask_guard(session, "music", "media", a, None, &[], "desktop").await {
+        "media" => match ask_guard(session, "music", "media", a, None, &[], "desktop").await {
             Some(no) => no,
             None => media(a).await,
         },

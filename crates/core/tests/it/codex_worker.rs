@@ -69,7 +69,7 @@ async fn codex_shikigami() {
     let events = Arc::new(EventLog::open(&state.join("events.jsonl")).unwrap());
     let approvals = Arc::new(Approvals::new(events.clone()));
     let cfg: toml::Table = "enabled = [\"music\"]".parse().unwrap();
-    let plugins = Arc::new(Plugins::load_at(&cfg, &state, "seimei", &seimei_core::plugins::FACTORIES));
+    let plugins = Arc::new(Plugins::load_at(&cfg, &state, "seimei", &[crate::builtin::MUSIC]));
     let parts = Parts {
         events: events.clone(),
         board: Arc::new(Mutex::new(Board::open(&state.join("tasks.json"), Some(events.clone())))),
