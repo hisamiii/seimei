@@ -26,6 +26,11 @@ impl Home {
         script("claude", "echo '2.1.296 (Claude Code)'");
         // Found first on PATH whatever the machine has: setup offers it as the terminal and the bridge.
         script("kitty", "exit 0");
+        // A tailnet, so the reach question has its default; a real one on the machine is never asked.
+        script(
+            "tailscale",
+            r#"echo '{"BackendState": "Running", "Self": {"DNSName": "box.tail1234.ts.net."}}'"#,
+        );
         for tool in ["systemctl", "rc-update", "rc-service"] {
             script(tool, &format!("echo \"{tool} $@\" >> {}", base.join("services.log").display()));
         }
@@ -130,12 +135,21 @@ fn setup_defaults_and_no_claude() {
     assert!(o.status.success(), "{out}");
     let cfg: toml::Table = h.read("cfg/seimei/config.toml").parse().unwrap();
     assert_eq!(cfg["server"]["port"].as_integer(), Some(8417));
-    assert_eq!(cfg["server"]["origin"].as_str(), Some("http://localhost:8417"));
+    assert_eq!(cfg["server"]["origin"].as_str(), Some("https://box.tail1234.ts.net"), "the tailnet's");
+    assert!(out.contains("tailscale serve --bg 8417"), "{out}");
     assert!(cfg["plugins"]["enabled"].as_array().unwrap().is_empty());
     assert_eq!(cfg["sessions"]["terminal"].as_str(), Some("kitty -d {cwd} --title {title}"), "the one found");
     assert!(!h.exists("data/seimei/kitty-rc.conf"));
     assert!(!h.exists("services.log"), "not started");
     assert!(out.contains("systemctl --user enable --now seimei"), "{out}");
+
+    // No tailnet: the reach question has no default, and a closed stdin ends setup instead of asking forever.
+    let h = Home::new("notailnet");
+    std::fs::write(h.base.join("bin/tailscale"), "#!/bin/sh\nexit 1\n").unwrap();
+    let o = h.run(&["setup"], "9100\n\nnope\n");
+    assert_eq!(o.status.code(), Some(2), "{}", text(&o));
+    assert!(text(&o).contains("Pick one") && text(&o).contains("nope is not"), "{}", text(&o));
+    assert!(!h.exists("cfg/seimei/config.toml"));
 
     let h = Home::new("noclaude");
     std::fs::remove_file(h.base.join("bin/claude")).unwrap();

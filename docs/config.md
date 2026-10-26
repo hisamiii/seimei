@@ -5,7 +5,7 @@ seimei reads `~/.config/seimei/config.toml`. Every key is optional; `config.exam
 | section | key | default | what |
 |---|---|---|---|
 | `[server]` | `port` | 8417 | listens on 127.0.0.1 (`--dev` uses port + 1) |
-| | `origin` | `http://localhost:8417` | the address phones and browsers use (a tunnel's https URL); also the passkey domain and the only Host served besides localhost |
+| | `origin` | `http://localhost:8417` | the address phones and browsers use, behind HTTPS ([reach.md](reach.md)); also the passkey domain and the only Host served besides localhost |
 | `[dispatcher]` | `model` | `[models] work` | the dispatcher's model |
 | | `name` | `seimei` (`seimei-dev` with `--dev`) | its session's name in Claude Code's registry |
 | | `cwd` | `~` | its working folder |

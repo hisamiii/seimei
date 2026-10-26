@@ -56,11 +56,18 @@ pub fn kitty_rc_text(password: &str) -> String {
     )
 }
 
+/// A question with a default; with none, the answer is required and a closed stdin ends setup.
 fn ask(question: &str, default: &str) -> String {
-    eprint!("{question} [{default}]: ");
+    if default.is_empty() {
+        eprint!("{question}: ");
+    } else {
+        eprint!("{question} [{default}]: ");
+    }
     let _ = std::io::stderr().flush();
     let mut line = String::new();
-    let _ = std::io::stdin().read_line(&mut line);
+    if std::io::stdin().read_line(&mut line).unwrap_or(0) == 0 && default.is_empty() {
+        fail("no answer (stdin closed)");
+    }
     match line.trim() {
         "" => default.to_string(),
         a => a.to_string(),
@@ -75,6 +82,30 @@ fn yes(question: &str, default: bool) -> bool {
         Some('y') => true,
         Some('n') => false,
         _ => default,
+    }
+}
+
+/// This machine's name on its tailnet ("box.tail1234.ts.net"), when tailscale runs and is logged in.
+fn tailnet_name() -> Option<String> {
+    let out = Command::new("tailscale").args(["status", "--json"]).output().ok().filter(|o| o.status.success())?;
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+    if v["BackendState"] != "Running" {
+        return None;
+    }
+    v["Self"]["DNSName"].as_str().map(|n| n.trim_end_matches('.').to_string()).filter(|n| !n.is_empty())
+}
+
+/// The origin from the answer to "how will your phone reach this machine?": tailscale, local or an address.
+pub fn reach_origin(answer: &str, port: u16, tailnet: Option<&str>) -> Result<String, String> {
+    match answer.trim() {
+        "tailscale" | "t" => match tailnet {
+            Some(n) => Ok(format!("https://{n}")),
+            None => Err("tailscale is not running here: start it and log in, or give an https address.".into()),
+        },
+        "local" | "l" => Ok(format!("http://localhost:{port}")),
+        a if a.starts_with("https://") || a.starts_with("http://") => Ok(a.trim_end_matches('/').to_string()),
+        "" => Err("Pick one: tailscale, an https address, or local.".into()),
+        a => Err(format!("{a} is not tailscale, local or an http(s) address.")),
     }
 }
 
@@ -357,12 +388,26 @@ pub fn run(read_secret: impl Fn(&str) -> String) {
                 Err(_) => println!("A port is a number up to 65535."),
             }
         };
+        let tailnet = tailnet_name();
         println!(
-            "\nThe phone reaches seimei at its origin. For use away from this machine, put seimei behind HTTPS (a \
-             Cloudflare tunnel, `tailscale serve` or a reverse proxy) and give that address; passkeys and push need \
-             https. Plain localhost works on this machine only."
+            "\nHow will your phone reach this machine? seimei listens on this machine only; the phone needs HTTPS in \
+             front of it (passkeys and notifications too). docs/reach.md has the steps.\n  tailscale: `tailscale serve` \
+             on your tailnet{}\n  an https address you set up: a Cloudflare tunnel or a reverse proxy\n  local: this \
+             machine's browser only, for trying seimei out",
+            tailnet.as_deref().map(|n| format!(" (found: https://{n})")).unwrap_or_default()
         );
-        let origin = ask("Origin", &format!("http://localhost:{port}"));
+        let origin = loop {
+            let answer = ask("Reach", if tailnet.is_some() { "tailscale" } else { "" });
+            match reach_origin(&answer, port, tailnet.as_deref()) {
+                Ok(o) => break o,
+                Err(e) => println!("{e}"),
+            }
+        };
+        if origin.ends_with(".ts.net") {
+            println!("Then run once: tailscale serve --bg {port}  (the first time it may ask you to turn on HTTPS for the tailnet)");
+        } else if origin.starts_with("http://") && !origin.starts_with("http://localhost") {
+            println!("Without https, passkeys and notifications do not work, and the password crosses the network in clear.");
+        }
         let about = ask("How should the prompts call this machine (e.g. \"desktop, an Arch box\")", "computer");
         println!(
             "\nYour Claude plan sets the defaults: max (opus, up to 1m of context) or pro (sonnet and 200k, so the \
@@ -458,6 +503,18 @@ fn fail(msg: &str) -> ! {
 
 #[cfg(test)]
 mod tests {
+    use super::reach_origin;
+
+    #[test]
+    fn reach_answers() {
+        let ts = Some("box.tail1234.ts.net");
+        assert_eq!(reach_origin("tailscale", 8417, ts).unwrap(), "https://box.tail1234.ts.net");
+        assert!(reach_origin("tailscale", 8417, None).is_err());
+        assert_eq!(reach_origin("local", 9000, ts).unwrap(), "http://localhost:9000");
+        assert_eq!(reach_origin(" https://seimei.example.net/ ", 8417, None).unwrap(), "https://seimei.example.net");
+        assert!(reach_origin("", 8417, ts).is_err() && reach_origin("seimei.example.net", 8417, ts).is_err());
+    }
+
     #[test]
     fn the_openrc_script_parses_and_empties_its_cgroup_on_stop() {
         let script = super::openrc_text(std::path::Path::new("/opt/seimei/bin/seimei"));

@@ -1,6 +1,6 @@
 # Architecture
 
-seimei is one Rust binary on the server. It keeps one permanent Claude Code session, the dispatcher, and runs worker sessions, the shikigami, next to it. The web page and the Android app talk to it over HTTP. It listens on 127.0.0.1 only; HTTPS in front of it (`tailscale serve`, a Cloudflare tunnel or a reverse proxy) brings it to the phone.
+seimei is one Rust binary on the server. It keeps one permanent Claude Code session, the dispatcher, and runs worker sessions, the shikigami, next to it. The web page and the Android app talk to it over HTTP. It listens on 127.0.0.1 only; HTTPS in front of it (`tailscale serve`, a Cloudflare tunnel or a reverse proxy, see [reach.md](reach.md)) brings it to the phone.
 
 ```
 phone app / web page ──https──> proxy ──> 127.0.0.1:8417  seimei
