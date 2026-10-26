@@ -1170,7 +1170,7 @@ impl Turns {
             } else {
                 let why = msg.result.clone().filter(|r| !r.is_empty()).unwrap_or(msg.subtype.clone());
                 self.events.add(
-                    json!({"type": "system", "level": "error", "text": format!("Turn failed: {why}"), "lane": lane}),
+                    json!({"type": "system", "level": "error", "text": format!("Turn failed: {}", crate::util::turn_error(&why)), "lane": lane}),
                 );
             }
         }

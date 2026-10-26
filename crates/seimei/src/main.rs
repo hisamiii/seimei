@@ -57,6 +57,25 @@ const COMMANDS: [&str; 12] = [
     "plugin",
 ];
 
+const USAGE: &str = "\
+usage: seimei [COMMAND] [OPTIONS]
+
+  (none), serve                 run the server (--dev: port + 1 with its own state; --no-login with --dev)
+  --model NAME                  with serve: the dispatcher's model for this run
+  setup                         the first run: config, password, service (safe to run again)
+  update [--check]              install the latest signed release over this binary
+  version                       print the version
+  passwd [--keep-sessions]      set the password; ends every session unless --keep-sessions
+  passkeys [--clear]            list or remove passkeys
+  pair                          a pairing code for the phone app
+  devices [--revoke ID]         list or unpair phones
+  logout-all                    end every session
+  lockdown                      end every session, remove every passkey, unpair every phone
+  screen-password [--clear]     the screen lock password the desktop plugin types
+
+Config: ~/.config/seimei/config.toml. Docs: docs/config.md in the source.
+";
+
 struct Args {
     command: String,
     dev: bool,
@@ -93,6 +112,10 @@ fn args() -> Args {
             "--clear" => a.clear = true,
             "--check" => a.check = true,
             "--version" => a.command = "version".into(),
+            "-h" | "--help" | "help" => {
+                print!("{USAGE}");
+                std::process::exit(0);
+            }
             "--revoke" => a.revoke = it.next(),
             "--model" => a.model = it.next(),
             "plugin" => {
@@ -100,7 +123,7 @@ fn args() -> Args {
                 a.plugin = it.next();
             }
             c if COMMANDS.contains(&c) => a.command = c.into(),
-            other => die(&format!("unknown argument {other}; usage: seimei [{}] [--dev]", COMMANDS.join("|"))),
+            other => die(&format!("unknown argument {other}; `seimei --help` lists the commands")),
         }
     }
     a

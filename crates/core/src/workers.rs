@@ -1285,11 +1285,9 @@ impl Session {
             self.shell_wait = true;
             return;
         } else if msg.is_error {
-            let line = first_line(&text, 160);
-            let summary = if line.is_empty() { msg.subtype.clone() } else { line };
-            self.w.set("failed", json!({"summary": summary}));
-            let said = if text.is_empty() { &msg.subtype } else { &text };
-            self.pool.report(&self.w, "failed", said);
+            let said = crate::util::turn_error(if text.is_empty() { &msg.subtype } else { &text });
+            self.w.set("failed", json!({"summary": first_line(&said, 160)}));
+            self.pool.report(&self.w, "failed", &said);
         } else if trivial && state == "running" {
             // Nothing said: most likely a replayed notification ahead of the user's message, so no report yet.
             self.grace = Some(Instant::now() + TRIVIAL_GRACE);

@@ -184,3 +184,16 @@ fn screen_password() {
     let o = h.run(&["screen-password", "--clear"], "");
     assert!(o.status.success() && !f.exists());
 }
+
+#[test]
+fn help_lists_the_commands() {
+    let out = Command::new(env!("CARGO_BIN_EXE_seimei")).arg("--help").output().unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{out:?}");
+    for c in ["setup", "update", "passwd", "lockdown", "pair"] {
+        assert!(text.contains(c), "{c}: {text}");
+    }
+    let bad = Command::new(env!("CARGO_BIN_EXE_seimei")).arg("--nope").output().unwrap();
+    assert_eq!(bad.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&bad.stderr).contains("seimei --help"));
+}
