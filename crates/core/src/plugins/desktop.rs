@@ -9,6 +9,7 @@
 //! shell = "fish"        # the shell a restored Claude session runs in; $SHELL when left out
 //! ```
 
+pub mod agent;
 pub mod backend;
 pub mod checks;
 pub mod hyprland;
@@ -16,6 +17,7 @@ pub mod layout;
 pub mod niri;
 pub mod sway;
 pub mod uinput;
+pub mod vinput;
 pub mod x11;
 
 use std::collections::HashMap;
@@ -47,7 +49,7 @@ const STOPPED: &str = "the user pressed the stop key at the desktop; ask them be
 
 const PROMPT: &str = "## Desktop
 Drive the {about} with your desktop tools (start with desktop), not {cli} in Bash: {restarts} can restart, and your shell keeps the old socket.
-- Focus stealing is fine and you may use the user's workspaces, but apps you open for a task go to the \"seimei\" workspace (open_app does that).
+{focus}
 - Closing a window you did not open{ends} {wait} for the user's OK on their phone; ask in chat first when the reason is not obvious.
 - screenshot returns the image's path: Read it when you need to look (show=true puts it in the chat and returns the image).
 - Never type into a window you have not just looked at. Prefer keyboard shortcuts and typing over clicks.
@@ -98,6 +100,8 @@ pub struct Desktop {
     times: Mutex<Times>,
     /// The layout memory: which session it last offered to bring back.
     offered: Mutex<Option<String>>,
+    /// The agent display (niri only): a nested niri for agent apps.
+    pub agent: agent::Agent,
 }
 
 pub(crate) fn number(v: &Value) -> f64 {
@@ -146,6 +150,7 @@ impl Desktop {
             sh.rsplit('/').next().unwrap_or("sh").to_string()
         });
         let driving = ctx.run.join("seimei-driving");
+        let agent = agent::Agent::new(state, ctx.clone(), 30.0);
         let input = (Device::new(true, sink.clone()), Device::new(false, sink));
         Ok(Desktop {
             b: backend::make(name, ctx)?,
@@ -160,6 +165,7 @@ impl Desktop {
             input: Mutex::new(input),
             times: Mutex::default(),
             offered: Mutex::default(),
+            agent,
         })
     }
 
@@ -188,7 +194,13 @@ impl Desktop {
                 .into_iter()
                 .flatten()
                 .collect();
+        let focus = if b.name() == "niri" {
+            "- Work in the agent display (display: \"agent\" on the desktop tools, browser: \"agent\" on the browser tools): it has its own screen, keyboard and pointer, so the user's focus and mouse stay theirs. Touch the user's display only when the task is about something there; then focus stealing is fine, and apps you open go to the \"seimei\" workspace (open_app does that)."
+        } else {
+            "- Focus stealing is fine and you may use the user's workspaces, but apps you open for a task go to the \"seimei\" workspace (open_app does that)."
+        };
         PROMPT
+            .replace("{focus}", focus)
             .replace("{about}", about.split(" (").next().unwrap_or(about))
             .replace("{cli}", b.cli())
             .replace("{restarts}", if b.restarts().is_empty() { b.label() } else { b.restarts() })
@@ -220,6 +232,7 @@ impl Desktop {
 
     /// Follow the WM's events for as long as seimei runs, reconnecting across WM restarts.
     pub async fn run(self: Arc<Self>) {
+        tokio::spawn(self.clone().agent_idle());
         let mut down_since: Option<Instant> = None;
         let label = self.b.label();
         loop {
@@ -766,6 +779,9 @@ impl Desktop {
         if let Some(no) = super::ask_guard(session, "desktop", tool, args, about, &[], "desktop").await {
             return no;
         }
+        if tool == "agent_display" || args["display"] == "agent" {
+            return self.agent_tool(tool, args, session).await;
+        }
         let name = self.b.name();
         let r: Result<String, String> = match tool {
             "desktop" => self.blocking(|d| d.overview()).await,
@@ -823,8 +839,9 @@ impl Desktop {
                 (Err(e), _) | (_, Err(e)) => Err(e),
             },
             "click" | "scroll" => self.click_tool(tool, args).await,
-            "ui_tree" | "ui_action" => self.a11y_tool(tool, args).await,
+            "ui_tree" | "ui_action" => self.a11y_tool(tool, args, None).await,
             "notifications" => return notifications(args).await,
+            "clipboard_read" => return self.clipboard(None, session).await,
             "unlock_screen" => self.blocking(|d| d.unlock()).await,
             "restore_desktop" => return self.restore_tool(args, session).await,
             _ => Err(format!("no tool {tool}")),
@@ -856,24 +873,28 @@ impl Desktop {
                 }),
             }
         };
-        let (data, mime, mut note) = match shot {
-            Ok(s) => s,
-            Err(e) => return text(&e, true),
-        };
+        match shot {
+            Ok((data, mime, note)) => self.deliver(&data, &mime, note, args),
+            Err(e) => text(&e, true),
+        }
+    }
+
+    /// A screenshot as the tool returns it: a path to Read, or the image in the chat with show=true.
+    fn deliver(&self, data: &[u8], mime: &str, mut note: String, args: &Value) -> Value {
         if truthy(&args["show"]) {
             let files = crate::files::Files::new(&self.state);
-            let name = match files.save(&data) {
+            let name = match files.save(data) {
                 Ok((name, _)) => name,
                 Err(e) => return text(&e, true),
             };
             let caption = chars(&if truthy(&args["caption"]) { text_of(&args["caption"]) } else { String::new() }, 300);
             self.system(json!({"type": "image", "file": name, "caption": caption}), None);
             note += " Shown to the user.";
-            return json!({"content": [{"type": "image", "data": crate::util::b64(&data), "mimeType": mime},
+            return json!({"content": [{"type": "image", "data": crate::util::b64(data), "mimeType": mime},
                                       {"type": "text", "text": note}]});
         }
         // A path, not the pixels: an image in every result was 8% of the dispatcher's context growth.
-        match shot_file(&self.state.join("shots"), &data, &mime) {
+        match shot_file(&self.state.join("shots"), data, mime) {
             Ok(path) => text(&format!("{}\n{note}", path.display()), false),
             Err(e) => text(&e, true),
         }
@@ -894,10 +915,21 @@ impl Desktop {
         Ok(if moved { "Moved." } else { "Clicked." }.into())
     }
 
-    async fn a11y_tool(self: &Arc<Self>, tool: &str, args: &Value) -> Result<String, String> {
+    /// ui_tree and ui_action on a window of the user's display, or of the agent display's niri when inner is given.
+    async fn a11y_tool(
+        self: &Arc<Self>,
+        tool: &str,
+        args: &Value,
+        inner: Option<niri::Niri>,
+    ) -> Result<String, String> {
         let wid = int(need(args, "window")?)?;
-        let pid =
-            self.blocking(move |d| d.b.window(wid)).await?.ok_or_else(|| format!("no window {wid}"))?["pid"].clone();
+        let found = self
+            .blocking(move |d| match &inner {
+                Some(b) => b.window(wid),
+                None => d.b.window(wid),
+            })
+            .await?;
+        let pid = found.ok_or_else(|| format!("no window {wid}"))?["pid"].clone();
         let pid = text_of(&pid);
         let r = if tool == "ui_tree" {
             let depth = args.get("depth").map_or(Ok(12), int)?.to_string();

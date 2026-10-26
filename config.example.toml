@@ -46,6 +46,7 @@ enabled = []
 # backend = "niri"     # niri, sway, hyprland or x11 (any EWMH window manager); found from the session when left out.
 #                      # KDE Plasma and GNOME on Wayland are not supported yet (on X11 they work as x11).
 # shell = "fish"       # the shell a restored Claude session runs in; $SHELL when left out
+# agent_idle_minutes = 30   # niri: the agent display stops after this long without an agent using it
 
 # [plugins.browser]
 # extension_id = "seimei@localhost"   # the extension's id; deploy.sh keeps the installed one when left out

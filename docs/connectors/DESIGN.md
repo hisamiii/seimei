@@ -195,48 +195,51 @@ The niri backend picks the newest listening `niri.*.sock`; it should use `$NIRI_
 
 ## 7. Agent display
 
+Built for niri (`crates/core/src/plugins/desktop/agent.rs`, input in `vinput.rs`).
+
 ### What it is
 
-A second compositor, started by seimei on demand, that agent apps live in. It has its own seat, so its keyboard focus and pointer are not the user's; seimei sends input through the Wayland virtual keyboard and virtual pointer protocols (`zwp_virtual_keyboard_v1`, `zwlr_virtual_pointer_v1`) to it, and takes screenshots with screencopy from it. Nothing the agent does there reaches the user's focus, pointer, clipboard or screen.
+A second compositor, started by seimei on demand, that agent apps live in. It has its own seat, so its keyboard focus and pointer are not the user's; seimei sends input through the Wayland virtual keyboard and virtual pointer protocols (`zwp_virtual_keyboard_v1`, `zwlr_virtual_pointer_v1`) to it, and takes screenshots from it with its own `niri msg action screenshot`. Nothing the agent does there reaches the user's focus, pointer, clipboard or screen.
 
-### Providers
+### How it runs
 
-- **Nested niri** (on niri, nothing to install): `niri -c <seimei's agent config>` opened by seimei, its window parked on the "seimei" workspace. Measured: input and fresh screenshots work with the window on a hidden workspace. The config sets `repeat-rate 0` (else the virtual keyboard's keys repeat), `animations off`, a fixed `default-column-width`, no `screenshot-path`. The window's size sets the display's size; 1280x800 logical keeps screenshots small.
-- **Headless wlroots** (any desktop, also GNOME, KDE and X11, and over SSH): `sway` or `labwc` with `WLR_BACKENDS=headless` and `WLR_LIBINPUT_NO_DEVICES=1`, one virtual output (`swaymsg create_output`). No window at all. Needs sway or labwc installed; this machine has neither.
-- GNOME (`mutter --headless --virtual-monitor`) and KDE (`kwin_wayland --virtual`) have their own headless modes; possible later, not in the first build.
-
-Both need: the user's socket pinned (6); apps started with the inner `WAYLAND_DISPLAY`, without `DISPLAY` (no Xwayland inside unless `xwayland-satellite` is there); single-instance apps started so they do not hand off to an instance on the user's display (Firefox `--no-remote --profile`, kitty `--single-instance` off, foot not as a client of the user's server).
+- A nested niri, `vblank_mode=0 niri -c <state>/agent-display/config.kdl`, spawned through the user's niri without `DISPLAY` (X11 apps inside must not open on the user's screen). Its window goes to the "seimei" workspace and the user's focus goes back at once: measured 12 ms between the window taking focus and the user's window having it again. Nothing in `~/.config/niri` changes; the inner config is seimei's own and written on every start.
+- The inner config: `repeat-rate 0` (a virtual keyboard's keys must not repeat), animations off, no gaps or focus ring, each window as wide as the display, no `screenshot-path`. The display measures 1280x1532 logical (the outer window is set 1280 wide; the height is the workspace's).
+- `vblank_mode=0`: a nested niri waits for the outer niri's frame callbacks, which come about once a second for a window on a hidden workspace. With vsync on, every inner frame blocked niri's loop for a second, and each IPC call took 1 to 2 s while a page drew. Off, calls take milliseconds; the agent browser's 10 fps cap (8) keeps an animated page from spinning both compositors (measured with a CSS animation: about 1% CPU each for the inner niri, the outer niri and Firefox, against 75%, 81% and 37% uncapped).
+- Found again after a seimei restart: the niri socket whose process runs with seimei's config is adopted. Its apps leave niri's process tree when they start, so they are found by the `NIRI_SOCKET` they inherited (for memory and for stopping).
+- Stopped after `[plugins.desktop] agent_idle_minutes` (30 by default) without an agent call, by `niri msg action quit`; its apps exit with it, and stop waits for them so the next start finds the browser profile free.
+- The desktop tools keep pinning the user's compositor socket (6); nested compositors are skipped when it is picked.
 
 ### Input
 
-seimei needs a small Wayland client for the two protocols. Options: `wtype` plus a pointer tool as external commands (fewer lines, two runtime dependencies, no pointer tool in common distros), or a Rust client with the `wayland-client` and `wayland-protocols-wlr` / `wayland-protocols-misc` crates (Smithay's, the standard ones) inside seimei. Recommended: the Rust client, about 300 lines with the keymap upload; it replaces uinput for the agent display and needs no `/dev/uinput` permission.
+A Wayland client in Rust on the raw wire protocol (`vinput.rs`, about 300 lines, no new crates): one connection per call, a virtual keyboard with a keymap made for that call (one keycode per keysym, so any Unicode text types), modifiers sent with the key, and a virtual pointer with absolute motion, buttons and wheel steps. It needs no `/dev/uinput` and no focus on the user's display. The stop key still halts it; the user's screen lock does not (the agent display has none).
 
 ### API
 
-Existing desktop tools get a `display` parameter, default `"user"`:
+The niri tools take `display: "user" | "agent"`, default user: `desktop`, `niri`, `niri_query`, `open_app`, `screenshot`, `type_text`, `press_keys`, `click`, `scroll`, `ui_tree`, `ui_action`, `clipboard_read`. Window ids are per display. With `display: "agent"`, `open_app` starts the agent display when needed, a window given to input or screenshot is focused first, and click and scroll take pixels of the latest agent screenshot.
 
 ```
 agent_display
-  go: "start" | "stop" | "status"   default status
-open_app
-  command, workspace                as now
-  display: "user" | "agent"         agent: start the agent display if needed and open the app in it
-screenshot, type_text, press_keys, click, scroll, ui_tree, ui_action
-  ...                               as now
-  display: "user" | "agent"         window ids are per display
+  go: "start" | "stop" | "status"   default status: size, windows, memory with its apps, idle minutes left
+clipboard_read
+  display: "user" | "agent"         user: after an Approve card; agent: no card
 ```
 
-`desktop` lists the agent display's windows under their own heading. Input to the agent display needs no focus check against the user's display and is not stopped by the user's screen lock (the agent display has no lock); the stop key still halts it. `agent_display status` reports memory use. It stops itself after 30 idle minutes (configurable), closing its apps.
+`clipboard_read` is also on sway and Hyprland (user display, with the card). The niri prompt says: "Work in the agent display (display: "agent" on the desktop tools, browser: "agent" on the browser tools) ... Touch the user's display only when the task is about something there."
 
-The prompt changes with it: "Focus stealing is fine" becomes "Work in the agent display (display: agent) or with browser_act; touch the user's display only when the task is about something there."
+### Measured
+
+Start 0.3 s. Memory (PSS): 100 MB for the inner niri alone, 680 to 730 MB with the agent Firefox on a test page and a foot. Idle CPU near 0. Input checked end to end: Unicode text and Tab into a Firefox field, Enter, ctrl+c and ctrl+l in foot, a trusted click on a page button (`event.isTrusted` true), wheel scroll; the user's focused window stayed focused through every call.
 
 ### Cost and risk
 
-64 MB for the compositor, plus the apps (a Firefox profile about 640 MB). GPU: one more GL context on niri's GPU, small. Apps in the agent display run as the user, with the user's files; the display isolates input and screen, not permissions. On a desktop with no provider the tools say so and the user display works as now.
+Apps in the agent display run as the user, with the user's files; the display isolates input and screen, not permissions. Other desktops say the agent display needs niri, and the user display works as before. Headless sway or labwc, GNOME and KDE are not built yet.
 
 ## 8. Agent browser
 
-A Firefox profile under seimei's data dir (`agent-browser/`), started in the agent display with `--no-remote --profile`, with the seimei extension pre-installed in the profile. Logged out by default. The extension already connects through the native host; the host passes the profile's name, and the plugin keeps one link per browser. Browser tools get `browser: "user" | "agent"`, default "agent" when it runs. Pages that need trusted input get it from the agent display's real input (`click` with `display: "agent"` at the element's box from `browser_read`).
+A Firefox (or Waterfox) of seimei's own, logged out, started in the agent display with `--no-remote --profile <state>/agent-display/browser` when a browser tool with `browser: "agent"` needs it. The signed extension from `<state>/seimei-waterfox.xpi` is copied into the profile (only when it changed: Firefox reinstalls a changed file, which drops the link once), and `user.js` turns off first-run pages and saved logins and caps drawing at 10 fps (`widget.wayland.vsync.enabled` false, `layout.frame_rate` 10).
+
+The native host finds seimei's second socket, `agent-browser.sock`, through `SEIMEI_BROWSER_SOCK`, and the plugin keeps a second link for it. Every tab there is seimei's: no Approve cards, tabs open in front, close facts say so. Browser tools take `browser: "user" | "agent"`, default user. Pages that need trusted input get it from the agent display (`click` with `display: "agent"`).
 
 ## How it degrades for other users
 
@@ -245,7 +248,7 @@ A Firefox profile under seimei's data dir (`agent-browser/`), started in the age
 | browser 1 to 5 | yes | yes | yes | yes |
 | `captureTab`, `openOrClosedShadowRoot`, `tabs.hide` | Firefox only; Chromium would need `chrome.debugger` (shows a bar) for background shots, so the first build is Firefox-only | | | |
 | 6 | yes | yes (their own sockets) | n/a | n/a |
-| 7 agent display | nested niri, or headless sway/labwc if installed | headless sway/labwc, or nested sway | headless sway/labwc if installed | headless sway/labwc, or Xvfb + XTEST later |
+| 7 agent display | nested niri (built) | headless sway/labwc, or nested sway | headless sway/labwc if installed | headless sway/labwc, or Xvfb + XTEST later |
 | 8 agent browser | with 7 | with 7 | with 7 | with 7 |
 
 ## Sources
@@ -264,11 +267,13 @@ A Firefox profile under seimei's data dir (`agent-browser/`), started in the age
 - wlr virtual pointer: https://wayland.app/protocols/wlr-virtual-pointer-unstable-v1
 - sway headless outputs, `create_output`: sway(5)
 
-## Open questions for the user
+## Decisions
 
-1. Acting in your own logged-in tabs: one Approve card per tab (proposed), a card per action, or agents only act in tabs they opened?
-2. Agent display on this laptop: the nested niri window on the "seimei" workspace (no install, you can look at it there), or install sway for a headless one with no window?
-3. Agent browser: logged out only, or will you log it into some sites (GitHub, for example) so agents can work there without your profile?
-4. Agent tabs in your browser: a collapsed "seimei" tab group in your window (proposed), or keep them as plain background tabs?
-5. Clipboard on your desktop: read only after a card, or never?
-6. Agent display lifetime: start on demand and stop after 30 idle minutes (proposed, about 0.7 GB with a browser while up), or always on?
+The user's answers to the open questions of this design:
+
+1. Acting in the user's own logged-in tabs: one Approve card per tab and site. Agents act freely in tabs they opened. (Built with items 1 to 6.)
+2. Agent display: the nested niri, its window parked on the "seimei" workspace. Windows on a background workspace of the user's own niri are no alternative: input there needs keyboard focus.
+3. Agent browser: logged out. Agents use it without Approve cards; anything that needs the user's logged-in Firefox goes through the card per tab.
+4. Agent tabs in the user's browser: the collapsed "seimei" tab group, as built.
+5. The clipboard of the user's desktop: read only after an Approve card. The agent display's own clipboard needs none.
+6. Agent display lifetime: started on demand, stopped after 30 idle minutes (configurable).

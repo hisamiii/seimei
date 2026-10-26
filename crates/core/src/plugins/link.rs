@@ -99,6 +99,11 @@ impl Link {
         eprintln!("seimei: {} disconnected", self.name);
     }
 
+    /// Whether a connector is connected now.
+    pub async fn connected(&self) -> bool {
+        self.writer.lock().await.is_some()
+    }
+
     /// One request to the connector: its result, or the error to show.
     pub async fn call(&self, op: &str, timeout: u64, args: Value) -> Result<Value, String> {
         let id = self.ids.fetch_add(1, Ordering::Relaxed) + 1;

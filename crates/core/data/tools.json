@@ -701,9 +701,19 @@
      "_meta": {
       "anthropic/alwaysLoad": true
      },
-     "description": "List the tabs open in the browser (Firefox or Waterfox) on the server, by window: id, title, URL, and whether active, pinned, playing sound, asleep or in seimei's tab group. Private windows are not visible.",
+     "description": "List the tabs open in the browser (Firefox or Waterfox) on the server, by window: id, title, URL, and whether active, pinned, playing sound, asleep or in seimei's tab group. Private windows are not visible. With browser: \"agent\": the agent browser's tabs.",
      "inputSchema": {
-      "properties": {},
+      "properties": {
+       "browser": {
+        "type": "string",
+        "enum": [
+         "user",
+         "agent"
+        ],
+        "default": "user",
+        "description": "agent: the agent browser, a logged-out Firefox of seimei's own in the agent display (no cards; tab ids are its own)"
+       }
+      },
       "required": [],
       "type": "object"
      },
@@ -727,6 +737,15 @@
        "elements": {
         "type": "boolean",
         "description": "add the element list, default false"
+       },
+       "browser": {
+        "type": "string",
+        "enum": [
+         "user",
+         "agent"
+        ],
+        "default": "user",
+        "description": "agent: the agent browser, a logged-out Firefox of seimei's own in the agent display (no cards; tab ids are its own)"
        }
       },
       "required": [
@@ -748,6 +767,15 @@
        },
        "front": {
         "type": "boolean"
+       },
+       "browser": {
+        "type": "string",
+        "enum": [
+         "user",
+         "agent"
+        ],
+        "default": "user",
+        "description": "agent: the agent browser, a logged-out Firefox of seimei's own in the agent display (no cards; tab ids are its own)"
        }
       },
       "required": [
@@ -797,6 +825,15 @@
        "confirm": {
         "type": "boolean",
         "description": "accept a confirm() dialog the action raises, default false"
+       },
+       "browser": {
+        "type": "string",
+        "enum": [
+         "user",
+         "agent"
+        ],
+        "default": "user",
+        "description": "agent: the agent browser, a logged-out Firefox of seimei's own in the agent display (no cards; tab ids are its own)"
        }
       },
       "required": [
@@ -831,6 +868,15 @@
        "timeout": {
         "type": "number",
         "description": "seconds, default 10, max 60"
+       },
+       "browser": {
+        "type": "string",
+        "enum": [
+         "user",
+         "agent"
+        ],
+        "default": "user",
+        "description": "agent: the agent browser, a logged-out Firefox of seimei's own in the agent display (no cards; tab ids are its own)"
        }
       },
       "required": [
@@ -855,6 +901,15 @@
        "ref": {
         "type": "string",
         "description": "just this element, by ref from browser_read elements"
+       },
+       "browser": {
+        "type": "string",
+        "enum": [
+         "user",
+         "agent"
+        ],
+        "default": "user",
+        "description": "agent: the agent browser, a logged-out Firefox of seimei's own in the agent display (no cards; tab ids are its own)"
        }
       },
       "required": [
@@ -881,6 +936,15 @@
          "forward",
          "reload"
         ]
+       },
+       "browser": {
+        "type": "string",
+        "enum": [
+         "user",
+         "agent"
+        ],
+        "default": "user",
+        "description": "agent: the agent browser, a logged-out Firefox of seimei's own in the agent display (no cards; tab ids are its own)"
        }
       },
       "required": [
@@ -896,6 +960,15 @@
       "properties": {
        "tab": {
         "type": "integer"
+       },
+       "browser": {
+        "type": "string",
+        "enum": [
+         "user",
+         "agent"
+        ],
+        "default": "user",
+        "description": "agent: the agent browser, a logged-out Firefox of seimei's own in the agent display (no cards; tab ids are its own)"
        }
       },
       "required": [
@@ -917,6 +990,15 @@
         "items": {
          "type": "integer"
         }
+       },
+       "browser": {
+        "type": "string",
+        "enum": [
+         "user",
+         "agent"
+        ],
+        "default": "user",
+        "description": "agent: the agent browser, a logged-out Firefox of seimei's own in the agent display (no cards; tab ids are its own)"
        }
       },
       "required": [
@@ -935,6 +1017,15 @@
        },
        "filename": {
         "type": "string"
+       },
+       "browser": {
+        "type": "string",
+        "enum": [
+         "user",
+         "agent"
+        ],
+        "default": "user",
+        "description": "agent: the agent browser, a logged-out Firefox of seimei's own in the agent display (no cards; tab ids are its own)"
        }
       },
       "required": [
@@ -951,6 +1042,15 @@
        "limit": {
         "type": "integer",
         "description": "default 10, max 50"
+       },
+       "browser": {
+        "type": "string",
+        "enum": [
+         "user",
+         "agent"
+        ],
+        "default": "user",
+        "description": "agent: the agent browser, a logged-out Firefox of seimei's own in the agent display (no cards; tab ids are its own)"
        }
       },
       "type": "object"
@@ -978,9 +1078,19 @@
       "_meta": {
        "anthropic/alwaysLoad": true
       },
-      "description": "The niri desktop: outputs, workspaces with their windows (id, app, title; focused, urgent, opened by seimei), the keyboard layout and whether the screen is locked (input tools refuse while it is). Start here before acting.",
+      "description": "The niri desktop: outputs, workspaces with their windows (id, app, title; focused, urgent, opened by seimei), the keyboard layout and whether the screen is locked (input tools refuse while it is). Start here before acting. With display: \"agent\": the agent display's windows.",
       "inputSchema": {
-       "properties": {},
+       "properties": {
+        "display": {
+         "type": "string",
+         "enum": [
+          "user",
+          "agent"
+         ],
+         "default": "user",
+         "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
+        }
+       },
        "required": [],
        "type": "object"
       },
@@ -990,7 +1100,7 @@
       "_meta": {
        "anthropic/alwaysLoad": true
       },
-      "description": "See the screen. Without a window: the whole screen as JPEG; click and scroll take pixel coordinates from this image. With a window id: that window alone at full resolution, even on another workspace, for reading (not for click coordinates). region [x, y, w, h] (pixels of the whole-screen image) or target (bar: the status bar; top or bottom: half the screen): that part at full resolution, under 800 KB, for reading small text. It returns the image's path: Read it to see the image (only when you need to look; the path stays valid for the last 30 shots). show=true puts the image in the chat and returns the image itself.",
+      "description": "See the screen. Without a window: the whole screen as JPEG; click and scroll take pixel coordinates from this image. With a window id: that window alone at full resolution, even on another workspace, for reading (not for click coordinates). region [x, y, w, h] (pixels of the whole-screen image) or target (bar: the status bar; top or bottom: half the screen): that part at full resolution, under 800 KB, for reading small text. It returns the image's path: Read it to see the image (only when you need to look; the path stays valid for the last 30 shots). show=true puts the image in the chat and returns the image itself. With display: \"agent\": the agent display; a window id there is focused first (each window fills that screen).",
       "inputSchema": {
        "properties": {
         "window": {
@@ -1016,6 +1126,15 @@
         },
         "caption": {
          "type": "string"
+        },
+        "display": {
+         "type": "string",
+         "enum": [
+          "user",
+          "agent"
+         ],
+         "default": "user",
+         "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
         }
        },
        "type": "object"
@@ -1037,6 +1156,15 @@
          "items": {
           "type": "string"
          }
+        },
+        "display": {
+         "type": "string",
+         "enum": [
+          "user",
+          "agent"
+         ],
+         "default": "user",
+         "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
         }
        },
        "required": [
@@ -1062,6 +1190,15 @@
           "keyboard-layouts",
           "version"
          ]
+        },
+        "display": {
+         "type": "string",
+         "enum": [
+          "user",
+          "agent"
+         ],
+         "default": "user",
+         "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
         }
        },
        "required": [
@@ -1075,7 +1212,7 @@
       "_meta": {
        "anthropic/alwaysLoad": true
       },
-      "description": "Start an app or command in the desktop session. It runs outside seimei, so it survives seimei restarts. Its window goes to the \"seimei\" workspace unless workspace is \"current\", and counts as seimei's (closing it needs no OK). Returns the new window's id.",
+      "description": "Start an app or command in the desktop session. It runs outside seimei, so it survives seimei restarts. Its window goes to the \"seimei\" workspace unless workspace is \"current\", and counts as seimei's (closing it needs no OK). With display: \"agent\" it opens in the agent display instead, which starts on first use (Firefox there: use the browser tools with browser: \"agent\"). Returns the new window's id.",
       "inputSchema": {
        "properties": {
         "command": {
@@ -1089,6 +1226,15 @@
           "current"
          ],
          "default": "seimei"
+        },
+        "display": {
+         "type": "string",
+         "enum": [
+          "user",
+          "agent"
+         ],
+         "default": "user",
+         "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
         }
        },
        "required": [
@@ -1099,10 +1245,28 @@
       "name": "open_app"
      },
      {
+      "description": "The agent display: a screen of seimei's own (a nested niri on the \"seimei\" workspace) with its own keyboard and pointer, where agent apps get input without taking the user's focus or mouse. It starts on first use by open_app or the agent browser and stops itself after a while unused, closing its apps. go: status (size, windows, memory), start or stop.",
+      "inputSchema": {
+       "properties": {
+        "go": {
+         "type": "string",
+         "enum": [
+          "status",
+          "start",
+          "stop"
+         ],
+         "default": "status"
+        }
+       },
+       "type": "object"
+      },
+      "name": "agent_display"
+     },
+     {
       "_meta": {
        "anthropic/alwaysLoad": true
       },
-      "description": "Type text into a window: it is focused first, and typing stops if focus moves away. ASCII only; the US layout is switched on while typing.",
+      "description": "Type text into a window: it is focused first, and typing stops if focus moves away. ASCII only; the US layout is switched on while typing. With display: \"agent\" it types into a window of the agent display, any characters, without touching the user's focus.",
       "inputSchema": {
        "properties": {
         "window": {
@@ -1110,6 +1274,15 @@
         },
         "text": {
          "type": "string"
+        },
+        "display": {
+         "type": "string",
+         "enum": [
+          "user",
+          "agent"
+         ],
+         "default": "user",
+         "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
         }
        },
        "required": [
@@ -1124,7 +1297,7 @@
       "_meta": {
        "anthropic/alwaysLoad": true
       },
-      "description": "Press keys or combinations in a window, in order, like [\"ctrl+l\"], [\"enter\"], [\"alt+tab\"], [\"super+shift+e\"]. Names: letters, digits, punctuation, enter, esc, tab, backspace, delete, space, arrows (up/down/left/right), home, end, pageup, pagedown, f1-f12, ctrl, shift, alt, super.",
+      "description": "Press keys or combinations in a window, in order, like [\"ctrl+l\"], [\"enter\"], [\"alt+tab\"], [\"super+shift+e\"]. Names: letters, digits, punctuation, enter, esc, tab, backspace, delete, space, arrows (up/down/left/right), home, end, pageup, pagedown, f1-f12, ctrl, shift, alt, super. With display: \"agent\": a window of the agent display.",
       "inputSchema": {
        "properties": {
         "window": {
@@ -1135,6 +1308,15 @@
          "items": {
           "type": "string"
          }
+        },
+        "display": {
+         "type": "string",
+         "enum": [
+          "user",
+          "agent"
+         ],
+         "default": "user",
+         "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
         }
        },
        "required": [
@@ -1149,7 +1331,7 @@
       "_meta": {
        "anthropic/alwaysLoad": true
       },
-      "description": "Click at pixel coordinates of the latest whole-screen screenshot. Pass the window you expect there: the click is refused if it is no longer focused. count=2 double-clicks, count=0 only moves.",
+      "description": "Click at pixel coordinates of the latest whole-screen screenshot. Pass the window you expect there: the click is refused if it is no longer focused. count=2 double-clicks, count=0 only moves. With display: \"agent\": pixels of the latest agent display screenshot; the window, if given, is focused first.",
       "inputSchema": {
        "properties": {
         "x": {
@@ -1173,6 +1355,15 @@
         "count": {
          "type": "integer",
          "default": 1
+        },
+        "display": {
+         "type": "string",
+         "enum": [
+          "user",
+          "agent"
+         ],
+         "default": "user",
+         "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
         }
        },
        "required": [
@@ -1184,7 +1375,7 @@
       "name": "click"
      },
      {
-      "description": "Scroll with the wheel at pixel coordinates of the latest whole-screen screenshot; positive amount scrolls down, in wheel clicks.",
+      "description": "Scroll with the wheel at pixel coordinates of the latest whole-screen screenshot; positive amount scrolls down, in wheel clicks. With display: \"agent\": pixels of the latest agent display screenshot.",
       "inputSchema": {
        "properties": {
         "x": {
@@ -1198,6 +1389,15 @@
         },
         "window": {
          "type": "integer"
+        },
+        "display": {
+         "type": "string",
+         "enum": [
+          "user",
+          "agent"
+         ],
+         "default": "user",
+         "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
         }
        },
        "required": [
@@ -1225,6 +1425,15 @@
         },
         "filter": {
          "type": "string"
+        },
+        "display": {
+         "type": "string",
+         "enum": [
+          "user",
+          "agent"
+         ],
+         "default": "user",
+         "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
         }
        },
        "required": [
@@ -1253,6 +1462,15 @@
         },
         "set_text": {
          "type": "string"
+        },
+        "display": {
+         "type": "string",
+         "enum": [
+          "user",
+          "agent"
+         ],
+         "default": "user",
+         "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
         }
        },
        "required": [
@@ -1277,6 +1495,24 @@
       "name": "notifications"
      },
      {
+      "description": "Read the text on the clipboard. The user's clipboard asks them with an Approve card first (it may hold a password); with display: \"agent\" it reads the agent display's own clipboard, without a card.",
+      "inputSchema": {
+       "properties": {
+        "display": {
+         "type": "string",
+         "enum": [
+          "user",
+          "agent"
+         ],
+         "default": "user",
+         "description": "agent: the agent display, seimei's own screen with its own keyboard and pointer (window ids are its own)"
+        }
+       },
+       "type": "object"
+      },
+      "name": "clipboard_read"
+     },
+     {
       "description": "Unlock the lock screen with the password the user saved for seimei. You never see the password. Use it only when a task needs the desktop while the screen is locked.",
       "inputSchema": {
        "properties": {},
@@ -1299,8 +1535,8 @@
       "name": "restore_desktop"
      }
     ],
-    "prompt": "## Desktop\nDrive the computer with your desktop tools (start with desktop), not `niri msg`, grim or ydotool in Bash: niri can restart, and your shell keeps the old socket.\n- Focus stealing is fine and you may use the user's workspaces, but apps you open for a task go to the \"seimei\" workspace (open_app does that).\n- Closing a window you did not open, quitting niri and editing ~/.config/niri wait for the user's OK on their phone; ask in chat first when the reason is not obvious.\n- screenshot returns the image's path: Read it when you need to look (show=true puts it in the chat and returns the image).\n- Never type into a window you have not just looked at. Prefer keyboard shortcuts and typing over clicks.\n- The user has a stop key on the computer. When they press it, your turn ends and desktop input is blocked for a minute: do not resume driving until they say so.",
-    "prompt_about": "## Desktop\nDrive the laptop with your desktop tools (start with desktop), not `niri msg`, grim or ydotool in Bash: niri can restart, and your shell keeps the old socket.\n- Focus stealing is fine and you may use the user's workspaces, but apps you open for a task go to the \"seimei\" workspace (open_app does that).\n- Closing a window you did not open, quitting niri and editing ~/.config/niri wait for the user's OK on their phone; ask in chat first when the reason is not obvious.\n- screenshot returns the image's path: Read it when you need to look (show=true puts it in the chat and returns the image).\n- Never type into a window you have not just looked at. Prefer keyboard shortcuts and typing over clicks.\n- The user has a stop key on the laptop. When they press it, your turn ends and desktop input is blocked for a minute: do not resume driving until they say so."
+    "prompt": "## Desktop\nDrive the computer with your desktop tools (start with desktop), not `niri msg`, grim or ydotool in Bash: niri can restart, and your shell keeps the old socket.\n- Work in the agent display (display: \"agent\" on the desktop tools, browser: \"agent\" on the browser tools): it has its own screen, keyboard and pointer, so the user's focus and mouse stay theirs. Touch the user's display only when the task is about something there; then focus stealing is fine, and apps you open go to the \"seimei\" workspace (open_app does that).\n- Closing a window you did not open, quitting niri and editing ~/.config/niri wait for the user's OK on their phone; ask in chat first when the reason is not obvious.\n- screenshot returns the image's path: Read it when you need to look (show=true puts it in the chat and returns the image).\n- Never type into a window you have not just looked at. Prefer keyboard shortcuts and typing over clicks.\n- The user has a stop key on the computer. When they press it, your turn ends and desktop input is blocked for a minute: do not resume driving until they say so.",
+    "prompt_about": "## Desktop\nDrive the laptop with your desktop tools (start with desktop), not `niri msg`, grim or ydotool in Bash: niri can restart, and your shell keeps the old socket.\n- Work in the agent display (display: \"agent\" on the desktop tools, browser: \"agent\" on the browser tools): it has its own screen, keyboard and pointer, so the user's focus and mouse stay theirs. Touch the user's display only when the task is about something there; then focus stealing is fine, and apps you open go to the \"seimei\" workspace (open_app does that).\n- Closing a window you did not open, quitting niri and editing ~/.config/niri wait for the user's OK on their phone; ask in chat first when the reason is not obvious.\n- screenshot returns the image's path: Read it when you need to look (show=true puts it in the chat and returns the image).\n- Never type into a window you have not just looked at. Prefer keyboard shortcuts and typing over clicks.\n- The user has a stop key on the laptop. When they press it, your turn ends and desktop input is blocked for a minute: do not resume driving until they say so."
    },
    "sway": {
     "initialize": {
@@ -1615,6 +1851,14 @@
        "type": "object"
       },
       "name": "notifications"
+     },
+     {
+      "description": "Read the text on the clipboard. It asks the user with an Approve card first (it may hold a password).",
+      "inputSchema": {
+       "properties": {},
+       "type": "object"
+      },
+      "name": "clipboard_read"
      },
      {
       "description": "Unlock the lock screen with the password the user saved for seimei. You never see the password. Use it only when a task needs the desktop while the screen is locked.",
@@ -1956,6 +2200,14 @@
        "type": "object"
       },
       "name": "notifications"
+     },
+     {
+      "description": "Read the text on the clipboard. It asks the user with an Approve card first (it may hold a password).",
+      "inputSchema": {
+       "properties": {},
+       "type": "object"
+      },
+      "name": "clipboard_read"
      },
      {
       "description": "Unlock the lock screen with the password the user saved for seimei. You never see the password. Use it only when a task needs the desktop while the screen is locked.",

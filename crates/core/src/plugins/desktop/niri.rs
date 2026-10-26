@@ -9,15 +9,18 @@ use std::time::Duration;
 use regex::Regex;
 use serde_json::{Value, json};
 
-use super::backend::{Backend, Ctx, Emit, Env, Ours, exec, grim_region, grim_screen, session_socket};
+use super::backend::{Backend, Ctx, Emit, Env, Ours, exec, grim_region, grim_screen, listening, session_socket};
 use crate::util::{py_json_compact, sh_quote};
 
 const QUERIES: [&str; 8] =
     ["outputs", "workspaces", "windows", "focused-window", "focused-output", "layers", "keyboard-layouts", "version"];
 static DISPLAY: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^niri\.(wayland-\d+)\.\d+\.sock$").unwrap());
 
+#[derive(Clone)]
 pub struct Niri {
     ctx: Ctx,
+    /// A niri seimei runs itself (the agent display): only its socket, never the user's.
+    pinned: Option<PathBuf>,
 }
 
 fn down() -> String {
@@ -48,11 +51,19 @@ fn window(mut w: Value) -> Value {
 
 impl Niri {
     pub fn new(ctx: Ctx) -> Niri {
-        Niri { ctx }
+        Niri { ctx, pinned: None }
+    }
+
+    /// The niri behind one socket.
+    pub fn pinned(ctx: Ctx, socket: PathBuf) -> Niri {
+        Niri { ctx, pinned: Some(socket) }
     }
 
     fn socket(&self) -> Option<PathBuf> {
-        session_socket(&self.ctx, "niri.", ".sock")
+        match &self.pinned {
+            Some(p) => listening(p).then(|| p.clone()),
+            None => session_socket(&self.ctx, "niri.", ".sock"),
+        }
     }
 
     /// One request on niri's socket: "Windows", "Workspaces", "Outputs", "FocusedWindow", "KeyboardLayouts".

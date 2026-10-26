@@ -2,12 +2,16 @@
 //! native-messaging host connects to seimei's link socket. Its tools run inside seimei, which holds the link and knows
 //! which tabs seimei opened; `seimei plugin browser` forwards each call. Page text and downloads are untrusted data.
 //! Acting in a tab the user opened needs their Approve card once per tab and site; closing one goes by guard.toml.
+//! The agent browser (browser: "agent") is a logged-out Firefox of seimei's own in the agent display: every tab
+//! there is seimei's, so nothing in it asks.
 
 pub mod host;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::pin::Pin;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 
 use serde_json::{Value, json};
 
@@ -20,8 +24,15 @@ const READ_LIMIT: i64 = 20000;
 /// A read is kept this long so paging through a page does not reload it.
 const READ_KEEP: f64 = 120.0;
 
+/// Starts the agent browser (and the agent display it runs in) unless it runs, for the link at the given socket.
+pub type Starter = Box<dyn Fn(PathBuf) -> Pin<Box<dyn Future<Output = Result<bool, String>> + Send>> + Send + Sync>;
+
 pub struct Browser {
     pub link: Arc<Link>,
+    /// The agent browser: every tab there is seimei's. None in the agent browser itself.
+    pub agent: Option<Box<Browser>>,
+    starter: OnceLock<Starter>,
+    agent_sock: OnceLock<PathBuf>,
     /// Tabs seimei opened (any session): they close and take actions without a card.
     opened: Mutex<HashSet<i64>>,
     /// The user's tabs they let seimei act in, with the site (scheme://host) the OK holds for.
@@ -224,18 +235,58 @@ impl Browser {
     /// The browser plugin; tab screenshots go to state/shots (a temporary folder without state).
     pub fn new(state: Option<&Path>) -> Browser {
         let missing = "The browser is not connected: it is closed, or the seimei extension is not installed.";
+        let mut b = Browser::with_link(state, Link::new("the browser", missing));
+        let missing = "The agent browser is not connected.";
+        b.agent = Some(Box::new(Browser::with_link(state, Link::new("the agent browser", missing))));
+        b
+    }
+
+    fn with_link(state: Option<&Path>, link: Link) -> Browser {
         let shots = match state {
             Some(s) => s.join("shots"),
             None => std::env::temp_dir().join(format!("seimei-shots-{}", std::process::id())),
         };
         Browser {
-            link: Arc::new(Link::new("the browser", missing)),
+            link: Arc::new(link),
+            agent: None,
+            starter: OnceLock::new(),
+            agent_sock: OnceLock::new(),
             opened: Mutex::default(),
             approved: Mutex::default(),
             reads: Default::default(),
             name: Mutex::default(),
             shots,
         }
+    }
+
+    /// How the agent browser starts: the desktop plugin's agent display.
+    pub fn set_starter(&self, start: Starter) {
+        let _ = self.starter.set(start);
+    }
+
+    /// Serve the agent browser's link at path, for as long as seimei runs.
+    pub async fn serve_agent(self: Arc<Self>, path: PathBuf) {
+        let _ = self.agent_sock.set(path.clone());
+        if let Some(a) = &self.agent {
+            a.link.clone().run(path).await;
+        }
+    }
+
+    /// The agent browser, started and connected.
+    async fn agent_ready(&self) -> Result<&Browser, String> {
+        let b = self.agent.as_deref().ok_or("this is the agent browser already")?;
+        let (Some(start), Some(sock)) = (self.starter.get(), self.agent_sock.get()) else {
+            return Err("The agent browser needs the desktop plugin on niri.".into());
+        };
+        // On every call: it starts what is missing, and the use keeps the agent display from its idle stop.
+        start(sock.clone()).await?;
+        for _ in 0..450 {
+            if b.link.connected().await {
+                return Ok(b);
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        Err("The agent browser started, but its extension did not connect within 45 s.".into())
     }
 
     /// The browser's name for messages: "Firefox", or "The browser" when the extension does not say.
@@ -252,7 +303,7 @@ impl Browser {
     /// Whether seimei may act in the tab: its own tabs (opened by it, or in its tab group) always, the user's
     /// only after their Approve card, which holds until the tab leaves that site. None to go on, or the reply.
     async fn may_act(&self, tab: i64, doing: &str, session: &dyn Session) -> Result<Option<Value>, String> {
-        if self.opened.lock().unwrap().contains(&tab) {
+        if self.mine() || self.opened.lock().unwrap().contains(&tab) {
             return Ok(None);
         }
         let info = self.link.call("info", 30, json!({"tabs": [tab]})).await?;
@@ -404,7 +455,7 @@ impl Browser {
         }
         let theirs: Vec<i64> = {
             let opened = self.opened.lock().unwrap();
-            ids.iter().filter(|i| !opened.contains(i)).copied().collect()
+            ids.iter().filter(|i| !self.mine() && !opened.contains(i)).copied().collect()
         };
         // Facts for the guard's rules: tabs = theirs when any of them seimei did not open.
         let mut about = crate::guard::About::default();
@@ -453,13 +504,15 @@ impl Browser {
             }
             "browser_open" => {
                 // background is what extension 1.0 reads; a newer one reads front.
-                let front = truthy(&a["front"]);
+                // In the agent browser tabs open in front: its window is seimei's, and the agent display shows it.
+                let front = self.mine() || truthy(&a["front"]);
                 let args = json!({"url": py(&a["url"]), "front": front, "background": !front});
                 let t = self.link.call("open", 30, args).await?;
                 if let Some(id) = t["id"].as_i64() {
                     self.opened.lock().unwrap().insert(id);
                 }
-                ok(format!("Opened tab {}", tab_line(&t)))
+                let place = if self.mine() { " in the agent browser" } else { "" };
+                ok(format!("Opened tab {}{place}", tab_line(&t)))
             }
             "browser_switch" => {
                 let t = self.link.call("switch", 30, json!({"tab": int(&a["tab"])?})).await?;
@@ -508,6 +561,17 @@ impl Browser {
         {
             return no;
         }
+        if a["browser"] == "agent" {
+            return match self.agent_ready().await {
+                Ok(b) => b.run(tool, a, session).await.unwrap_or_else(|e| text(&e, true)),
+                Err(e) => text(&e, true),
+            };
+        }
         self.run(tool, a, session).await.unwrap_or_else(|e| text(&e, true))
+    }
+
+    /// The agent browser itself: all its tabs are seimei's.
+    fn mine(&self) -> bool {
+        self.agent.is_none()
     }
 }

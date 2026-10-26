@@ -161,7 +161,7 @@ pub fn check(tool: &str, inp: &Value, desk: &Desktop) -> Option<About> {
                 field("content").or_else(|| field("new_string")).or_else(|| field("new_source")).unwrap_or_default();
             return about("config", edit, format!("{path}\n\n{detail}"));
         }
-    } else if tool == format!("mcp__desktop__{}", b.name()) {
+    } else if tool == format!("mcp__desktop__{}", b.name()) && inp["display"] != "agent" {
         let mut args = vec![inp.get("action").map(text_of).unwrap_or_default()];
         if inp.get("args").is_some_and(crate::util::truthy) {
             match &inp["args"] {

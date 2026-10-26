@@ -401,6 +401,7 @@ fn main() {
         tokio::spawn(app.pool.plugins.clone().listen(app.approvals.clone()));
         if let Some(b) = &app.pool.plugins.browser {
             tokio::spawn(b.link.clone().run(seimei_core::plugins::link::runtime_path("browser", a.dev)));
+            tokio::spawn(b.clone().serve_agent(seimei_core::plugins::link::runtime_path("agent-browser", a.dev)));
         }
         if let Some(d) = &app.pool.plugins.desktop {
             let disp = app.dispatcher.clone();

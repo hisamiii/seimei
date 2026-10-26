@@ -36,6 +36,7 @@ The dispatcher and every shikigami run as the user, with Bash, in the permission
   - no agent reads or writes seimei's own secrets in its data folder (and the dev server's): `auth.json`, `unlock`, `push-vapid.pem`, `kitty-rc.conf`, `signing/`, `firebase/`;
   - a command nested too deep to check is refused.
   - the browser plugin acts or navigates in a tab the user opened only after their card (once per tab and site), and never reads or fills password, payment card, one-time code or file fields.
+  - the desktop plugin reads the user's clipboard only after their card, once per call.
 - **An append-only audit log** of every call.
 
 **Claude Code's own permission prompts** become cards in every mode except bypass ([config.md](config.md)).

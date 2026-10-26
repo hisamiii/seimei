@@ -1818,6 +1818,22 @@
      ]
     }
    ]
+  },
+  {
+   "name": "agent browser without the agent display",
+   "steps": [
+    {
+     "tool": "browser_tabs",
+     "args": {
+      "browser": "agent"
+     },
+     "replies": {},
+     "want": "The agent browser needs the desktop plugin on niri.",
+     "error": true,
+     "card": null,
+     "sent": []
+    }
+   ]
   }
  ]
 }

@@ -268,6 +268,12 @@ impl Plugins {
                     "desktop" => {
                         let s = |k: &str| own.get(k).and_then(|v| v.as_str()).filter(|v| !v.is_empty());
                         let d = desktop::Desktop::new(s("backend"), desktop::Ctx::system(), state, s("shell"), None)?;
+                        if let Some(m) = own
+                            .get("agent_idle_minutes")
+                            .and_then(|v| v.as_float().or(v.as_integer().map(|i| i as f64)))
+                        {
+                            d.agent.set_idle(m);
+                        }
                         eprintln!("seimei: desktop backend: {}", d.b.name());
                         out.desktop = Some(Arc::new(d));
                     }
@@ -279,6 +285,13 @@ impl Plugins {
                 Ok(p) => out.list.push(p),
                 Err(e) => eprintln!("seimei: plugin {name}: {e}; seimei goes on without it"),
             }
+        }
+        if let (Some(b), Some(d)) = (&out.browser, &out.desktop) {
+            let d = d.clone();
+            b.set_starter(Box::new(move |sock| {
+                let d = d.clone();
+                Box::pin(async move { d.agent_browser(&sock).await })
+            }));
         }
         let names = out.names();
         eprintln!("seimei: plugins: {}", if names.is_empty() { "none".into() } else { names.join(", ") });

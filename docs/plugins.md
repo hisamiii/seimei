@@ -16,18 +16,18 @@ enabled = ["desktop", "music", "mytool"]
 
 | plugin | what | needs |
 |---|---|---|
-| `desktop` | windows, workspaces, screenshots, typing and pointer (uinput), AT-SPI, layout memory, screen unlock | niri, sway, Hyprland or an X11 EWMH window manager |
+| `desktop` | windows, workspaces, screenshots, typing and pointer (uinput), AT-SPI, layout memory, screen unlock, clipboard; on niri also the agent display, a nested niri with its own keyboard and pointer for agent apps | niri, sway, Hyprland or an X11 EWMH window manager |
 | `discord` | read and send through the user's Discord client | the Vencord plugin in `plugins/discord/vencord/` built into Vesktop |
-| `browser` | tabs, page text and elements, acting on pages, waiting, tab screenshots, open, download | the seimei extension in Firefox, Waterfox or LibreWolf (`seimei.xpi` on the release page) |
+| `browser` | tabs, page text and elements, acting on pages, waiting, tab screenshots, open, download; with the agent display also the agent browser, a logged-out Firefox of seimei's own | the seimei extension in Firefox, Waterfox or LibreWolf (`seimei.xpi` on the release page) |
 | `music` | Quod Libet and MPRIS players | the Quod Libet bridge (`plugins/music/seimei_bridge.py`) for tags and playlists |
 | `queue` | claude-queue / cqd: GPU turns for every session | claude-queue installed |
 
 Cards the built-in plugins raise:
 
-- **desktop:** closing a window seimei did not open, quitting the compositor, writing the WM config.
+- **desktop:** closing a window seimei did not open, quitting the compositor, writing the WM config, reading the user's clipboard (the agent display's needs none).
 - **discord:** every send, edit and delete.
 - **music:** tag edits and playlist deletes.
-- **browser:** the first action or navigation in a tab the user opened (once per tab and site; seimei's own tabs, which it keeps in a collapsed "seimei" tab group, need none). Closing the user's tabs goes by guard.toml.
+- **browser:** the first action or navigation in a tab the user opened (once per tab and site; seimei's own tabs, which it keeps in a collapsed "seimei" tab group, and the agent browser need none). Closing the user's tabs goes by guard.toml.
 
 The browser extension talks to seimei through a native-messaging host, `seimei browser-host`. `seimei setup` installs it when the browser plugin is on: a script `~/.local/share/seimei/browser-host` that runs the binary, and its manifest in `~/.mozilla/native-messaging-hosts` (Firefox, Waterfox) and `~/.librewolf/native-messaging-hosts` when LibreWolf is there. Then install `seimei.xpi` from the release page once (about:addons, Install Add-on From File). Chromium-based browsers are not supported: the extension is a Firefox (Manifest V2) one.
 
