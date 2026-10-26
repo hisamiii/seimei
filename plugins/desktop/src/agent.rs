@@ -198,8 +198,16 @@ impl Agent {
             {
                 let _ = me.b.focus(prev);
             }
+            // Floating at a fixed size: the display is as big as this window, and a tile would be as tall as the screen.
             if let Some(wid) = win.as_ref().and_then(|w| w["id"].as_i64()) {
-                let _ = me.b.action(&["set-window-width".into(), "--id".into(), wid.to_string(), "1280".into()]);
+                let id = wid.to_string();
+                for a in [
+                    &["move-window-to-floating", "--id", &id][..],
+                    &["set-window-width", "--id", &id, "1280"],
+                    &["set-window-height", "--id", &id, "800"],
+                ] {
+                    let _ = me.b.action(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+                }
             }
         })
         .await
