@@ -31,7 +31,7 @@ impl Listener for Heard {
     fn session_id(&self) -> Option<String> {
         None
     }
-    fn rate_limit(&self, _info: &Value) {}
+    fn rate_limit(&self, _info: &Value, _from: &str, _session: &str) {}
 }
 
 /// The test's Claude config dir, which tests/live.sh sets; the user's own is never used.

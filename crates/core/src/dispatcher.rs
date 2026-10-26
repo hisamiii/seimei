@@ -323,7 +323,7 @@ enum Cmd {
     },
     Interrupt,
     /// A shikigami's rate limit event: limits are shared by the dispatcher and every worker (one account).
-    RateLimit(Value),
+    RateLimit(Value, String, String),
 }
 
 /// The dispatcher's settings from config.toml ([dispatcher], [approvals] dispatcher, [host] about).
@@ -390,8 +390,8 @@ impl crate::workers::Listener for Dispatcher {
     fn session_id(&self) -> Option<String> {
         Dispatcher::session_id(self)
     }
-    fn rate_limit(&self, info: &Value) {
-        Dispatcher::rate_limit(self, info)
+    fn rate_limit(&self, info: &Value, from: &str, session: &str) {
+        Dispatcher::rate_limit(self, info, from, session)
     }
 }
 
@@ -589,8 +589,8 @@ impl Dispatcher {
         Some(sid.trim().to_string()).filter(|s| !s.is_empty())
     }
 
-    pub fn rate_limit(&self, info: &Value) {
-        let _ = self.tx.send(Cmd::RateLimit(info.clone()));
+    pub fn rate_limit(&self, info: &Value, from: &str, session: &str) {
+        let _ = self.tx.send(Cmd::RateLimit(info.clone(), from.into(), session.into()));
     }
 
     fn options(&self) -> Options {
@@ -920,8 +920,8 @@ impl Turns {
                 None
             }
             Cmd::Interrupt => None,
-            Cmd::RateLimit(info) => {
-                self.rate_limit(&info);
+            Cmd::RateLimit(info, from, session) => {
+                self.rate_limit(&info, &from, &session);
                 None
             }
         }
@@ -1020,7 +1020,10 @@ impl Turns {
                 }
             }
             Message::Result(r) => return self.result(r),
-            Message::RateLimit(info) => self.rate_limit(&info),
+            Message::RateLimit(info) => {
+                let session = self.d.session_id().unwrap_or_default();
+                self.rate_limit(&info, "seimei", &session)
+            }
             Message::Unreadable { error, .. } => eprintln!("seimei: dispatcher: unreadable line: {error}"),
             Message::Other(_) => {}
         }
@@ -1295,8 +1298,8 @@ impl Turns {
     }
 
     /// Limits are shared by the dispatcher and every worker: one account.
-    fn rate_limit(&mut self, info: &Value) {
-        self.d.usage.limit(info);
+    fn rate_limit(&mut self, info: &Value, from: &str, session: &str) {
+        self.d.usage.limit(info, from, session);
         let window = info["rateLimitType"].as_str().filter(|w| !w.is_empty()).unwrap_or("unknown").to_string();
         let prev = self.rate_limits.get(&window).and_then(|w| w["status"].as_str().map(String::from));
         let now = json!({"status": info["status"], "resets_at": info["resetsAt"], "utilization": info["utilization"]});

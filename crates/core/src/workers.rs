@@ -1154,7 +1154,7 @@ impl Session {
             }
             Message::RateLimit(info) => {
                 if let Some(d) = self.pool.dispatcher.get() {
-                    d.rate_limit(&info);
+                    d.rate_limit(&info, &self.w.name(), &str_of(&self.w.get("session_id")));
                 }
             }
             _ => {}
@@ -1891,8 +1891,8 @@ pub trait Listener: Send + Sync {
     fn note(&self, text: &str, key: Option<&str>);
     /// Its session id, once it has one.
     fn session_id(&self) -> Option<String>;
-    /// A shikigami ran into a rate limit.
-    fn rate_limit(&self, info: &Value);
+    /// A rate-limit reading from a shikigami's session (from: its name).
+    fn rate_limit(&self, info: &Value, from: &str, session: &str);
 }
 
 /// All shikigami, workers.json and the line of events they send the dispatcher.

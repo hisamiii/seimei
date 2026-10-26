@@ -17,6 +17,13 @@ const WARN_AT: [f64; 2] = [0.8, 0.95];
 const FIVE: f64 = 5.0 * 3600.0;
 const TOP: usize = 10;
 
+fn append_line(path: &Path, line: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut f = std::fs::OpenOptions::new().create(true).append(true).mode(0o600).open(path)?;
+    f.write_all(format!("{line}\n").as_bytes())
+}
+
 fn name(key: &str) -> &str {
     NAMES.iter().find(|n| n.0 == key).map_or(key, |n| n.1)
 }
@@ -32,6 +39,8 @@ fn local(t: f64, fmt: &str) -> String {
 
 pub struct Usage {
     path: PathBuf,
+    /// rate-limits.jsonl: every reading as it came, with its time and session, so the windows' course can be shown.
+    log: PathBuf,
     events: Option<Arc<EventLog>>,
     data: Mutex<Value>,
 }
@@ -47,7 +56,7 @@ impl Usage {
                 data[k] = json!({});
             }
         }
-        Usage { path, events, data: Mutex::new(data) }
+        Usage { path, log: state.join("rate-limits.jsonl"), events, data: Mutex::new(data) }
     }
 
     fn roll(d: &mut Value) {
@@ -93,8 +102,13 @@ impl Usage {
         }
     }
 
-    /// From a rate-limit event: every window's share used and its reset.
-    pub fn limit(&self, raw: &Value) {
+    /// From a rate-limit event (from: the dispatcher, "seimei", or a shikigami's name; session: its session id): every
+    /// window's share used and its reset. Each reading is also appended to rate-limits.jsonl.
+    pub fn limit(&self, raw: &Value, from: &str, session: &str) {
+        let line = json!({"t": (now() * 10.0).round() / 10.0, "from": from, "session": session, "info": raw});
+        if let Err(e) = append_line(&self.log, &line.to_string()) {
+            eprintln!("seimei: usage: {}: {e}", self.log.display());
+        }
         let mut d = self.data.lock().unwrap();
         let mut windows = raw["unifiedWindows"].as_object().cloned().unwrap_or_default();
         if windows.is_empty()
@@ -322,4 +336,29 @@ fn thousands(n: i64) -> String {
         out.push(c);
     }
     if n < 0 { format!("-{out}") } else { out }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_reading_is_logged() {
+        let dir = std::env::temp_dir().join(format!("seimei-usage-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let u = Usage::new(&dir, None);
+        let r = json!({"status": "allowed", "rateLimitType": "five_hour", "utilization": 0.42, "resetsAt": 1793030000});
+        u.limit(&r, "seimei", "s1");
+        u.limit(&r, "dev", "s2");
+        let lines: Vec<Value> = std::fs::read_to_string(dir.join("rate-limits.jsonl"))
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(lines.len(), 2);
+        assert_eq!((lines[1]["from"].as_str(), lines[1]["session"].as_str()), (Some("dev"), Some("s2")));
+        assert_eq!(lines[0]["info"]["utilization"], 0.42);
+        assert!(lines[0]["t"].as_f64().unwrap() > 1.7e9);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
