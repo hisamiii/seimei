@@ -1,5 +1,6 @@
-//! `seimei plugin queue` end to end: the real binary on stdio, as Claude Code starts it, with seimei's card socket and
-//! a fake cqd. Its spec, a tool's text, a kill card approved and denied, a lost seimei and a stopped cqd.
+//! The plugins end to end on stdio, as Claude Code starts them, with seimei's card socket: `seimei plugin queue` with
+//! a fake cqd (its spec, a tool's text, a kill card approved and denied, a lost seimei and a stopped cqd), music,
+//! browser and discord forwarding to seimei, and plugins/template installed the way its README says.
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
@@ -34,7 +35,13 @@ impl Server {
     /// `seimei plugin <name>` with the env seimei gives it, and more.
     fn start(name: &str, env: &serde_json::Map<String, Value>, more: &[(&str, String)]) -> Server {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_seimei"));
-        cmd.args(["plugin", name]).stdin(Stdio::piped()).stdout(Stdio::piped());
+        cmd.args(["plugin", name]);
+        Server::spawn(cmd, env, more)
+    }
+
+    /// Any MCP server on stdio, with that env.
+    fn spawn(mut cmd: Command, env: &serde_json::Map<String, Value>, more: &[(&str, String)]) -> Server {
+        cmd.stdin(Stdio::piped()).stdout(Stdio::piped());
         for (k, v) in env {
             cmd.env(k, v.as_str().unwrap());
         }
@@ -471,5 +478,69 @@ async fn discord_plugin_forwards_to_seimei() {
     let sends: Vec<Value> =
         seen.lock().unwrap().iter().filter(|r| r["op"] == "send").map(|r| r["args"].clone()).collect();
     assert_eq!(sends, [json!({"channel": "111111", "text": "hello all", "reply_to": null, "files": []})]);
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// plugins/template, copied into the user's plugins folder as its README says: seimei lists it with its prompt and
+/// note, Claude Code would start its command, and its clear raises a card that only an approval gets past.
+#[tokio::test(flavor = "multi_thread")]
+async fn template_plugin_as_a_user_installs_it() {
+    let d = std::env::temp_dir().join(format!("seimei-template-{}", std::process::id()));
+    let (home, data) = (d.join("home"), d.join("data"));
+    let folder = home.join(".config/seimei/plugins/template");
+    std::fs::create_dir_all(&folder).unwrap();
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/template");
+    for f in ["plugin.toml", "prompt.md", "server.py"] {
+        std::fs::copy(src.join(f), folder.join(f)).unwrap();
+    }
+    let mut env = crate::env::Env::lock();
+    env.set("HOME", &home);
+    env.set("XDG_CONFIG_HOME", home.join(".config"));
+    let (state, events, approvals, plugins) = host("template", "template").await;
+    assert!(plugins.prompt(None).starts_with("## Notes (the template plugin)"), "{}", plugins.prompt(None));
+    assert!(plugins.worker_notes().contains("The template plugin keeps notes"), "{}", plugins.worker_notes());
+    let server = plugins.servers("seimei", None, None)["template"].clone();
+    assert_eq!(server["command"], json!(folder.join("server.py").display().to_string()));
+    let senv = server["env"].as_object().unwrap().clone();
+    let more = [("XDG_DATA_HOME", data.display().to_string())];
+
+    let mut srv = tokio::task::spawn_blocking(move || {
+        let mut srv = Server::spawn(Command::new(server["command"].as_str().unwrap()), &senv, &more);
+        let init = srv.ask(1, "initialize", json!({"protocolVersion": "2025-06-18", "capabilities": {}}));
+        assert_eq!(init["serverInfo"]["name"], "template");
+        let names: Vec<Value> = srv.ask(2, "tools/list", json!({}))["tools"].as_array().unwrap().iter().map(|t| t["name"].clone()).collect();
+        assert_eq!(names, [json!("notes_add"), json!("notes_list"), json!("notes_clear")]);
+        assert_eq!(srv.call(3, "notes_add", json!({"text": "buy  milk"})), ("Added. 1 notes.".into(), false));
+        assert_eq!(srv.call(4, "notes_add", json!({"text": "call the plumber"})), ("Added. 2 notes.".into(), false));
+        assert_eq!(srv.call(5, "notes_list", json!({})), ("1. buy milk\n2. call the plumber".into(), false));
+        srv
+    })
+    .await
+    .unwrap();
+
+    // Clearing asks first: denied, the notes stay; approved, they go.
+    for (approve, want) in [(false, ("The user denied it; the notes stay.", true)), (true, ("Removed.", false))] {
+        let mut sub = events.subscribe();
+        let call = tokio::task::spawn_blocking(move || {
+            let r = srv.call(6, "notes_clear", json!({}));
+            (srv, r)
+        });
+        let card = loop {
+            let ev = tokio::time::timeout(Duration::from_secs(10), sub.recv()).await.unwrap().unwrap();
+            if ev["type"] == "approval" {
+                break ev;
+            }
+        };
+        assert_eq!((&card["who"], &card["target"]), (&json!("seimei"), &json!("remove all 2 notes")));
+        assert_eq!(card["detail"], "buy milk\ncall the plumber");
+        approvals.decide(card["aid"].as_str().unwrap(), approve, None, None);
+        let (back, r) = call.await.unwrap();
+        srv = back;
+        assert_eq!(r, (want.0.to_string(), want.1));
+    }
+    assert_eq!(srv.call(7, "notes_list", json!({})), ("No notes.".into(), false));
+    drop(srv);
+    drop(env);
+    let _ = std::fs::remove_dir_all(&state);
     let _ = std::fs::remove_dir_all(&d);
 }
