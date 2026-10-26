@@ -206,6 +206,9 @@ respawn_delay=5
 respawn_max=0
 # A stop that hangs ends in SIGKILL, not in a server left running.
 retry="TERM/15/KILL/5"
+# What it prints; only the user reads it.
+output_log="${XDG_STATE_HOME:-${HOME}/.local/state}/seimei/seimei.log"
+error_log="$output_log"
 # The key binding that ends a turn: rc-service --user seimei usr1
 extra_started_commands="usr1"
 
@@ -235,6 +238,7 @@ enter_cgroup() {
 }
 
 start_pre() {
+	mkdir -p "${output_log%/*}" && touch "$output_log" && chmod 600 "$output_log"
 	enter_cgroup seimei || ewarn "seimei stays in $(sed -n 's/^0:://p' /proc/$$/cgroup)"
 	return 0
 }
