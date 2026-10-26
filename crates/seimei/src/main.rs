@@ -42,7 +42,7 @@ use seimei_core::push::{Fcm, Push, WebPush};
 use seimei_core::util::{config_file, data_dir};
 use serde_json::Value;
 
-const COMMANDS: [&str; 12] = [
+const COMMANDS: [&str; 13] = [
     "serve",
     "setup",
     "update",
@@ -55,6 +55,7 @@ const COMMANDS: [&str; 12] = [
     "devices",
     "screen-password",
     "plugin",
+    "browser-host",
 ];
 
 const USAGE: &str = "\
@@ -271,6 +272,9 @@ fn main() {
         let name = a.plugin.clone().unwrap_or_else(|| die("usage: seimei plugin NAME"));
         let rt = tokio::runtime::Runtime::new().expect("a runtime");
         return rt.block_on(seimei_core::plugins::serve_stdio(&name)).unwrap_or_else(|e| die(&e));
+    }
+    if a.command == "browser-host" {
+        return seimei_core::plugins::browser::host::run();
     }
     if a.command == "setup" {
         return setup::run(secret);

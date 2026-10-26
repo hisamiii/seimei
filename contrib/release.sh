@@ -12,6 +12,10 @@ cd "$root"
 [ -f contrib/minisign.pub ] || { echo "no contrib/minisign.pub: make the key first (see the top of this script)"; exit 1; }
 grep -q "^version = \"$v\"" crates/seimei/Cargo.toml || { echo "crates/seimei/Cargo.toml is not at $v"; exit 1; }
 [ -z "$(git status --porcelain)" ] || { echo "commit first: the release is built from HEAD"; exit 1; }
+# The browser extension as addons.mozilla.org signed it (browser/sign.py), for the version in its manifest.
+ext=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' browser/manifest.json)
+signed=$(python3 -c 'import json,sys,zipfile; print(json.loads(zipfile.ZipFile(sys.argv[1]).read("manifest.json"))["version"])' browser/seimei.xpi)
+[ "$ext" = "$signed" ] || { echo "browser/seimei.xpi is $signed, the extension $ext: run browser/sign.py"; exit 1; }
 asset=seimei-$(uname -m)-linux
 # Fully static (musl, mimalloc, vendored openssl): runs on any Linux of this arch. Needs rust-musl and musl (musl-gcc).
 target=$(uname -m)-unknown-linux-musl
@@ -31,6 +35,8 @@ else
 fi
 minisign -V -p contrib/minisign.pub -m "dist/$asset"
 android/publish.sh release dist/seimei.apk
-gh release create "v$v" "dist/$asset" "dist/$asset.minisig" dist/seimei.apk --target "$(git rev-parse HEAD)" \
+cp browser/seimei.xpi dist/seimei.xpi
+gh release create "v$v" "dist/$asset" "dist/$asset.minisig" dist/seimei.apk dist/seimei.xpi --target "$(git rev-parse HEAD)" \
     --title "seimei $v" --notes "Install or update with \`seimei update\`; the binary is signed with contrib/minisign.pub. \
-seimei.apk is the phone app (Android 11+): on first run it asks for your seimei's address."
+seimei.apk is the phone app (Android 11+): on first run it asks for your seimei's address. \
+seimei.xpi is the browser plugin's extension for Firefox, Waterfox and LibreWolf (about:addons, Install Add-on From File)."

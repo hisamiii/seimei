@@ -211,3 +211,31 @@ fn help_lists_the_commands() {
     assert_eq!(bad.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&bad.stderr).contains("seimei --help"));
 }
+
+#[test]
+fn setup_browser_host() {
+    let h = Home::new("browser");
+    std::fs::create_dir_all(h.base.join(".librewolf")).unwrap();
+    // port, reach, about, plan, terminal; plugins: only the browser; the password twice, no bridge, no start.
+    let answers = "\n\n\n\n\nn\nn\nn\ny\nn\nlong enough\nlong enough\nn\nn\n";
+    let o = h.run(&["setup"], answers);
+    let out = text(&o);
+    assert!(o.status.success(), "{out}");
+    let script = h.base.join("data/seimei/browser-host");
+    assert!(h.read("data/seimei/browser-host").contains(&format!("{} browser-host", env!("CARGO_BIN_EXE_seimei"))));
+    assert_eq!(std::fs::metadata(&script).unwrap().permissions().mode() & 0o777, 0o700);
+    for dir in [".mozilla", ".librewolf"] {
+        let m: serde_json::Value =
+            serde_json::from_str(&h.read(&format!("{dir}/native-messaging-hosts/seimei.json"))).unwrap();
+        assert_eq!(m["path"].as_str(), Some(script.to_str().unwrap()), "{dir}");
+        assert_eq!(m["allowed_extensions"][0].as_str(), Some("seimei@hisamiowo.xyz"));
+    }
+    assert!(!h.exists(".config/mozilla/native-messaging-hosts"), "only where a profile is");
+    assert!(out.contains("seimei.xpi"), "{out}");
+
+    // A manifest of another install stays as it is.
+    std::fs::write(h.base.join(".mozilla/native-messaging-hosts/seimei.json"), "{}\n").unwrap();
+    let o = h.run(&["setup"], "");
+    assert!(text(&o).contains("exists (another install"), "{}", text(&o));
+    assert_eq!(h.read(".mozilla/native-messaging-hosts/seimei.json"), "{}\n");
+}

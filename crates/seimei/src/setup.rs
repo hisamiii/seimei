@@ -22,7 +22,7 @@ const PLUGINS: [(&str, &str, &str); 5] = [
     ("desktop", "the desktop: windows, workspaces, screenshots, keyboard and mouse", "niri, sway, Hyprland or X11"),
     ("music", "Quod Libet and the session's media players", "quodlibet or an MPRIS player, playerctl"),
     ("queue", "claude-queue: every session's commands take GPU turns", "claude-queue"),
-    ("browser", "Waterfox or Firefox, through the extension in browser/", "the extension installed"),
+    ("browser", "Firefox, Waterfox or LibreWolf, through the seimei extension", "seimei.xpi from the release page"),
     ("discord", "Discord through the Vesktop plugin in discord/", "Vesktop with the plugin"),
 ];
 
@@ -314,6 +314,62 @@ fn openrc_service(exe: &Path) {
 }
 
 /// The page types into the user's own Claude sessions through kitty remote control, when they run in kitty.
+/// The release's signed extension; [plugins.browser] extension_id overrides it for one packed from source.
+const EXTENSION_ID: &str = "seimei@hisamiowo.xyz";
+
+/// The browser plugin's native-messaging host for the Firefox family: a small script that runs this binary, and its
+/// manifest where Firefox and Waterfox (~/.mozilla) and LibreWolf look. A manifest that points elsewhere stays.
+fn browser_host(state: &Path, exe: &Path) {
+    let cfg: toml::Table = std::fs::read_to_string(config_file()).ok().and_then(|s| s.parse().ok()).unwrap_or_default();
+    let plugins = cfg.get("plugins").and_then(|p| p.as_table());
+    let on = plugins.and_then(|p| p.get("enabled")).and_then(|e| e.as_array());
+    if !on.is_some_and(|e| e.iter().any(|n| n.as_str() == Some("browser"))) {
+        return;
+    }
+    let id = (plugins.and_then(|p| p.get("browser")).and_then(|b| b.get("extension_id")).and_then(|i| i.as_str()))
+        .unwrap_or(EXTENSION_ID);
+    let home = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+    let script = state.join("browser-host");
+    let text = format!("#!/bin/sh\nexec {} browser-host\n", seimei_core::util::sh_quote(&exe.to_string_lossy()));
+    write_file(&script, &text, 0o700);
+    let manifest = serde_json::json!({"name": "seimei", "description": "seimei connector", "type": "stdio",
+        "path": script, "allowed_extensions": [id]});
+    let manifest = format!("{manifest}\n");
+    let mut dirs = vec![home.join(".mozilla/native-messaging-hosts")];
+    for (profile, hosts) in [
+        (".librewolf", ".librewolf/native-messaging-hosts"),
+        (".config/mozilla", ".config/mozilla/native-messaging-hosts"),
+    ] {
+        if home.join(profile).is_dir() {
+            dirs.push(home.join(hosts));
+        }
+    }
+    println!();
+    for dir in dirs {
+        let file = dir.join("seimei.json");
+        match std::fs::read_to_string(&file) {
+            Ok(t) if t == manifest => println!("{} is set up.", file.display()),
+            Ok(_) => println!("{} exists (another install of the host); leaving it.", file.display()),
+            Err(_) => {
+                std::fs::create_dir_all(&dir).unwrap_or_else(|e| fail(&format!("{}: {e}", dir.display())));
+                write_file(&file, &manifest, 0o644);
+                println!("Wrote {}.", file.display());
+            }
+        }
+    }
+    println!(
+        "The browser plugin needs the seimei extension: seimei.xpi from the release page, in about:addons, Install \
+         Add-on From File. Chromium-based browsers are not supported: the extension is a Firefox one."
+    );
+}
+
+fn write_file(path: &Path, text: &str, mode: u32) {
+    let w = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(mode).open(path);
+    if let Err(e) = w.and_then(|mut f| f.write_all(text.as_bytes())) {
+        fail(&format!("{}: {e}", path.display()));
+    }
+}
+
 fn kitty_bridge(state: &Path) {
     let rc = state.join("kitty-rc.conf");
     if rc.exists() {
@@ -404,9 +460,13 @@ pub fn run(read_secret: impl Fn(&str) -> String) {
             }
         };
         if origin.ends_with(".ts.net") {
-            println!("Then run once: tailscale serve --bg {port}  (the first time it may ask you to turn on HTTPS for the tailnet)");
+            println!(
+                "Then run once: tailscale serve --bg {port}  (the first time it may ask you to turn on HTTPS for the tailnet)"
+            );
         } else if origin.starts_with("http://") && !origin.starts_with("http://localhost") {
-            println!("Without https, passkeys and notifications do not work, and the password crosses the network in clear.");
+            println!(
+                "Without https, passkeys and notifications do not work, and the password crosses the network in clear."
+            );
         }
         let about = ask("How should the prompts call this machine (e.g. \"desktop, an Arch box\")", "computer");
         println!(
@@ -474,8 +534,10 @@ pub fn run(read_secret: impl Fn(&str) -> String) {
 
     kitty_bridge(&state);
 
-    // The service.
     let exe = std::env::current_exe().unwrap_or_else(|e| fail(&format!("this binary: {e}")));
+    browser_host(&state, &exe);
+
+    // The service.
     if seimei_core::util::systemd() {
         systemd_service(&exe);
     } else if on_path("rc-service") {

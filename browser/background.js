@@ -1,4 +1,4 @@
-// The seimei connector: a native-messaging port to host.py, which relays to the seimei server on this laptop.
+// The seimei connector: a native-messaging port to `seimei browser-host`, which relays to the seimei server on this computer.
 // Requests come as {id, op, args}; each gets {id, ok, result} or {id, ok: false, error}.
 const HOST = 'seimei';
 // The tab group seimei's own background tabs go into.

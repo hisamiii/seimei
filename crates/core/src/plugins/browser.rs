@@ -3,6 +3,8 @@
 //! which tabs seimei opened; `seimei plugin browser` forwards each call. Page text and downloads are untrusted data.
 //! Acting in a tab the user opened needs their Approve card once per tab and site; closing one goes by guard.toml.
 
+pub mod host;
+
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};

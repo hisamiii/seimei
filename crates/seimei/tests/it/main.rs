@@ -6,6 +6,7 @@ mod env;
 mod live;
 
 mod acp_tools;
+mod browser_host;
 mod cqd;
 mod live_acp;
 mod live_dispatcher;
