@@ -51,9 +51,11 @@ A card holds a tool call until the user answers on the phone or the web. Three s
 | path | what |
 |---|---|
 | `~/.config/seimei/config.toml` | config ([config.md](config.md)) |
-| `~/.local/share/seimei/` | state: events, session id, workers, tasks, notes, auth.json, uploads, audit log |
+| `~/.config/seimei/guard.toml` | the user's guard rules ([security.md](security.md)) |
+| `~/.local/share/seimei/` | state, mode 700: events, session id, workers, tasks, notes, auth.json, uploads, the audit log; `plugins.sock` (the plugins' MCP processes reach seimei here, each with its session's token); `mcp/` (each session's MCP config, 600) |
+| `~/.local/state/seimei/seimei.log` | the OpenRC service's log (systemd keeps it in the journal) |
+| `$XDG_RUNTIME_DIR/seimei/` | the connectors' sockets (`browser.sock`, `discord.sock`) |
 | `~/.local/share/seimei-app/` | the maintainer's production checkout; `contrib/maintainer/deploy.sh` moves it to a commit and restarts once idle |
-| `$XDG_RUNTIME_DIR/seimei/` | sockets of the connectors (Discord, browser) |
 
 ## Themes
 
