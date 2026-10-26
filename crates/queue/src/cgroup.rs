@@ -155,6 +155,95 @@ pub fn leave_queue(who: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The top cgroup of a process: its elogind session without systemd (/1, /4), user.slice with it.
+pub fn session_of(pid: i32) -> String {
+    let cg = crate::util::proc_cgroup(pid);
+    if cg.is_empty() {
+        return cg;
+    }
+    format!("/{}", cg.trim_matches('/').split('/').next().unwrap_or(""))
+}
+
+/// Whether session cgroup a (/1) is older than b (/4): elogind numbers its sessions upward.
+pub fn older_session(a: &str, b: &str) -> bool {
+    match (a.trim_start_matches('/').parse::<u64>(), b.trim_start_matches('/').parse::<u64>()) {
+        (Ok(a), Ok(b)) => a < b,
+        _ => false,
+    }
+}
+
+fn parent_of(pid: i32) -> i32 {
+    crate::util::stat(pid).first().and_then(|p| p.parse().ok()).unwrap_or(0)
+}
+
+/// One scheduler per user (cqd's single_instance): the open lock, held for the scheduler's life, or None when another
+/// one runs and this one should end. The lock is in the state dir, on disk: a new login session may get a new runtime
+/// dir while the last session's services live on, so a lock there would not see them. A holder that answers on this
+/// socket stays, unless it runs in an older login session (niri died, and the next session's runlevel started it
+/// again): that one, or one that does not answer, is stopped with the supervise-daemon that would respawn it, and this
+/// one takes over. The newer session wins, so an old session's respawn never takes the queue back.
+pub fn single_instance(state: &Path, sock: &Path) -> Result<Option<std::fs::File>, String> {
+    use std::io::{Read, Seek, Write};
+    let path = state.join("cqd.lock");
+    let _ = std::fs::create_dir_all(state);
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .read(true)
+        .open(&path)
+        .map_err(|e| format!("cqd: {}: {e}", path.display()))?;
+    let me = std::process::id() as i32;
+    let mut end = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    let (mut stopped, mut killed) = (false, false);
+    loop {
+        if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            break;
+        }
+        let mut text = String::new();
+        let _ = f.rewind().and_then(|_| f.read_to_string(&mut text));
+        let pid: i32 = text.trim().parse().unwrap_or(0);
+        if pid > 0 && !stopped {
+            stopped = true;
+            let answers = std::os::unix::net::UnixStream::connect(sock).is_ok();
+            if answers && !older_session(&session_of(pid), &session_of(me)) {
+                // A supervise-daemon would start this one again every few seconds: it stops too.
+                let parent = unsafe { libc::getppid() };
+                let mine = supervisor(parent);
+                let with = if mine { format!(", with its supervise-daemon {parent}") } else { String::new() };
+                eprintln!("cqd: another cqd (pid {pid}) runs and answers on {}; this one exits{with}", sock.display());
+                if mine {
+                    unsafe { libc::kill(parent, libc::SIGTERM) };
+                }
+                return Ok(None);
+            }
+            let why = if answers {
+                format!("it runs in an older session ({})", session_of(pid))
+            } else {
+                format!("it does not answer on {}", sock.display())
+            };
+            let parent = parent_of(pid);
+            let target = if parent > 1 && supervisor(parent) { parent } else { pid };
+            let its = if target != pid { "its supervise-daemon " } else { "" };
+            eprintln!(
+                "cqd: another cqd (pid {pid}) holds {}, but {why}; stopping {its}{target} and taking over",
+                path.display()
+            );
+            unsafe { libc::kill(target, libc::SIGTERM) };
+        }
+        if std::time::Instant::now() > end {
+            if pid <= 0 || killed {
+                return Err(format!("cqd: {} stays locked; is another cqd stuck?", path.display()));
+            }
+            unsafe { libc::kill(pid, libc::SIGKILL) };
+            end = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            killed = true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    f.set_len(0).and_then(|_| writeln!(f, "{me}")).map_err(|e| format!("cqd: {}: {e}", path.display()))?;
+    Ok(Some(f))
+}
+
 /// Without systemd: a scope of our own, made by hand. Returns an error, or "".
 pub fn move_pids(cg: &Path, pids: &[i32]) -> String {
     if let Err(e) = std::fs::create_dir_all(cg) {
@@ -254,6 +343,8 @@ mod tests {
         let got = session_exit("/1/delegated/queue.slice/queue-a.slice/run-1.scope", &d);
         assert_eq!(got, Some(s.join("session")));
         assert_eq!(session_exit("/2/x", &d), None);
+        assert!(older_session("/1", "/4") && !older_session("/4", "/1") && !older_session("/4", "/4"));
+        assert!(!older_session("/user.slice", "/user.slice"));
         let _ = std::fs::remove_dir_all(&d);
     }
 }

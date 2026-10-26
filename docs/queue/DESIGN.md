@@ -83,7 +83,7 @@ The service's stop hook stops thawing (cqd's `--thaw-all` in `stop_post` is the 
 
 ### The queue without the phone server
 
-`[server] web = false` runs serve with the scheduler, the queue socket and the plugins socket, and no HTTP port, tunnel or push: a workstation with three agents and one GPU. It is cheap because the web server is already one task among serve's. One scheduler per user: serve takes `$XDG_RUNTIME_DIR/seimei/queue/lock`; a second serve (a dev instance, a test) runs without the scheduler and says so in its log and in `queue` status.
+`[server] web = false` runs serve with the scheduler, the queue socket and the plugins socket, and no HTTP port, tunnel or push: a workstation with three agents and one GPU. It is cheap because the web server is already one task among serve's. One scheduler per user: serve takes `~/.local/share/seimei/queue/lock` (on disk, since a new login session may get a new runtime dir while the last one's services live on), and the scheduler itself takes cqd's `cqd.lock` in its state dir, where a holder from an older login session is stopped and replaced; a second serve (a dev instance, a test) runs without the scheduler and says so in its log and in `queue` status.
 
 **The protocol stays.** cqd's two line protocols are kept byte for byte: the shim's `key=value` lines (`acquire`, `hello`, `wait`, `ka`, `grant`, `pass`) and the JSON ops (`status`, `watch`, `bench`, `history`, `events`, `policy`, `control`, `ping`). devgate.so v2, every running session's mapped shim, `bench`, `cq` and seimei's plugin keep working against the new scheduler unchanged. Trust stays as cqd has it: SO_PEERCRED pid to cgroup; a process in an agent's queue slice reads and controls only its own leases, the rest may run every op.
 

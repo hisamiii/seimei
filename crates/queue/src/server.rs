@@ -561,10 +561,16 @@ pub async fn serve(d: D, stop: impl std::future::Future<Output = ()>) -> std::io
         let dm = d.borrow();
         (dm.run.clone(), dm.args.cgroup_root.clone(), dm.args.act_slices.clone(), dm.args.shadow)
     };
+    let mut _lock = None;
     let listener = if shadow {
         None
     } else {
         let sock = run.join("cqd.sock");
+        let state = d.borrow().args.state_dir.clone();
+        match cgroup::single_instance(&state, &sock).map_err(std::io::Error::other)? {
+            Some(f) => _lock = Some(f),
+            None => return Ok(()),
+        }
         let fds = std::env::var("LISTEN_FDS").ok();
         let lpid = std::env::var("LISTEN_PID").ok();
         let l = if fds.as_deref() == Some("1") && lpid == Some(std::process::id().to_string()) {

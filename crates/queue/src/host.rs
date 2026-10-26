@@ -101,7 +101,8 @@ pub fn start(mode: Mode, state: &Path) -> Option<Host> {
     if mode == Mode::Off {
         return None;
     }
-    let Some(lock) = take_lock(&runtime_dir().join("seimei/queue")) else {
+    // On disk: a new login session may get a new runtime dir while the last session's serve lives on.
+    let Some(lock) = take_lock(&state.join("queue")) else {
         eprintln!("seimei: queue: another seimei runs the queue; this one runs without it");
         return None;
     };
