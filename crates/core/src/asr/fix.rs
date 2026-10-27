@@ -91,6 +91,7 @@ pub fn fix(dict: &Dict, text: &str, terms: &[String], known: &[String]) -> Fixed
     let known_l: std::collections::HashSet<String> =
         terms_l.iter().cloned().chain(known.iter().map(|k| k.to_lowercase())).collect();
     let refs: Vec<&str> = terms_l.iter().map(String::as_str).collect();
+    let term_set: std::collections::HashSet<&str> = refs.iter().copied().collect();
     let toks: Vec<&str> = words(text).into_iter().map(|t| t.trim_end_matches(['.', '-', '+'])).collect();
     let (mut out, mut at, mut fixed, mut suspects) = (String::new(), 0, vec![], vec![]);
     let mut i = 0;
@@ -102,19 +103,29 @@ pub fn fix(dict: &Dict, text: &str, terms: &[String], known: &[String]) -> Fixed
             }
             let grams = &toks[i..i + j];
             let g: String = grams.concat().to_lowercase();
-            if g.chars().count() < 4 || (j > 1 && grams.iter().any(|t| known_l.contains(&t.to_lowercase()))) {
+            // A run never swallows a listed term; a word that is only known (the auto list: "shiki" in "shiki ga me")
+            // may be part of one, at a higher bar.
+            if g.chars().count() < 4 || (j > 1 && grams.iter().any(|t| term_set.contains(t.to_lowercase().as_str()))) {
                 continue;
             }
+            let has_known = j > 1 && grams.iter().any(|t| known_l.contains(&t.to_lowercase()));
             if j == 1 && (known_l.contains(&g) || dict.english(&g)) {
                 continue;
             }
             // A run of common words is a term only when it spells it nearly exactly ("Ku bus" for kubus).
             let all_english = j > 1 && grams.iter().all(|t| dict.english(t));
-            let close = similar::get_close_matches(g.as_str(), &refs, 1, if all_english { 0.9 } else { 0.8 });
+            let cutoff = if all_english {
+                0.9
+            } else if has_known {
+                0.85
+            } else {
+                0.8
+            };
+            let close = similar::get_close_matches(g.as_str(), &refs, 1, cutoff);
             let hit =
                 close.first().map(|c| (similar::TextDiff::from_chars(g.as_str(), *c).ratio(), *c)).or_else(|| {
                     let k = sound(&g);
-                    (!all_english && k.len() >= 2 && g.chars().count() >= 4)
+                    (!all_english && !has_known && k.len() >= 2 && g.chars().count() >= 4)
                         .then(|| refs.iter().find(|r| r.chars().count() >= 4 && sound(r) == k).map(|r| (0.79, *r)))
                         .flatten()
                 });
@@ -204,6 +215,11 @@ mod tests {
         assert_eq!(f.text, "Check whether the shikigami on kubus still holds gfx1151.", "{:?}", f.fixed);
         assert_eq!(f.fixed.len(), 3);
         assert_eq!(fix(&d, "cuBus is back", &terms(), &[]).text, "kubus is back");
+        // "shiki" is a word of the auto list, and still part of the misheard run.
+        assert_eq!(
+            fix(&d, "Ask the shiki ga me to check", &terms(), &["shiki".into()]).text,
+            "Ask the shikigami to check"
+        );
         assert_eq!(fix(&d, "Neri and many", &terms(), &[]).text, "Niri and many");
         assert_eq!(fix(&d, "on Neri. Neri and the Neri", &terms(), &[]).text, "on niri. Niri and the niri");
     }
