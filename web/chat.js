@@ -3,6 +3,7 @@ import { md } from './md.js';
 import { $, S, hooks, el, svg, clock, dayKey, dayLabel, home, plural, post, view, snack, finePointer, toLogin, ICON, wearShape, say, enter } from './util.js';
 import { openWorker } from './agents.js';
 import { renderTasks } from './tasks.js';
+import { sentDictated } from './mic.js';
 
 export const log = $('log');
 export const thread = $('thread');
@@ -1085,6 +1086,7 @@ $('composer').addEventListener('submit', async (e) => {
     if (!S.online) snack('Offline. Your message stays here.');
     return;
   }
+  sentDictated(text);
   input.value = '';
   autosize();
   renderAttachments();
