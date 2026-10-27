@@ -116,9 +116,9 @@ A script, `contrib/asr_eval.py`, plays clips through either path and scores them
 | terms inserted on the 20 clean clips | 0 | 0 |
 | latency, median / p90 | 507 / 845 ms | 506 / 924 ms |
 
-All of the WER is number formatting ("fifteen" for "15", "rm minus rf" for "rm-rf"), the same on both paths, and the 20 new clean clips came back exact; the 0.7% bar was measured on a different set. The misses.log replay: the fixer made one change ("sexmo" to sxmo, right) and no wrong ones. Not done: clean clips through the laptop mic (piper voices only).
+All of the WER is number formatting ("fifteen" for "15", "rm minus rf" for "rm-rf"), the same on both paths, and the 20 new clean clips came back exact; the 0.7% bar was measured on a different set. The misses.log replay: the fixer made one change ("sexmo" to sxmo, right) and no wrong ones. A second run after the fixer changes below (on the QA server, a debug build) gave the same jargon, WER and 0 inserted terms, at a median of 554 against 527 ms. Not done: clean clips through the laptop mic (piper voices only).
 
-As built, differing from the above: the fixer takes runs of up to 4 words and a rough consonant key instead of Double Metaphone; a word of the auto list may be part of a misheard run (at a 0.85 bar); a fixed term, or a term the model writes lowercase, gets a capital at a sentence start. On the web the new text gets a 2 s outline on the field instead of a tint, since a textarea cannot color part of its text.
+As built, differing from the above: the fixer takes runs of up to 4 words, and a rough consonant key instead of Double Metaphone that counts only with a letter similarity of 0.6 or more (the misses.log replay had it turn "SWMO" into seimei); a word of the auto list may be part of a misheard run (at a 0.85 bar); a fixed term, or a term the model writes lowercase, gets a capital at a sentence start. On the web the new text gets a 2 s outline on the field instead of a tint, since a textarea cannot color part of its text.
 
 ## Build order
 

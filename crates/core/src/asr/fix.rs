@@ -83,7 +83,7 @@ pub struct Fixed {
 }
 
 /// Swap misheard words for terms of this request's list. A run of 1 to 4 words is a candidate when its letters
-/// together are close to a term (similarity >= 0.8, or the same sound key with 4+ letters), it is not already that
+/// together are close to a term (similarity >= 0.8, or the same sound key with 4+ letters and similarity >= 0.6), it is not already that
 /// term, and, for one word, it is not English ("build" is not a miss for ebuild). Of the runs at a position the
 /// closest wins, the shorter on a tie, and a run whose first word the term does not need is left to the next position. `known` also has words that count as right but are never inserted (the auto list).
 pub fn fix(dict: &Dict, text: &str, terms: &[String], known: &[String]) -> Fixed {
@@ -125,7 +125,15 @@ pub fn fix(dict: &Dict, text: &str, terms: &[String], known: &[String]) -> Fixed
                 close.first().map(|c| (similar::TextDiff::from_chars(g.as_str(), *c).ratio(), *c)).or_else(|| {
                     let k = sound(&g);
                     (!all_english && !has_known && k.len() >= 2 && g.chars().count() >= 4)
-                        .then(|| refs.iter().find(|r| r.chars().count() >= 4 && sound(r) == k).map(|r| (0.79, *r)))
+                        .then(|| {
+                            refs.iter()
+                                .find(|r| {
+                                    r.chars().count() >= 4
+                                        && sound(r) == k
+                                        && similar::TextDiff::from_chars(g.as_str(), **r).ratio() >= 0.6
+                                })
+                                .map(|r| (0.79, *r))
+                        })
                         .flatten()
                 });
             // Every word of the run is needed: no shorter part of it, from either end, is as close to the term ("on Ku
@@ -225,6 +233,8 @@ mod tests {
             fix(&d, "Ask the shiki ga me to check", &terms(), &["shiki".into()]).text,
             "Ask the shikigami to check"
         );
+        // The same sound key alone is not enough: "SWMO" and seimei are both "sm".
+        assert_eq!(fix(&d, "etcetera, SWMO", &terms(), &[]).text, "etcetera, SWMO");
         let mut with_shiki = terms();
         with_shiki.push("shiki".into());
         assert_eq!(fix(&d, "Ask the shiki ga me to check", &with_shiki, &[]).text, "Ask the shikigami to check");
