@@ -34,7 +34,7 @@ Which models and how much context a shikigami gets follows the plan in `[models]
 
 ## Events and clients
 
-Everything the page shows is an event in `events.jsonl` (state dir), with dense ids. Clients read the history, then follow `/api/stream` (SSE) from the last id they saw, so a reconnect replays what it missed. Transient events (`events.flash`) are sent but never stored. The server sends a data ping every 15 seconds; a client that hears nothing for 40 seconds shows "away" (a suspended server never closes the socket).
+Everything the page shows is an event in `events.jsonl` (state dir), with dense ids (from 1, or from the old last id after the log is cleared). Clients read the history, then follow `/api/stream` (SSE) from the last id they saw, so a reconnect replays what it missed. Transient events (`events.flash`) are sent but never stored. The server sends a data ping every 15 seconds; a client that hears nothing for 40 seconds shows "away" (a suspended server never closes the socket).
 
 Push goes to phones only while they are away (the server holds pushes while the app is open): FCM for builds with a Firebase config, Web Push (RFC 8291) through a UnifiedPush distributor, or seimei's own background stream when the phone has neither. A browser turns on its own in the menu, Notifications: the page subscribes through the Push API, `/sw.js` shows what comes while the page is closed or its tab hidden, and the subscription ends with the browser's login. A browser gets no take-backs (it would show an empty notification); opening the page clears what it shows.
 

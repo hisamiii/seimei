@@ -18,7 +18,8 @@ const TURN: [&str; 5] = ["assistant", "tool", "tool_result", "image", "file"];
 /// A stalled client loses its stream past this many queued events; it reconnects and replays from its last id.
 const QUEUE: usize = 2000;
 
-/// The append-only event log (events.jsonl): everything the pages show, with dense ids from 1.
+/// The append-only event log (events.jsonl): everything the pages show, with dense ids. They start at 1, or where a
+/// cleared log took over the old one's last id, so clients that resume from that id miss nothing.
 /// The whole log stays in memory; clients replay from it and then follow live events.
 pub struct EventLog {
     inner: Mutex<Inner>,
@@ -136,13 +137,13 @@ impl EventLog {
     /// The event with this id.
     pub fn get(&self, id: i64) -> Option<Event> {
         let g = self.inner.lock().unwrap();
-        usize::try_from(id - 1).ok().and_then(|i| g.events.get(i).cloned())
+        usize::try_from(id - g.first()).ok().and_then(|i| g.events.get(i).cloned())
     }
 
-    /// Ids are dense and start at 1, so the id doubles as an index.
+    /// Ids are dense, so the id less the first one doubles as an index.
     pub fn after(&self, last: i64) -> Vec<Event> {
         let g = self.inner.lock().unwrap();
-        let start = (last.max(0) as usize).min(g.events.len());
+        let start = ((last + 1 - g.first()).max(0) as usize).min(g.events.len());
         g.events[start..].to_vec()
     }
 
@@ -151,13 +152,18 @@ impl EventLog {
         let g = self.inner.lock().unwrap();
         let end = match first {
             None => g.events.len(),
-            Some(f) => ((f - 1).max(0) as usize).min(g.events.len()),
+            Some(f) => ((f - g.first()).max(0) as usize).min(g.events.len()),
         };
         g.events[end.saturating_sub(limit)..end].to_vec()
     }
 }
 
 impl Inner {
+    /// The id of the first stored event (1 for an empty log).
+    fn first(&self) -> i64 {
+        self.events.first().map(|e| id(e)).unwrap_or(1)
+    }
+
     fn send(&mut self, ev: &Event) {
         // A full queue drops that client's stream: it ends after what is queued and replays from its last id.
         self.subs.retain(|q| q.try_send(ev.clone()).is_ok());
@@ -234,6 +240,25 @@ mod tests {
         let again = EventLog::open(&p).unwrap();
         assert_eq!(again.last_id(), 8);
         assert_eq!(again.after(7)[0]["tool_id"], "x");
+        std::fs::remove_file(&p).unwrap();
+    }
+
+    /// A cleared log goes on from the old one's last id: replay, lookup and scrollback count from there.
+    #[test]
+    fn a_log_that_starts_later() {
+        let (_, p) = log("later");
+        std::fs::write(&p, "{\"id\":14282,\"type\":\"system\",\"text\":\"cleared\",\"lane\":\"t\"}\n").unwrap();
+        let l = EventLog::open(&p).unwrap();
+        assert_eq!(l.add(json!({"type": "user", "text": "hi"}))["id"], 14283);
+        l.add(json!({"type": "assistant", "text": "yo"}));
+        assert_eq!(l.after(14282).len(), 2);
+        assert_eq!(l.after(14283)[0]["text"], "yo");
+        assert_eq!(l.after(0).len(), 3);
+        assert!(l.after(14284).is_empty());
+        assert_eq!(l.get(14283).unwrap()["text"], "hi");
+        assert!(l.get(14281).is_none() && l.get(1).is_none());
+        assert_eq!(l.before(Some(14284), 10).len(), 2);
+        assert_eq!(l.before(None, 10).len(), 3);
         std::fs::remove_file(&p).unwrap();
     }
 
