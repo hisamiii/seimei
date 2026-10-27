@@ -1,6 +1,6 @@
-# Dictation in seimei (design, not built)
+# Dictation in seimei
 
-Status: for review. Based on the research in `~/Development/Scratch/asr-context/REPORT.md` (2026-10-27) and on dictate (`~/Development/Projects/dictate`, Mod+H on the laptop). Nothing here is built until the user has reviewed it.
+Status: built (2026-10-27), steps 1 to 5 below; the app's mic ships with the next app release. Based on the research in `~/Development/Scratch/asr-context/REPORT.md` (2026-10-27) and on dictate (`~/Development/Projects/dictate`, Mod+H on the laptop).
 
 ## What changes
 
@@ -84,7 +84,7 @@ There is no LLM rewrite. The report found it adds 0.3 to 1 s and a second provid
 - **Denylist.** `[asr] deny` holds words and globs. Board items or chats tagged private add nothing to the list.
 - **Per-source switches.** `[asr.sources]` turns each of chat, names, board, window, draft and auto on or off. With everything off except pins, the list is what you pinned.
 - **The send log.** `asr/sent.jsonl` gets one line per request: the time, the client, the model, every term sent with its source, the description, the audio length in seconds, and the cost. It holds no audio and no transcript. It rotates at 10 MB, and the usage tool can show it.
-- **ZDR.** `[asr] zdr = true` sets `provider.zdr` on the request. Whether MAI's Azure endpoint qualifies isn't known yet (the report didn't check). The first build step checks it. If MAI has no ZDR endpoint, `zdr = true` means voxtral's `mistral/zdr` only, and the doc for the setting says so.
+- **ZDR.** `[asr] zdr = true` sets `provider.zdr` on the request. Checked 2026-10-27 against OpenRouter's `/endpoints/zdr` list: MAI-Transcribe-2's Azure endpoint is on it, and so is voxtral-mini's `mistral/zdr`, so both models keep working with it on.
 
 ## Eval (before the switch, and after each change to the list or fixer)
 
@@ -107,7 +107,20 @@ A script, `contrib/asr_eval.py`, plays clips through either path and scores them
   - inserted terms at 0 on the clean clips;
   - median latency within 100 ms of dictate direct.
 
-## Build order (once reviewed)
+**Results, 2026-10-27** (49 clips, two rounds each, the endpoint with a saved context):
+
+| | dictate direct | seimei |
+|---|---|---|
+| jargon | 70/70 | 70/70 |
+| WER | 1.94% | 1.84% |
+| terms inserted on the 20 clean clips | 0 | 0 |
+| latency, median / p90 | 507 / 845 ms | 506 / 924 ms |
+
+All of the WER is number formatting ("fifteen" for "15", "rm minus rf" for "rm-rf"), the same on both paths, and the 20 new clean clips came back exact; the 0.7% bar was measured on a different set. The misses.log replay: the fixer made one change ("sexmo" to sxmo, right) and no wrong ones. Not done: clean clips through the laptop mic (piper voices only).
+
+As built, differing from the above: the fixer takes runs of up to 4 words and a rough consonant key instead of Double Metaphone; a word of the auto list may be part of a misheard run (at a 0.85 bar); a fixed term, or a term the model writes lowercase, gets a capital at a sentence start. On the web the new text gets a 2 s outline on the field instead of a tint, since a textarea cannot color part of its text.
+
+## Build order
 
 1. **Server core.** `crates/core/src/asr/` (`vocab.rs`: english, worth, sources, rank; `fix.rs`; `mod.rs`: the OpenRouter call), `POST /api/asr`, `asr.sock`, `[asr]` config, `sent.jsonl`, and the ZDR check.
 2. **Eval, before and after.** The pass bar decides whether the list or the fixer changes.

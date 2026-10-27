@@ -61,6 +61,10 @@ A card holds a tool call until the user answers on the phone or the web. Three s
 
 A theme is one token file in `web/themes/`, built by `contrib/themes.py` from a small palette per side (dark and light). The page sets its tokens as CSS variables (`theme.js`); the app reads the same files as assets (`Theme.kt`). Adding a theme is one entry in `contrib/themes.py`. Material You has no fixed colors: the app uses Android's wallpaper scheme and sends its seed to `/api/theme`; the page rebuilds the same M3 scheme from that seed with material-color-utilities (`mcu.js`, vendored), or from a seed picked on the page when no phone has sent one. The server never reads its own wallpaper.
 
+## Dictation
+
+`POST /api/asr` (the app and the page) and `<state>/asr.sock` (dictate on the laptop, no login, mode 600) take a 16 kHz WAV and a hint (`X-Seimei-Asr`: the open chat, the focused window, the draft). `crates/core/src/asr` builds the word list per request from the pins, the open chat's rare words, the live names, the board and the window, calls OpenRouter, applies `asr/fixes`, then swaps misheard words only for terms that were in the list (`fix.rs`). Each call is a line in `asr/sent.jsonl` (the terms sent and their sources, no audio, no text). The socket's `/context` returns the list a hint gets, for checking what goes out and for `contrib/asr_eval.py`. Details and the eval in [asr.md](asr.md).
+
 ## Deploys
 
 Production never runs from the working tree. `contrib/maintainer/deploy.sh [rev]` (the author's setup; an install from a release uses `seimei update`) runs detached, as its own transient systemd unit or, when PID 1 is not systemd (OpenRC), in its own session under init (so the restart it ends with cannot cut it off), checks out the commit in the production checkout, builds the server there (`cargo build --release`, its own `target/`), waits for open cards and an idle dispatcher, renames the build to `bin/seimei` and restarts the service. The result goes to `deploy/last.json`, which seimei hands to whoever it resumes.
@@ -71,10 +75,11 @@ Production never runs from the working tree. `contrib/maintainer/deploy.sh [rev]
 - `crates/core`, the sessions: `dispatcher.rs` (the permanent session, its prompt in `dispatcher.md`, routing of event turns), `workers.rs` (shikigami: summon, resume, hand-over), `tools.rs` (the dispatcher's MCP tools, schemas in `data/tools.json`), `sessions.rs`, `transcripts.rs`, `adopt.rs`, `kitty.rs` (the user's own sessions), `tasks.rs` (the board), `plan.rs`, `style.rs`, `recall.rs` (what survives a compaction).
 - `crates/core`, the checks: `guard.rs` (rules and the built-in denies, with `shell.rs` and `paths.rs` to read commands and paths), `permissions.rs` (Claude Code's prompts as cards), `approvals.rs` (cards waiting for the user).
 - `crates/core`, state and the user: `events.rs` (the log), `auth.rs`, `push.rs`, `files.rs` and `uploads.rs`, `usage.rs`, `cost.rs`, `metrics.rs`, `watches.rs`, `archive.rs`, `aliases.rs`, `wake.rs`, `deploys.rs`, `util.rs`.
+- `crates/core/src/asr`: dictation (`vocab.rs` the word list, `fix.rs` the fixer, `mod.rs` the OpenRouter call and the logs); its routes are `crates/server/src/asr.rs`.
 - `crates/core/src/plugins`: `mod.rs` (the host: the `Builtin` trait and `Factory`, enabling, the plugin socket, prompt sections), and `link.rs` (a connector's socket).
 - `plugins/<name>`: a built-in plugin's crate (`src/lib.rs` exports its `PLUGIN: Factory`), its `plugin.toml`, `prompt.md`, `tools.json`, tests and connector. `crates/seimei/src/lib.rs` lists the ones the binary has. `plugins/template` is a user plugin (Python, no build) to copy.
 - `crates/server/src/lib.rs`: every HTTP route; `crates/seimei/src`: `main.rs` (startup and the account commands), `lib.rs` (the built-in plugins), `setup.rs`, `update.rs`.
-- `web/`: `app.js` (start, stream, routing), `chat.js`, `agents.js`, `tasks.js`, `account.js`, `usage.js`, `sw.js` (notifications). `android/`: the app, the same screens in Compose.
+- `web/`: `app.js` (start, stream, routing), `chat.js`, `agents.js`, `tasks.js`, `account.js`, `usage.js`, `mic.js` (dictation), `sw.js` (notifications). `android/`: the app, the same screens in Compose (`Dictate.kt` for the mic).
 
 ## Tests
 

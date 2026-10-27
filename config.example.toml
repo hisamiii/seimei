@@ -81,3 +81,21 @@ enabled = []
 
 [queue]
 # mode = "shadow"                   # the agent queue: off, shadow (beside claude-queue's cqd), on (after the cutover)
+
+[asr]
+# Dictation (docs/asr.md): the app's and the page's mic, and dictate on the laptop through <state>/asr.sock.
+# key_file = "~/.config/dictate/or-key"   # an OpenRouter key; without one the mic is not shown
+# model = "microsoft/mai-transcribe-2"
+# fallback = "mistralai/voxtral-mini-transcribe-3-0"
+# language = "en"
+# vocab_max = 100                   # terms sent with a clip at most
+# zdr = false                       # only providers that keep no data
+# deny = []                         # words and globs never sent
+
+[asr.sources]
+# chat = true                       # rare words of the open chat's last 20 messages, its agent and project
+# names = true                      # running shikigami, sessions, projects
+# board = true                      # rare words of open board items
+# window = true                     # the laptop's focused window and its repo
+# draft = true                      # rare words of the composer's draft
+# auto = true                       # the nightly list of your own rare words

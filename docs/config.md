@@ -22,6 +22,13 @@ seimei reads `~/.config/seimei/config.toml`. Every key is optional; `config.exam
 | `[plugins]` | `enabled` | `[]` | the plugins to load; `[plugins.<name>]` tables configure them ([plugins.md](plugins.md)) |
 | `[agents.<name>]` | `command`, `args`, `env` | none | an ACP agent a shikigami can run on (summon's `harness = "acp:<name>"`); it keeps its own login and model |
 | | `protocol` | `acp` | `codex` for `codex app-server` |
+| `[asr]` | `key_file` | `~/.config/dictate/or-key` | the OpenRouter key for dictation ([asr.md](asr.md)); without one the mic is not shown |
+| | `model`, `fallback` | `microsoft/mai-transcribe-2`, `mistralai/voxtral-mini-transcribe-3-0` | the transcription models; the fallback gets the call when the first fails |
+| | `language` | `en` | |
+| | `vocab_max` | 100 | terms sent with a clip at most (MAI got worse with 150) |
+| | `zdr` | `false` | only providers that keep no data (OpenRouter's `provider.zdr`; both default models have one) |
+| | `deny` | `[]` | words and globs never sent, whatever their source |
+| `[asr.sources]` | `chat`, `names`, `board`, `window`, `draft`, `auto` | all `true` | one switch per source of the word list; with all off only the pins in `asr/words.txt` go |
 | `[queue]` | `mode` | `shadow` while claude-queue's cqd runs, else `off` | the agent queue ([queue/DESIGN.md](queue/DESIGN.md)); `shadow` watches beside cqd and logs where it would differ, `on` comes with the cutover |
 
 ## Permission modes
