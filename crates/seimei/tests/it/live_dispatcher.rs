@@ -128,6 +128,7 @@ async fn run(work: std::path::PathBuf, state: std::path::PathBuf) {
         shikigami: "default".into(),
         terminal: String::new(),
         plugins,
+        asr: None,
     })
     .unwrap();
     let plugins = app.pool.plugins.clone();

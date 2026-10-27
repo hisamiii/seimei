@@ -4,6 +4,7 @@ pub mod adopt;
 pub mod aliases;
 pub mod approvals;
 pub mod archive;
+pub mod asr;
 pub mod auth;
 pub mod cost;
 pub mod deploys;

@@ -3,6 +3,8 @@
 
 #![allow(clippy::result_large_err)] // axum responses as the error side, as handlers return them
 
+pub mod asr;
+
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
@@ -92,6 +94,8 @@ pub struct App {
     cost: Arc<Cost>,
     worker_events: Arc<WorkerEvents>,
     audit: PathBuf,
+    /// Dictation (docs/asr.md); None when `[asr]` is off.
+    pub asr: Option<Arc<seimei_core::asr::Asr>>,
 }
 
 /// What the server is built from.
@@ -111,11 +115,12 @@ pub struct Setup {
     pub terminal: String,
     /// The plugins enabled in config.
     pub plugins: Arc<seimei_core::plugins::Plugins>,
+    pub asr: Option<Arc<seimei_core::asr::Asr>>,
 }
 
 impl App {
     pub fn new(setup: Setup) -> std::io::Result<App> {
-        let Setup { events, auth, origins, web, state, push, dispatcher: disp, shikigami, terminal, plugins } = setup;
+        let Setup { events, auth, origins, web, state, push, dispatcher: disp, shikigami, terminal, plugins, asr } = setup;
         let state = state.as_path();
         // Only these Host headers are served: a page using DNS rebinding cannot read the API from the browser.
         let mut hosts: HashSet<String> = ["localhost", "127.0.0.1", "::1"].map(String::from).into();
@@ -191,6 +196,7 @@ impl App {
             cost,
             worker_events,
             audit: state.join("audit.jsonl"),
+            asr,
         })
     }
 
@@ -337,7 +343,9 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/sessions/{pid}", get(session))
         .route("/api/sessions/{pid}/send", post(session_send))
         .route("/api/sessions/{pid}/archive", post(session_archive))
-        .route("/api/sessions/{pid}/answer", post(session_answer));
+        .route("/api/sessions/{pid}/answer", post(session_answer))
+        .route("/api/asr", get(asr::status).post(asr::transcribe))
+        .route("/api/asr/edit", post(asr::edited));
     if app.auth.is_some() {
         r = r
             .route("/api/auth/password", post(login_password))
@@ -415,7 +423,11 @@ async fn guard(State(app): Shared, req: Request, next: Next) -> Response {
         // A bearer token is never sent on its own, so the app's calls need no Origin; cookies do.
         let app_call = DEVICE_PUBLIC.contains(&key) || (app.auth.is_some() && Auth::bearer(req.headers()).is_some());
         // Uploads stream raw bytes; the Origin check is what keeps other sites out.
-        let body_type = if path == "/api/upload" { "application/octet-stream" } else { "application/json" };
+        let body_type = match path.as_str() {
+            "/api/upload" => "application/octet-stream",
+            "/api/asr" => "audio/wav",
+            _ => "application/json",
+        };
         let origin = req.headers().get(header::ORIGIN).and_then(|h| h.to_str().ok()).unwrap_or("");
         if (!app_call && !app.origins.contains(origin)) || content_type(req.headers()) != body_type {
             return text(StatusCode::FORBIDDEN, "forbidden");
@@ -426,6 +438,8 @@ async fn guard(State(app): Shared, req: Request, next: Next) -> Response {
                 PUBLIC_BODY
             } else if path == "/api/send" {
                 SEND_BODY
+            } else if path == "/api/asr" {
+                asr::ASR_BODY
             } else {
                 BODY
             };

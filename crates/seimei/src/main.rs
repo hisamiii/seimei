@@ -409,6 +409,7 @@ fn main() {
             )
             .about(about),
         ),
+        asr: Some(seimei_core::asr::Asr::new(seimei_core::asr::Config::from_toml(cfg.get("asr")), &state)),
     };
     let app = Arc::new(seimei_server::App::new(setup).unwrap_or_else(|e| die(&format!("workers: {e}"))));
     let _ = app.pool.agents.set(seimei_core::workers::agents_from(cfg.get("agents").and_then(|a| a.as_table())));
@@ -431,6 +432,13 @@ fn main() {
             }
         });
         tokio::spawn(app.watcher.clone().run());
+        if let Some(asr) = app.asr.clone() {
+            tokio::spawn(asr.nightly());
+            tokio::spawn({
+                let (app, state) = (app.clone(), state.clone());
+                async move { seimei_server::asr::serve_socket(app, &state).await }
+            });
+        }
         tokio::spawn(app.watches.clone().run(events.clone()));
         tokio::spawn(app.pool.plugins.clone().listen(app.approvals.clone()));
         seimei::link(&app.pool.plugins);
