@@ -298,11 +298,9 @@ impl Asr {
         if secs < 2.0 && JUNK.contains(&raw.to_lowercase().as_str()) {
             raw.clear();
         }
-        let dict = self.dict();
-        let fixed = fix::apply_fixes(&raw, &fix::load_fixes(&self.dir.join("fixes")));
-        let auto = vocab::read_lines(&self.dir.join("words-auto.txt"));
-        let f = fix::fix(&dict, &fixed, &terms, &auto);
-        if !f.fixed.is_empty() || !f.suspects.is_empty() {
+        let f = self.clean(&raw, &terms);
+        // The eval's clips are not misses.
+        if ctx.client != "eval" && (!f.fixed.is_empty() || !f.suspects.is_empty()) {
             let mut found: Vec<String> = f.fixed.iter().map(|(a, b)| format!("{a} -> {b} (fixed)")).collect();
             found.extend(f.suspects.iter().cloned());
             self.miss(&raw, &found);
@@ -329,6 +327,13 @@ impl Asr {
             "cost": cost,
             "terms": terms.len(),
         }))
+    }
+
+    /// After the model: the fixes table, then the fixer with this request's terms.
+    pub fn clean(&self, raw: &str, terms: &[String]) -> fix::Fixed {
+        let fixed = fix::apply_fixes(raw, &fix::load_fixes(&self.dir.join("fixes")));
+        let auto = vocab::read_lines(&self.dir.join("words-auto.txt"));
+        fix::fix(&self.dict(), &fixed, terms, &auto)
     }
 
     fn miss(&self, text: &str, found: &[String]) {

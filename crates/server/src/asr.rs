@@ -42,6 +42,27 @@ fn texts(events: &[seimei_core::events::Event]) -> Vec<String> {
 /// The request's context: the hint, and what seimei knows about the open chat, its agents and the board.
 pub fn context(app: &App, hint: &Value, client: &str) -> Context {
     let mut ctx = Context { client: client.into(), ..Default::default() };
+    let f = &hint["fixture"];
+    if f.is_object() {
+        // A saved chat, board and names, for the eval (contrib/asr_eval.py): the same list every run.
+        let v = |k: &str| f[k].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect());
+        ctx.chat = v("chat").unwrap_or_default();
+        ctx.agent = v("agent").unwrap_or_default();
+        ctx.names = v("names").unwrap_or_default();
+        ctx.board = v("board").unwrap_or_default();
+    } else {
+        live(app, hint, &mut ctx);
+    }
+    let w = &hint["window"];
+    if w.is_object() {
+        let s = |k: &str| w[k].as_str().unwrap_or("").to_string();
+        ctx.window = Some(Window { app_id: s("app_id"), title: s("title"), cwd: s("cwd") });
+    }
+    ctx.draft = seimei_core::util::cut(hint["draft"].as_str().unwrap_or(""), 4000).to_string();
+    ctx
+}
+
+fn live(app: &App, hint: &Value, ctx: &mut Context) {
     let chat = hint["chat"].as_str().unwrap_or("seimei");
     if let Some(id) = chat.strip_prefix("w:") {
         if let Some(w) = app.pool.get(id) {
@@ -75,13 +96,6 @@ pub fn context(app: &App, hint: &Value, client: &str) -> Context {
         ctx.board = b.tasks().iter().filter(|t| t.state != "done").map(|t| t.title.clone()).collect();
     }
     ctx.names.retain(|n| !n.is_empty());
-    let w = &hint["window"];
-    if w.is_object() {
-        let s = |k: &str| w[k].as_str().unwrap_or("").to_string();
-        ctx.window = Some(Window { app_id: s("app_id"), title: s("title"), cwd: s("cwd") });
-    }
-    ctx.draft = seimei_core::util::cut(hint["draft"].as_str().unwrap_or(""), 4000).to_string();
-    ctx
 }
 
 fn hint(headers: &HeaderMap) -> Value {
@@ -132,6 +146,29 @@ pub async fn edited(State(app): Shared, req: Request) -> Response {
     ok(json!({"ok": true}))
 }
 
+/// {hint, text?}: the context and list a request with this hint gets, and what the fixer makes of `text`. For the
+/// eval and for checking what goes out; nothing is sent anywhere.
+async fn local_context(State(app): Shared, req: Request) -> Response {
+    let Ok(bytes) = axum::body::to_bytes(req.into_body(), 1 << 20).await else {
+        return text(StatusCode::PAYLOAD_TOO_LARGE, "too large");
+    };
+    let Ok(b) = serde_json::from_slice::<Value>(&bytes) else { return text(StatusCode::BAD_REQUEST, "JSON, please") };
+    let Some(asr) = app.asr.clone() else { return text(StatusCode::SERVICE_UNAVAILABLE, "dictation is off") };
+    let ctx = context(&app, &b["hint"], "dictate");
+    let (list, desc) = asr.list(&ctx);
+    let mut out = json!({
+        "context": {"chat": ctx.chat, "agent": ctx.agent, "names": ctx.names, "board": ctx.board},
+        "terms": list.iter().map(|(w, s)| json!([w, s])).collect::<Vec<_>>(),
+        "description": desc,
+    });
+    if let Some(t) = b["text"].as_str() {
+        let terms: Vec<String> = list.into_iter().map(|(w, _)| w).collect();
+        let f = asr.clean(t, &terms);
+        out["fixed"] = json!({"text": f.text, "fixed": f.fixed, "suspects": f.suspects});
+    }
+    ok(out)
+}
+
 async fn local_transcribe(State(app): Shared, req: Request) -> Response {
     run(app, req, "dictate").await
 }
@@ -141,6 +178,7 @@ pub fn local_router(app: Arc<App>) -> Router {
     Router::new()
         .route("/asr", post(local_transcribe))
         .route("/edit", post(edited))
+        .route("/context", post(local_context))
         .route("/status", get(status))
         .with_state(app)
 }
