@@ -111,6 +111,14 @@ class Api(server: String) {
         })
     }
 
+    /** A 16 kHz mono WAV to transcribe, with the context hint (docs/asr.md): {text, raw, fixed, ...}. */
+    suspend fun asr(wav: ByteArray, hint: JSONObject): JSONObject {
+        // A header is ASCII: anything else in the draft goes as a JSON escape.
+        val h = buildString { for (c in hint.toString()) if (c.code < 0x80) append(c) else append("\\u%04x".format(c.code)) }
+        val req = request("api/asr").header("X-Seimei-Asr", h).post(wav.toRequestBody(WAV)).build()
+        return JSONObject(await(req) { it.string() })
+    }
+
     /** Streams a file up to the server; [open] is read once, never held in memory whole. */
     suspend fun upload(name: String, open: () -> InputStream): JSONObject {
         val body = object : RequestBody() {
@@ -180,5 +188,6 @@ class Api(server: String) {
     companion object {
         val JSON = "application/json".toMediaType()
         val OCTET = "application/octet-stream".toMediaType()
+        val WAV = "audio/wav".toMediaType()
     }
 }

@@ -76,6 +76,8 @@ class Page(val kind: String, val id: String) {
     var note by mutableStateOf<String?>(null)
     var draft by mutableStateOf("")
     var files by mutableStateOf<List<Attachment.Doc>>(emptyList())
+    /** The hint's name for this chat (docs/asr.md): "w:<id>" or "s:<pid>". */
+    val chatKey get() = (if (kind == "worker") "w:" else "s:") + id
     var details by mutableStateOf(false)
     /** A shikigami's run so far (metrics.py), fetched when its details open. */
     var metrics by mutableStateOf<JSONObject?>(null)
@@ -234,6 +236,10 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     var unread by mutableStateOf(false)
 
     var draft by mutableStateOf(prefs.draft)
+        private set
+    /** The mic in the composers; shown when the server can transcribe (GET api/asr). */
+    val dictation = Dictation(this)
+    var asrOn by mutableStateOf(false)
         private set
     var attachments by mutableStateOf<List<Attachment>>(emptyList())
         private set
@@ -753,6 +759,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             awaySince = null
             presence()
             loadBoard()
+            checkAsr()
             return
         }
         val type = ev.str("type")
@@ -1060,6 +1067,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         val text = pg.draft.trim()
         val files = pg.files
         if (text.isEmpty() && files.isEmpty()) return
+        dictation.sent(pg.chatKey, text)
         pg.draft = ""
         pg.files = emptyList()
         viewModelScope.launch {
@@ -1258,6 +1266,22 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         prefs.draft = text
     }
 
+    private fun checkAsr() {
+        viewModelScope.launch {
+            asrOn = try {
+                api.get("api/asr").optBoolean("enabled")
+            } catch (e: IOException) {
+                asrOn
+            } catch (e: JSONException) {
+                false
+            }
+        }
+    }
+
+    /** What the server needs besides the audio: where the user is and what is in the draft (docs/asr.md). */
+    fun asrHint(chat: String, text: String): JSONObject =
+        JSONObject().put("client", "phone").put("chat", chat).put("screen", if (page != null) "agents" else tab).put("draft", text.takeLast(2000))
+
     fun send() {
         val text = draft.trim()
         val sending = attachments
@@ -1266,6 +1290,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             snack = "Offline. Your message stays here."
             return
         }
+        dictation.sent("chat", text)
         edit("")
         attachments = emptyList()
         val reply = replyTo

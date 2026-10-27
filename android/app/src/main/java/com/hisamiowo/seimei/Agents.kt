@@ -783,8 +783,10 @@ fun PageComposer(vm: Seimei, pg: Page, a: Agent) {
             val name = if (a.name.length > 22) a.name.take(21).trim() + "…" else a.name
             val x = LocalTokens.current
             val asking = pg.ask != null || (pg.kind == "worker" && pg.row.str("state") == "asking")
+            val d = vm.dictation
             // final/ 09: the 52 pill of the chat's composer, the attach button inside it
-            Row(Modifier.weight(1f).heightIn(min = 52.dp).clip(RoundedCornerShape(26.dp)).background(cs.surfaceContainerHigh),
+            if (d.state == Dictation.State.RECORDING && d.target == pg.chatKey) RecordingBar(d, Modifier.weight(1f))
+            else Row(Modifier.weight(1f).heightIn(min = 52.dp).clip(RoundedCornerShape(26.dp)).background(cs.surfaceContainerHigh),
                 verticalAlignment = Alignment.Bottom) {
                 Box(Modifier.padding(start = 4.dp, bottom = 2.dp)) {
                     IconButton({ menu = true }, Modifier.size(48.dp), enabled = why == null) {
@@ -802,21 +804,10 @@ fun PageComposer(vm: Seimei, pg: Page, a: Agent) {
                     }
                 }
                 val hint = if (why != null) "Can't reply from here right now" else if (asking) "Your answer" else "Message $name"
-                BasicTextField(
-                    value = pg.draft,
-                    onValueChange = { pg.draft = it },
-                    enabled = why == null,
-                    maxLines = 6,
-                    textStyle = TextStyle(fontSize = 15.sp, lineHeight = 22.sp, color = x.text),
-                    cursorBrush = SolidColor(cs.primary),
-                    modifier = Modifier.weight(1f).padding(start = 8.dp, end = 16.dp, top = 15.dp, bottom = 15.dp).semantics { contentDescription = hint },
-                    decorationBox = { field ->
-                        Box {
-                            if (pg.draft.isEmpty()) Text(hint, fontSize = 15.sp, lineHeight = 22.sp, color = x.text3, maxLines = 1)
-                            field()
-                        }
-                    },
-                )
+                DraftField(pg.draft, { pg.draft = it }, hint, pg.chatKey, d,
+                    Modifier.weight(1f).padding(start = 8.dp, end = if (vm.asrOn) 0.dp else 16.dp, top = 15.dp, bottom = 15.dp),
+                    maxLines = 6, enabled = why == null)
+                if (vm.asrOn) MicSlot(d, pg.chatKey, enabled = why == null) { vm.asrHint(pg.chatKey, pg.draft) }
             }
             Spacer(Modifier.width(8.dp))
             val typing = pg.draft.isNotBlank() || pg.files.isNotEmpty()

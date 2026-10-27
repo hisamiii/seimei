@@ -1247,7 +1247,9 @@ fun Composer(vm: Seimei) {
         // final/ 02: a 52 pill on surface-container-high (attach 48 inside it), then the 52 round send
         Row(verticalAlignment = Alignment.Bottom) {
             val x = LocalTokens.current
-            Row(Modifier.weight(1f).heightIn(min = 52.dp).clip(RoundedCornerShape(26.dp)).background(cs.surfaceContainerHigh),
+            val d = vm.dictation
+            if (d.state == Dictation.State.RECORDING && d.target == "chat") RecordingBar(d, Modifier.weight(1f))
+            else Row(Modifier.weight(1f).heightIn(min = 52.dp).clip(RoundedCornerShape(26.dp)).background(cs.surfaceContainerHigh),
                 verticalAlignment = Alignment.Bottom) {
                 Box(Modifier.padding(start = 4.dp, bottom = 2.dp)) {
                     IconButton({ menu = true }, Modifier.size(48.dp)) { Icon(Icons.attach, "Attach", Modifier.size(22.dp), tint = x.text3) }
@@ -1262,21 +1264,9 @@ fun Composer(vm: Seimei) {
                         }, leadingIcon = { Icon(Icons.doc, null) })
                     }
                 }
-                BasicTextField(
-                    value = vm.draft,
-                    onValueChange = vm::edit,
-                    maxLines = 7,
-                    textStyle = TextStyle(fontSize = 15.sp, lineHeight = 22.sp, color = x.text),
-                    cursorBrush = SolidColor(cs.primary),
-                    modifier = Modifier.weight(1f).padding(start = 8.dp, end = 16.dp, top = 15.dp, bottom = 15.dp).focusRequester(focus)
-                        .semantics { contentDescription = "Message seimei" },
-                    decorationBox = { field ->
-                        Box {
-                            if (vm.draft.isEmpty()) Text("Message seimei", fontSize = 15.sp, lineHeight = 22.sp, color = x.text3)
-                            field()
-                        }
-                    },
-                )
+                DraftField(vm.draft, vm::edit, "Message seimei", "chat", d,
+                    Modifier.weight(1f).padding(start = 8.dp, end = if (vm.asrOn) 0.dp else 16.dp, top = 15.dp, bottom = 15.dp), maxLines = 7, focus = focus)
+                if (vm.asrOn) MicSlot(d, "chat", enabled = true) { vm.asrHint("seimei", vm.draft) }
             }
             Spacer(Modifier.width(8.dp))
             val typing = vm.draft.isNotBlank() || vm.attachments.isNotEmpty()
