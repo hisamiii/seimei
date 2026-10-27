@@ -91,7 +91,6 @@ pub fn fix(dict: &Dict, text: &str, terms: &[String], known: &[String]) -> Fixed
     let known_l: std::collections::HashSet<String> =
         terms_l.iter().cloned().chain(known.iter().map(|k| k.to_lowercase())).collect();
     let refs: Vec<&str> = terms_l.iter().map(String::as_str).collect();
-    let term_set: std::collections::HashSet<&str> = refs.iter().copied().collect();
     let toks: Vec<&str> = words(text).into_iter().map(|t| t.trim_end_matches(['.', '-', '+'])).collect();
     let (mut out, mut at, mut fixed, mut suspects) = (String::new(), 0, vec![], vec![]);
     let mut i = 0;
@@ -103,11 +102,11 @@ pub fn fix(dict: &Dict, text: &str, terms: &[String], known: &[String]) -> Fixed
             }
             let grams = &toks[i..i + j];
             let g: String = grams.concat().to_lowercase();
-            // A run never swallows a listed term; a word that is only known (the auto list: "shiki" in "shiki ga me")
-            // may be part of one, at a higher bar.
-            if g.chars().count() < 4 || (j > 1 && grams.iter().any(|t| term_set.contains(t.to_lowercase().as_str()))) {
+            if g.chars().count() < 4 {
                 continue;
             }
+            // A run with a known word or a listed term in it ("shiki" in "shiki ga me") takes a higher bar; that it
+            // does not just spell the word it holds is checked below ("seimei is" stays).
             let has_known = j > 1 && grams.iter().any(|t| known_l.contains(&t.to_lowercase()));
             if j == 1 && (known_l.contains(&g) || dict.english(&g)) {
                 continue;
@@ -129,12 +128,18 @@ pub fn fix(dict: &Dict, text: &str, terms: &[String], known: &[String]) -> Fixed
                         .then(|| refs.iter().find(|r| r.chars().count() >= 4 && sound(r) == k).map(|r| (0.79, *r)))
                         .flatten()
                 });
-            // A leading word the term does not need is not part of it ("on Ku bus"): the next position takes the run.
+            // Every word of the run is needed: no shorter part of it, from either end, is as close to the term ("on Ku
+            // bus" leaves "on", "seimei is" is just seimei).
             let ratio = |s: &str, t: &str| similar::TextDiff::from_chars(s, t).ratio();
-            let lead_free = |t: &str, score: f32| j == 1 || ratio(&grams[1..].concat().to_lowercase(), t) < score;
+            let tight = |t: &str, score: f32| {
+                (1..j).all(|k| {
+                    ratio(&grams[..k].concat().to_lowercase(), t) < score
+                        && ratio(&grams[k..].concat().to_lowercase(), t) < score
+                })
+            };
             if let Some((score, t)) = hit
                 && (t != g || j > 1)
-                && lead_free(t, score)
+                && tight(t, score)
                 && best.is_none_or(|b| score > b.0)
             {
                 best = Some((score, j, terms_l.iter().position(|x| x == t).unwrap()));
@@ -220,6 +225,9 @@ mod tests {
             fix(&d, "Ask the shiki ga me to check", &terms(), &["shiki".into()]).text,
             "Ask the shikigami to check"
         );
+        let mut with_shiki = terms();
+        with_shiki.push("shiki".into());
+        assert_eq!(fix(&d, "Ask the shiki ga me to check", &with_shiki, &[]).text, "Ask the shikigami to check");
         assert_eq!(fix(&d, "Neri and many", &terms(), &[]).text, "Niri and many");
         assert_eq!(fix(&d, "on Neri. Neri and the Neri", &terms(), &[]).text, "on niri. Niri and the niri");
     }
@@ -227,7 +235,14 @@ mod tests {
     #[test]
     fn right_and_english_words_stay() {
         let d = dict();
-        for s in ["build the kubus", "seimei is back", "the bus is low", "Check whether it holds"] {
+        for s in [
+            "build the kubus",
+            "seimei is back",
+            "the bus is low",
+            "Check whether it holds",
+            "on niri now",
+            "is seimei",
+        ] {
             let f = fix(&d, s, &terms(), &[]);
             assert_eq!(f.text, s, "{:?}", f.fixed);
         }

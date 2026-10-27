@@ -7,7 +7,7 @@ and score jargon accuracy, WER, terms inserted on clean clips, fixer hits, laten
     asr_eval.py replay                  the fixer over the phrases in misses.log, for checking by hand
 
 Clip folders hold WAVs and a truth.json of {clip: text}. Set ASR_EVAL_CLIPS to a colon-separated list of them;
-ASR_EVAL_DICTATE to dictate's checkout. Results go to ASR_EVAL_OUT (default: the current folder)."""
+ASR_EVAL_DICTATE to dictate's checkout, ASR_EVAL_SOCK to another seimei's asr.sock. Results go to ASR_EVAL_OUT (default: the current folder)."""
 
 import http.client
 import json
@@ -19,7 +19,7 @@ import sys
 import time
 
 HOME = os.path.expanduser("~")
-SOCK = os.path.join(HOME, ".local/share/seimei/asr.sock")
+SOCK = os.environ.get("ASR_EVAL_SOCK", os.path.join(HOME, ".local/share/seimei/asr.sock"))
 CLIPS = os.environ.get("ASR_EVAL_CLIPS", ":".join(
     os.path.join(HOME, "Development/Scratch", d) for d in ("dictate/jargon", "dictate/clips", "asr-eval/clean")))
 DICTATE = os.environ.get("ASR_EVAL_DICTATE", os.path.join(HOME, "Development/Projects/dictate"))
