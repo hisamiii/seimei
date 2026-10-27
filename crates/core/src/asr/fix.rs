@@ -133,8 +133,15 @@ pub fn fix(dict: &Dict, text: &str, terms: &[String], known: &[String]) -> Fixed
             let (s, _) = span(text, toks[i]);
             let (_, e) = span(text, toks[i + j - 1]);
             out.push_str(&text[at..s]);
-            out.push_str(&terms[ti]);
-            fixed.push((text[s..e].to_string(), terms[ti].clone()));
+            // A sentence starts with a capital, whatever the term's own spelling ("Neri crashed" -> "Niri crashed").
+            let starts = text[..s].trim_end().is_empty() || text[..s].trim_end().ends_with(['.', '!', '?']);
+            let mut term = terms[ti].clone();
+            if starts && toks[i].starts_with(char::is_uppercase) && term.starts_with(char::is_lowercase) {
+                let mut c = term.chars();
+                term = c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default();
+            }
+            out.push_str(&term);
+            fixed.push((text[s..e].to_string(), term));
             at = e;
             i += j;
             continue;
@@ -179,7 +186,8 @@ mod tests {
         assert_eq!(f.text, "Check whether the shikigami on kubus still holds gfx1151.", "{:?}", f.fixed);
         assert_eq!(f.fixed.len(), 3);
         assert_eq!(fix(&d, "cuBus is back", &terms(), &[]).text, "kubus is back");
-        assert_eq!(fix(&d, "Neri and many", &terms(), &[]).text, "niri and many");
+        assert_eq!(fix(&d, "Neri and many", &terms(), &[]).text, "Niri and many");
+        assert_eq!(fix(&d, "on Neri. Neri and the Neri", &terms(), &[]).text, "on niri. Niri and the niri");
     }
 
     #[test]
