@@ -158,6 +158,24 @@ pub fn fix(dict: &Dict, text: &str, terms: &[String], known: &[String]) -> Fixed
     Fixed { text: out, fixed, suspects }
 }
 
+/// A phrase the model starts with a list term in the term's lowercase spelling ("niri crashed") starts with a capital,
+/// as every other phrase does. Only plain words: "gfx1151" and "llama.cpp" keep their spelling.
+pub fn capital(text: &str, terms: &[String]) -> String {
+    let first = words(text).into_iter().next().unwrap_or("");
+    let lead = text.trim_start();
+    if first.is_empty()
+        || !lead.starts_with(first)
+        || !first.chars().all(char::is_lowercase)
+        || !terms.iter().any(|t| t.eq_ignore_ascii_case(first))
+    {
+        return text.to_string();
+    }
+    let at = text.len() - lead.len();
+    let mut c = lead.chars();
+    let up: String = c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default();
+    format!("{}{up}", &text[..at])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,6 +217,13 @@ mod tests {
         }
         // Only listed terms go in: "Ku bus" stays without kubus on the list.
         assert_eq!(fix(&d, "Ku bus", &["niri".into()], &[]).text, "Ku bus");
+    }
+
+    #[test]
+    fn a_term_starting_a_phrase_gets_a_capital() {
+        assert_eq!(capital("niri crashed again, so niri", &terms()), "Niri crashed again, so niri");
+        assert_eq!(capital("the niri", &terms()), "the niri");
+        assert_eq!(capital("gfx1151 is fine", &terms()), "gfx1151 is fine");
     }
 
     #[test]

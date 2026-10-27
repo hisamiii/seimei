@@ -333,7 +333,9 @@ impl Asr {
     pub fn clean(&self, raw: &str, terms: &[String]) -> fix::Fixed {
         let fixed = fix::apply_fixes(raw, &fix::load_fixes(&self.dir.join("fixes")));
         let auto = vocab::read_lines(&self.dir.join("words-auto.txt"));
-        fix::fix(&self.dict(), &fixed, terms, &auto)
+        let mut f = fix::fix(&self.dict(), &fixed, terms, &auto);
+        f.text = fix::capital(&f.text, terms);
+        f
     }
 
     fn miss(&self, text: &str, found: &[String]) {
