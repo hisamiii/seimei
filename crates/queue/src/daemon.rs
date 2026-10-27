@@ -1924,6 +1924,13 @@ impl Daemon {
     }
 }
 
+/// Whether a holder in cqd's state can be compared with the shadow's view: not a lease ("running") none of whose
+/// processes has a device open now.
+fn comparable(h: &Value, open: &HashSet<i64>) -> bool {
+    h["state"] != "running"
+        || h["pids"].as_array().into_iter().flatten().any(|p| p.as_i64().is_some_and(|p| open.contains(&p)))
+}
+
 impl Daemon {
     /// The shadow beside cqd: where its view (holders, v1 waiters, desktop apps, frozen agents) differs from cqd's state.json for
     /// 15 ticks in a row (a lease outlives its last fd by lease_linger_s, so shorter differences are timing), one row
@@ -1934,9 +1941,13 @@ impl Daemon {
         if theirs["t"].as_f64().is_none_or(|t| now - t > 5.0) {
             return; // cqd is not ticking: nothing to compare with
         }
+        // The shadow binds no socket, so it never sees a lease: it knows a holder only while a device fd is open. A
+        // lease of cqd's whose processes have none open right now (a job that opens the GPU per dispatch, or one in
+        // its lease_linger_s) is not a difference.
+        let open: HashSet<i64> = self.procs.values().filter(|p| !p.devs.is_empty()).map(|p| p.pid as i64).collect();
         let holders = |s: &Value| -> BTreeMap<String, String> {
             let mut out = BTreeMap::new();
-            for h in s["holders"].as_array().into_iter().flatten() {
+            for h in s["holders"].as_array().into_iter().flatten().filter(|h| comparable(h, &open)) {
                 let pids: Vec<String> = h["pids"].as_array().into_iter().flatten().map(|p| p.to_string()).collect();
                 let state = match h["state"].as_str().unwrap_or("") {
                     "running" | "legacy" => "held",
@@ -2085,6 +2096,15 @@ mod tests {
     }
 
     /// 2026-10-26: a loom run that loaded its model and waited for memory was listed as an idle memory hog.
+    #[test]
+    fn leases_without_open_fds_are_not_differences() {
+        let open: HashSet<i64> = [7].into();
+        assert!(comparable(&json!({"state": "running", "pids": [5, 7]}), &open));
+        assert!(!comparable(&json!({"state": "running", "pids": [5]}), &open));
+        assert!(comparable(&json!({"state": "legacy", "pids": [5]}), &open));
+        assert!(comparable(&json!({"state": "paused", "pids": [5]}), &open));
+    }
+
     #[test]
     fn waiters_are_no_hogs() {
         let d = daemon();
