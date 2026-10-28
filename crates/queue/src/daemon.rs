@@ -55,9 +55,10 @@ pub fn default_policy() -> Map<String, Value> {
         "max_freeze_s": 3600,
         "auto_park": false,
         "rehome": true,
-        "desktop_names": ["vesktop", "electron*", "chromium*", "chrome", "firefox*", "waterfox*", "Xwayland", "mpv",
-                          "kitty", "waybar*", "blueman*", "btop", "z13gui", "swaybg", "niri*", "qs.py", "nwg-*"],
-        "desktop_args": ["--type=gpu-process", "*/qs.py", "qs.py"],
+        // Generic apps only; a machine's own (its bar, its widgets) go in policy.json.
+        "desktop_names": ["electron*", "chromium*", "chrome", "firefox*", "waterfox*", "Xwayland", "kitty", "foot",
+                          "alacritty"],
+        "desktop_args": ["--type=gpu-process"],
     });
     match v {
         Value::Object(m) => m,

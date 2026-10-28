@@ -112,7 +112,7 @@ The `cpu` default and the token are decision 3; V4 checks the weight.
 
 Policy (bench window, preemption, exempt agents, interactive daemons, desktop allowlist, memory numbers, event thresholds) keeps cqd's keys and defaults. Its file moves from `~/.config/claude-queue/policy.json` to seimei's state folder, `queue/policy.json`, because `queue_policy` writes it; config.toml holds only what the user sets by hand (resources, the cgroup root, a policy override).
 
-The defaults stop naming this laptop: the exempt list becomes "seimei's dispatcher" by role (the scheduler knows seimei's own slice name), the desktop allowlist keeps the generic entries (browsers, electron gpu-process, Xwayland, terminals, compositors) and loses qs.py, z13gui and friends, which move to this laptop's config.
+The defaults stop naming this laptop: the exempt list becomes "seimei's dispatcher" by role (the scheduler knows seimei's own slice name), the desktop allowlist keeps the generic entries (browsers, electron gpu-process, Xwayland, terminals) and loses qs.py, z13gui, niri, waybar and friends, which move to this laptop's policy.json (done in the port; cqd and the shadow read the same policy.json, so the shadow agrees with cqd once they are there).
 
 ## Placement
 
