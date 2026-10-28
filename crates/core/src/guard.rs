@@ -917,10 +917,7 @@ fn decide_by(rules: &Rules, tool: &str, inp: &Value, cwd: &str, facts: &Value, r
     }
     let rules = &rules.0;
     let cwd = Path::new(cwd);
-    let home_dir = home();
-    let h = home_dir.to_string_lossy();
-    let cmd = inp.get("command").and_then(Value::as_str).unwrap_or("");
-    let flat = cmd.replace("${HOME}", &h).replace("$HOME", &h);
+    let flat = command_of(inp);
     let all = if tool == "Bash" { commands(&flat) } else { vec![] };
     let cmds: Vec<&Cmd> = all.iter().flatten().collect();
     let mut pieces = if tool == "Bash" { bash_pieces(&cmds, cwd, &flat) } else { tool_pieces(tool, inp, cwd, reads) };
@@ -939,6 +936,12 @@ fn decide_by(rules: &Rules, tool: &str, inp: &Value, cwd: &str, facts: &Value, r
         }
     }
     best.map(|r| Verdict { action: r.action, message: r.message.clone() })
+}
+
+/// A call's command with $HOME and ${HOME} spelled out.
+fn command_of(inp: &Value) -> String {
+    let h = home().to_string_lossy().into_owned();
+    inp.get("command").and_then(Value::as_str).unwrap_or("").replace("${HOME}", &h).replace("$HOME", &h)
 }
 
 /// guard.toml and the folder it is in, as written and with links followed.
@@ -993,10 +996,7 @@ pub fn builtin(tool: &str, inp: &Value, cwd: &str) -> Option<String> {
         }
         return None;
     }
-    let cmd = inp.get("command").and_then(Value::as_str).unwrap_or("");
-    let home_dir = home();
-    let h = home_dir.to_string_lossy();
-    let flat = cmd.replace("${HOME}", &h).replace("$HOME", &h);
+    let flat = command_of(inp);
     let all = commands(&flat);
     let Some(cmds) = all.iter().map(Option::as_ref).collect::<Option<Vec<&Cmd>>>() else {
         return Some("a command nested too deep to check".into());
@@ -1133,6 +1133,14 @@ pub struct Guard {
     fails: Mutex<HashMap<(String, String), u32>>,
 }
 
+/// A hook input's tool, its arguments ({} when none) and its folder (home when none).
+fn hook_call(inp: &Value) -> (&str, Value, String) {
+    let tool = inp["tool_name"].as_str().unwrap_or("");
+    let args = if inp["tool_input"].is_object() { inp["tool_input"].clone() } else { json!({}) };
+    let cwd = inp["cwd"].as_str().filter(|c| !c.is_empty()).map_or_else(|| home().display().to_string(), String::from);
+    (tool, args, cwd)
+}
+
 fn decision(allow: bool, reason: &str) -> Value {
     json!({"hookSpecificOutput": {"hookEventName": "PreToolUse",
         "permissionDecision": if allow { "allow" } else { "deny" }, "permissionDecisionReason": reason}})
@@ -1154,17 +1162,12 @@ impl Guard {
 
     /// Append one line (created 600).
     fn audit(&self, mut rec: Value) {
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
         if std::fs::metadata(&self.path).is_ok_and(|m| m.len() > AUDIT_ROTATE) {
             let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
             let _ = std::fs::rename(&self.path, self.path.with_file_name(format!("audit-{stamp}.jsonl")));
         }
         rec["t"] = json!((crate::util::now() * 1000.0).round() / 1000.0);
-        let file = std::fs::OpenOptions::new().create(true).append(true).mode(0o600).open(&self.path);
-        if let Ok(mut f) = file {
-            let _ = f.write_all(format!("{rec}\n").as_bytes());
-        }
+        let _ = crate::util::append_line(&self.path, &rec.to_string());
     }
 
     /// A broken guard.toml's error, shown once per version of the file.
@@ -1195,13 +1198,10 @@ impl Guard {
 
     /// The PreToolUse hook: blocked, held for a card, or let through. who: "seimei" or the shikigami's name.
     pub async fn pre(&self, who: &str, worker: Option<&str>, inp: &Value, tool_use_id: Option<&str>) -> Value {
-        let tool = inp["tool_name"].as_str().unwrap_or("");
-        let args = if inp["tool_input"].is_object() { inp["tool_input"].clone() } else { json!({}) };
-        let home = home().display().to_string();
-        let cwd = inp["cwd"].as_str().filter(|c| !c.is_empty()).unwrap_or(&home);
+        let (tool, args, cwd) = hook_call(inp);
         let mut rec = json!({"event": "call", "who": who, "worker": worker, "session": inp["session_id"],
             "agent": inp["agent_id"], "id": tool_use_id, "tool": tool, "input": brief(&args)});
-        let (verdict, about) = self.verdict(tool, &args, cwd).await;
+        let (verdict, about) = self.verdict(tool, &args, &cwd).await;
         match verdict {
             Some(Verdict { action: Action::Deny, message: why }) => {
                 rec["decision"] = json!("blocked");
@@ -1254,13 +1254,10 @@ impl Guard {
         inp: &Value,
         tool_use_id: Option<&str>,
     ) -> Option<String> {
-        let tool = inp["tool_name"].as_str().unwrap_or("");
-        let args = if inp["tool_input"].is_object() { inp["tool_input"].clone() } else { json!({}) };
-        let home = home().display().to_string();
-        let cwd = inp["cwd"].as_str().filter(|c| !c.is_empty()).unwrap_or(&home);
+        let (tool, args, cwd) = hook_call(inp);
         let mut rec = json!({"event": "unasked", "who": who, "worker": worker, "session": inp["session_id"],
             "id": tool_use_id, "tool": tool, "input": brief(&args)});
-        let why = match self.verdict(tool, &args, cwd).await.0 {
+        let why = match self.verdict(tool, &args, &cwd).await.0 {
             Some(Verdict { action: Action::Deny, message }) => Some(format!("the guard blocks {message}")),
             Some(Verdict { action: Action::Card, message }) => Some(format!("it needs an approval card ({message})")),
             _ => None,
