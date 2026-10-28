@@ -285,16 +285,6 @@ impl Client {
         self.request(json!({"subtype": "get_context_usage"}), REQUEST_TIMEOUT).await
     }
 
-    /// Claude Code's own view of its MCP servers, as it answers.
-    pub async fn mcp_status(&self) -> Result<Value, Error> {
-        self.request(json!({"subtype": "mcp_status"}), REQUEST_TIMEOUT).await
-    }
-
-    /// Stop one background task (a subagent, a background shell).
-    pub async fn stop_task(&self, task_id: &str) -> Result<(), Error> {
-        self.request(json!({"subtype": "stop_task", "task_id": task_id}), REQUEST_TIMEOUT).await.map(|_| ())
-    }
-
     /// End the session: close stdin and give Claude Code time to write its transcript, then SIGTERM its process
     /// group, then SIGKILL. Returns how it exited.
     pub async fn close(&mut self) -> Option<ExitStatus> {

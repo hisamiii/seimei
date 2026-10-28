@@ -260,7 +260,6 @@ async fn control_requests_round_trip() {
     c.set_model(Some("sonnet")).await.unwrap();
     c.set_permission_mode("acceptEdits").await.unwrap();
     assert!(c.context_usage().await.unwrap()["totalTokens"].is_u64());
-    assert!(c.mcp_status().await.unwrap()["mcpServers"].is_array());
 }
 
 #[tokio::test]
