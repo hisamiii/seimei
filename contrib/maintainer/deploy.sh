@@ -1,15 +1,10 @@
 #!/bin/sh
 # deploy.sh [rev]: move the production checkout to a commit (default main) and restart seimei once it is idle.
-# Production never runs from the working tree, so half-finished edits cannot reach the phone.
-# It builds the Rust server here and swaps the binary in right before the restart.
-#
-# The deploy itself runs detached (a transient unit under systemd, its own session under OpenRC), so the restart it
-# ends with cannot cut it off, even when a shikigami (which that restart ends) started it. The caller follows it and prints
-# its result; the result also stays in $state/deploy/last.json, which seimei hands to whoever it resumes.
-# Tests point it elsewhere with SEIMEI_APP, SEIMEI_STATE, SEIMEI_SERVICE and SEIMEI_DEPLOY_TEST (no installs).
+# Production never runs from the working tree, so half-finished edits cannot reach the phone. Tests set SEIMEI_APP, SEIMEI_STATE, SEIMEI_SERVICE and SEIMEI_DEPLOY_TEST (no installs).
+# It runs detached (a transient unit under systemd, its own session under OpenRC), so its restart cannot cut it off, even when a shikigami started it.
+# The caller follows it; the result also stays in $state/deploy/last.json, which seimei hands to whoever it resumes.
 set -eu
-# The detached half gets its unit's name as `--unit NAME`; an argument, since an environment variable would be
-# inherited by whatever that deploy's restart starts.
+# The detached half gets its unit's name as an argument: an environment variable would be inherited by whatever the restart starts.
 inner=
 if [ "${1:-}" = --unit ]; then
     inner=$2
@@ -95,7 +90,6 @@ os.replace(path + ".tmp", path)
 if state != "running":
     with open(os.path.join(d, "history.jsonl"), "a") as f:
         f.write(json.dumps(cur) + "\n")
-    # Keep the newest 20 logs.
     logs = sorted((n for n in os.listdir(d) if n.startswith("seimei-deploy-") and n.endswith(".log")),
                   key=lambda n: os.path.getmtime(os.path.join(d, n)))
     for n in logs[:-20]:
@@ -114,7 +108,7 @@ git -C "$app" checkout -q --detach "$rev"
 if [ -z "${SEIMEI_DEPLOY_TEST:-}" ]; then
     step=build
     status running build
-    # Its own target dir, so a build in the working tree never races this one. Swapped in right before the restart.
+    # Its own target dir, so a build in the working tree never races this one.
     (cd "$app" && nice -n 19 cargo build -q --release --locked -p seimei)
     mkdir -p "$app/bin"
     cp "$app/target/release/seimei" "$app/bin/seimei.new"
@@ -127,9 +121,8 @@ if [ -z "${SEIMEI_DEPLOY_TEST:-}" ]; then
         cp --remove-destination "$app/contrib/maintainer/seimei-tunnel.service" "$units/seimei-tunnel.service"
         systemctl --user daemon-reload
     fi
-    # The browser connector: its native-messaging host runs from the production checkout, listed where Firefox looks
-    # (~/.mozilla, or ~/.config/mozilla with XDG paths); the extension (signed when sign.py made it) is for the user to
-    # install once (about:addons, Install Add-on From File).
+    # The browser's native-messaging host runs from the production checkout, listed where Firefox looks (~/.mozilla, or ~/.config/mozilla with XDG paths).
+    # The user installs the extension once, from about:addons.
     cfg=${XDG_CONFIG_HOME:-$HOME/.config}
     python3 "$app/plugins/browser/extension/install.py" "$app/plugins/browser/extension" "$HOME/.local/share/seimei/seimei.xpi" \
         "$cfg/seimei/config.toml" "$HOME/.mozilla/native-messaging-hosts" "$cfg/mozilla/native-messaging-hosts" >/dev/null
@@ -167,9 +160,8 @@ fi
 if [ -n "$systemd" ]; then
     systemctl --user restart "$service"
 else
-    # Out of the shikigami's claude-queue slice first (its cgroup, which setsid does not leave): a supervise-daemon
-    # started from in there freezes with the slice during every bench, the server under it too. The init script puts
-    # the server in a cgroup of its own; this covers a script from before that.
+    # Leave the shikigami's claude-queue cgroup first (setsid does not): a supervise-daemon started in there freezes with it during every bench.
+    # The init script puts the server in a cgroup of its own; this covers an older script.
     cg=$(sed -n 's/^0:://p' /proc/$$/cgroup)
     top=
     while [ -n "$cg" ] && [ -O "/sys/fs/cgroup$cg" ]; do
@@ -180,8 +172,7 @@ else
         { mkdir -p "/sys/fs/cgroup$top/seimei-ctl" && echo $$ >"/sys/fs/cgroup$top/seimei-ctl/cgroup.procs"; } 2>/dev/null ||
             echo "deploy: still in $(sed -n 's/^0:://p' /proc/$$/cgroup)"
     fi
-    # rc-service hands its own environment to the service. This deploy's may come from a shikigami's shell (Claude
-    # Code's and claude-queue's variables), so restart from the desktop session's, or from a minimal one without niri.
+    # rc-service hands its environment to the service, and this one may be a shikigami's shell: restart from the desktop session's, or a minimal one.
     # niri sets WAYLAND_DISPLAY and NIRI_SOCKET for what it starts, not in its own environment.
     niri=$(pgrep -u "$(id -u)" -x niri | head -1)
     if [ -n "$niri" ] && [ -r "/proc/$niri/environ" ]; then
@@ -196,8 +187,8 @@ fi
 if [ -z "${SEIMEI_DEPLOY_TEST:-}" ]; then
     step=verify
     status running verify
-    # Done only when the new server answers on its port as the service's own process (the unit's main process, or
-    # supervise-daemon's child) outside any claude-queue slice. No server, or one started by hand, fails the deploy.
+    # Done only when the new server answers on its port as the service's own process, outside any claude-queue slice.
+    # No server, or one started by hand, fails the deploy.
     if ! why=$(python3 - "$service" "$systemd" "${XDG_CONFIG_HOME:-$HOME/.config}/seimei/config.toml" <<'PY'
 import os, re, subprocess, sys, time, tomllib, urllib.error, urllib.request
 service, systemd, cfg = sys.argv[1:4]

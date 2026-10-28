@@ -1,10 +1,7 @@
-# dsh's acp profile for seimei: append these entries to ~/.dsh/profiles/acp/cordis.patch.yml and copy
-# seimei-hooks.json next to it. seimei's guard then sees every call before it runs, and the shikigami's mode decides
-# the rest (bypass: no cards; default: a card for each command and edit).
-#
-# The preset plugin is off in this profile, so settings.yaml's permission.defaultPreset (danger-full-access in the
-# terminal, say) does not reach ACP sessions: they keep approval on ask, in a workspace-write sandbox, and a
-# PreToolUse hook turns every tool call into a permission request to seimei. Model and provider stay in settings.yaml.
+# dsh's acp profile for seimei: append these entries to ~/.dsh/profiles/acp/cordis.patch.yml and copy seimei-hooks.json next to it.
+# seimei's guard then sees every call first, and the shikigami's mode decides the rest (bypass: no cards; default: a card per command and edit).
+# The preset plugin is off here, so settings.yaml's permission.defaultPreset does not reach ACP sessions: they keep approval on ask, in a workspace-write sandbox.
+# A PreToolUse hook turns every tool call into a permission request to seimei. Model and provider stay in settings.yaml.
 
 - id: permission
   disabled: true

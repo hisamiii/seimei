@@ -1,12 +1,7 @@
-"""Builds the theme token files: web/themes/<theme>.json, read by the web page (theme.js) and bundled into
-the app (its assets). A theme is a small base palette per side (dark and light); every token the page and the app use
-comes from it, so adding a theme is one more entry here. Material You has no fixed colors: the page and the app derive
-the same tokens from an M3 scheme (theme.js, Theme.kt). Run: python3 contrib/themes.py
-
-The web page builds Material You from a seed with material-color-utilities, vendored as web/mcu.js. To update
-it: `npm pack @material/material-color-utilities` into an empty folder, unpack it, and bundle an entry file that
-re-exports Hct, SchemeTonalSpot, argbFromHex and hexFromArgb with `npx esbuild entry.js --bundle --format=esm --minify
---legal-comments=none`; keep the two header lines and copy the package's LICENSE to mcu.LICENSE."""
+"""Builds the theme token files web/themes/<theme>.json, read by the web page (theme.js) and bundled into the app. Run: python3 contrib/themes.py
+A theme is a small base palette per side (dark and light); every token comes from it, so a new theme is one more entry here.
+Material You has no fixed colors: the page (web/mcu.js, vendored material-color-utilities) and the app (Theme.kt) derive the tokens from an M3 scheme.
+To update mcu.js: `npm pack @material/material-color-utilities`, bundle an entry that re-exports Hct, SchemeTonalSpot, argbFromHex and hexFromArgb with `npx esbuild entry.js --bundle --format=esm --minify --legal-comments=none`, keep the two header lines and copy its LICENSE to mcu.LICENSE."""
 import json
 from pathlib import Path
 
@@ -44,8 +39,7 @@ LEGIBLE = ([(t, SURFACES, 4.5) for t in ("text", "text-2")] + [("text-3", ["surf
 
 
 def legible(t):
-    """Moves each color that fails LEGIBLE a little at a time away from what it sits on (toward black or white); a
-    color that is already black or white moves the ground instead (white text on a light primary darkens the primary)."""
+    """Moves each color that fails LEGIBLE a little at a time away from what it sits on (toward black or white); a color that is already black or white moves the ground instead (white text on a light primary darkens the primary)."""
     for _ in range(3):
         for fg, grounds, least in LEGIBLE:
             for bg in grounds:
@@ -106,7 +100,7 @@ CAT_ACCENTS = {
               "maroon": "#e64553", "peach": "#fe640b", "yellow": "#df8e1d", "green": "#40a02b", "teal": "#179299",
               "sky": "#04a5e5", "sapphire": "#209fb5", "blue": "#1e66f5", "lavender": "#7287fd"},
 }
-# Catppuccin Mocha with mauve stays exactly the colors seimei had before themes.
+# Catppuccin Mocha with mauve uses these fixed values instead of derived ones.
 MOCHA_EXACT = {"on-primary": "#2d1b47", "primary-container": "#3d3552", "on-primary-container": "#ecdcff",
                "tonal": "#35384d", "on-tonal": "#dfe3ff", "warn-container": "#45393e", "on-warn-container": "#ffdcc4",
                "ok-container": "#364142", "on-ok-container": "#c8f3c3", "error-container": "#45293a",

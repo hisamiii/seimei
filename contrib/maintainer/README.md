@@ -1,5 +1,10 @@
-# The author's own setup
+# Maintainer deploy
 
-These files run seimei on its author's laptop and are kept here for reference, not for installing: `deploy.sh` moves a production checkout (`~/.local/share/seimei-app`) to a commit and restarts seimei once it is idle, the two units are that checkout's systemd services (one is a cloudflared tunnel with the author's config), and the rest is niri, autologin and waybar glue for that machine. `notes/` holds design notes and review material.
+These files are one maintainer's production deploy of seimei from source, kept for reference and not for installing. To install seimei, follow [docs/install.md](../../docs/install.md), where `seimei setup` writes the service for the binary you run.
 
-To install seimei, follow the README: `seimei setup` writes the service for the binary you run.
+- `deploy.sh` moves a production checkout to a commit and restarts seimei once it is idle. [docs/architecture.md](../../docs/architecture.md#deploys) describes its steps.
+- `seimei.service` is the systemd user service for that checkout.
+- `seimei-tunnel.service` runs a cloudflared tunnel, as in [docs/reach.md](../../docs/reach.md).
+- `seimei.kdl`, `seimei-autologin.conf` and `waybar-driving.sh` are niri, autologin and waybar glue for one desktop.
+
+The units and the glue hold that deploy's own paths and config. Copy ideas from them, not the files.
