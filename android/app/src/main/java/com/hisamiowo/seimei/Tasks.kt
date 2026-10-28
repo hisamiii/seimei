@@ -1,5 +1,12 @@
 package com.hisamiowo.seimei
 
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.material3.rememberSwipeToDismissBoxState
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.animation.core.Animatable
@@ -398,7 +405,7 @@ private fun TaskRow(vm: Seimei, t: Task, shape: Shape, kind: String, parts: List
         else -> cs.surfaceContainer
     }
     val sub = if (warm) tk.onWarnContainer.copy(alpha = .72f) else x.text3
-    Row(
+    SwipeToTick(vm, t, shape) { Row(
         Modifier.fillMaxWidth().heightIn(min = if (inset) 56.dp else 64.dp).clip(shape).background(bg)
             .then(if (t.worker != null) Modifier.clickable { vm.openWorker(t.worker) } else Modifier)
             .padding(start = pad, end = 16.dp, top = 12.dp, bottom = 12.dp),
@@ -436,7 +443,37 @@ private fun TaskRow(vm: Seimei, t: Task, shape: Shape, kind: String, parts: List
             }, fontSize = 14.sp, lineHeight = 20.sp, color = sub, maxLines = if (warm) 2 else 1, overflow = TextOverflow.Ellipsis)
             if (bar) StepBar(t)
         }
+    } }
+}
+
+/** An open task of the user's: swipe right to tick it off, with the same Undo as the circle, which stays the accessible way. */
+@Composable
+private fun SwipeToTick(vm: Seimei, t: Task, shape: Shape, content: @Composable () -> Unit) {
+    if (!t.you || t.state == "done") return content()
+    val tk = LocalTokens.current
+    val state = rememberSwipeToDismissBoxState()
+    val scope = rememberCoroutineScope()
+    // A tick when the swipe crosses the mark where letting go completes it (BEHAVIOR.md 7)
+    val haptic = LocalHapticFeedback.current
+    LaunchedEffect(state) {
+        snapshotFlow { state.targetValue }.collect { if (it == SwipeToDismissBoxValue.StartToEnd) haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate) }
     }
+    SwipeToDismissBox(
+        state,
+        backgroundContent = {
+            Row(Modifier.fillMaxSize().clip(shape).background(tk.okContainer).padding(start = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.check, null, Modifier.size(20.dp), tint = tk.onOkContainer)
+                Spacer(Modifier.width(8.dp))
+                Text("Done", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = tk.onOkContainer)
+            }
+        },
+        enableDismissFromEndToStart = false,
+        onDismiss = {
+            if (it == SwipeToDismissBoxValue.StartToEnd) vm.tick(t.id, true)
+            // Settle at once: the board redraws the row as done, and Undo brings it back as it was.
+            scope.launch { state.snapTo(SwipeToDismissBoxValue.Settled) }
+        },
+    ) { content() }
 }
 
 /** The user's own task: an empty circle that ticks it off, a check that takes it back. */

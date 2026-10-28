@@ -265,14 +265,13 @@ body.offline .hello, body.offline #fp-card { display: none; }
 .tgrp.board > .tr.k-ask .ts { color: color-mix(in srgb, var(--on-warn-container) 72%, transparent); }
 .tgrp.board .tr .nx { color: var(--primary); }
 
-/* Swipe demo (tasks-swipe.html): the row slides, the ok container shows under it */
-.demo-cap { margin: 8px 16px 12px; font-size: 14px; line-height: 20px; color: var(--text-3); }
-.swipe { position: relative; overflow: hidden; }
-.swipe .under { position: absolute; inset: 0; display: flex; align-items: center; gap: 8px; padding-left: 20px; background: var(--ok-container); color: var(--on-ok-container); font-weight: 500; font-size: 14px; visibility: hidden; }
-.swipe .tr { position: relative; background: var(--warn-container); transition: transform var(--spring-ms) var(--spring); }
-.swipe.swiping { background: var(--ok-container) !important; }
-.swipe.swiping .under { visibility: visible; }
-.swipe.swiping .tr { transform: translateX(112px); border-radius: var(--shape-lg); }
+/* Swipe to complete (tasks.js swipeToTick): the content slides, the row becomes the "Done" container under it */
+.tr.swipe { position: relative; overflow: hidden; touch-action: pan-y; }
+.tr.swipe > * { transition: transform var(--spring-fast-ms) var(--spring-fast); }
+.tr.swiping { background: var(--ok-container) !important; color: var(--on-ok-container); }
+.tr.swiping > * { transform: translateX(var(--dx, 0)); transition: none; }
+.tr.swiping::before { content: "Done"; position: absolute; left: 20px; top: 50%; translate: 0 -50%; font-size: 14px; font-weight: 500; opacity: .55; }
+.tr.swiping.armed::before { opacity: 1; }
 
 /* ===== showcase ===== */
 /* The showcase: every screen in the final design. Loaded after the earlier after CSS; this covers what they

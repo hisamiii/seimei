@@ -139,6 +139,7 @@ function row(t, kind, parts, { tile = true, run = false, cls = '', q = '' } = {}
     if (done) tt.append(svg(CHECK, 20));
     tt.addEventListener('click', (e) => { e.stopPropagation(); tick(t); });
     r.append(tt);
+    if (!done) swipeToTick(r, t);
   }
   const tx = el('span', 'tx');
   const tl = el('span', 'tl');
@@ -403,6 +404,56 @@ function archPage() {
   }
   flush();
   return parts;
+}
+
+// An open task of the user's: a swipe to the right past MARK ticks it off (the circle stays the accessible way).
+// Only the row's content moves; the row itself turns into the "Done" container, so the group keeps its corners.
+const MARK = 96;
+function swipeToTick(r, t) {
+  r.classList.add('swipe');
+  let start = null;
+  let dx = 0;
+  let on = false;
+  let swipedAt = 0;
+  r.addEventListener('pointerdown', (e) => {
+    if (e.button) return;
+    start = { x: e.clientX, y: e.clientY, id: e.pointerId };
+    dx = 0;
+    on = false;
+  });
+  r.addEventListener('pointermove', (e) => {
+    if (!start || e.pointerId !== start.id) return;
+    const mx = e.clientX - start.x;
+    const my = e.clientY - start.y;
+    if (!on) {
+      // A scroll is not a swipe: the first clear direction decides.
+      if (Math.abs(my) > 8 && Math.abs(my) >= Math.abs(mx)) start = null;
+      if (!start || mx < 12) return;
+      on = true;
+      r.setPointerCapture(e.pointerId);
+      r.classList.add('swiping');
+    }
+    const armed = dx >= MARK;
+    dx = Math.max(0, mx);
+    r.style.setProperty('--dx', `${dx}px`);
+    if (dx >= MARK !== armed) {
+      r.classList.toggle('armed', dx >= MARK);
+      navigator.vibrate?.(8);
+    }
+  });
+  const end = (e) => {
+    if (!start) return;
+    start = null;
+    if (!on) return;
+    swipedAt = Date.now();
+    r.classList.remove('swiping', 'armed');
+    r.style.removeProperty('--dx');
+    if (e.type === 'pointerup' && dx >= MARK) tick(t);
+  };
+  r.addEventListener('pointerup', end);
+  r.addEventListener('pointercancel', end);
+  // The click that ends a swipe is no tap on the circle.
+  r.addEventListener('click', (e) => { if (Date.now() - swipedAt < 400) e.stopPropagation(); }, true);
 }
 
 async function tick(t, undo = true) {
