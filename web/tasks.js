@@ -10,7 +10,8 @@ import { openWorker, marked } from './agents.js';
 let board = keep.read('tasks') || { tasks: [], projects: [], archived: 0 };
 const VIEW = 'seimei.tb.view';
 const OPEN = 'seimei.tb.open';
-let view = localStorage.getItem(VIEW) === 'all' ? 'all' : 'now';
+let view = 'now';
+try { if (localStorage.getItem(VIEW) === 'all') view = 'all'; } catch {}
 // Projects opened by hand on All tasks (name -> true)
 let opened = {};
 try { opened = JSON.parse(localStorage.getItem(OPEN) || '{}'); } catch {}
