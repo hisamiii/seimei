@@ -80,4 +80,4 @@ Without it, a message from the page reaches the session through the dispatcher's
 - `CLAUDE_CONFIG_DIR` is honored for Claude Code's config dir (sessions registry, transcripts).
 - `SEIMEI_CLAUDE` is the Claude Code executable to run (default: `claude` on PATH); the tests point it at a fake.
 - `SEIMEI_WEB` serves the web page from a folder instead of the copy built into the binary: edit `web/` and reload, no rebuild.
-- `SEIMEI_INIT=systemd` or `openrc` overrides the PID 1 check: which service `seimei setup` writes, and how the queue plugin tells agents to start desktop apps (`systemd-run`; without systemd the compositor's spawn on niri, Hyprland or sway, else `setsid -f`).
+- `SEIMEI_INIT=systemd` or `openrc` overrides the init check (`/run/systemd/system`): which service `seimei setup` writes, and how the queue plugin tells agents to start desktop apps (`systemd-run`; without systemd the compositor's spawn on niri, Hyprland or sway, else `setsid -f`).

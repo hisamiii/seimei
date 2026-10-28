@@ -8,11 +8,17 @@ use crate::util::{fnmatch, read};
 
 pub const CG: &str = "/sys/fs/cgroup";
 
-/// Units via systemd's user manager; else (OpenRC and elogind) the scheduler makes its scopes by hand.
+/// Units via systemd's user manager; else (OpenRC and elogind) the scheduler makes its scopes by hand. The same check
+/// as seimei_core::util::systemd, with its SEIMEI_INIT; CLAUDE_QUEUE_SYSTEMD=0, cqd's own switch, turns it off too.
 pub fn systemd() -> bool {
     static S: OnceLock<bool> = OnceLock::new();
     *S.get_or_init(|| {
-        Path::new("/run/systemd/system").is_dir() && std::env::var("CLAUDE_QUEUE_SYSTEMD").as_deref() != Ok("0")
+        let init = match std::env::var("SEIMEI_INIT").as_deref() {
+            Ok("systemd") => true,
+            Ok(i) if !i.is_empty() => false,
+            _ => Path::new("/run/systemd/system").is_dir(),
+        };
+        init && std::env::var("CLAUDE_QUEUE_SYSTEMD").as_deref() != Ok("0")
     })
 }
 

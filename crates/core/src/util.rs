@@ -29,12 +29,13 @@ pub fn config_home() -> PathBuf {
     xdg("XDG_CONFIG_HOME", ".config")
 }
 
-/// Whether PID 1 is systemd (else OpenRC or another init). SEIMEI_INIT=systemd or =openrc says so instead.
+/// Whether systemd runs this machine (else OpenRC or another init): /run/systemd/system, the check sd_booted makes.
+/// SEIMEI_INIT=systemd or =openrc says so instead. seimei_queue::cgroup::systemd makes the same check.
 pub fn systemd() -> bool {
     match std::env::var("SEIMEI_INIT").as_deref() {
         Ok("systemd") => true,
         Ok(i) if !i.is_empty() => false,
-        _ => std::fs::read_to_string("/proc/1/comm").is_ok_and(|c| c.trim() == "systemd"),
+        _ => Path::new("/run/systemd/system").is_dir(),
     }
 }
 
