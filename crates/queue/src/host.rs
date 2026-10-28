@@ -1,12 +1,12 @@
 //! The queue inside `seimei serve`: the scheduler on an OS thread of its own with its own runtime, so a route or a
 //! plugin that panics or blocks the main runtime cannot stall a tick. A tick that panics is caught (server::safe_tick);
-//! a scheduler that dies as a whole is started again from scratch, and three deaths in a minute leave it off (safe
-//! mode: everything it froze thawed, the shims back on their own v1 gate). One scheduler per user: the first serve
-//! takes the lock, a second one (a dev instance, a test) runs without it.
+//! a scheduler that dies as a whole is started again from scratch, and three deaths in a minute leave it off until
+//! serve restarts (safe mode: a flag serve reads; the shadow froze nothing, so there is nothing to thaw). One scheduler
+//! per user: the first serve takes the lock, a second one (a dev instance, a test) runs without it.
 //!
 //! Modes (`[queue] mode` in config.toml): "off"; "shadow", beside a live cqd: it scans and classifies, binds no socket,
-//! touches nothing, and logs where its view differs from cqd's (shadow-diff.jsonl); "on" waits for the cutover. With no
-//! mode set it shadows when cqd answers on its socket, else it is off.
+//! touches nothing, and logs where its view differs from cqd's (shadow-diff.jsonl). "on" is refused until the cutover.
+//! With no mode set it shadows when cqd answers on its socket, else it is off.
 
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
@@ -39,16 +39,9 @@ impl Host {
     }
 }
 
-fn runtime_dir() -> PathBuf {
-    std::env::var_os("XDG_RUNTIME_DIR")
-        .filter(|d| !d.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| format!("/tmp/seimei-{}", unsafe { libc::getuid() }).into())
-}
-
 /// cqd's socket answers: the old queue runs.
 pub fn cqd_running() -> bool {
-    let sock = runtime_dir().join("claude-queue/cqd.sock");
+    let sock = crate::runtime_dir().join("cqd.sock");
     std::os::unix::net::UnixStream::connect(sock).is_ok()
 }
 
@@ -57,11 +50,8 @@ pub fn mode(configured: Option<&str>) -> Result<Mode, String> {
     match configured {
         Some("off") => Ok(Mode::Off),
         Some("shadow") => Ok(Mode::Shadow),
-        Some("on") => {
-            Err("[queue] mode = \"on\" comes with the cutover from cqd (docs/queue/DESIGN.md); running as shadow"
-                .into())
-        }
-        Some(other) => Err(format!("[queue] mode = {other:?}: off, shadow or on")),
+        Some("on") => Err("[queue] mode = \"on\" comes with the cutover from cqd (docs/queue/DESIGN.md)".into()),
+        Some(other) => Err(format!("[queue] mode = {other:?}: off or shadow")),
         None => Ok(if cqd_running() { Mode::Shadow } else { Mode::Off }),
     }
 }
@@ -75,24 +65,22 @@ fn take_lock(dir: &Path) -> Option<std::fs::File> {
 /// The shadow's arguments: cqd's policy, wait records and cgroup root, its own runtime and state folders, a copy of
 /// cqd's history (so ETAs and learned needs match), and nothing it may change.
 fn shadow_args(state: &Path) -> Args {
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-    let cq_run = runtime_dir().join("claude-queue");
+    let cqd = Args::default();
+    let cq_run = cqd.runtime_dir.clone();
     let state_dir = state.join("queue-shadow");
     let _ = std::fs::create_dir_all(&state_dir);
-    let _ = std::fs::copy(home.join(".local/state/claude-queue/history.jsonl"), state_dir.join("history.jsonl"));
+    let _ = std::fs::copy(cqd.state_dir.join("history.jsonl"), state_dir.join("history.jsonl"));
     Args {
-        runtime_dir: runtime_dir().join("seimei/queue-shadow"),
+        // Beside cqd's folder: $XDG_RUNTIME_DIR/seimei/queue-shadow in the usual case.
+        runtime_dir: cq_run.parent().unwrap_or(&cq_run).join("seimei/queue-shadow"),
         waits_dir: Some(cq_run.join("waits")),
         state_dir,
-        config_dir: home.join(".config/claude-queue"),
         cgroup_root: cgroup::user_cgroup(),
-        act_slices: "queue-*.slice".into(),
-        windows_cmd: "niri msg -j windows".into(),
         kmsg_cmd: String::new(),
         dry_run: true,
-        test_engine_dir: None,
         shadow: true,
         shadow_of: Some(cq_run),
+        ..cqd
     }
 }
 
@@ -128,7 +116,6 @@ pub fn start(mode: Mode, state: &Path) -> Option<Host> {
             deaths.retain(|d| t - d < 60.0);
             deaths.push(t);
             if deaths.len() >= 3 {
-                // Safe mode: nothing of ours stays frozen, and the queue stays off until serve restarts.
                 safe.store(true, Ordering::Relaxed);
                 eprintln!(
                     "seimei: queue: the scheduler died three times in a minute; it stays off until seimei restarts"
@@ -143,7 +130,7 @@ pub fn start(mode: Mode, state: &Path) -> Option<Host> {
         eprintln!("seimei: queue: no thread: {e}");
         return None;
     }
-    eprintln!("seimei: queue: {}", if mode == Mode::Shadow { "shadow beside cqd" } else { "on" });
+    eprintln!("seimei: queue: shadow beside cqd");
     Some(host)
 }
 

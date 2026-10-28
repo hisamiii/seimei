@@ -48,6 +48,8 @@ fn queue_cases() {
     let d = std::env::temp_dir().join(format!("seimei-queue-{}", std::process::id()));
     let run = d.join("run");
     env.set("XDG_RUNTIME_DIR", &run);
+    // An agent's shell has it set; it would win over XDG_RUNTIME_DIR.
+    env.remove("CLAUDE_QUEUE_DIR");
     let queue = |lib: &Path| Queue::new(&toml::Table::from_iter([("lib".into(), lib.display().to_string().into())]));
     for c in doc["wrap"].as_array().unwrap() {
         let argv: Vec<String> = serde_json::from_value(c["argv"].clone()).unwrap();

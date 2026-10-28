@@ -141,8 +141,31 @@ pub fn mins(s: Option<f64>) -> String {
     }
 }
 
+/// Seconds since the epoch at boot: /proc/PID/stat's start time counts from it.
 pub fn boot_time() -> f64 {
     read("/proc/stat").lines().find_map(|l| l.strip_prefix("btime ").and_then(|v| v.trim().parse().ok())).unwrap_or(0.0)
+}
+
+pub const DEVICES: &str = "/dev/kfd:/dev/dri/renderD*:/dev/nvidia*:/dev/accel/accel*";
+
+/// The device globs devgate gates: $CLAUDE_QUEUE_DEVICES, else DEVICES.
+pub fn device_patterns() -> Vec<String> {
+    let v = std::env::var("CLAUDE_QUEUE_DEVICES").ok().filter(|s| !s.is_empty());
+    v.as_deref().unwrap_or(DEVICES).split(':').map(String::from).collect()
+}
+
+/// A process's open fds on a gated device: (fd, path).
+pub fn devices(pid: i32, patterns: &[String]) -> Vec<(String, String)> {
+    let mut out = vec![];
+    let Ok(it) = std::fs::read_dir(format!("/proc/{pid}/fd")) else { return out };
+    for e in it.flatten() {
+        let Ok(link) = std::fs::read_link(e.path()) else { continue };
+        let link = link.to_string_lossy();
+        if link.starts_with("/dev/") && patterns.iter().any(|p| fnmatch(&link, p)) {
+            out.push((e.file_name().to_string_lossy().into_owned(), link.into_owned()));
+        }
+    }
+    out
 }
 
 /// render (DRM render node, graphics or Vulkan compute), compute (KFD, nvidia) or npu (accel). Fake test devices

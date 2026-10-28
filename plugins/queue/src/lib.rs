@@ -18,12 +18,14 @@ use regex::Regex;
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
-use seimei_core::guard::name_matches;
 use seimei_core::plugins::{Builtin, Factory, Fut, Host, Notify, Session, ask_guard, strip};
 use seimei_core::sessions::{self, Own};
 use seimei_core::tools::text;
 use seimei_core::util::{self, chars, now, read_json, truthy};
 use seimei_core::watches::{Watches, mins};
+use seimei_queue::cgroup::bench_running;
+use seimei_queue::runtime_dir;
+use seimei_queue::util::{boot_time, dev_kind, device_patterns, devices, meminfo, proc_cgroup, read, stat};
 
 pub const PLUGIN: Factory = Factory {
     name: "queue",
@@ -77,7 +79,6 @@ impl Builtin for Queue {
     }
 }
 
-const DEVICES: &str = "/dev/kfd:/dev/dri/renderD*:/dev/nvidia*:/dev/accel/accel*";
 /// A holder whose command ended this long ago is stuck.
 const STUCK: f64 = 600.0;
 const GIB: f64 = (1u64 << 30) as f64;
@@ -105,24 +106,11 @@ pub fn queue_name(name: &str) -> String {
     name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect()
 }
 
-fn runtime_dir() -> PathBuf {
-    std::env::var_os("XDG_RUNTIME_DIR")
-        .filter(|d| !d.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(format!("/tmp/claude-queue-{}", unsafe { libc::getuid() })))
-        .join("claude-queue")
-}
-
-/// Where claude-queue keeps its state: $SEIMEI_QUEUE_DIR, else its runtime folder.
-pub fn queue_dir() -> PathBuf {
-    std::env::var_os("SEIMEI_QUEUE_DIR").filter(|d| !d.is_empty()).map(PathBuf::from).unwrap_or_else(runtime_dir)
-}
-
 fn cqd_sock() -> PathBuf {
     std::env::var_os("SEIMEI_CQD_SOCK")
         .filter(|d| !d.is_empty())
         .map(PathBuf::from)
-        .unwrap_or(queue_dir().join("cqd.sock"))
+        .unwrap_or(runtime_dir().join("cqd.sock"))
 }
 
 /// One request to cqd, or None when it does not run. Blocking.
@@ -195,43 +183,24 @@ pub fn from_cqd(c: &Value, names: &HashMap<String, String>) -> Value {
         "hogs": c["hogs"], "grants_open": c["grants_open"]})
 }
 
-fn read(path: &str) -> String {
-    std::fs::read_to_string(path).unwrap_or_default()
+fn cmdline(pid: i32) -> String {
+    chars(read(format!("/proc/{pid}/cmdline")).replace('\0', " ").trim(), 120)
 }
 
-/// Fields after the command name: [0] is state, [1] ppid, [19] starttime.
-fn stat(pid: &str) -> Vec<String> {
-    let s = read(&format!("/proc/{pid}/stat"));
-    s.rsplit_once(')').map(|(_, rest)| rest.split_whitespace().map(String::from).collect()).unwrap_or_default()
-}
-
-fn boot() -> f64 {
-    read("/proc/stat").lines().find_map(|l| l.strip_prefix("btime ")?.trim().parse().ok()).unwrap_or(0.0)
-}
-
-fn cgroup(pid: &str) -> String {
-    let s = read(&format!("/proc/{pid}/cgroup"));
-    s.split_once("0::").map(|(_, r)| r.lines().next().unwrap_or("").to_string()).unwrap_or_default()
-}
-
-fn cmdline(pid: &str) -> String {
-    chars(read(&format!("/proc/{pid}/cmdline")).replace('\0', " ").trim(), 120)
-}
-
-fn rss(pid: &str) -> u64 {
+fn rss(pid: i32) -> u64 {
     static VMRSS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^VmRSS:\s+(\d+) kB").unwrap());
-    VMRSS.captures(&read(&format!("/proc/{pid}/status"))).and_then(|m| m[1].parse::<u64>().ok()).map_or(0, |k| k << 10)
+    VMRSS.captures(&read(format!("/proc/{pid}/status"))).and_then(|m| m[1].parse::<u64>().ok()).map_or(0, |k| k << 10)
 }
 
-fn comm(pid: &str) -> String {
-    read(&format!("/proc/{pid}/comm")).trim().to_string()
+fn comm(pid: i32) -> String {
+    read(format!("/proc/{pid}/comm")).trim().to_string()
 }
 
 /// Resident GTT + VRAM of one DRM fd: on a UMA machine GPU memory is system RAM that RSS does not show.
-fn gpu_mem(pid: &str, fd: &str) -> u64 {
+fn gpu_mem(pid: i32, fd: &str) -> u64 {
     static DRM: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?m)^drm-resident-(gtt|vram):\s+(\d+)\s*(\w+)?").unwrap());
-    (DRM.captures_iter(&read(&format!("/proc/{pid}/fdinfo/{fd}"))))
+    (DRM.captures_iter(&read(format!("/proc/{pid}/fdinfo/{fd}"))))
         .map(|m| {
             let unit = match m.get(3).map(|u| u.as_str()) {
                 Some("KiB") => 1 << 10,
@@ -248,44 +217,29 @@ pub fn gib(n: f64) -> String {
     format!("{:.1} GiB", n / GIB)
 }
 
-fn devices(pid: &str, patterns: &[Vec<char>]) -> Vec<(String, String)> {
-    let Ok(fds) = std::fs::read_dir(format!("/proc/{pid}/fd")) else { return vec![] };
-    let mut out = vec![];
-    for fd in fds.flatten() {
-        let Ok(link) = std::fs::read_link(fd.path()) else { continue };
-        let link = link.display().to_string();
-        let name: Vec<char> = link.chars().collect();
-        if link.starts_with("/dev/") && patterns.iter().any(|p| name_matches(p, &name)) {
-            out.push((fd.file_name().to_string_lossy().into_owned(), link));
-        }
-    }
-    out
-}
-
-/// A desktop app: render nodes only. Agent commands all inherit WAYLAND_DISPLAY, but compute holds /dev/kfd (ROCm)
-/// or /dev/accel (NPU).
+/// A desktop app: render nodes only. Agent commands all inherit WAYLAND_DISPLAY, but compute holds /dev/kfd (ROCm),
+/// /dev/nvidia* or /dev/accel (NPU).
 fn graphics(devs: &[(String, String)], env: &[u8]) -> bool {
     let shown = env.split(|b| *b == 0).any(|e| {
         let (k, v) = e.split_at(e.iter().position(|b| *b == b'=').unwrap_or(e.len()));
         (k == b"WAYLAND_DISPLAY" || k == b"DISPLAY") && v.len() > 1
     });
-    shown && !devs.iter().any(|(_, d)| d == "/dev/kfd" || d.starts_with("/dev/accel/") || d.starts_with("/dev/nvidia"))
+    shown && devs.iter().all(|(_, d)| dev_kind(d) == "render")
 }
 
 /// The Bash command that made this scope is over: no process in it still has a parent outside it, other than the
 /// init or user manager it was reparented to. A run_in_background job's shell is still claude's child.
-fn ended(scope: &str, procs: &HashMap<String, String>) -> bool {
+fn ended(scope: &str, procs: &HashMap<i32, String>) -> bool {
     let tail = format!("/{scope}");
     for (pid, cg) in procs {
         if !cg.ends_with(&tail) {
             continue;
         }
-        let st = stat(pid);
-        let Some(ppid) = st.get(1) else { continue };
-        if procs.get(ppid).is_some_and(|c| c.ends_with(&tail)) {
+        let Some(ppid) = stat(*pid).get(1).and_then(|p| p.parse::<i32>().ok()) else { continue };
+        if procs.get(&ppid).is_some_and(|c| c.ends_with(&tail)) {
             continue;
         }
-        if ppid == "0" || ppid == "1" || comm(ppid) == "systemd" {
+        if ppid <= 1 || comm(ppid) == "systemd" {
             continue;
         }
         return false;
@@ -293,12 +247,8 @@ fn ended(scope: &str, procs: &HashMap<String, String>) -> bool {
     true
 }
 
-fn bench_running(lock: &Path) -> bool {
-    use std::os::fd::AsRawFd;
-    let Ok(f) = std::fs::File::open(lock) else { return false };
-    // SAFETY: flock on a file this function owns; a shared lock it cannot take means a bench holds it.
-    let r = unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) };
-    r != 0 && std::io::Error::last_os_error().raw_os_error() == Some(libc::EWOULDBLOCK)
+fn pids() -> impl Iterator<Item = i32> {
+    (std::fs::read_dir("/proc").into_iter().flatten().flatten()).filter_map(|e| e.file_name().to_str()?.parse().ok())
 }
 
 /// Holders and waits right now, from cqd when it runs. Blocking.
@@ -312,32 +262,19 @@ pub fn snapshot(names: &HashMap<String, String>) -> Value {
 /// The /proc view, for when cqd is down. Blocking.
 pub fn proc_snapshot(names: &HashMap<String, String>) -> Value {
     static SLICE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"/queue\.slice/queue-(\w+)\.slice/([^/]+)").unwrap());
-    let patterns: Vec<Vec<char>> = std::env::var("CLAUDE_QUEUE_DEVICES")
-        .ok()
-        .filter(|d| !d.is_empty())
-        .unwrap_or(DEVICES.into())
-        .split(':')
-        .map(|p| p.chars().collect())
-        .collect();
+    let patterns = device_patterns();
     let tick = unsafe { libc::sysconf(libc::_SC_CLK_TCK) } as f64;
-    let (at, boot) = (now(), boot());
-    let procs: HashMap<String, String> = (std::fs::read_dir("/proc").into_iter().flatten().flatten())
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|p| p.bytes().all(|b| b.is_ascii_digit()))
-        .map(|p| {
-            let cg = cgroup(&p);
-            (p, cg)
-        })
-        .collect();
-    let queued: HashMap<String, String> =
-        procs.iter().filter(|(_, cg)| cg.contains("/queue.slice/")).map(|(p, c)| (p.clone(), c.clone())).collect();
+    let (at, boot) = (now(), boot_time());
+    let procs: HashMap<i32, String> = pids().map(|p| (p, proc_cgroup(p))).collect();
+    let queued: HashMap<i32, String> =
+        procs.iter().filter(|(_, cg)| cg.contains("/queue.slice/")).map(|(p, c)| (*p, c.clone())).collect();
     let (mut holders, mut outside) = (vec![], 0);
-    for (pid, cg) in &procs {
+    for (&pid, cg) in &procs {
         let devs = devices(pid, &patterns);
         if devs.is_empty() {
             continue;
         }
-        if !queued.contains_key(pid) {
+        if !queued.contains_key(&pid) {
             outside += 1;
             continue;
         }
@@ -346,47 +283,42 @@ pub fn proc_snapshot(names: &HashMap<String, String>) -> Value {
         let st = stat(pid);
         let started = st.get(19).and_then(|t| t.parse::<f64>().ok()).map_or(at, |t| boot + t / tick);
         let env = std::fs::read(format!("/proc/{pid}/environ")).unwrap_or_default();
-        let mut devices: Vec<&String> = devs.iter().map(|(_, d)| d).collect();
-        devices.sort();
-        devices.dedup();
+        let mut paths: Vec<&String> = devs.iter().map(|(_, d)| d).collect();
+        paths.sort();
+        paths.dedup();
         let gpu: u64 = devs.iter().filter(|(_, d)| d.starts_with("/dev/dri/")).map(|(fd, _)| gpu_mem(pid, fd)).sum();
         let age = at - started;
         let ended = !scope.is_empty() && ended(&scope, &queued);
-        holders.push(json!({"pid": pid.parse::<i64>().unwrap_or(0), "who": who(names, &agent), "agent": agent,
-            "command": cmdline(pid), "comm": comm(pid), "devices": devices, "rss": rss(pid), "gpu_mem": gpu,
+        holders.push(json!({"pid": pid, "who": who(names, &agent), "agent": agent,
+            "command": cmdline(pid), "comm": comm(pid), "devices": paths, "rss": rss(pid), "gpu_mem": gpu,
             "age": age, "gui": graphics(&devs, &env), "ended": ended, "stuck": ended && age >= STUCK}));
     }
     let mut waits = vec![];
-    for e in std::fs::read_dir(queue_dir().join("waits")).into_iter().flatten().flatten() {
-        let name = e.file_name().to_string_lossy().into_owned();
-        let parts: Vec<String> = read(&e.path().display().to_string()).split_whitespace().map(String::from).collect();
-        if parts.len() < 5 || !name.bytes().all(|b| b.is_ascii_digit()) {
+    for e in std::fs::read_dir(runtime_dir().join("waits")).into_iter().flatten().flatten() {
+        let Some(pid) = e.file_name().to_str().and_then(|n| n.parse::<i32>().ok()) else { continue };
+        let parts: Vec<String> = read(e.path()).split_whitespace().map(String::from).collect();
+        if parts.len() < 5 {
             continue;
         }
         // The waiter is gone (or its pid was reused).
-        if stat(&name).get(19) != Some(&parts[0]) {
+        if stat(pid).get(19) != Some(&parts[0]) {
             continue;
         }
-        let agent = procs.get(&name).and_then(|cg| SLICE.captures(cg)).map_or("?".into(), |m| m[1].to_string());
+        let agent = procs.get(&pid).and_then(|cg| SLICE.captures(cg)).map_or("?".into(), |m| m[1].to_string());
         let since: f64 = parts[1].parse().unwrap_or(at);
-        waits.push(json!({"pid": name.parse::<i64>().unwrap_or(0), "who": who(names, &agent), "agent": agent,
+        waits.push(json!({"pid": pid, "who": who(names, &agent), "agent": agent,
             "since": since, "waited": at - since, "kind": parts[2], "blocker": parts[3].parse::<i64>().unwrap_or(0),
-            "device": parts[4], "command": cmdline(&name)}));
+            "device": parts[4], "command": cmdline(pid)}));
     }
     waits.sort_by(|a, b| f(&a["since"]).total_cmp(&f(&b["since"])));
-    static MEM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^MemAvailable:\s+(\d+) kB").unwrap());
-    let mem = MEM.captures(&read("/proc/meminfo")).and_then(|m| m[1].parse::<u64>().ok()).map_or(0, |k| k << 10);
+    let mem = meminfo().get("MemAvailable").copied().unwrap_or(0.0) as u64;
     json!({"cqd": false, "holders": holders, "waits": waits, "outside": outside,
-        "bench": bench_running(&queue_dir().join("bench.lock")), "mem_free": mem})
+        "bench": bench_running(&runtime_dir().join("bench.lock")), "mem_free": mem})
 }
 
 /// The biggest processes by RSS: who a memory wait is waiting on.
-fn top_memory() -> Vec<(String, String, u64)> {
-    let mut rows: Vec<(u64, String, String)> = (std::fs::read_dir("/proc").into_iter().flatten().flatten())
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|p| p.bytes().all(|b| b.is_ascii_digit()))
-        .filter_map(|p| Some((rss(&p), comm(&p), p)).filter(|r| r.0 > 0))
-        .collect();
+fn top_memory() -> Vec<(i32, String, u64)> {
+    let mut rows: Vec<(u64, String, i32)> = pids().map(|p| (rss(p), comm(p), p)).filter(|r| r.0 > 0).collect();
     rows.sort_by(|a, b| b.cmp(a));
     rows.into_iter().take(3).map(|(r, comm, pid)| (pid, comm, r)).collect()
 }
@@ -592,7 +524,8 @@ pub async fn call(tool: &str, a: &Value, session: &dyn Session) -> Value {
             text(&blocking(move || describe(&snapshot(&names))).await, false)
         }
         "queue_control" => {
-            let mut action = s(&a["action"]);
+            let Some(action) = a["action"].as_str() else { return text("action is required", true) };
+            let mut action = action.to_string();
             if action == "revoke" && truthy(&a["kill"]) {
                 let snap = blocking(|| snapshot(&HashMap::new())).await;
                 let t = &a["target"];
@@ -748,7 +681,7 @@ impl Watcher {
 
     /// Waits past their time, from devgate's records (cqd is down): (line, key) for each one not told yet. Blocking.
     pub fn check(&self) -> Vec<(String, String)> {
-        let wdir = queue_dir().join("waits");
+        let wdir = runtime_dir().join("waits");
         let at = now();
         let mut due = HashSet::new();
         for e in std::fs::read_dir(&wdir).into_iter().flatten().flatten() {
@@ -756,9 +689,8 @@ impl Watcher {
             if !name.starts_with(|c: char| c.is_ascii_digit()) {
                 continue;
             }
-            let parts: Vec<String> =
-                read(&e.path().display().to_string()).split_whitespace().map(String::from).collect();
-            let st = if name.bytes().all(|b| b.is_ascii_digit()) { stat(&name) } else { vec![] };
+            let parts: Vec<String> = read(e.path()).split_whitespace().map(String::from).collect();
+            let st = name.parse::<i32>().map_or(vec![], stat);
             if parts.len() < 5 || st.get(19) != Some(&parts[0]) {
                 // A waiter killed mid-wait leaves its record behind.
                 let young = e
@@ -785,8 +717,7 @@ impl Watcher {
         let mut out = vec![];
         for w in snap["waits"].as_array().into_iter().flatten() {
             let pid = s(&w["pid"]);
-            let parts: Vec<String> =
-                read(&wdir.join(&pid).display().to_string()).split_whitespace().take(2).map(String::from).collect();
+            let parts: Vec<String> = read(wdir.join(&pid)).split_whitespace().take(2).map(String::from).collect();
             let key = format!("{pid}:{}", parts.join(":"));
             if due.contains(&key) && self.told.lock().unwrap().insert(key.clone()) {
                 out.push((

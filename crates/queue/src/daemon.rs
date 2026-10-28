@@ -18,7 +18,6 @@ use crate::util::*;
 
 pub type D = Rc<RefCell<Daemon>>;
 
-pub const DEVICES: &str = "/dev/kfd:/dev/dri/renderD*:/dev/nvidia*:/dev/accel/accel*";
 /// Seconds between fd scans of every process (queued ones are scanned every tick).
 const FULL_SWEEP: f64 = 3.0;
 /// Seconds between memory, hog and KFD occupancy samples.
@@ -56,9 +55,10 @@ pub fn default_policy() -> Map<String, Value> {
         "max_freeze_s": 3600,
         "auto_park": false,
         "rehome": true,
-        "desktop_names": ["vesktop", "electron*", "chromium*", "chrome", "firefox*", "waterfox*", "Xwayland", "mpv",
-                          "kitty", "waybar*", "blueman*", "btop", "z13gui", "swaybg", "niri*", "qs.py", "nwg-*"],
-        "desktop_args": ["--type=gpu-process", "*/qs.py", "qs.py"],
+        // Generic apps only; a machine's own (its bar, its widgets) go in policy.json.
+        "desktop_names": ["electron*", "chromium*", "chrome", "firefox*", "waterfox*", "Xwayland", "kitty", "foot",
+                          "alacritty"],
+        "desktop_args": ["--type=gpu-process"],
     });
     match v {
         Value::Object(m) => m,
@@ -167,6 +167,26 @@ pub struct Args {
     pub shadow_of: Option<PathBuf>,
 }
 
+/// cqd's defaults, as `seimei queue scheduler` starts with no flags (the cgroup root is found later).
+impl Default for Args {
+    fn default() -> Args {
+        Args {
+            runtime_dir: crate::runtime_dir(),
+            waits_dir: None,
+            state_dir: crate::home().join(".local/state/claude-queue"),
+            config_dir: crate::home().join(".config/claude-queue"),
+            cgroup_root: String::new(),
+            act_slices: "queue-*.slice".into(),
+            windows_cmd: "niri msg -j windows".into(),
+            kmsg_cmd: if systemd() { "journalctl -k -f -n 0 -o cat" } else { "dmesg -W" }.into(),
+            dry_run: false,
+            test_engine_dir: None,
+            shadow: false,
+            shadow_of: None,
+        }
+    }
+}
+
 /// A blocker of a request: (v1 kind, blocker pid, text).
 pub type Block = (String, i32, String);
 
@@ -244,13 +264,7 @@ impl Daemon {
             let _ = std::fs::create_dir_all(d);
         }
         let waits_dir = args.waits_dir.clone().unwrap_or_else(|| run.join("waits"));
-        let patterns = std::env::var("CLAUDE_QUEUE_DEVICES")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| DEVICES.into())
-            .split(':')
-            .map(String::from)
-            .collect();
+        let patterns = device_patterns();
         let policy_file = args.config_dir.join("policy.json");
         let d = Daemon {
             me: Weak::new(),
@@ -464,19 +478,6 @@ impl Daemon {
 
     // ---------- scanning ----------
 
-    pub fn devices(&self, pid: i32) -> Vec<(String, String)> {
-        let mut out = vec![];
-        let Ok(it) = std::fs::read_dir(format!("/proc/{pid}/fd")) else { return out };
-        for e in it.flatten() {
-            let Ok(link) = std::fs::read_link(e.path()) else { continue };
-            let link = link.to_string_lossy();
-            if link.starts_with("/dev/") && self.patterns.iter().any(|p| fnmatch(&link, p)) {
-                out.push((e.file_name().to_string_lossy().into_owned(), link.into_owned()));
-            }
-        }
-        out
-    }
-
     fn scan_procs(&mut self, now: f64) {
         let full = now - self.last_full >= FULL_SWEEP;
         if full {
@@ -511,7 +512,7 @@ impl Daemon {
             let p = &self.procs[&pid];
             if full_p || p.cg.contains("/queue.slice/") || !p.devs.is_empty() {
                 let cg = proc_cgroup(pid);
-                let devs = self.devices(pid);
+                let devs = devices(pid, &self.patterns);
                 let p = self.procs.get_mut(&pid).unwrap();
                 p.cg = cg;
                 p.devs = devs;
@@ -888,7 +889,7 @@ impl Daemon {
                 job.wait_s = self.waited(ps);
                 let first_pid = first.pid;
                 self.jobs_of(queued).insert(cg.clone(), job);
-                if queued {
+                if queued && self.args.shadow {
                     self.shadow_start(cg, first_pid, now);
                 }
             }
@@ -1103,7 +1104,9 @@ impl Daemon {
         self.wait_seen.retain(|k, (t, _)| live.contains(k) || now - *t <= 3600.0);
         out.sort_by(|a, b| a.since.total_cmp(&b.since));
         self.waiters = out.clone();
-        self.shadow_v1(&out, now);
+        if self.args.shadow {
+            self.shadow_v1(&out, now);
+        }
     }
 
     fn wait_events(&mut self, rows: &[Value], now: f64) {
@@ -1269,7 +1272,7 @@ impl Daemon {
             self.procs.insert(pid, Proc::new(pid, &st[19], ppid));
         }
         let cg = proc_cgroup(pid);
-        let devs = self.devices(pid);
+        let devs = devices(pid, &self.patterns);
         let p = self.procs.get_mut(&pid)?;
         p.cg = cg;
         p.devs = devs;
@@ -1329,7 +1332,7 @@ impl Daemon {
     fn scope_holds_now(&self, cg: &str) -> bool {
         read(format!("{CG}{cg}/cgroup.procs"))
             .split_whitespace()
-            .any(|p| !self.devices(p.parse().unwrap_or(0)).is_empty())
+            .any(|p| !devices(p.parse().unwrap_or(0), &self.patterns).is_empty())
     }
 
     /// Queued scopes holding a device right now (a v1 shim may have opened since the last tick): cg -> pid.
@@ -2081,13 +2084,9 @@ mod tests {
             state_dir: dir.join("state"),
             config_dir: dir.join("cfg"),
             cgroup_root: dir.join("cg").to_string_lossy().into_owned(),
-            act_slices: "queue-*.slice".into(),
             windows_cmd: String::new(),
             kmsg_cmd: String::new(),
-            dry_run: false,
-            test_engine_dir: None,
-            shadow: false,
-            shadow_of: None,
+            ..Args::default()
         })
     }
 
