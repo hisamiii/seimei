@@ -203,8 +203,6 @@ fn plan(p: &Value) -> Vec<PlanEntry> {
 struct Items {
     /// Tool calls started and not yet completed.
     calls: HashMap<String, ToolCall>,
-    /// The calls an approval request named.
-    asked: HashSet<String>,
     /// Agent messages that came in deltas (their completed item is said already).
     streamed: HashSet<String>,
     /// The turn said something: the next message starts on a paragraph of its own.
@@ -294,9 +292,6 @@ async fn read(
                                 content: call.content.clone(),
                                 ..ToolCall::default()
                             }));
-                            if !it.asked.remove(&call.id) {
-                                let _ = events.send(Event::Unasked(whole));
-                            }
                         }
                     }
                     (Some("turn/started"), None) => turn.known(&rpc, &s(&p["turn"]["id"])),
@@ -316,9 +311,6 @@ async fn read(
                     }
                     (Some(_), None) => {}
                     (Some(m), Some(id)) => {
-                        if matches!(m, "item/commandExecution/requestApproval" | "item/fileChange/requestApproval") {
-                            it.asked.insert(s(&p["itemId"]));
-                        }
                         request(m, id.clone(), p, &it.calls, &cwd, &handler, &rpc);
                     }
                     (None, Some(id)) => {

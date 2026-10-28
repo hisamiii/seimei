@@ -78,7 +78,6 @@ async fn turn(c: &mut Client) -> (Vec<Update>, Result<String, String>) {
             Some(Event::Update(u)) => ups.push(u),
             Some(Event::TurnEnd(end)) => return (ups, end),
             Some(Event::Unreadable(l)) => panic!("unreadable: {l}"),
-            Some(Event::Unasked(t)) => panic!("a call it asked for shows as unasked: {t:?}"),
             None => panic!("the agent exited mid-turn"),
         }
     }

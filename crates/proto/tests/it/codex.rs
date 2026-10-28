@@ -1,4 +1,4 @@
-//! The codex app-server client against tests/fakes/codex.py: the handshake, turns with text, reasoning and plans, approvals for a command and a file change (accepted, declined, cancelled while open), a command run unasked, interrupting a turn, the MCP servers in the thread's config, requests it turns down, resuming a thread, a failed turn and a server that dies.
+//! The codex app-server client against tests/fakes/codex.py: the handshake, turns with text, reasoning and plans, approvals for a command and a file change (accepted, declined, cancelled while open), interrupting a turn, the MCP servers in the thread's config, requests it turns down, resuming a thread, a failed turn and a server that dies.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -67,9 +67,9 @@ impl Handler for Pick {
     }
 }
 
-/// Events until the turn ends: the updates (text joined up), the calls it ran unasked, and how it ended.
-async fn turn(c: &mut Client) -> (Vec<Update>, Vec<String>, Result<String, String>) {
-    let (mut ups, mut unasked) = (vec![], vec![]);
+/// Events until the turn ends: the updates (text joined up) and how it ended.
+async fn turn(c: &mut Client) -> (Vec<Update>, Result<String, String>) {
+    let mut ups = vec![];
     loop {
         match tokio::time::timeout(Duration::from_secs(20), c.recv()).await.expect("an event in time") {
             Some(Event::Update(Update::Text(t))) => match ups.last_mut() {
@@ -77,9 +77,8 @@ async fn turn(c: &mut Client) -> (Vec<Update>, Vec<String>, Result<String, Strin
                 _ => ups.push(Update::Text(t)),
             },
             Some(Event::Update(u)) => ups.push(u),
-            Some(Event::TurnEnd(end)) => return (ups, unasked, end),
+            Some(Event::TurnEnd(end)) => return (ups, end),
             Some(Event::Unreadable(l)) => panic!("unreadable: {l}"),
-            Some(Event::Unasked(t)) => unasked.push(t.title),
             None => panic!("the server exited mid-turn"),
         }
     }
@@ -104,10 +103,10 @@ async fn handshake_and_turns() {
     assert_eq!(c.session["approvalPolicy"], "untrusted");
     assert!(!c.session_id.is_empty());
     c.prompt_text("hello there").unwrap();
-    assert_eq!(turn(&mut c).await, (vec![text("You said: hello there")], vec![], Ok("end_turn".into())));
+    assert_eq!(turn(&mut c).await, (vec![text("You said: hello there")], Ok("end_turn".into())));
     c.prompt_text("!think").unwrap();
     let want = vec![Update::Thought("Thinking it over.".into()), text("Done thinking.")];
-    assert_eq!(turn(&mut c).await, (want, vec![], Ok("end_turn".into())));
+    assert_eq!(turn(&mut c).await, (want, Ok("end_turn".into())));
     // A message that came whole, after one that streamed, is said too, on a paragraph of its own.
     c.prompt_text("!two").unwrap();
     assert_eq!(turn(&mut c).await.0, vec![text("First.\n\nSecond.")]);
@@ -123,9 +122,9 @@ async fn handshake_and_turns() {
     };
     let want =
         vec![plan(["pending", "pending", "pending"]), plan(["completed", "in_progress", "pending"]), text("Planned.")];
-    assert_eq!(turn(&mut c).await, (want, vec![], Ok("end_turn".into())));
+    assert_eq!(turn(&mut c).await, (want, Ok("end_turn".into())));
     c.prompt_text("!fail").unwrap();
-    assert_eq!(turn(&mut c).await.2, Err("the model is out of reach".into()));
+    assert_eq!(turn(&mut c).await.1, Err("the model is out of reach".into()));
     assert!(c.close().await.is_some_and(|s| s.success()));
 }
 
@@ -135,14 +134,15 @@ async fn unasked_calls_and_interrupts() {
     let pick = Pick::new(None);
     let mut c = codex::connect(o.clone(), pick.clone()).await.unwrap();
     c.prompt_text("!unasked ls").unwrap();
-    let (_, unasked, end) = turn(&mut c).await;
-    assert_eq!((unasked, end), (vec!["ls".to_string()], Ok("end_turn".into())));
+    let (ups, end) = turn(&mut c).await;
+    assert!(ups.iter().any(|u| matches!(u, Update::ToolCall(t) if t.title == "ls")), "{ups:?}");
+    assert_eq!(end, Ok("end_turn".into()));
 
     c.prompt_text("!wait").unwrap();
     let first = tokio::time::timeout(Duration::from_secs(10), c.recv()).await.unwrap();
     assert_eq!(first, Some(Event::Update(text("Work"))));
     c.cancel().unwrap();
-    assert_eq!(turn(&mut c).await.2, Ok("cancelled".into()));
+    assert_eq!(turn(&mut c).await.1, Ok("cancelled".into()));
 
     // The handler never decides: cancel drops it, answers cancel for it and interrupts the turn.
     c.prompt_text("!tool make").unwrap();
@@ -153,7 +153,7 @@ async fn unasked_calls_and_interrupts() {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     c.cancel().unwrap();
-    let (ups, _, end) = turn(&mut c).await;
+    let (ups, end) = turn(&mut c).await;
     assert_eq!(end, Ok("cancelled".into()));
     assert!(matches!(ups.last(), Some(Update::ToolCallUpdate(t)) if t.status == "failed"), "{ups:?}");
     assert!(pick.dropped.load(Ordering::SeqCst), "the handler's future was dropped");
@@ -161,9 +161,9 @@ async fn unasked_calls_and_interrupts() {
     // A cancel right after the prompt, before the turn has an id, still interrupts it.
     c.prompt_text("!wait").unwrap();
     c.cancel().unwrap();
-    assert_eq!(turn(&mut c).await.2, Ok("cancelled".into()));
+    assert_eq!(turn(&mut c).await.1, Ok("cancelled".into()));
     c.prompt_text("still there?").unwrap();
-    assert_eq!(turn(&mut c).await.2, Ok("end_turn".into()));
+    assert_eq!(turn(&mut c).await.1, Ok("end_turn".into()));
     c.close().await;
 }
 
@@ -178,12 +178,12 @@ async fn mcp_servers_and_requests_turned_down() {
     }];
     let mut c = codex::connect(o, Pick::new(Some("allow_once"))).await.unwrap();
     c.prompt_text("!mcp").unwrap();
-    let (ups, _, _) = turn(&mut c).await;
+    let (ups, _) = turn(&mut c).await;
     let want = json!([{"name": "shikigami", "command": "/usr/bin/seimei", "args": ["plugin", "shikigami"],
                        "env": ["SEIMEI_TOKEN"], "approval": "approve"}]);
     assert_eq!(last_text(&ups), want);
     c.prompt_text("!ask").unwrap();
-    let (ups, _, _) = turn(&mut c).await;
+    let (ups, _) = turn(&mut c).await;
     let want = json!([{"permissions": {}, "scope": "turn"}, {"answers": {}},
                       {"action": "decline", "content": null, "_meta": null}]);
     assert_eq!(last_text(&ups), want);
@@ -210,7 +210,7 @@ async fn a_server_that_dies_ends_its_turn() {
     let o = options("crash");
     let mut c = codex::connect(o.clone(), Pick::new(None)).await.unwrap();
     c.prompt_text("!crash").unwrap();
-    assert_eq!(turn(&mut c).await, (vec![text("Going down.")], vec![], Err("the agent exited".into())));
+    assert_eq!(turn(&mut c).await, (vec![text("Going down.")], Err("the agent exited".into())));
     assert_eq!(tokio::time::timeout(Duration::from_secs(5), c.recv()).await.unwrap(), None);
     assert!(c.close().await.is_some_and(|s| s.code() == Some(3)));
     let mut o = options("missing");

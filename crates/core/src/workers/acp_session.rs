@@ -119,7 +119,6 @@ impl Session {
                 self.turn_ended(end);
             }
             Event::Unreadable(line) => eprintln!("seimei: {} wrote: {}", self.w.name(), chars(&line, 200)),
-            Event::Unasked(_) => {}
         }
     }
 
