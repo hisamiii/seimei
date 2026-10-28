@@ -49,8 +49,8 @@ pub fn transcript(session: &str, cwd: &str) -> Option<PathBuf> {
     None
 }
 
-/// The project a path belongs to: its folder under ~/Development/Projects, ~/Development/Scratch, ~/.config or the
-/// older ~/src, else its top folder under home.
+/// The project a path belongs to: its folder under ~/Development/Projects, ~/Development/Scratch or ~/.config, else
+/// its top folder under home.
 pub fn project_of(path: &str) -> Option<String> {
     let path = crate::paths::expand(path);
     let rest = path.strip_prefix(&format!("{}/", home().display()))?;
@@ -60,7 +60,7 @@ pub fn project_of(path: &str) -> Option<String> {
     }
     let top = match parts.as_slice() {
         ["Development", "Projects" | "Scratch", p, ..] => p,
-        ["src" | ".config", p, ..] => p,
+        [".config", p, ..] => p,
         [p, ..] if p.starts_with('.') => return None,
         [p, ..] => p,
         [] => return None,

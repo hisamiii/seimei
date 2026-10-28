@@ -19,7 +19,7 @@ fn watch_cases() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("watches.json"), doc["start"].to_string()).unwrap();
     let events = Arc::new(EventLog::open(&dir.join("events.jsonl")).unwrap());
-    let push = Push::new(events, None, Fcm::new(dir.join("fcm.json")), &dir, WebPush::new(dir.join("vapid.pem"), "x"));
+    let push = Push::new(events, None, Fcm::new(dir.join("fcm.json")), WebPush::new(dir.join("vapid.pem"), "x"));
     let told = Arc::new(Mutex::new(Vec::<String>::new()));
     let t = told.clone();
     let w = Watches::new(&dir.join("watches.json"), push, Box::new(move |line| t.lock().unwrap().push(line.into())));

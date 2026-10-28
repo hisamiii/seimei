@@ -425,14 +425,11 @@ pub struct Push {
     pub fcm: Fcm,
     pub webpush: WebPush,
     pub stream: Stream,
-    path: PathBuf,
     st: Mutex<State>,
 }
 
 #[derive(Default)]
 struct State {
-    /// Questions pushed before the rules changed: withdrawn once at start (push.json held them).
-    stale_questions: bool,
     next: u64,
     /// device -> its open event streams.
     open: HashMap<String, Vec<(u64, Alive)>>,
@@ -477,25 +474,8 @@ enum Only {
 }
 
 impl Push {
-    pub fn new(
-        events: Arc<EventLog>,
-        auth: Option<Arc<Auth>>,
-        fcm: Fcm,
-        state: &std::path::Path,
-        webpush: WebPush,
-    ) -> Arc<Push> {
-        let path = state.join("push.json");
-        let stale = read_json(&path)
-            .is_some_and(|d| d.get("notified").is_some_and(|n| !n.is_null() && n != &json!({}) && n != &json!([])));
-        Arc::new(Push {
-            events,
-            auth,
-            fcm,
-            webpush,
-            stream: Stream::default(),
-            path,
-            st: Mutex::new(State { stale_questions: stale, ..State::default() }),
-        })
+    pub fn new(events: Arc<EventLog>, auth: Option<Arc<Auth>>, fcm: Fcm, webpush: WebPush) -> Arc<Push> {
+        Arc::new(Push { events, auth, fcm, webpush, stream: Stream::default(), st: Mutex::default() })
     }
 
     // ---------- which phones have the app open ----------
@@ -639,13 +619,8 @@ impl Push {
 
     // ---------- the event stream ----------
 
-    /// Follows the event log for good; also cancels questions left on the phones by a restart.
+    /// Follows the event log for good.
     pub async fn run(self: Arc<Self>) {
-        let stale = std::mem::take(&mut self.st.lock().unwrap().stale_questions);
-        if stale {
-            self.fire(json!({"kind": "question", "tag": "question", "cancel": 1}), 3600, Only::All);
-            let _ = std::fs::write(&self.path, "{}");
-        }
         loop {
             let mut q = self.events.subscribe();
             while let Some(ev) = q.recv().await {

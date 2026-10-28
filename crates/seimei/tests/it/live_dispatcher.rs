@@ -98,7 +98,6 @@ async fn run(work: std::path::PathBuf, state: std::path::PathBuf) {
         events.clone(),
         None,
         Fcm::new(state.join("nofcm.json")),
-        &state,
         WebPush::new(state.join("vapid.pem"), "http://localhost"),
     );
     let cfg: toml::Table = format!(

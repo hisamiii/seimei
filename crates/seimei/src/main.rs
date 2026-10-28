@@ -378,7 +378,6 @@ fn main() {
         events.clone(),
         auth.clone(),
         Fcm::new(data_dir().join("firebase/service-account.json")),
-        &state,
         WebPush::new(state.join("push-vapid.pem"), &origin),
     );
     if let Some(auth) = &auth {

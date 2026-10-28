@@ -121,14 +121,13 @@ async fn rules_who_gets_what_when() {
     let (a, _b) = phones(&auth);
     let mut fcm = Fcm::new(sa);
     fcm.base = format!("http://{addr}");
-    let p = Push::new(events.clone(), Some(auth.clone()), fcm, &d, WebPush::new(d.join("vapid.pem"), "x"));
+    let p = Push::new(events.clone(), Some(auth.clone()), fcm, WebPush::new(d.join("vapid.pem"), "x"));
     tokio::spawn(p.clone().run());
     settle().await;
 
     // Phone A has the app open, B does not.
     let open_a = p.opened(Some(&a), Box::new(|| true));
     settle().await;
-    assert!(took(&f).is_empty(), "no stale question cancel without old state");
     events.add(json!({"type": "approval", "aid": "a1", "who": "seimei", "action": "command", "target": "run a command",
                       "detail": "claude stop x"}));
     settle().await;
@@ -238,17 +237,6 @@ async fn rules_who_gets_what_when() {
     assert!(took(&f).is_empty(), "nothing while the app is open");
     assert_eq!(f.tokens.lock().unwrap().len(), 1, "one access token for every send");
 
-    // Old push.json with pushed questions: withdrawn once at start, on every phone.
-    std::fs::write(d.join("push.json"), r#"{"notified": ["w:w1"]}"#).unwrap();
-    let mut fcm = Fcm::new(d.join("service-account.json"));
-    fcm.base = format!("http://{addr}");
-    let q = Push::new(events.clone(), Some(auth.clone()), fcm, &d, WebPush::new(d.join("vapid.pem"), "x"));
-    tokio::spawn(q.run());
-    settle().await;
-    let out = took(&f);
-    assert_eq!(out.len(), auth.push_devices().len());
-    assert!(out.iter().all(|(_, x)| x["kind"] == "question" && x["cancel"] == "1"));
-    assert_eq!(std::fs::read_to_string(d.join("push.json")).unwrap(), "{}");
     std::fs::remove_dir_all(&d).unwrap();
 }
 
@@ -388,7 +376,6 @@ async fn a_browser_gets_pushes_while_its_page_is_away() {
         events.clone(),
         Some(auth.clone()),
         Fcm::new(d.join("none.json")),
-        &d,
         WebPush::new(d.join("vapid.pem"), "x"),
     );
     tokio::spawn(p.clone().run());

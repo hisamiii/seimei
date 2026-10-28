@@ -624,7 +624,7 @@ impl Dispatcher {
             system_prompt: SystemPrompt::Preset { append: Some(self.prompt()) },
             env,
             // It delegates through summon: subagents would be invisible to the user. Agent is still Task in some CLIs.
-            disallowed_tools: OFF_TOOLS.iter().chain(&["Agent", "Task", "LSP"]).map(|t| t.to_string()).collect(),
+            disallowed_tools: OFF_TOOLS.iter().chain(&["Agent", "LSP"]).map(|t| t.to_string()).collect(),
             skills: Some(vec![]),
             sdk_mcp_servers: vec!["seimei".into()],
             mcp_servers: plugins.servers("seimei", None, None),

@@ -66,9 +66,6 @@ object Push {
         for ((id, name, importance) in CHANNELS) {
             nm.createNotificationChannel(NotificationChannel(id, name, importance).apply { description = ABOUT[id] })
         }
-        // Questions and automatic replies no longer notify: seimei decides what pings.
-        nm.deleteNotificationChannel("question")
-        nm.deleteNotificationChannel("reply")
         Delivery.start(ctx)
     }
 
