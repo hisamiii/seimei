@@ -33,7 +33,7 @@ fn main() {
     std::fs::write(dest, Value::Object(out).to_string()).unwrap();
 }
 
-/// One tool as the WM own serves it.
+/// One tool as the WM described by own serves it.
 fn finish(mut t: Value, own: &Value, display: &Value) -> Value {
     let o = t.as_object_mut().unwrap();
     o.remove("on");
