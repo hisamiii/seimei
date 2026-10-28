@@ -25,6 +25,7 @@ Layout:
 - Rust: edition 2024, `rustfmt.toml` in the root (120 columns), `cargo clippy` clean. Idiomatic Rust with std or a small well-known crate (shlex, glob, percent-encoding) or a few lines of our own.
 - What must stay stable: the wire protocol to the web page and the app, and the meaning of the state files (any valid JSON, the formatting is free). For the guard, blocking a bit more is fine; every real bypass becomes a new case in `tests/cases/guard.json`.
 - Python (the test fakes, the connectors' helpers): 4-space indent, the existing style.
+- Case files (`tests/cases/`, `plugins/*/tests/cases.json`): one case per line, as `json.dumps(case, ensure_ascii=False, separators=(", ", ": "))` writes it.
 - Kotlin: the app's existing style.
 - Web: plain JS and CSS; colors only through the theme tokens.
 - No dead code. Git keeps the code if it is ever needed again.

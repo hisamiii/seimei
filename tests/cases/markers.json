@@ -1,710 +1,100 @@
 {
  "about": "The dispatcher's reply markers (head: lane markers and re: lines, final or while streaming; None means the start could still be a marker), turn labels (why), the class of the events that start a turn (class: user always reaches the chat, noise stays in the trajectory) and reply quotes (quoted: the chip and the line seimei gets).",
  "head": [
-  {
-   "text": "Plain reply.",
-   "final": true,
-   "head": {
-    "lanes": [],
-    "quote": null,
-    "rest": "Plain reply."
-   }
-  },
-  {
-   "text": "Plain reply.",
-   "final": false,
-   "head": {
-    "lanes": [],
-    "quote": null,
-    "rest": "Plain reply."
-   }
-  },
-  {
-   "text": "chat: for you",
-   "final": true,
-   "head": {
-    "lanes": [
-     "chat:"
-    ],
-    "quote": null,
-    "rest": "for you"
-   }
-  },
-  {
-   "text": "chat: for you",
-   "final": false,
-   "head": {
-    "lanes": [
-     "chat:"
-    ],
-    "quote": null,
-    "rest": "for you"
-   }
-  },
-  {
-   "text": "trajectory: noted",
-   "final": true,
-   "head": {
-    "lanes": [
-     "trajectory:"
-    ],
-    "quote": null,
-    "rest": "noted"
-   }
-  },
-  {
-   "text": "trajectory: noted",
-   "final": false,
-   "head": {
-    "lanes": [
-     "trajectory:"
-    ],
-    "quote": null,
-    "rest": "noted"
-   }
-  },
-  {
-   "text": "chat: trajectory: both",
-   "final": true,
-   "head": {
-    "lanes": [
-     "chat:",
-     "trajectory:"
-    ],
-    "quote": null,
-    "rest": "both"
-   }
-  },
-  {
-   "text": "chat: trajectory: both",
-   "final": false,
-   "head": {
-    "lanes": [
-     "chat:",
-     "trajectory:"
-    ],
-    "quote": null,
-    "rest": "both"
-   }
-  },
-  {
-   "text": "trajectory:chat:tight",
-   "final": true,
-   "head": {
-    "lanes": [
-     "trajectory:",
-     "chat:"
-    ],
-    "quote": null,
-    "rest": "tight"
-   }
-  },
-  {
-   "text": "trajectory:chat:tight",
-   "final": false,
-   "head": {
-    "lanes": [
-     "trajectory:",
-     "chat:"
-    ],
-    "quote": null,
-    "rest": "tight"
-   }
-  },
-  {
-   "text": "  chat:   spaced",
-   "final": true,
-   "head": {
-    "lanes": [
-     "chat:"
-    ],
-    "quote": null,
-    "rest": "spaced"
-   }
-  },
-  {
-   "text": "  chat:   spaced",
-   "final": false,
-   "head": {
-    "lanes": [
-     "chat:"
-    ],
-    "quote": null,
-    "rest": "spaced"
-   }
-  },
-  {
-   "text": "re: the wallpaper thing\nYes, done.",
-   "final": true,
-   "head": {
-    "lanes": [],
-    "quote": "the wallpaper thing",
-    "rest": "Yes, done."
-   }
-  },
-  {
-   "text": "re: the wallpaper thing\nYes, done.",
-   "final": false,
-   "head": {
-    "lanes": [],
-    "quote": "the wallpaper thing",
-    "rest": "Yes, done."
-   }
-  },
-  {
-   "text": "RE: Upper case\nok",
-   "final": true,
-   "head": {
-    "lanes": [],
-    "quote": "Upper case",
-    "rest": "ok"
-   }
-  },
-  {
-   "text": "RE: Upper case\nok",
-   "final": false,
-   "head": {
-    "lanes": [],
-    "quote": "Upper case",
-    "rest": "ok"
-   }
-  },
-  {
-   "text": "chat: re: quoted words\nbody",
-   "final": true,
-   "head": {
-    "lanes": [
-     "chat:"
-    ],
-    "quote": "quoted words",
-    "rest": "body"
-   }
-  },
-  {
-   "text": "chat: re: quoted words\nbody",
-   "final": false,
-   "head": {
-    "lanes": [
-     "chat:"
-    ],
-    "quote": "quoted words",
-    "rest": "body"
-   }
-  },
-  {
-   "text": "re: quoted words\nchat: after",
-   "final": true,
-   "head": {
-    "lanes": [
-     "chat:"
-    ],
-    "quote": "quoted words",
-    "rest": "after"
-   }
-  },
-  {
-   "text": "re: quoted words\nchat: after",
-   "final": false,
-   "head": {
-    "lanes": [
-     "chat:"
-    ],
-    "quote": "quoted words",
-    "rest": "after"
-   }
-  },
-  {
-   "text": "re: no newline yet",
-   "final": true,
-   "head": {
-    "lanes": [],
-    "quote": null,
-    "rest": "re: no newline yet"
-   }
-  },
-  {
-   "text": "re: no newline yet",
-   "final": false,
-   "head": null
-  },
-  {
-   "text": "re: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nlong line",
-   "final": true,
-   "head": {
-    "lanes": [],
-    "quote": null,
-    "rest": "re: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nlong line"
-   }
-  },
-  {
-   "text": "re: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nlong line",
-   "final": false,
-   "head": {
-    "lanes": [],
-    "quote": null,
-    "rest": "re: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nlong line"
-   }
-  },
-  {
-   "text": "re:\nempty quote",
-   "final": true,
-   "head": {
-    "lanes": [],
-    "quote": "",
-    "rest": "empty quote"
-   }
-  },
-  {
-   "text": "re:\nempty quote",
-   "final": false,
-   "head": {
-    "lanes": [],
-    "quote": "",
-    "rest": "empty quote"
-   }
-  },
-  {
-   "text": "c",
-   "final": true,
-   "head": {
-    "lanes": [],
-    "quote": null,
-    "rest": "c"
-   }
-  },
-  {
-   "text": "c",
-   "final": false,
-   "head": null
-  },
-  {
-   "text": "ch",
-   "final": true,
-   "head": {
-    "lanes": [],
-    "quote": null,
-    "rest": "ch"
-   }
-  },
-  {
-   "text": "ch",
-   "final": false,
-   "head": null
-  },
-  {
-   "text": "chat",
-   "final": true,
-   "head": {
-    "lanes": [],
-    "quote": null,
-    "rest": "chat"
-   }
-  },
-  {
-   "text": "chat",
-   "final": false,
-   "head": null
-  },
-  {
-   "text": "chat:",
-   "final": true,
-   "head": {
-    "lanes": [
-     "chat:"
-    ],
-    "quote": null,
-    "rest": ""
-   }
-  },
-  {
-   "text": "chat:",
-   "final": false,
-   "head": null
-  },
-  {
-   "text": "t",
-   "final": true,
-   "head": {
-    "lanes": [],
-    "quote": null,
-    "rest": "t"
-   }
-  },
-  {
-   "text": "t",
-   "final": false,
-   "head": null
-  },
-  {
-   "text": "traj",
-   "final": true,
-   "head": {
-    "lanes": [],
-    "quote": null,
-    "rest": "traj"
-   }
-  },
-  {
-   "text": "traj",
-   "final": false,
-   "head": null
-  },
-  {
-   "text": "r",
-   "final": true,
-   "head": {
-    "lanes": [],
-    "quote": null,
-    "rest": "r"
-   }
-  },
-  {
-   "text": "r",
-   "final": false,
-   "head": null
-  },
-  {
-   "text": "re",
-   "final": true,
-   "head": {
-    "lanes": [],
-    "quote": null,
-    "rest": "re"
-   }
-  },
-  {
-   "text": "re",
-   "final": false,
-   "head": null
-  },
-  {
-   "text": "re:",
-   "final": true,
-   "head": {
-    "lanes": [],
-    "quote": null,
-    "rest": "re:"
-   }
-  },
-  {
-   "text": "re:",
-   "final": false,
-   "head": null
-  },
-  {
-   "text": "",
-   "final": true,
-   "head": {
-    "lanes": [],
-    "quote": null,
-    "rest": ""
-   }
-  },
-  {
-   "text": "",
-   "final": false,
-   "head": null
-  },
-  {
-   "text": "   ",
-   "final": true,
-   "head": {
-    "lanes": [],
-    "quote": null,
-    "rest": "   "
-   }
-  },
-  {
-   "text": "   ",
-   "final": false,
-   "head": null
-  },
-  {
-   "text": "rex marks",
-   "final": true,
-   "head": {
-    "lanes": [],
-    "quote": null,
-    "rest": "rex marks"
-   }
-  },
-  {
-   "text": "rex marks",
-   "final": false,
-   "head": {
-    "lanes": [],
-    "quote": null,
-    "rest": "rex marks"
-   }
-  },
-  {
-   "text": "Chat: capital",
-   "final": true,
-   "head": {
-    "lanes": [],
-    "quote": null,
-    "rest": "Chat: capital"
-   }
-  },
-  {
-   "text": "Chat: capital",
-   "final": false,
-   "head": {
-    "lanes": [],
-    "quote": null,
-    "rest": "Chat: capital"
-   }
-  },
-  {
-   "text": "re: a\nre: b\ntext",
-   "final": true,
-   "head": {
-    "lanes": [],
-    "quote": "a",
-    "rest": "re: b\ntext"
-   }
-  },
-  {
-   "text": "re: a\nre: b\ntext",
-   "final": false,
-   "head": {
-    "lanes": [],
-    "quote": "a",
-    "rest": "re: b\ntext"
-   }
-  },
-  {
-   "text": "trajectory:",
-   "final": true,
-   "head": {
-    "lanes": [
-     "trajectory:"
-    ],
-    "quote": null,
-    "rest": ""
-   }
-  },
-  {
-   "text": "trajectory:",
-   "final": false,
-   "head": null
-  },
-  {
-   "text": "chat:\n\nnew paragraph",
-   "final": true,
-   "head": {
-    "lanes": [
-     "chat:"
-    ],
-    "quote": null,
-    "rest": "new paragraph"
-   }
-  },
-  {
-   "text": "chat:\n\nnew paragraph",
-   "final": false,
-   "head": {
-    "lanes": [
-     "chat:"
-    ],
-    "quote": null,
-    "rest": "new paragraph"
-   }
-  },
-  {
-   "text": "über ünïcode",
-   "final": true,
-   "head": {
-    "lanes": [],
-    "quote": null,
-    "rest": "über ünïcode"
-   }
-  },
-  {
-   "text": "über ünïcode",
-   "final": false,
-   "head": {
-    "lanes": [],
-    "quote": null,
-    "rest": "über ünïcode"
-   }
-  },
-  {
-   "text": "re: ünïcode quote\nbody",
-   "final": true,
-   "head": {
-    "lanes": [],
-    "quote": "ünïcode quote",
-    "rest": "body"
-   }
-  },
-  {
-   "text": "re: ünïcode quote\nbody",
-   "final": false,
-   "head": {
-    "lanes": [],
-    "quote": "ünïcode quote",
-    "rest": "body"
-   }
-  }
+  {"text": "Plain reply.", "final": true, "head": {"lanes": [], "quote": null, "rest": "Plain reply."}},
+  {"text": "Plain reply.", "final": false, "head": {"lanes": [], "quote": null, "rest": "Plain reply."}},
+  {"text": "chat: for you", "final": true, "head": {"lanes": ["chat:"], "quote": null, "rest": "for you"}},
+  {"text": "chat: for you", "final": false, "head": {"lanes": ["chat:"], "quote": null, "rest": "for you"}},
+  {"text": "trajectory: noted", "final": true, "head": {"lanes": ["trajectory:"], "quote": null, "rest": "noted"}},
+  {"text": "trajectory: noted", "final": false, "head": {"lanes": ["trajectory:"], "quote": null, "rest": "noted"}},
+  {"text": "chat: trajectory: both", "final": true, "head": {"lanes": ["chat:", "trajectory:"], "quote": null, "rest": "both"}},
+  {"text": "chat: trajectory: both", "final": false, "head": {"lanes": ["chat:", "trajectory:"], "quote": null, "rest": "both"}},
+  {"text": "trajectory:chat:tight", "final": true, "head": {"lanes": ["trajectory:", "chat:"], "quote": null, "rest": "tight"}},
+  {"text": "trajectory:chat:tight", "final": false, "head": {"lanes": ["trajectory:", "chat:"], "quote": null, "rest": "tight"}},
+  {"text": "  chat:   spaced", "final": true, "head": {"lanes": ["chat:"], "quote": null, "rest": "spaced"}},
+  {"text": "  chat:   spaced", "final": false, "head": {"lanes": ["chat:"], "quote": null, "rest": "spaced"}},
+  {"text": "re: the wallpaper thing\nYes, done.", "final": true, "head": {"lanes": [], "quote": "the wallpaper thing", "rest": "Yes, done."}},
+  {"text": "re: the wallpaper thing\nYes, done.", "final": false, "head": {"lanes": [], "quote": "the wallpaper thing", "rest": "Yes, done."}},
+  {"text": "RE: Upper case\nok", "final": true, "head": {"lanes": [], "quote": "Upper case", "rest": "ok"}},
+  {"text": "RE: Upper case\nok", "final": false, "head": {"lanes": [], "quote": "Upper case", "rest": "ok"}},
+  {"text": "chat: re: quoted words\nbody", "final": true, "head": {"lanes": ["chat:"], "quote": "quoted words", "rest": "body"}},
+  {"text": "chat: re: quoted words\nbody", "final": false, "head": {"lanes": ["chat:"], "quote": "quoted words", "rest": "body"}},
+  {"text": "re: quoted words\nchat: after", "final": true, "head": {"lanes": ["chat:"], "quote": "quoted words", "rest": "after"}},
+  {"text": "re: quoted words\nchat: after", "final": false, "head": {"lanes": ["chat:"], "quote": "quoted words", "rest": "after"}},
+  {"text": "re: no newline yet", "final": true, "head": {"lanes": [], "quote": null, "rest": "re: no newline yet"}},
+  {"text": "re: no newline yet", "final": false, "head": null},
+  {"text": "re: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nlong line", "final": true, "head": {"lanes": [], "quote": null, "rest": "re: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nlong line"}},
+  {"text": "re: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nlong line", "final": false, "head": {"lanes": [], "quote": null, "rest": "re: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nlong line"}},
+  {"text": "re:\nempty quote", "final": true, "head": {"lanes": [], "quote": "", "rest": "empty quote"}},
+  {"text": "re:\nempty quote", "final": false, "head": {"lanes": [], "quote": "", "rest": "empty quote"}},
+  {"text": "c", "final": true, "head": {"lanes": [], "quote": null, "rest": "c"}},
+  {"text": "c", "final": false, "head": null},
+  {"text": "ch", "final": true, "head": {"lanes": [], "quote": null, "rest": "ch"}},
+  {"text": "ch", "final": false, "head": null},
+  {"text": "chat", "final": true, "head": {"lanes": [], "quote": null, "rest": "chat"}},
+  {"text": "chat", "final": false, "head": null},
+  {"text": "chat:", "final": true, "head": {"lanes": ["chat:"], "quote": null, "rest": ""}},
+  {"text": "chat:", "final": false, "head": null},
+  {"text": "t", "final": true, "head": {"lanes": [], "quote": null, "rest": "t"}},
+  {"text": "t", "final": false, "head": null},
+  {"text": "traj", "final": true, "head": {"lanes": [], "quote": null, "rest": "traj"}},
+  {"text": "traj", "final": false, "head": null},
+  {"text": "r", "final": true, "head": {"lanes": [], "quote": null, "rest": "r"}},
+  {"text": "r", "final": false, "head": null},
+  {"text": "re", "final": true, "head": {"lanes": [], "quote": null, "rest": "re"}},
+  {"text": "re", "final": false, "head": null},
+  {"text": "re:", "final": true, "head": {"lanes": [], "quote": null, "rest": "re:"}},
+  {"text": "re:", "final": false, "head": null},
+  {"text": "", "final": true, "head": {"lanes": [], "quote": null, "rest": ""}},
+  {"text": "", "final": false, "head": null},
+  {"text": "   ", "final": true, "head": {"lanes": [], "quote": null, "rest": "   "}},
+  {"text": "   ", "final": false, "head": null},
+  {"text": "rex marks", "final": true, "head": {"lanes": [], "quote": null, "rest": "rex marks"}},
+  {"text": "rex marks", "final": false, "head": {"lanes": [], "quote": null, "rest": "rex marks"}},
+  {"text": "Chat: capital", "final": true, "head": {"lanes": [], "quote": null, "rest": "Chat: capital"}},
+  {"text": "Chat: capital", "final": false, "head": {"lanes": [], "quote": null, "rest": "Chat: capital"}},
+  {"text": "re: a\nre: b\ntext", "final": true, "head": {"lanes": [], "quote": "a", "rest": "re: b\ntext"}},
+  {"text": "re: a\nre: b\ntext", "final": false, "head": {"lanes": [], "quote": "a", "rest": "re: b\ntext"}},
+  {"text": "trajectory:", "final": true, "head": {"lanes": ["trajectory:"], "quote": null, "rest": ""}},
+  {"text": "trajectory:", "final": false, "head": null},
+  {"text": "chat:\n\nnew paragraph", "final": true, "head": {"lanes": ["chat:"], "quote": null, "rest": "new paragraph"}},
+  {"text": "chat:\n\nnew paragraph", "final": false, "head": {"lanes": ["chat:"], "quote": null, "rest": "new paragraph"}},
+  {"text": "über ünïcode", "final": true, "head": {"lanes": [], "quote": null, "rest": "über ünïcode"}},
+  {"text": "über ünïcode", "final": false, "head": {"lanes": [], "quote": null, "rest": "über ünïcode"}},
+  {"text": "re: ünïcode quote\nbody", "final": true, "head": {"lanes": [], "quote": "ünïcode quote", "rest": "body"}},
+  {"text": "re: ünïcode quote\nbody", "final": false, "head": {"lanes": [], "quote": "ünïcode quote", "rest": "body"}}
  ],
  "why": [
-  {
-   "text": "Events:\n- shikigami app-tester (ab12) finished: 3 bugs fixed\n- shikigami asr-bench (cd34) failed: oom",
-   "why": "app-tester finished, asr-bench failed"
-  },
-  {
-   "text": "session kv-gate asks: which variant?",
-   "why": "session kv-gate asks"
-  },
-  {
-   "text": "",
-   "why": ""
-  },
-  {
-   "text": "notes waited 30 min",
-   "why": "notes waited 30 min"
-  },
-  {
-   "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-   "why": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-  },
-  {
-   "text": "shikigami a-b_c (z9) asks: what: now",
-   "why": "a-b_c asks"
-  }
+  {"text": "Events:\n- shikigami app-tester (ab12) finished: 3 bugs fixed\n- shikigami asr-bench (cd34) failed: oom", "why": "app-tester finished, asr-bench failed"},
+  {"text": "session kv-gate asks: which variant?", "why": "session kv-gate asks"},
+  {"text": "", "why": ""},
+  {"text": "notes waited 30 min", "why": "notes waited 30 min"},
+  {"text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "why": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
+  {"text": "shikigami a-b_c (z9) asks: what: now", "why": "a-b_c asks"}
  ],
  "quoted": [
-  {
-   "event": {
-    "type": "assistant",
-    "text": "  Some   reply\nwith lines  "
-   },
-   "chip": "Some reply with lines",
-   "line": "Some reply with lines"
-  },
-  {
-   "event": {
-    "type": "worker",
-    "event": "done",
-    "name": "app-tester",
-    "worker": "ab12",
-    "text": "## Report\n\n- fixed it"
-   },
-   "chip": "app-tester finished: Report",
-   "line": "shikigami app-tester (ab12) finished: Report"
-  },
-  {
-   "event": {
-    "type": "worker",
-    "event": "asking",
-    "name": "x",
-    "worker": "w1",
-    "text": "> which one?"
-   },
-   "chip": "x asks: which one?",
-   "line": "shikigami x (w1) asks: which one?"
-  },
-  {
-   "event": {
-    "type": "worker",
-    "event": "running",
-    "name": "x",
-    "worker": "w1",
-    "text": "hi"
-   },
-   "chip": "",
-   "line": ""
-  },
-  {
-   "event": {
-    "type": "approval",
-    "who": "seimei",
-    "target": "run a  command",
-    "worker": null
-   },
-   "chip": "seimei wants to run a command",
-   "line": "approval card: seimei wants to run a command"
-  },
-  {
-   "event": {
-    "type": "approval",
-    "who": "dev",
-    "target": "edit a file",
-    "worker": "ab12"
-   },
-   "chip": "dev wants to edit a file",
-   "line": "approval card: dev (ab12) wants to edit a file"
-  },
-  {
-   "event": {
-    "type": "user",
-    "text": "hi"
-   },
-   "chip": "",
-   "line": ""
-  },
-  {
-   "event": {
-    "type": "assistant",
-    "text": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
-   },
-   "chip": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
-   "line": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
-  }
+  {"event": {"type": "assistant", "text": "  Some   reply\nwith lines  "}, "chip": "Some reply with lines", "line": "Some reply with lines"},
+  {"event": {"type": "worker", "event": "done", "name": "app-tester", "worker": "ab12", "text": "## Report\n\n- fixed it"}, "chip": "app-tester finished: Report", "line": "shikigami app-tester (ab12) finished: Report"},
+  {"event": {"type": "worker", "event": "asking", "name": "x", "worker": "w1", "text": "> which one?"}, "chip": "x asks: which one?", "line": "shikigami x (w1) asks: which one?"},
+  {"event": {"type": "worker", "event": "running", "name": "x", "worker": "w1", "text": "hi"}, "chip": "", "line": ""},
+  {"event": {"type": "approval", "who": "seimei", "target": "run a  command", "worker": null}, "chip": "seimei wants to run a command", "line": "approval card: seimei wants to run a command"},
+  {"event": {"type": "approval", "who": "dev", "target": "edit a file", "worker": "ab12"}, "chip": "dev wants to edit a file", "line": "approval card: dev (ab12) wants to edit a file"},
+  {"event": {"type": "user", "text": "hi"}, "chip": "", "line": ""},
+  {"event": {"type": "assistant", "text": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"}, "chip": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy", "line": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"}
  ],
  "class": [
-  {
-   "text": "[seimei] shikigami app-tester (ab12) finished: 3 bugs fixed",
-   "class": "user"
-  },
-  {
-   "text": "[seimei] Events:\n- claude-queue: q1's command ended but pid 5 still holds npu (2 min since)\n- shikigami asr-bench (cd34) failed: oom",
-   "class": "user"
-  },
-  {
-   "text": "[seimei] session \"kv-gate\" asks: Which branch?",
-   "class": "user"
-  },
-  {
-   "text": "[seimei] shikigami dev (ab12) waits on a permission card: Bash rm -r build",
-   "class": "user"
-  },
-  {
-   "text": "[seimei] claude-queue: kernel: amdgpu 0000:c4:00.0: [drm] *ERROR* GPU reset; grants closed until `cq grants on`",
-   "class": "user"
-  },
-  {
-   "text": "[seimei] claude-queue: moved pid 77 waybar out of the queue (desktop)",
-   "class": "noise"
-  },
-  {
-   "text": "[seimei] Events:\n- seimei restarted; resumed shikigami dev (told to check their state first)\n- session \"cleanup\" (pid 6575) was closed",
-   "class": "noise"
-  },
-  {
-   "text": "[seimei] shikigami dev (ab12) was interrupted by a restart",
-   "class": "noise"
-  },
-  {
-   "text": "[seimei] session \"cleanup\" (pid 6575) died without closing: killed or crashed",
-   "class": "other"
-  },
-  {
-   "text": "[seimei] session \"cleanup\" finished a turn",
-   "class": "other"
-  },
-  {
-   "text": "[seimei] Events:\n- claude-queue: q1's command ended but pid 5 still holds npu\n- session \"x\" finished a turn",
-   "class": "other"
-  },
-  {
-   "text": "[seimei] claude-queue: kernel: [34321.3] amdxdna 0000:c5:00.1: [drm] *ERROR* aie2_tdr_detect: TDR timeout detected; grants closed until `cq grants on`",
-   "class": "noise"
-  },
-  {
-   "text": "[seimei] claude-queue: kernel: [1200.1] amdgpu 0000:c4:00.0: [drm] *ERROR* ring gfx_0.0.0 timeout; grants closed until `cq grants on`",
-   "class": "user"
-  }
+  {"text": "[seimei] shikigami app-tester (ab12) finished: 3 bugs fixed", "class": "user"},
+  {"text": "[seimei] Events:\n- claude-queue: q1's command ended but pid 5 still holds npu (2 min since)\n- shikigami asr-bench (cd34) failed: oom", "class": "user"},
+  {"text": "[seimei] session \"kv-gate\" asks: Which branch?", "class": "user"},
+  {"text": "[seimei] shikigami dev (ab12) waits on a permission card: Bash rm -r build", "class": "user"},
+  {"text": "[seimei] claude-queue: kernel: amdgpu 0000:c4:00.0: [drm] *ERROR* GPU reset; grants closed until `cq grants on`", "class": "user"},
+  {"text": "[seimei] claude-queue: moved pid 77 waybar out of the queue (desktop)", "class": "noise"},
+  {"text": "[seimei] Events:\n- seimei restarted; resumed shikigami dev (told to check their state first)\n- session \"cleanup\" (pid 6575) was closed", "class": "noise"},
+  {"text": "[seimei] shikigami dev (ab12) was interrupted by a restart", "class": "noise"},
+  {"text": "[seimei] session \"cleanup\" (pid 6575) died without closing: killed or crashed", "class": "other"},
+  {"text": "[seimei] session \"cleanup\" finished a turn", "class": "other"},
+  {"text": "[seimei] Events:\n- claude-queue: q1's command ended but pid 5 still holds npu\n- session \"x\" finished a turn", "class": "other"},
+  {"text": "[seimei] claude-queue: kernel: [34321.3] amdxdna 0000:c5:00.1: [drm] *ERROR* aie2_tdr_detect: TDR timeout detected; grants closed until `cq grants on`", "class": "noise"},
+  {"text": "[seimei] claude-queue: kernel: [1200.1] amdgpu 0000:c4:00.0: [drm] *ERROR* ring gfx_0.0.0 timeout; grants closed until `cq grants on`", "class": "user"}
  ]
 }

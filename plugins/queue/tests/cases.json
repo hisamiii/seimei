@@ -1,146 +1,25 @@
 {
  "about": "The queue plugin's texts and hooks, run by plugins/queue/tests/queue.rs. describe: the queue tool's text from the gate's status reply. wrap and env: how sessions run under claude-queue ({lib} and {run} are the test's folders). triggers: whether a queue_wait target is valid.",
- "names": {
-  "npu_dma": "shikigami npu-dma",
-  "seimei": "seimei (you)"
- },
+ "names": {"npu_dma": "shikigami npu-dma", "seimei": "seimei (you)"},
  "describe": [
-  {
-   "name": "a holder and two waiters",
-   "snap": {
-    "t": 1000,
-    "holder": {
-     "id": "L3",
-     "agent": "npu_dma",
-     "pid": 4242,
-     "cmd": "python bench.py --long",
-     "device": "/dev/accel/accel0",
-     "since": 400,
-     "ended": false
-    },
-    "waiters": [
-     {
-      "agent": "seimei",
-      "pid": 99,
-      "cmd": "make gpu",
-      "device": "/dev/kfd",
-      "since": 970
-     },
-     {
-      "agent": "other",
-      "pid": 7,
-      "cmd": "./run",
-      "device": "/dev/dri/renderD128",
-      "since": 990
-     }
-    ]
-   },
-   "want": "L3 holds the turn: pid 4242 (shikigami npu-dma) python bench.py --long, /dev/accel/accel0 for 10 min\nWaiting, in order:\n- pid 99 (seimei (you)) make gpu, /dev/kfd for 30s\n- pid 7 (other) ./run, /dev/dri/renderD128 for 10s"
-  },
-  {
-   "name": "a holder whose processes ended",
-   "snap": {
-    "t": 100,
-    "holder": {
-     "id": "L1",
-     "agent": "seimei",
-     "pid": 5,
-     "cmd": "x",
-     "device": "/dev/kfd",
-     "since": 40,
-     "ended": true
-    },
-    "waiters": []
-   },
-   "want": "L1 holds the turn: pid 5 (seimei (you)) x, /dev/kfd for 1 min\nIts processes are gone; the turn passes on in a few seconds.\nNothing waits."
-  },
-  {
-   "name": "free",
-   "snap": {
-    "t": 1,
-    "holder": null,
-    "waiters": []
-   },
-   "want": "Nobody holds the GPU/NPU turn.\nNothing waits."
-  },
-  {
-   "name": "cqd answers instead",
-   "snap": {
-    "t": 1,
-    "holders": []
-   },
-   "want": "Another daemon (claude-queue's cqd) holds the queue socket; seimei's queue starts once it stops."
-  }
+  {"name": "a holder and two waiters", "snap": {"t": 1000, "holder": {"id": "L3", "agent": "npu_dma", "pid": 4242, "cmd": "python bench.py --long", "device": "/dev/accel/accel0", "since": 400, "ended": false}, "waiters": [{"agent": "seimei", "pid": 99, "cmd": "make gpu", "device": "/dev/kfd", "since": 970}, {"agent": "other", "pid": 7, "cmd": "./run", "device": "/dev/dri/renderD128", "since": 990}]}, "want": "L3 holds the turn: pid 4242 (shikigami npu-dma) python bench.py --long, /dev/accel/accel0 for 10 min\nWaiting, in order:\n- pid 99 (seimei (you)) make gpu, /dev/kfd for 30s\n- pid 7 (other) ./run, /dev/dri/renderD128 for 10s"},
+  {"name": "a holder whose processes ended", "snap": {"t": 100, "holder": {"id": "L1", "agent": "seimei", "pid": 5, "cmd": "x", "device": "/dev/kfd", "since": 40, "ended": true}, "waiters": []}, "want": "L1 holds the turn: pid 5 (seimei (you)) x, /dev/kfd for 1 min\nIts processes are gone; the turn passes on in a few seconds.\nNothing waits."},
+  {"name": "free", "snap": {"t": 1, "holder": null, "waiters": []}, "want": "Nobody holds the GPU/NPU turn.\nNothing waits."},
+  {"name": "cqd answers instead", "snap": {"t": 1, "holders": []}, "want": "Another daemon (claude-queue's cqd) holds the queue socket; seimei's queue starts once it stops."}
  ],
  "wrap": [
-  {
-   "name": "npu-dma",
-   "argv": [
-    "claude",
-    "--resume",
-    "abc"
-   ],
-   "want": [
-    "claude-queue",
-    "npu-dma",
-    "--resume",
-    "abc"
-   ]
-  },
-  {
-   "name": "npu-dma",
-   "argv": [
-    "kitty",
-    "claude"
-   ],
-   "want": [
-    "kitty",
-    "claude"
-   ]
-  }
+  {"name": "npu-dma", "argv": ["claude", "--resume", "abc"], "want": ["claude-queue", "npu-dma", "--resume", "abc"]},
+  {"name": "npu-dma", "argv": ["kitty", "claude"], "want": ["kitty", "claude"]}
  ],
  "env": [
-  {
-   "name": "npu-dma",
-   "prefix": true,
-   "want": {
-    "CLAUDE_QUEUE": "npu_dma",
-    "CLAUDE_QUEUE_DIR": "{run}/claude-queue",
-    "CLAUDE_QUEUE_LIB": "{lib}/devgate.so",
-    "CLAUDE_CODE_SHELL_PREFIX": "{lib}/queue-prefix"
-   }
-  },
-  {
-   "name": "seimei",
-   "prefix": false,
-   "want": {}
-  }
+  {"name": "npu-dma", "prefix": true, "want": {"CLAUDE_QUEUE": "npu_dma", "CLAUDE_QUEUE_DIR": "{run}/claude-queue", "CLAUDE_QUEUE_LIB": "{lib}/devgate.so", "CLAUDE_CODE_SHELL_PREFIX": "{lib}/queue-prefix"}},
+  {"name": "seimei", "prefix": false, "want": {}}
  ],
  "triggers": [
-  {
-   "trigger": "queue_wait",
-   "target": "15",
-   "ok": true
-  },
-  {
-   "trigger": "queue_wait",
-   "target": "*",
-   "ok": true
-  },
-  {
-   "trigger": "queue_wait",
-   "target": "2.5",
-   "ok": true
-  },
-  {
-   "trigger": "queue_wait",
-   "target": "soon",
-   "ok": false
-  },
-  {
-   "trigger": "queue_free",
-   "target": "anything",
-   "ok": true
-  }
+  {"trigger": "queue_wait", "target": "15", "ok": true},
+  {"trigger": "queue_wait", "target": "*", "ok": true},
+  {"trigger": "queue_wait", "target": "2.5", "ok": true},
+  {"trigger": "queue_wait", "target": "soon", "ok": false},
+  {"trigger": "queue_free", "target": "anything", "ok": true}
  ]
 }
