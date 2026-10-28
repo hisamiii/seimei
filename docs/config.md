@@ -1,46 +1,79 @@
 # Configuration
 
-seimei reads `~/.config/seimei/config.toml`. Every key is optional; `config.example.toml` lists them with their defaults.
+seimei reads `~/.config/seimei/config.toml`, and every key is optional. `config.example.toml` lists every key with its default.
+
+## Keys
+
+The table lists each section's keys, their defaults and what they set. Notes on some keys follow the table.
 
 | section | key | default | what |
 |---|---|---|---|
-| `[server]` | `port` | 8417 | listens on 127.0.0.1 (`--dev` uses port + 1) |
-| | `origin` | `http://localhost:8417` | the address phones and browsers use, behind HTTPS ([reach.md](reach.md)); also the passkey domain and the only Host served besides localhost |
-| | `web` | `true` | `false` runs seimei without the phone server: the plugins only (the GPU queue among them) |
+| `[server]` | `port` | 8417 | the port on 127.0.0.1; `--dev` uses port + 1 |
+| | `origin` | `http://localhost:8417` | the HTTPS address phones and browsers use |
+| | `web` | `true` | `false` runs only the plugins, without the phone server |
 | `[dispatcher]` | `model` | `[models] work` | the dispatcher's model |
-| | `name` | `seimei` (`seimei-dev` with `--dev`) | its session's name in Claude Code's registry |
+| | `name` | `seimei` | its session's name in Claude Code's registry |
 | | `cwd` | `~` | its working folder |
-| | `compact_window` | 400000, or 80% of `[models] context` when that is less | tokens at which its context compacts |
-| `[models]` | `work` | `opus` | for real work, and a shikigami's model when none is picked |
-| | `routine` | `sonnet` | for routine jobs |
-| | `quick` | `haiku` | for lookups, and every shikigami's own subagents |
-| | `context` | `1m` | the most context a shikigami gets (200k, 256k, 400k, 1m); `seimei setup` writes sonnet and 200k for Pro |
+| | `compact_window` | 400000 | tokens at which its context compacts |
+| `[models]` | `work` | `opus` | real work, and the default shikigami model |
+| | `routine` | `sonnet` | routine jobs |
+| | `quick` | `haiku` | lookups, and every shikigami's own subagents |
+| | `context` | `1m` | the most context a shikigami gets |
 | `[host]` | `about` | `computer` | how prompts name the machine |
-| `[sessions]` | `terminal` | `$TERMINAL`'s or the first one installed (kitty, foot, alacritty, ghostty, wezterm, gnome-terminal, konsole, xfce4-terminal) | how a session opens for the user (release, "Open on server"); the command follows |
-| `[approvals]` | `dispatcher` | `default` | permission mode, by Claude Code's names |
-| | `shikigami` | `default` | permission mode and ceiling for shikigami |
-| `[plugins]` | `enabled` | `[]` | the plugins to load; `[plugins.<name>]` tables configure them ([plugins.md](plugins.md)) |
-| `[agents.<name>]` | `command`, `args`, `env` | none | an ACP agent a shikigami can run on (summon's `harness = "acp:<name>"`); it keeps its own login and model |
+| `[sessions]` | `terminal` | see below | the terminal a session opens in for the user |
+| `[approvals]` | `dispatcher` | `default` | the dispatcher's permission mode |
+| | `shikigami` | `default` | the permission mode and ceiling for shikigami |
+| `[plugins]` | `enabled` | `[]` | the plugins to load |
+| `[agents.<name>]` | `command`, `args`, `env` | none | an ACP agent a shikigami can run on |
 | | `protocol` | `acp` | `codex` for `codex app-server` |
-| `[asr]` | `key_file` | `~/.config/seimei/openrouter-key` | the OpenRouter key for dictation ([asr.md](asr.md)); without one the mic is not shown |
-| | `model`, `fallback` | `microsoft/mai-transcribe-2`, `mistralai/voxtral-mini-transcribe-3-0` | the transcription models; the fallback gets the call when the first fails |
-| | `language` | `en` | |
-| | `vocab_max` | 100 | terms sent with a clip at most (MAI got worse with 150) |
-| | `zdr` | `false` | only providers that keep no data (OpenRouter's `provider.zdr`; both default models have one) |
-| | `deny` | `[]` | words and globs never sent, whatever their source |
-| `[asr.sources]` | `chat`, `names`, `board`, `window`, `draft`, `auto` | all `true` | one switch per source of the word list; with all off only the pins in `asr/words.txt` go |
+| `[asr]` | `key_file` | `~/.config/seimei/openrouter-key` | the OpenRouter key for dictation |
+| | `model` | `microsoft/mai-transcribe-2` | the transcription model |
+| | `fallback` | `mistralai/voxtral-mini-transcribe-3-0` | the model that gets the call when the first fails |
+| | `language` | `en` | the spoken language |
+| | `vocab_max` | 100 | the most terms sent with a clip |
+| | `zdr` | `false` | use only providers that keep no data |
+| | `deny` | `[]` | words and globs never sent |
+| `[asr.sources]` | `chat`, `names`, `board`, `window`, `draft`, `auto` | all `true` | one switch per source of the word list |
+
+Notes on the keys:
+
+- `origin` is behind HTTPS, see [reach.md](reach.md). It is also the passkey domain, and the only Host served besides localhost.
+- `web = false` still runs the plugins, the GPU queue among them.
+- `[dispatcher] name` is `seimei-dev` with `--dev`.
+- `compact_window` is 80% of `[models] context` when that is less than 400000.
+- `context` takes 200k, 256k, 400k or 1m. For a Pro plan, `seimei setup` writes sonnet and 200k.
+- `[sessions] terminal` opens a session the user takes over, as with "Open on server". It is a command line such as `foot -D {cwd} --title {title}`, and the session's command follows it. The default is `$TERMINAL`'s, else the first one installed of kitty, foot, alacritty, ghostty, wezterm, gnome-terminal, konsole and xfce4-terminal.
+- `[approvals]` takes Claude Code's mode names, see [Permission modes](#permission-modes).
+- `[plugins.<name>]` tables configure each plugin, see [plugins.md](plugins.md).
+- An `[agents.<name>]` agent is picked with summon's `harness = "acp:<name>"`. It keeps its own login and model.
+- Without the OpenRouter key in `key_file` the mic is not shown, see [asr.md](asr.md). `vocab_max` stays at 100 because MAI got worse with 150.
+- `zdr` sets OpenRouter's `provider.zdr`. Both default models have such a provider.
+- With every `[asr.sources]` switch off, only the pins in `asr/words.txt` are sent.
 
 ## Permission modes
 
-`default` (Ask), `acceptEdits` (Allow edits), `plan` (Plan first), `auto`, `dontAsk` (Only what's allowed), `bypassPermissions` (Bypass). Whatever Claude Code would ask in a terminal becomes a card. The shikigami mode is a ceiling: summon may only pick a stricter one, and only the user raises it, on a shikigami's page.
+The modes take Claude Code's names, and whatever Claude Code would ask in a terminal becomes a card. The shikigami mode is a ceiling: summon may pick only a stricter one, and only the user raises it, on a shikigami's page.
 
-In bypass nothing asks, except Claude Code's own safety checks: those it still raises in bypass (for example "This shell -c script runs rm and could not be checked") are blocked without a card.
+| mode | shown as |
+|---|---|
+| `default` | Ask |
+| `acceptEdits` | Allow edits |
+| `plan` | Plan first |
+| `auto` | auto |
+| `dontAsk` | Only what's allowed |
+| `bypassPermissions` | Bypass |
+
+In bypass nothing asks, except Claude Code's own safety checks. seimei blocks those without a card, for example "This shell -c script runs rm and could not be checked". Read [security.md](security.md) before you pick bypass.
 
 ## Guard rules
 
-`~/.config/seimei/guard.toml` holds the guard's rules, one `[[rule]]` each. `contrib/guard.example.toml` documents the fields and has a starting set of rules, commented out; `seimei setup` offers to write it with every rule on when there is no guard.toml yet. Without the file there are no rules. seimei reads the file again when it changes. See [security.md](security.md) for how a call is decided.
+`~/.config/seimei/guard.toml` holds the guard's rules, one `[[rule]]` each. Without the file there are no rules.
+
+`contrib/guard.example.toml` documents the fields and has a starting set of rules, commented out. When there is no guard.toml yet, `seimei setup` offers to write that set with every rule on. seimei reads the file again when it changes. [security.md](security.md) says how a call is decided.
 
 ## Command line
+
+`seimei` with no command runs the server. Run every command on the server, as the user seimei runs as.
 
 ```
 seimei, seimei serve         run the server (the default)
@@ -58,11 +91,11 @@ seimei lockdown              end every session, remove every passkey, unpair eve
 seimei screen-password [--clear]  the screen lock password the desktop plugin types
 ```
 
-Run them on the server, as the user seimei runs as.
-
 ## The kitty bridge
 
-The page types into the user's own Claude sessions, and answers their questions, through kitty remote control when they run in kitty. `seimei setup` offers it when kitty is installed: it writes `kitty-rc.conf` (a password allowed only `ls`, `send-text`, `send-key` and `get-text`) in seimei's data folder, and kitty.conf gets three lines:
+The kitty bridge lets the page type into the user's own Claude Code sessions, and answer their questions, when they run in kitty. `seimei setup` offers it when kitty is installed.
+
+Setup writes `kitty-rc.conf` in seimei's data folder. It holds a password that allows only `ls`, `send-text`, `send-key` and `get-text`. Then kitty.conf gets three lines:
 
 ```
 allow_remote_control password
@@ -70,12 +103,15 @@ listen_on unix:${XDG_RUNTIME_DIR}/kitty-{kitty_pid}
 include ~/.local/share/seimei/kitty-rc.conf
 ```
 
-Without it, a message from the page reaches the session through the dispatcher's SendMessage, and the session's questions are answered on the server.
+Without the bridge, a message from the page reaches the session through the dispatcher's SendMessage. The session's questions are then answered on the server.
 
 ## Environment
 
-- seimei uses your Claude Code login, however you configured it (`claude login`, an API key, `apiKeyHelper`): the sessions get seimei's environment as is.
-- `CLAUDE_CONFIG_DIR` is honored for Claude Code's config dir (sessions registry, transcripts).
-- `SEIMEI_CLAUDE` is the Claude Code executable to run (default: `claude` on PATH); the tests point it at a fake.
-- `SEIMEI_WEB` serves the web page from a folder instead of the copy built into the binary: edit `web/` and reload, no rebuild.
-- `SEIMEI_INIT=systemd` or `openrc` overrides the init check (`/run/systemd/system`): which service `seimei setup` writes, and how the queue plugin tells agents to start desktop apps (`systemd-run`; without systemd the compositor's spawn on niri, Hyprland or sway, else `setsid -f`).
+The sessions get seimei's environment as is, so seimei uses your Claude Code login however you set it up. That can be `claude login`, an API key or `apiKeyHelper`.
+
+- `CLAUDE_CONFIG_DIR` sets Claude Code's config dir, with the sessions registry and transcripts.
+- `SEIMEI_CLAUDE` is the Claude Code executable to run. The default is `claude` on PATH, and the tests point it at a fake.
+- `SEIMEI_WEB` serves the web page from a folder instead of the copy in the binary. Edit `web/` and reload, with no rebuild.
+- `SEIMEI_INIT` is `systemd` or `openrc` and overrides the init check, which looks at `/run/systemd/system`.
+
+The init check picks the service `seimei setup` writes. It also picks how the queue plugin tells agents to start desktop apps. With systemd that is `systemd-run`. Without it, the compositor's spawn is used on niri, Hyprland or sway, else `setsid -f`.
