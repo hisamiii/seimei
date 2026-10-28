@@ -593,8 +593,6 @@ body.login { display: grid; place-items: center; grid-template-rows: 1fr; paddin
 .squestion ol { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 4px; }
 .squestion li span { color: var(--text); }
 .squestion li small { display: block; font-size: 12px; color: color-mix(in srgb, var(--on-warn-container) 80%, transparent); }
-.running { display: flex; flex-direction: column; gap: 4px; background: var(--surface-low); border-radius: 14px; padding: 10px 12px; font-size: 13px; color: var(--text-3); }
-.running code { font: 12px/1.45 var(--mono); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 4.4em; overflow: hidden; }
 .sheet-body.scroll { overflow-y: auto; overscroll-behavior: contain; }
 .sheet-body.scroll .wlog { flex: none; overflow: visible; }
 
