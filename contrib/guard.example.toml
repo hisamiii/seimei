@@ -5,7 +5,7 @@
 # tells you what is wrong, in the app and in its log.
 #
 # Each [[rule]] has match fields (every one given must hit) and an action.
-#   tool    glob on the tool name: "Bash", "Edit", "mcp__discord__*". {a,b} for alternatives.
+#   tool    glob on the tool name: "Bash", "Edit", "mcp__browser__*". {a,b} for alternatives.
 #   paths   globs, ~ is home. "dir/**" is anything below dir; plain "dir" is the folder itself.
 #           A relative glob (".claude/settings.json") matches in any folder.
 #   op      "read", "write" or "exec", or a list of them; the default is all three. Needs paths.
@@ -39,7 +39,6 @@
 #   mcp__desktop__*         desktop = "quit" (ends the session), "close" (a window seimei did not open)
 #                           or "config" (an edit of the window manager's config). Bash commands that
 #                           do the same (niri msg action quit) get the same facts.
-#   mcp__discord__*         author = "you" or "someone else": whose message an edit, delete or react is on
 #   mcp__browser__browser_close   tabs = "theirs" (tabs seimei did not open) or "mine"
 #
 # Built in, whatever this file says: agents cannot change this file, a command nested too deep to
@@ -239,18 +238,6 @@
 #facts   = { desktop = "{quit,close,config}" }
 #action  = "card"
 #message = "change your desktop"
-
-# Discord: every send, edit, delete and react waits for your OK; others' messages are not touched.
-#[[rule]]
-#tool    = "mcp__discord__discord_{edit,delete}"
-#facts   = { author = "someone else" }
-#action  = "deny"
-#message = "editing or deleting someone else's Discord message"
-
-#[[rule]]
-#tool    = "mcp__discord__discord_{send,edit,delete,react}"
-#action  = "card"
-#message = "act on Discord"
 
 # Music: writing tags and deleting a playlist.
 #[[rule]]

@@ -28,7 +28,7 @@ The dispatcher and every shikigami run as the user, with Bash, in the permission
   - For each piece, the first matching rule in file order decides. The call gets the strictest answer of its pieces: deny, then card, then allow.
   - No match leaves the call to the permission mode. `allow` never skips Claude Code's own prompts.
 - **Cards** wait 10 minutes. One nobody answers counts as a deny.
-- **Facts** the built-in plugins give: desktop `desktop` (quit, close, config), discord `author` (you, someone else), browser `tabs` (theirs, mine).
+- **Facts** the built-in plugins give: desktop `desktop` (quit, close, config), browser `tabs` (theirs, mine).
 - **A broken file** keeps the last good rules, and seimei says so in the chat and the log.
 - **The agents' prompts** list the rules from the file, so an agent knows what is refused or carded.
 - **Built in, whatever the file says:**

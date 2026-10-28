@@ -17,7 +17,6 @@ enabled = ["desktop", "music", "mytool"]
 | plugin | what | needs |
 |---|---|---|
 | `desktop` | windows, workspaces, screenshots, typing and pointer (uinput), AT-SPI, layout memory, screen unlock, clipboard; on niri, KDE Plasma and GNOME also the agent display, a screen of seimei's own with its own keyboard and pointer for agent apps (a nested niri; a headless KWin or GNOME Shell) | niri, sway, Hyprland, KDE Plasma 6 or GNOME 45 and later on Wayland (GNOME with seimei's Shell extension, which `seimei setup` installs), or an X11 EWMH window manager |
-| `discord` | read and send through the user's Discord client | the Vencord plugin in `plugins/discord/vencord/` built into Vesktop |
 | `browser` | tabs, page text and elements, acting on pages, waiting, tab screenshots, open, download; with the agent display also the agent browser, a logged-out Firefox of seimei's own | the seimei extension in Firefox or a fork of it (`seimei.xpi` on the release page), or in a Chromium browser (Chrome, Chromium, Brave, Vivaldi, Edge; loaded unpacked) |
 | `music` | Quod Libet and MPRIS players | the Quod Libet bridge (`plugins/music/seimei_bridge.py`) for tags and playlists |
 | `queue` | claude-queue / cqd: GPU turns for every session | claude-queue installed |
@@ -25,7 +24,6 @@ enabled = ["desktop", "music", "mytool"]
 Cards the built-in plugins raise:
 
 - **desktop:** closing a window seimei did not open, quitting the compositor, writing the WM config, reading the user's clipboard (the agent display's needs none).
-- **discord:** every send, edit and delete.
 - **music:** tag edits and playlist deletes.
 - **browser:** the first action or navigation in a tab the user opened (once per tab and site; seimei's own tabs, which it keeps in a collapsed "seimei" tab group, and the agent browser need none). Closing the user's tabs goes by guard.toml.
 

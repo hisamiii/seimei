@@ -79,9 +79,9 @@ fn text(o: &Output) -> String {
 #[test]
 fn setup_first_run_then_again() {
     let h = Home::new("first");
-    // port, origin, about, plan, terminal, five plugins (desktop, browser, music, queue, discord: only music), a too-short password, then a good one twice, the
+    // port, origin, about, plan, terminal, four plugins (desktop, browser, music, queue: only music), a too-short password, then a good one twice, the
     // kitty bridge, the example guard rules, start now.
-    let answers = "9100\nhttps://seimei.example.net\ntest box\npro\nfoot -D {cwd} -T {title}\nn\nn\ny\n\nn\nshort\nshort\n\
+    let answers = "9100\nhttps://seimei.example.net\ntest box\npro\nfoot -D {cwd} -T {title}\nn\nn\ny\n\nshort\nshort\n\
                    correct horse\ncorrect horse\ny\ny\ny\n";
     let o = h.run(&["setup"], answers);
     let out = text(&o);
@@ -132,7 +132,7 @@ fn setup_first_run_then_again() {
 fn setup_defaults_and_no_claude() {
     let h = Home::new("defaults");
     // Every default (end of input) but the password, no kitty bridge, no guard rules and no start.
-    let o = h.run(&["setup"], "\n\n\n\n\n\n\n\n\n\nlong enough\nlong enough\nn\nn\nn\n");
+    let o = h.run(&["setup"], "\n\n\n\n\n\n\n\n\nlong enough\nlong enough\nn\nn\nn\n");
     let out = text(&o);
     assert!(o.status.success(), "{out}");
     let cfg: toml::Table = h.read("cfg/seimei/config.toml").parse().unwrap();
@@ -165,7 +165,7 @@ fn setup_defaults_and_no_claude() {
 fn setup_openrc_service() {
     let mut h = Home::new("openrc");
     h.init = "openrc";
-    let o = h.run(&["setup"], "\n\n\n\n\n\n\n\n\n\nlong enough\nlong enough\nn\nn\ny\n");
+    let o = h.run(&["setup"], "\n\n\n\n\n\n\n\n\nlong enough\nlong enough\nn\nn\ny\n");
     let out = text(&o);
     assert!(o.status.success(), "{out}");
     if Path::new("/etc/user/init.d/seimei").exists() {
@@ -220,7 +220,7 @@ fn setup_browser_host() {
     std::fs::create_dir_all(h.base.join(".librewolf")).unwrap();
     std::fs::create_dir_all(h.base.join(".config/chromium")).unwrap();
     // port, reach, about, plan, terminal; plugins: only the browser; the password twice, no bridge, no guard rules, no start.
-    let answers = "\n\n\n\n\nn\ny\nn\nn\nn\nlong enough\nlong enough\nn\nn\nn\n";
+    let answers = "\n\n\n\n\nn\ny\nn\nn\nlong enough\nlong enough\nn\nn\nn\n";
     let o = h.run(&["setup"], answers);
     let out = text(&o);
     assert!(o.status.success(), "{out}");

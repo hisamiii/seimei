@@ -13,7 +13,7 @@ use crate::util::{chars, hex, now, random_bytes};
 
 /// How long a card waits for the user, by default.
 pub const WAIT: Duration = Duration::from_secs(600);
-/// A card shows the whole thing it asks about (a Discord edit has the old and the new text).
+/// A card shows the whole thing it asks about (an edit has the old and the new text).
 const DETAIL: usize = 6000;
 
 /// How a card ended: approved, denied, expired, cancelled (its session went away first).

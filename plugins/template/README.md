@@ -39,4 +39,4 @@ enabled = ["template"]
 - A card is one line to the socket, `{"token", "op": "card", "card": {"action": "plugin", "target", "detail"}}`, and one line back, `{"outcome": "approved" | "denied" | "cancelled" | "expired"}` or `{"error"}`. `target` is the card's title, `detail` what it shows below.
 - A plugin's tool calls also pass through Claude Code's permission prompts and seimei's guard, like any MCP tool's. "Always allow" on the first one leaves only the plugin's own cards.
 
-The built-in plugins (`plugins/desktop`, `plugins/browser`, `plugins/music`, `plugins/queue`, `plugins/discord`) are Rust crates linked into the binary; see [docs/plugins.md](../../docs/plugins.md).
+The built-in plugins (`plugins/desktop`, `plugins/browser`, `plugins/music`, `plugins/queue`) are Rust crates linked into the binary; see [docs/plugins.md](../../docs/plugins.md).

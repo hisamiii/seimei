@@ -1786,57 +1786,6 @@
    }
   },
   {
-   "tool": "mcp__discord__discord_edit",
-   "input": {
-    "message": "1"
-   },
-   "cwd": "/home/tester",
-   "action": "deny",
-   "why": "someone else",
-   "facts": {
-    "author": "someone else"
-   }
-  },
-  {
-   "tool": "mcp__discord__discord_delete",
-   "input": {
-    "message": "1"
-   },
-   "cwd": "/home/tester",
-   "action": "card",
-   "facts": {
-    "author": "you"
-   }
-  },
-  {
-   "tool": "mcp__discord__discord_react",
-   "input": {
-    "message": "1"
-   },
-   "cwd": "/home/tester",
-   "action": "card",
-   "facts": {
-    "author": "someone else"
-   }
-  },
-  {
-   "tool": "mcp__discord__discord_send",
-   "input": {
-    "channel": "1",
-    "text": "hi"
-   },
-   "cwd": "/home/tester",
-   "action": "card"
-  },
-  {
-   "tool": "mcp__discord__discord_read",
-   "input": {
-    "channel": "1"
-   },
-   "cwd": "/home/tester",
-   "action": null
-  },
-  {
    "tool": "mcp__browser__browser_close",
    "input": {
     "tabs": [
@@ -1975,10 +1924,9 @@
    "rules": "none"
   },
   {
-   "tool": "mcp__discord__discord_send",
+   "tool": "mcp__music__music",
    "input": {
-    "channel": "1",
-    "text": "hi"
+    "command": "status"
    },
    "cwd": "/home/tester",
    "action": null,

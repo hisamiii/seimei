@@ -135,13 +135,6 @@ if [ -z "${SEIMEI_DEPLOY_TEST:-}" ]; then
         "$cfg/seimei/config.toml" "$HOME/.mozilla/native-messaging-hosts" "$cfg/mozilla/native-messaging-hosts" >/dev/null
     # The old name, for one release, until an installed copy that points at it is gone.
     ln -sfn seimei.xpi "$HOME/.local/share/seimei/seimei-waterfox.xpi"
-    # The Discord connector: Vencord with the SeimeiConnector plugin, for Vesktop to load from its Vencord Location.
-    # Without pnpm the last build stays in place; the rest of the deploy goes on.
-    if command -v pnpm >/dev/null; then
-        "$app/plugins/discord/vencord/build.sh"
-    else
-        echo "deploy: no pnpm, the Discord connector build is skipped" >&2
-    fi
     [ -z "$systemd" ] || systemctl --user reenable seimei.service seimei-tunnel.service 2>/dev/null
 fi
 

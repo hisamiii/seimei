@@ -9,7 +9,7 @@ seimei runs Claude Code from a phone: one permanent dispatcher session and worke
 Layout:
 
 - `crates/`: the Rust workspace. `proto` (the stream-json client for Claude Code, ACP and Codex), `core` (state, login, push, the guard; `core/src/plugins/`: the plugin host; `core/data/tools.json`: seimei's own MCP tools), `server` (HTTP routes), `queue` (the agent queue's scheduler, a port of claude-queue's cqd; see docs/queue/DESIGN.md), `seimei` (the binary; `src/lib.rs` lists the plugins built in).
-- `plugins/`: the plugins, each self-contained (its crate, manifest, prompt, tools, tests and connector): `desktop`, `browser` (with the extension in `plugins/browser/extension/`), `music`, `queue`, `discord` (with its Vencord connector, GPL, in `plugins/discord/vencord/`), and `template`, the one to copy for a plugin of your own.
+- `plugins/`: the plugins, each self-contained (its crate, manifest, prompt, tools, tests and connector): `desktop`, `browser` (with the extension in `plugins/browser/extension/`), `music`, `queue`, and `template`, the one to copy for a plugin of your own.
 - `web/`: the web page, built into the binary. Plain JS and CSS, no build step.
 - `android/`: the app (Kotlin).
 - `contrib/`: the guard example, the release script and its minisign key, the theme generator, the dsh profile; `contrib/maintainer/`: the author's own deploy and machine setup.

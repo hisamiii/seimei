@@ -611,7 +611,6 @@ pub async fn ask_guard(
                 Ok(o) if o == "approved" => None,
                 Ok(o) => {
                     let undone = match plugin {
-                        "discord" => "nothing was done on Discord",
                         "browser" => "no tabs closed",
                         _ => "nothing changed",
                     };

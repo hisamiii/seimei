@@ -7,12 +7,11 @@ use seimei_plugin_browser::Browser;
 use seimei_plugin_desktop::DesktopPlugin;
 
 /// In the order setup offers them.
-pub const BUILTINS: [Factory; 5] = [
+pub const BUILTINS: [Factory; 4] = [
     seimei_plugin_desktop::PLUGIN,
     seimei_plugin_browser::PLUGIN,
     seimei_plugin_music::PLUGIN,
     seimei_plugin_queue::PLUGIN,
-    seimei_plugin_discord::PLUGIN,
 ];
 
 /// What the built-ins need of each other: the browser's agent browser starts in the desktop's agent display.

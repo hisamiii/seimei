@@ -1,5 +1,5 @@
 //! Phase 4's dispatcher run: seimei's dispatcher on haiku, wired as the dev server wires it (seimei_server::App),
-//! with the queue, music, browser and discord plugins on fakes. One message asks it for one read-only tool of each;
+//! with the queue, music and browser plugins on fakes. One message asks it for one read-only tool of each;
 //! the tools reach the fakes and their texts reach the session, with no card. Desktop is left out: its devices are
 //! the real /dev/uinput. Run by tests/live.sh dispatcher.
 
@@ -42,13 +42,6 @@ fn browser_op(op: &str) -> Value {
     match op {
         "tabs" => json!({"tabs": [{"id": 5, "window": 1, "index": 0, "title": "Kingfisher field notes",
             "url": "https://x.org/5", "active": true, "pinned": false, "audible": false, "asleep": false}], "focused": 1}),
-        _ => Value::Null,
-    }
-}
-
-fn discord_op(op: &str) -> Value {
-    match op {
-        "guilds" => json!([{"id": "4242", "name": "Heron Club", "unread": 3}]),
         _ => Value::Null,
     }
 }
@@ -109,7 +102,7 @@ async fn run(work: std::path::PathBuf, state: std::path::PathBuf) {
         WebPush::new(state.join("vapid.pem"), "http://localhost"),
     );
     let cfg: toml::Table = format!(
-        "enabled = [\"queue\", \"music\", \"browser\", \"discord\"]\nqueue = {{ lib = \"{}\" }}",
+        "enabled = [\"queue\", \"music\", \"browser\"]\nqueue = {{ lib = \"{}\" }}",
         state.join("nolib").display()
     )
     .parse()
@@ -136,9 +129,7 @@ async fn run(work: std::path::PathBuf, state: std::path::PathBuf) {
     let links = state.join("links");
     std::fs::create_dir_all(&links).unwrap();
     tokio::spawn(plugins.get::<seimei_plugin_browser::Browser>("browser").unwrap().link.clone().run(links.join("browser.sock")));
-    tokio::spawn(plugins.get::<seimei_plugin_discord::Discord>("discord").unwrap().link.clone().run(links.join("discord.sock")));
     let tabs_seen = connector(links.join("browser.sock"), browser_op);
-    let guilds_seen = connector(links.join("discord.sock"), discord_op);
 
     // Every card is denied: none should come.
     let cards = Arc::new(Mutex::new(Vec::<Value>::new()));
@@ -156,20 +147,18 @@ async fn run(work: std::path::PathBuf, state: std::path::PathBuf) {
     tokio::spawn(app.dispatcher.clone().run());
 
     let ask = "A test of your plugin tools. Call each of these once, one at a time, with no other tools: \
-               mcp__queue__queue; mcp__music__music with command status; mcp__browser__browser_tabs; \
-               mcp__discord__discord_guilds. Then reply in one line: the queue's first line, the song's title, the \
-               tab's title and the Discord server's name.";
+               mcp__queue__queue; mcp__music__music with command status; mcp__browser__browser_tabs. Then reply \
+               in one line: the queue's first line, the song's title and the tab's title.";
     app.dispatcher.send(ask, &[], vec![], &[], None, None);
-    let names =
-        ["mcp__queue__queue", "mcp__music__music", "mcp__browser__browser_tabs", "mcp__discord__discord_guilds"];
+    let names = ["mcp__queue__queue", "mcp__music__music", "mcp__browser__browser_tabs"];
     let after = |ev: &EventLog| ev.after(start).iter().map(|e| (**e).clone()).collect::<Vec<Value>>();
     let replied = |evs: &[Value]| {
         names.iter().all(|n| evs.iter().any(|e| e["type"] == "tool" && e["name"] == *n))
-            && evs.iter().any(|e| e["type"] == "assistant" && e["text"].as_str().is_some_and(|t| t.contains("Heron")))
+            && evs.iter().any(|e| e["type"] == "assistant" && e["text"].as_str().is_some_and(|t| t.contains("Kingfisher")))
     };
     let done = until(300, || replied(&after(&events)) && !app.dispatcher.busy()).await;
     let evs = after(&events);
-    c.check("the dispatcher replied after the four tools", done, evs.iter().map(|e| &e["type"]).collect::<Vec<_>>());
+    c.check("the dispatcher replied after the three tools", done, evs.iter().map(|e| &e["type"]).collect::<Vec<_>>());
     let result = |name: &str| {
         let id = evs.iter().find(|e| e["type"] == "tool" && e["name"] == name).map(|e| e["tool_id"].clone());
         evs.iter()
@@ -189,14 +178,11 @@ async fn run(work: std::path::PathBuf, state: std::path::PathBuf) {
     let (t, err) = result(names[2]);
     c.check("browser listed the fake tab", !err && t.contains("Kingfisher field notes"), &t);
     c.check("the extension heard tabs", tabs_seen.lock().unwrap().iter().any(|r| r["op"] == "tabs"), &tabs_seen);
-    let (g, err) = result(names[3]);
-    c.check("discord listed the fake server", !err && g == "[4242] Heron Club (3 unread)", &g);
-    c.check("Vesktop heard guilds", guilds_seen.lock().unwrap().iter().any(|r| r["op"] == "guilds"), &guilds_seen);
     let reply: Vec<&str> = evs.iter().filter(|e| e["type"] == "assistant").filter_map(|e| e["text"].as_str()).collect();
     println!("reply: {}", reply.join(" | ").chars().take(600).collect::<String>());
     c.check(
-        "the reply names the song, tab and server",
-        reply.iter().any(|t| t.contains("Song") && t.contains("Kingfisher") && t.contains("Heron")),
+        "the reply names the song and the tab",
+        reply.iter().any(|t| t.contains("Song") && t.contains("Kingfisher")),
         &reply,
     );
     c.check("no card", cards.lock().unwrap().is_empty(), &cards);

@@ -15,14 +15,14 @@ phone app / web page ──https──> proxy ──> 127.0.0.1:8417  seimei
             │ guard.rs:      one PreToolUse hook on every tool call           │
             │ permissions.rs: Claude Code's permission prompts become cards   │
             │ sessions.rs / adopt.rs: the user's own Claude Code sessions     │
-            │ plugins/: desktop, discord, browser, music, queue (MCP servers) │
+            │ plugins/: desktop, browser, music, queue (MCP servers)         │
             └─────────────────────────────────────────────────────────────────┘
                            │ stream-json over stdio (crates/proto)
                            ▼
                  the user's installed `claude` (its own login)
 ```
 
-The workspace: `crates/proto` (the clients for Claude Code's stream-json protocol, ACP and Codex), `crates/core` (state, sessions, the guard, push, the plugin host), `plugins/*` (one crate per built-in plugin: desktop, browser, music, queue, discord), `crates/server` (HTTP routes; the web page in `web/` is built into the binary), `crates/seimei` (the binary: serve, setup, update and the account commands). `crates/core/data/tools.json` holds seimei's own MCP tools as Claude Code sees them; the descriptions are prompt text.
+The workspace: `crates/proto` (the clients for Claude Code's stream-json protocol, ACP and Codex), `crates/core` (state, sessions, the guard, push, the plugin host), `plugins/*` (one crate per built-in plugin: desktop, browser, music, queue), `crates/server` (HTTP routes; the web page in `web/` is built into the binary), `crates/seimei` (the binary: serve, setup, update and the account commands). `crates/core/data/tools.json` holds seimei's own MCP tools as Claude Code sees them; the descriptions are prompt text.
 
 ## Sessions
 
@@ -42,7 +42,7 @@ Push goes to phones only while they are away (the server holds pushes while the 
 
 A card holds a tool call until the user answers on the phone or the web. Three sources:
 
-1. The guard's own cards: stopping the user's sessions, plugin actions (closing windows seimei did not open, editing the WM config, Discord sends), writes to Claude Code's permission settings.
+1. The guard's own cards: stopping the user's sessions, plugin actions (closing windows seimei did not open, editing the WM config), writes to Claude Code's permission settings.
 2. Claude Code's permission prompts (`can_use_tool`), in every mode but bypass, with the terminal's choices: Allow, Always allow (written where Claude Code writes it, the project's `.claude/settings.local.json`), Allow edits for this session, Deny with a note. A shikigami's card waits for the user (one reminder after 30 minutes); the dispatcher's counts as denied after 30 minutes, or when the user writes in the chat instead.
 3. Plan cards (plan mode): Go ahead or Keep planning.
 
@@ -54,7 +54,7 @@ A card holds a tool call until the user answers on the phone or the web. Three s
 | `~/.config/seimei/guard.toml` | the user's guard rules ([security.md](security.md)) |
 | `~/.local/share/seimei/` | state, mode 700: events, session id, workers, tasks, notes, auth.json, uploads, the audit log; `plugins.sock` (the plugins' MCP processes reach seimei here, each with its session's token); `mcp/` (each session's MCP config, 600) |
 | `~/.local/state/seimei/seimei.log` | the OpenRC service's log (systemd keeps it in the journal) |
-| `$XDG_RUNTIME_DIR/seimei/` | the connectors' sockets (`browser.sock`, `discord.sock`) |
+| `$XDG_RUNTIME_DIR/seimei/` | the browser connector's socket (`browser.sock`) |
 | `~/.local/share/seimei-app/` | the maintainer's production checkout; `contrib/maintainer/deploy.sh` moves it to a commit and restarts once idle |
 
 ## Themes

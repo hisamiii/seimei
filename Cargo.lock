@@ -1941,7 +1941,6 @@ dependencies = [
  "seimei-core",
  "seimei-plugin-browser",
  "seimei-plugin-desktop",
- "seimei-plugin-discord",
  "seimei-plugin-music",
  "seimei-plugin-queue",
  "seimei-queue",
@@ -1997,16 +1996,6 @@ dependencies = [
  "image",
  "libc",
  "regex",
- "seimei-core",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "seimei-plugin-discord"
-version = "0.1.0"
-dependencies = [
- "base64 0.23.1",
  "seimei-core",
  "serde_json",
  "tokio",

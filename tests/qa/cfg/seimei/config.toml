@@ -3,7 +3,7 @@ port = 8430
 
 # No desktop: QA must never open a window. Releases and loans go to the fake terminal (tests/fakes/bin).
 [plugins]
-enabled = ["discord", "browser", "music", "queue"]
+enabled = ["browser", "music", "queue"]
 
 [sessions]
 terminal = "fake-terminal {cwd} {title}"

@@ -1,6 +1,6 @@
 //! The plugins end to end on stdio, as Claude Code starts them, with seimei's card socket: `seimei plugin queue` with
 //! a fake cqd (its spec, a tool's text, a kill card approved and denied, a lost seimei and a stopped cqd), music,
-//! browser and discord forwarding to seimei, and plugins/template installed the way its README says.
+//! the browser forwarding to seimei, and plugins/template installed the way its README says.
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
@@ -410,70 +410,6 @@ async fn browser_plugin_forwards_to_seimei() {
     assert_eq!(outside, ("not this session's process".into(), true));
     let _ = other.kill();
     let _ = other.wait();
-    let _ = std::fs::remove_dir_all(&d);
-}
-
-/// The Vesktop plugin's answers.
-fn discord_op(op: &str, a: &Value) -> Value {
-    match op {
-        "where" | "ack" => json!("#general in Home"),
-        "send" => json!({"where": "#general in Home", "id": "600001"}),
-        _ => json!({"op": op, "args": a}),
-    }
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn discord_plugin_forwards_to_seimei() {
-    // The example's rules: the cards these tools raise are guard.toml's now. Children inherit it.
-    let mut rules = crate::env::Env::lock();
-    rules.example_rules(&std::env::temp_dir().join(format!("seimei-discord_plugin_forwards_to_seimei-rules-{}", std::process::id())));
-    let (d, events, approvals, plugins) = host("discord", "discord").await;
-    let link = d.join("run/seimei/discord.sock");
-    tokio::spawn(plugins.get::<seimei_plugin_discord::Discord>("discord").unwrap().link.clone().run(link.clone()));
-    let seen = connector(link, discord_op);
-    let env = plugins.servers("seimei", None, None)["discord"]["env"].as_object().unwrap().clone();
-    let spec: Value = serde_json::from_str(seimei_plugin_discord::PLUGIN.spec).unwrap();
-    let mut srv = tokio::task::spawn_blocking(move || {
-        let mut srv = Server::start("discord", &env, &[]);
-        assert_eq!(srv.ask(1, "tools/list", json!({}))["tools"], spec["tools"]);
-        // The connector may still be connecting; marking read needs no card.
-        let mut r = srv.call(2, "discord_mark_read", json!({"channel": "111111"}));
-        for i in 0..50 {
-            if !r.1 {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(50));
-            r = srv.call(100 + i, "discord_mark_read", json!({"channel": "111111"}));
-        }
-        assert_eq!(r, ("Marked #general in Home as read.".into(), false));
-        srv
-    })
-    .await
-    .unwrap();
-
-    // A send waits for the card, then sends what it showed.
-    let mut sub = events.subscribe();
-    let call = tokio::task::spawn_blocking(move || {
-        let r = srv.call(3, "discord_send", json!({"channel": "111111", "text": "hello all"}));
-        (srv, r)
-    });
-    let card = loop {
-        let ev = tokio::time::timeout(Duration::from_secs(10), sub.recv()).await.unwrap().unwrap();
-        if ev["type"] == "approval" {
-            break ev;
-        }
-    };
-    assert_eq!(
-        (&card["who"], &card["target"], &card["detail"]),
-        (&json!("seimei"), &json!("send a Discord message to #general in Home"), &json!("hello all"))
-    );
-    approvals.decide(card["aid"].as_str().unwrap(), true, None, None);
-    let (srv, r) = call.await.unwrap();
-    assert_eq!(r, ("Sent to #general in Home (message 600001).".into(), false));
-    drop(srv);
-    let sends: Vec<Value> =
-        seen.lock().unwrap().iter().filter(|r| r["op"] == "send").map(|r| r["args"].clone()).collect();
-    assert_eq!(sends, [json!({"channel": "111111", "text": "hello all", "reply_to": null, "files": []})]);
     let _ = std::fs::remove_dir_all(&d);
 }
 
