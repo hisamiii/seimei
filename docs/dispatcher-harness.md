@@ -56,10 +56,12 @@ What is missing, and how seimei fills it:
 - **Tool switches on ACP**: the protocol has none. The owner sets them in `[agents.<name>] args` or `env`.
 - **Rate limits on ACP**: there are none, so the page shows no windows for that agent.
 - **Denied paths**: only Claude Code takes them from seimei. Elsewhere the agent's own permission settings decide every call.
-- **Peer messages**: the relay is other Claude Code sessions messaging the dispatcher by name. It uses Claude Code's SendMessage and the fixed `--name`. Other harnesses have no peer messaging, so the relay is dropped there.
+- **The relay**: the owner writes on the page of one of their own Claude Code sessions that has no terminal seimei can type into. The dispatcher passes the message on with SendMessage. `session_send` in `crates/server/src/lib.rs` calls `Dispatcher::relay` for it, so it works only while the dispatcher is Claude Code.
+- **Relay without the dispatcher**: seimei's server can deliver the message itself. `Live::address()` in `sessions.rs` already knows each session's messaging socket, from `messagingSocketPath` in the session registry or `cc-socks/<pid>.sock`, and SendMessage is a write to that socket. The server writes the same message there and reports whether it arrived or was held, with no model turn.
+- **The catch**: the socket's message format is Claude Code's own and not documented. seimei pins it to the tested version, as `TESTED` does for stream-json.
 - **The style reminder after tool calls**: it is a `PostToolUse` hook. Elsewhere it rides each message only, as it already does.
 
-Codex method names follow the app-server v2 schema and move between versions. Step 7 checks each one against `codex app-server generate-json-schema` for the tested version.
+Codex method names follow the app-server v2 schema and move between versions. Step 8 checks each one against `codex app-server generate-json-schema` for the tested version.
 
 ## 3. The proposed interface
 
@@ -141,21 +143,22 @@ The owner picks the harness with one key, `[dispatcher] harness`. It is `claude`
 - `[approvals] deny_paths` reaches only a Claude Code dispatcher.
 - A changed key starts a fresh session on the next start, seeded as section 4 says.
 
-The page and the app show the harness in the header. Actions only Claude Code has are hidden on other harnesses, such as the relay and the terminal resume. `config.md` documents the key.
+The page and the app show the harness in the header. Actions only Claude Code has are hidden on other harnesses, such as the terminal resume. `config.md` documents the key.
 
 ## 6. Step plan
 
 Each step is one commit, and `cargo test --workspace` passes after each. The fakes in `tests/fakes/` grow only the messages each step needs.
 
 1. **Pin today's dispatcher.** Add an offline test on the fake Claude Code CLI. It covers markers, a tool call, an interrupt, `/compact` with `compact_boundary`, and a resume after restart.
-2. **Add the trait.** Move the stream-json code into the Claude Code implementation, and `Turns` reads `Ev`. Step 1's test passes unchanged.
-3. **Serve seimei's tools over stdio.** Add `seimei plugin seimei`. A test like `acp_tools.rs` calls `tasks` from the fake ACP agent with `!call`, and a call from outside its process tree is refused.
-4. **Add the ACP implementation.** It queues prompts, puts the system prompt in the first one, and sends images and `session/cancel`. On the fake ACP agent, a reply streams, a mid-turn message waits, `!unasked` lands in the audit log and `!tool` raises a card.
-5. **Add the ask tool.** A test calls it from the fake ACP agent and answers the question card.
-6. **Add the rollover for restarts and deploys.** It covers the handoff turn, `session.json` and the seed. The test sets `FAKE_ACP_NO_LOAD`: a restart opens a new session whose first prompt holds the prompt, handoff and block, and a switched harness starts fresh.
-7. **Add the Codex extras.** These are developer instructions, the compaction signal with the After compaction block, token usage, rate limits and `requestUserInput` as a question card. The fake Codex learns each method, and the test runs the dispatcher on it.
-8. **Add the config key.** This covers `[dispatcher] harness`, a `harness` field in the `state` event, the page and app header, and `config.md`, `security.md` and `architecture.md`. A case checks the `state` event, and the QA server shows the header by hand.
-9. **Optionally, move the shikigami onto the trait.** The `acp_worker` and `codex_worker` tests pass unchanged.
+2. **Relay from the server.** Capture SendMessage's write to a session's messaging socket, then send it from `session_send` and drop `Dispatcher::relay`. A test runs a fake session socket: the message arrives in the captured format, and a held answer shows on the page.
+3. **Add the trait.** Move the stream-json code into the Claude Code implementation, and `Turns` reads `Ev`. Step 1's test passes unchanged.
+4. **Serve seimei's tools over stdio.** Add `seimei plugin seimei`. A test like `acp_tools.rs` calls `tasks` from the fake ACP agent with `!call`, and a call from outside its process tree is refused.
+5. **Add the ACP implementation.** It queues prompts, puts the system prompt in the first one, and sends images and `session/cancel`. On the fake ACP agent, a reply streams, a mid-turn message waits, `!unasked` lands in the audit log and `!tool` raises a card.
+6. **Add the ask tool.** A test calls it from the fake ACP agent and answers the question card.
+7. **Add the rollover for restarts and deploys.** It covers the handoff turn, `session.json` and the seed. The test sets `FAKE_ACP_NO_LOAD`: a restart opens a new session whose first prompt holds the prompt, handoff and block, and a switched harness starts fresh.
+8. **Add the Codex extras.** These are developer instructions, the compaction signal with the After compaction block, token usage, rate limits and `requestUserInput` as a question card. The fake Codex learns each method, and the test runs the dispatcher on it.
+9. **Add the config key.** This covers `[dispatcher] harness`, a `harness` field in the `state` event, the page and app header, and `config.md`, `security.md` and `architecture.md`. A case checks the `state` event, and the QA server shows the header by hand.
+10. **Optionally, move the shikigami onto the trait.** The `acp_worker` and `codex_worker` tests pass unchanged.
 
 ## 7. Risks and open questions
 
@@ -169,5 +172,5 @@ The main risk is that the session which summons everything else runs under anoth
 
 Open questions for the owner:
 
-1. Scope: the proposal is the dispatcher first, and the shikigami onto the trait later, as step 9.
-2. The relay: the proposal drops it on every harness but Claude Code.
+1. Scope: the proposal is the dispatcher first, and the shikigami onto the trait later, as step 10.
+2. The relay: may seimei's server write to Claude Code's undocumented messaging socket itself, as step 2 proposes? Without that, the relay needs a Claude Code process to call SendMessage.
