@@ -140,12 +140,6 @@ pub fn agents_from(cfg: Option<&toml::Table>) -> BTreeMap<String, Agent> {
     out
 }
 
-/// The shikigami's own MCP server (ask, board), as data/tools.json has it.
-static SERVER: LazyLock<Value> = LazyLock::new(|| {
-    let all: Value = serde_json::from_str(include_str!("../../data/tools.json")).expect("tools.json");
-    all["shikigami"].clone()
-});
-
 /// Seconds to gather a burst of events into one message for the dispatcher.
 fn batch_wait() -> Duration {
     let s = std::env::var("SEIMEI_BATCH").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(3.0);
@@ -1350,7 +1344,7 @@ impl Handler for Side {
                 let error = json!({"code": -32601, "message": format!("Server '{server}' not found")});
                 return Some(json!({"jsonrpc": "2.0", "id": id, "error": error}));
             }
-            crate::tools::serve(&SERVER, message, |name, args| {
+            crate::tools::serve(&crate::tools::SERVER["shikigami"], message, |name, args| {
                 let w = w.clone();
                 async move {
                     tokio::task::spawn_blocking(move || w.call(&name, &args))

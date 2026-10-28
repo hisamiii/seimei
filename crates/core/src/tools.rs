@@ -25,7 +25,8 @@ use crate::util::{as_text, chars, flag, now, truthy};
 use crate::watches::{DEFAULT_HOURS, NewRule, TRIGGERS, Watches, mins};
 use crate::workers::{ACTIVE, EFFORTS, MODELS, Pool, Summon, Worker};
 
-static SERVER: LazyLock<Value> =
+/// data/tools.json: the dispatcher's server, and under "shikigami" the shikigami's own (ask, board).
+pub(crate) static SERVER: LazyLock<Value> =
     LazyLock::new(|| serde_json::from_str(include_str!("../data/tools.json")).expect("tools.json"));
 
 /// More running shikigami than this need the user's OK.
