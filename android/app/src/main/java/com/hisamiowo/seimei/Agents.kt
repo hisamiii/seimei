@@ -824,7 +824,7 @@ val MODELS = listOf("opus", "sonnet", "haiku")
 val MODE_LABEL = mapOf("plan" to "Plan first", "default" to "Ask first", "acceptEdits" to "Allow edits", "auto" to "Auto",
     "dontAsk" to "Only what's allowed", "bypassPermissions" to "Bypass")
 val MODE_NOTE = mapOf("acceptEdits" to "Commands still ask", "auto" to "Claude Code decides", "dontAsk" to "Never asks",
-    "bypassPermissions" to "The guard still applies")
+    "bypassPermissions" to "Deny rules still apply")
 
 @Composable
 fun Pills(values: List<String>, on: String, pick: (String) -> Unit) {

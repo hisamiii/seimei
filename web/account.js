@@ -132,8 +132,6 @@ async function pushOff() {
 
 // ---------- activity log ----------
 
-const AUDIT_TONE = { blocked: 'bad', denied: 'bad', expired: 'bad', approved: 'ok' };
-
 function auditWhat(call) {
   let inp = {};
   try { inp = JSON.parse(call.input); } catch { return call.input || ''; }
@@ -154,11 +152,9 @@ async function openAudit() {
       day = d;
       list.append(el('div', 'aday', dayLabel(c.t)));
     }
-    const row = el('div', `arow ${AUDIT_TONE[c.decision] || ''}`);
+    const row = el('div', 'arow');
     const top = el('div', 'atop');
     top.append(el('time', null, clock(c.t)), el('b', null, c.who), el('span', 'tool', c.tool.replace(/^mcp__.+?__/, '')));
-    const word = c.decision === 'approved' ? 'Allowed' : c.decision.charAt(0).toUpperCase() + c.decision.slice(1);
-    if (c.decision !== 'allowed') top.append(el('span', 'tag', c.why ? `${word}: ${c.why}` : word));
     if (c.failed) top.append(el('span', 'tag', 'Failed'));
     row.append(top, el('code', null, auditWhat(c)));
     list.append(row);

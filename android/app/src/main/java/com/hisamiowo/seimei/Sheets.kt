@@ -51,8 +51,6 @@ fun Sheet(onDismiss: () -> Unit, title: String, content: @Composable ColumnScope
     }
 }
 
-private val AUDIT_TONE = mapOf("blocked" to "bad", "denied" to "bad", "expired" to "bad", "approved" to "ok")
-
 /** What a call touched, from its input: the command, the file, the pattern... (the web's auditWhat). */
 fun auditWhat(c: JSONObject): String {
     val raw = c.str("input")
@@ -64,7 +62,7 @@ fun auditWhat(c: JSONObject): String {
     return if (raw == "{}") "" else raw
 }
 
-/** Menu, then Activity log: every tool call the guard saw, newest first, a day at a time, one segmented list a day. */
+/** Menu, then Activity log: every tool call of seimei and the shikigami, newest first, a day at a time, one segmented list a day. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ActivitySheet(vm: Seimei, done: () -> Unit) {
@@ -79,25 +77,16 @@ fun ActivitySheet(vm: Seimei, done: () -> Unit) {
                 Text(dayLabel(rows.first().optDouble("t")), Modifier.padding(top = 12.dp, bottom = 4.dp), fontSize = 14.sp, lineHeight = 22.sp,
                     fontWeight = FontWeight.SemiBold, color = tk.text2)
                 for ((i, c) in rows.withIndex()) {
-                    val tone = AUDIT_TONE[c.str("decision")]
-                    val bad = tone == "bad"
-                    val fg = if (bad) tk.onErrorContainer else null
-                    Column(Modifier.fillMaxWidth().clip(segment(i, rows.size)).background(if (bad) tk.errorContainer else tk.containerHigh)
+                    Column(Modifier.fillMaxWidth().clip(segment(i, rows.size)).background(tk.containerHigh)
                         .padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), itemVerticalAlignment = Alignment.CenterVertically) {
-                            Text(clock(c.optDouble("t")), fontSize = 12.sp, lineHeight = 20.sp, color = fg ?: tk.text3, style = TNUM)
-                            Text(c.str("who"), fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium, color = fg ?: tk.text)
-                            Text(c.str("tool").replace(Regex("^mcp__.+?__"), ""), fontSize = 14.sp, lineHeight = 20.sp, color = fg ?: tk.text2)
-                            val d = c.str("decision")
-                            if (d != "allowed" && d.isNotEmpty()) {
-                                val word = if (d == "approved") "Allowed" else d.replaceFirstChar { it.uppercase() }
-                                Text(if (c.str("why").isNotEmpty()) "$word: ${c.str("why")}" else word, fontSize = 12.sp, lineHeight = 20.sp,
-                                    fontWeight = FontWeight.Medium, color = fg ?: if (tone == "ok") tk.ok else tk.text2)
-                            }
-                            if (c.optBoolean("failed")) Text("Failed", fontSize = 12.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium, color = fg ?: tk.error)
+                            Text(clock(c.optDouble("t")), fontSize = 12.sp, lineHeight = 20.sp, color = tk.text3, style = TNUM)
+                            Text(c.str("who"), fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium, color = tk.text)
+                            Text(c.str("tool").replace(Regex("^mcp__.+?__"), ""), fontSize = 14.sp, lineHeight = 20.sp, color = tk.text2)
+                            if (c.optBoolean("failed")) Text("Failed", fontSize = 12.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium, color = tk.error)
                         }
                         val what = auditWhat(c)
-                        if (what.isNotEmpty()) Text(what, fontFamily = FontFamily.Monospace, fontSize = 14.sp, lineHeight = 20.sp, color = fg ?: tk.text3,
+                        if (what.isNotEmpty()) Text(what, fontFamily = FontFamily.Monospace, fontSize = 14.sp, lineHeight = 20.sp, color = tk.text3,
                             maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }

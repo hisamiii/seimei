@@ -404,11 +404,7 @@ body.offline .hello, body.offline #fp-card { display: none; }
 .arow:has(+ .aday), .arow:last-child { border-bottom-left-radius: var(--shape-lg-inc); border-bottom-right-radius: var(--shape-lg-inc); }
 .atop { font-size: 14px; line-height: 20px; }
 .atop time { font-size: 12px; }
-.atop .tag, .arow.ok .tag, .arow.bad .tag { padding: 0; background: none; border-radius: 0; font-size: 12px; font-weight: 500; }
-.arow.ok .tag { color: var(--ok); }
-.arow.bad { background: var(--error-container); }
-.arow.bad .tag, .arow.bad b, .arow.bad .tool, .arow.bad time { color: var(--on-error-container); }
-.arow.bad code { color: var(--on-error-container); opacity: .85; }
+.atop .tag { padding: 0; background: none; border-radius: 0; font-size: 12px; font-weight: 500; }
 .arow code { font-size: 13px; line-height: 20px; }
 
 /* Phone app */

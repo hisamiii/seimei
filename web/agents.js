@@ -791,7 +791,7 @@ const CHEV = 'M9 6l6 6-6 6';
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const MODELS = ['opus', 'sonnet', 'haiku'];
 const MODE_LABEL = { plan: 'Plan first', default: 'Ask first', acceptEdits: 'Allow edits', auto: 'Auto', dontAsk: "Only what's allowed", bypassPermissions: 'Bypass' };
-const MODE_NOTE = { acceptEdits: 'Commands still ask', auto: 'Claude Code decides', dontAsk: 'Never asks', bypassPermissions: 'The guard still applies' };
+const MODE_NOTE = { acceptEdits: 'Commands still ask', auto: 'Claude Code decides', dontAsk: 'Never asks', bypassPermissions: 'Deny rules still apply' };
 
 // One sheet for effort, model and permissions: only the user changes these here (seimei's tune tool does effort and model).
 function changeSheet(w) {

@@ -975,7 +975,7 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
     var note by remember(a.aid) { mutableStateOf("") }
     // seimei's AskUserQuestion: the options are the answers, the note writes one, Skip leaves it
     val question = a.action == "question"
-    // A permission card carries the agent's choices; a guard card is Approve/Deny.
+    // A permission card carries the agent's choices; a card of seimei's own tools is Approve/Deny.
     val perm = a.options.isNotEmpty()
     // The subtitle names what it touches, not the title again: the session a command names, the file an edit writes.
     val sub = when {
