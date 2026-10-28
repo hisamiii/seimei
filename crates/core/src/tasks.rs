@@ -8,13 +8,12 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 
-use chrono::TimeZone;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use crate::events::EventLog;
-use crate::util::{now, read_json, save_json};
+use crate::util::{local_time, now, read_json, save_json};
 
 pub const STATES: [&str; 6] = ["open", "running", "asks", "review", "paused", "done"];
 /// The owner of items the user does themselves.
@@ -564,12 +563,7 @@ impl Board {
     pub fn start(&mut self, worker: &str, name: &str, wstate: &str, tid: &str) -> Result<Task> {
         let i = self.own(name, tid)?;
         let at = now();
-        for (j, o) in self.data.tasks.iter_mut().enumerate() {
-            if j != i && o.worker.as_deref() == Some(worker) && o.state != "done" && o.state != "review" {
-                (o.worker, o.linked, o.wstate, o.updated) = (None, None, None, at);
-                set_state(o, "open");
-            }
-        }
+        self.unlink_others(worker, i, at);
         let t = &mut self.data.tasks[i];
         (t.worker, t.linked, t.wstate, t.updated) = (Some(worker.into()), Some(at), Some(wstate.into()), at);
         set_state(t, follows(wstate).unwrap_or("running"));
@@ -584,12 +578,7 @@ impl Board {
     pub fn give(&mut self, worker: &str, owner: &str, tid: &str) -> Result<Task> {
         let i = self.live(tid)?;
         let at = now();
-        for (j, o) in self.data.tasks.iter_mut().enumerate() {
-            if j != i && o.worker.as_deref() == Some(worker) && o.state != "done" && o.state != "review" {
-                (o.worker, o.linked, o.wstate, o.updated) = (None, None, None, at);
-                set_state(o, "open");
-            }
-        }
+        self.unlink_others(worker, i, at);
         if self.data.tasks[i].owner != owner {
             self.data.tasks[i].pos = self.last(owner) + 1;
         }
@@ -601,6 +590,16 @@ impl Board {
         let t = t.clone();
         self.changed();
         Ok(t)
+    }
+
+    /// What else the shikigami worked on goes back to the queue, unless it is in review: one item at a time.
+    fn unlink_others(&mut self, worker: &str, keep: usize, at: f64) {
+        for (j, o) in self.data.tasks.iter_mut().enumerate() {
+            if j != keep && o.worker.as_deref() == Some(worker) && o.state != "done" && o.state != "review" {
+                (o.worker, o.linked, o.wstate, o.updated) = (None, None, None, at);
+                set_state(o, "open");
+            }
+        }
     }
 
     /// A shikigami deployed or delivered one of its items: it waits in review for seimei's check.
@@ -904,9 +903,7 @@ impl Board {
                 }
                 let rows: Vec<String> = (hits.iter())
                     .map(|t| {
-                        let at = t.done_at.unwrap_or(t.updated) as i64;
-                        let day = chrono::Local.timestamp_opt(at, 0).single().map(|d| d.format("%Y-%m-%d").to_string());
-                        let day = day.unwrap_or_default();
+                        let day = local_time(t.done_at.unwrap_or(t.updated), "%Y-%m-%d");
                         format!("{} {} ({}, {}, done {day})", t.id, t.title, t.project, t.owner)
                     })
                     .collect();
