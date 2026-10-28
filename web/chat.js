@@ -487,6 +487,8 @@ function approvalCard(ev) {
   foot.append(deny);
   if (!question) foot.append(ok);
   card.append(foot);
+  // 0 for a shikigami's permission card, which waits.
+  card.expires = ev.expires || 0;
   approvals.set(ev.aid, card);
   if (outcomes.has(ev.aid)) settle(outcomes.get(ev.aid));
   return card;
