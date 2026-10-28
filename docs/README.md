@@ -9,6 +9,7 @@ Start with [install.md](install.md), then [reach.md](reach.md) to bring seimei t
 - [security.md](security.md): who can reach seimei, what the agents can do, the cards, and the limits of bypass mode.
 - [plugins.md](plugins.md): the built-in plugins, the agent display and browser, external MCP servers, and how to write a plugin.
 - [asr.md](asr.md): dictation, its word list and fixer, privacy, and the mic in the clients.
+- [dispatcher-harness.md](dispatcher-harness.md): a proposal to run the dispatcher on any harness.
 - [troubleshooting.md](troubleshooting.md): logs, a page that does not load, logins, failed turns, notifications, a leak.
 
 To contribute, read [CONTRIBUTING.md](../CONTRIBUTING.md) and [AGENTS.md](../AGENTS.md). Report security problems as [SECURITY.md](../SECURITY.md) says.
