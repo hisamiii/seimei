@@ -759,6 +759,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             awaySince = null
             presence()
             loadBoard()
+            refreshPage()
             checkAsr()
             return
         }
@@ -959,6 +960,8 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                     pg.last = k.optLong("last")
                     if (k.has("next")) pg.next = k.getLong("next")
                     pg.row = (k.optJSONObject("row") ?: JSONObject()).merged(listed)
+                    // The copy keeps polling, and the stream's reconnect refreshes a worker's page.
+                    if (kind == "session") pg.poll = viewModelScope.launch { pollSession(pg) }
                     page = pg
                     presence()
                 }
@@ -980,7 +983,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 else {
                     pg.row = listed
                     takeSession(pg, r)
-                    pg.poll = viewModelScope.launch { pollSession(pg) }
+                    if (pg.poll == null) pg.poll = viewModelScope.launch { pollSession(pg) }
                 }
                 if (shown == null) {
                     page = pg
@@ -1036,6 +1039,21 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 savePage(pg)
             } catch (e: HttpError) {
                 if (e.code == 404) pg.reach = "The session has ended."
+            } catch (e: IOException) {
+            }
+        }
+    }
+
+    /** Back online: a shikigami's open page fetches what came while the stream was down (a session's polls). */
+    private fun refreshPage() {
+        val pg = page?.takeIf { it.kind == "worker" } ?: return
+        viewModelScope.launch {
+            try {
+                val r = api.get("api/workers/${pg.id}?after=${pg.last}")
+                if (page !== pg) return@launch
+                pg.take(r.getJSONArray("events").objects(), reset = false)
+                pg.row = pg.row.merged(r.getJSONObject("worker"))
+                savePage(pg)
             } catch (e: IOException) {
             }
         }

@@ -1021,7 +1021,12 @@ export async function openPage(kind, id) {
     if (r) r.reset = true;
   }
   if (kept && P !== p) return;
-  if (!r) return kept ? snack('Offline: this is the last copy') : snack("Couldn't reach the server");
+  if (!r) {
+    if (!kept) return snack("Couldn't reach the server");
+    // The copy keeps polling, and the stream's reconnect refreshes a worker's page.
+    if (kind === 'session') pollTimer = setTimeout(poll, 2000);
+    return snack('Offline: this is the last copy');
+  }
   // Drawn anew when there was no copy, or the server says the copy is too old to extend.
   if (!kept || r.reset) build(kind, id, kind === 'worker' ? { ...r.worker, ...live } : { ...r.session, reach: r.reach, via: r.via });
   else P.row = kind === 'worker' ? { ...P.row, ...r.worker, ...live } : { ...P.row, ...r.session, reach: r.reach, via: r.via };
@@ -1062,6 +1067,19 @@ function shown(reopen) {
   document.body.classList.add('spage-open');
   if (!reopen && !history.state?.spage) history.pushState({ spage: true }, '');
   requestAnimationFrame(() => stick(true));
+}
+
+// Back online: the open page fetches what came while the stream was down.
+export async function refreshPage() {
+  if (P?.kind === 'session') return poll();
+  if (!P) return;
+  const p = P;
+  const r = await getJSON(`api/workers/${encodeURIComponent(p.id)}?after=${p.last}`);
+  if (!r || P !== p) return;
+  p.row = { ...p.row, ...r.worker, ...S.workers.find((x) => x.id === p.id) };
+  add(r.events);
+  head();
+  stick();
 }
 
 export const openWorker = (id) => openPage('worker', id);
