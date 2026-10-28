@@ -11,7 +11,6 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.Icon
 import android.os.Build
-import android.os.Bundle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -67,7 +66,7 @@ object Push {
         for ((id, name, importance) in CHANNELS) {
             nm.createNotificationChannel(NotificationChannel(id, name, importance).apply { description = ABOUT[id] })
         }
-        // Questions and automatic replies no longer notify (rules of 2026-10-20): seimei decides what pings.
+        // Questions and automatic replies no longer notify: seimei decides what pings.
         nm.deleteNotificationChannel("question")
         nm.deleteNotificationChannel("reply")
         Delivery.start(ctx)
@@ -117,7 +116,6 @@ object Push {
         // only while the app's session is unlocked.
         val unlocked = Build.VERSION.SDK_INT >= 31 && session() != null
         if (aid != null && unlocked) {
-            n.addExtras(Bundle().apply { putString("aid", aid) })
             val perm = d["perm"] == "1"
             val acts = listOfNotNull(Triple(false, "Deny", if (perm) "deny" else null), Triple(true, "Allow", if (perm) "once" else null),
                 d["always"]?.let { Triple(true, "Always allow", it) })
@@ -171,11 +169,9 @@ object Push {
     fun openToAnswer(ctx: Context, aid: String, title: String, body: String) =
         show(ctx, mapOf("kind" to "approval", "tag" to "approval:$aid", "group" to "approvals", "title" to title, "body" to body, "tab" to "chat"))
 
-    /** Withdraws a card's notification (and one from an older server, a lone card under the tag "approval"). */
+    /** Withdraws a card's notification. */
     fun settled(ctx: Context, aid: String) {
-        val nm = ctx.getSystemService(NotificationManager::class.java)
-        nm.cancel("approval:$aid", 0)
-        if (nm.activeNotifications.any { it.tag == "approval" && it.notification.extras.getString("aid") == aid }) nm.cancel("approval", 0)
+        ctx.getSystemService(NotificationManager::class.java).cancel("approval:$aid", 0)
         summary(ctx, "approvals", "approval")
     }
 

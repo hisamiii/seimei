@@ -8,7 +8,7 @@ import { current as themeNow } from './theme.js';
 const page = $('agents');
 const sp = $('spage');
 
-export const ACTIVE = new Set(['starting', 'running', 'asking']);
+const ACTIVE = new Set(['starting', 'running', 'asking']);
 
 function stateText(w) {
   const at = atTime(w.updated);
@@ -108,7 +108,7 @@ async function refreshAll() {
 
 // The theme's project colors (Catppuccin's by default); a project keeps its place in the list everywhere.
 const TINTS = ['#89b4fa', '#a6e3a1', '#94e2d5', '#cba6f7', '#f5c2e7', '#b4befe', '#f9e2af', '#74c7ec', '#eba0ac', '#fab387'];
-export function tint(project) {
+function tint(project) {
   if (!project) return themeNow?.['text-3'] || '#a6adc8';
   const tints = themeNow?.tints || TINTS;
   let h = 0;
@@ -248,7 +248,7 @@ function openArch() {
   page.scrollTop = 0;
 }
 
-export async function setArchived(x, on, undo = true) {
+async function setArchived(x, on, undo = true) {
   const path = x.kind === 'worker' ? `api/workers/${encodeURIComponent(x.id)}/archive` : `api/sessions/${x.id}/archive`;
   const r = await postJSON(path, { archived: on });
   if (!r.ok) return snack(r.error);
@@ -332,7 +332,7 @@ function archPage() {
   return parts;
 }
 
-export function renderAgents() {
+function renderAgents() {
   if (archView) {
     const top = page.scrollTop;
     page.replaceChildren(...archPage());
@@ -1002,7 +1002,7 @@ function build(kind, id, row) {
   stop.addEventListener('click', () => postJSON(`api/workers/${encodeURIComponent(id)}/stop`, {}));
 }
 
-export async function openPage(kind, id) {
+async function openPage(kind, id) {
   const reopen = P && P.kind === kind && P.id === id;
   // The page as last seen draws at once; the server then sends only what came since.
   const kept = keep.read(`${kind}-${id}`);
@@ -1026,7 +1026,12 @@ export async function openPage(kind, id) {
   }
   if (kept && P !== p) return;
   if (!r && kept && gone) return note('Gone from the server: this is the last copy');
-  if (!r) return kept ? snack('Offline: this is the last copy') : snack("Couldn't reach the server");
+  if (!r) {
+    if (!kept) return snack("Couldn't reach the server");
+    // The copy keeps polling, and the stream's reconnect refreshes a worker's page.
+    if (kind === 'session') pollTimer = setTimeout(poll, 2000);
+    return snack('Offline: this is the last copy');
+  }
   // Drawn anew when there was no copy, or the server says the copy is too old to extend.
   if (!kept || r.reset) build(kind, id, kind === 'worker' ? { ...r.worker, ...live } : { ...r.session, reach: r.reach, via: r.via });
   else P.row = kind === 'worker' ? { ...P.row, ...r.worker, ...live } : { ...P.row, ...r.session, reach: r.reach, via: r.via };
@@ -1069,8 +1074,20 @@ function shown(reopen) {
   requestAnimationFrame(() => stick(true));
 }
 
+// Back online: the open page fetches what came while the stream was down.
+export async function refreshPage() {
+  if (P?.kind === 'session') return poll();
+  if (!P) return;
+  const p = P;
+  const r = await getJSON(`api/workers/${encodeURIComponent(p.id)}?after=${p.last}`);
+  if (!r || P !== p) return;
+  p.row = { ...p.row, ...r.worker, ...S.workers.find((x) => x.id === p.id) };
+  add(r.events);
+  head();
+  stick();
+}
+
 export const openWorker = (id) => openPage('worker', id);
-export const openSession = (pid) => openPage('session', pid);
 export const pageOpen = () => !sp.hidden;
 
 export function closePage() {

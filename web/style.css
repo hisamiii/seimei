@@ -431,37 +431,7 @@ body.login { display: grid; place-items: center; grid-template-rows: 1fr; paddin
 }
 .handle { flex: none; align-self: center; width: 32px; height: 4px; border-radius: 2px; background: var(--outline); margin: 16px 0 8px; }
 .sheet-body { display: flex; flex-direction: column; gap: 14px; min-height: 0; flex: 1; padding: 6px 20px 16px; }
-.sheet .whead { display: flex; align-items: center; gap: 14px; }
-.sheet .wbadge { flex: none; width: 48px; height: 48px; border-radius: 16px; background: var(--t-bg); display: grid; place-items: center; }
-.sheet .wbadge span { width: 12px; height: 12px; border-radius: 50%; background: var(--t-dot); }
-.sheet .wbadge.run span { animation: pulse 2s ease-in-out infinite; }
-.sheet .whead h2 { margin: 0; font-size: 22px; font-weight: 500; letter-spacing: -.01em; overflow-wrap: anywhere; }
-.sheet .whead .sub { font-size: 13px; color: var(--text-3); }
 .question { background: var(--warn-container); color: var(--on-warn-container); border-radius: 16px; padding: 12px 14px; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.wlog {
-  flex: 1; min-height: 120px; overflow-y: auto; overscroll-behavior: contain;
-  border-top: 1px solid var(--container-high); padding: 14px 2px 4px; display: flex; flex-direction: column; gap: 12px; font-size: 14px;
-}
-.wlog .msg.user { max-width: 90%; font-size: 14px; padding: 9px 14px; }
-.wlog .note.day { display: none; }
-.sheet-actions { display: flex; gap: 8px; align-items: flex-end; }
-.sheet-actions .field { min-height: 48px; border-radius: 24px; }
-.sheet-actions textarea { min-height: 48px; padding: 13px 18px; font-size: 15px; }
-.sheet-actions .fab { width: 48px; height: 48px; }
-.round-stop {
-  flex: none; width: 48px; height: 48px; border-radius: 50%; border: 0; background: none;
-  box-shadow: inset 0 0 0 1px var(--outline); color: var(--error); display: grid; place-items: center;
-}
-.round-stop span { width: 13px; height: 13px; border-radius: 3px; background: currentColor; }
-.wlist { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; margin: 0 -8px; }
-.wrow {
-  display: grid; grid-template-columns: auto 1fr auto; gap: 2px 12px; align-items: center; text-align: left;
-  border: 0; background: none; border-radius: 16px; padding: 10px 8px; min-height: 56px;
-}
-.wrow .dot { grid-row: span 2; width: 10px; height: 10px; border-radius: 50%; background: var(--t-dot); margin: 0 4px; }
-.wrow b { font-weight: 500; font-size: 15px; }
-.wrow time { font-size: 12px; color: var(--text-3); }
-.wrow span { grid-column: 2 / 4; font-size: 13px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sheet h2.list { margin: 0; font-size: 22px; font-weight: 500; }
 
 /* Images */
@@ -588,15 +558,7 @@ body.login { display: grid; place-items: center; grid-template-rows: 1fr; paddin
 .cmodel .amt { font-variant-numeric: tabular-nums; }
 .cmodel small { grid-column: 1 / 3; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 
-.squestion { background: var(--warn-container); color: var(--on-warn-container); border-radius: 16px; padding: 12px 14px; font-size: 14px; display: flex; flex-direction: column; gap: 6px; }
-.squestion p { margin: 4px 0 0; color: var(--text); }
-.squestion ol { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 4px; }
-.squestion li span { color: var(--text); }
-.squestion li small { display: block; font-size: 12px; color: color-mix(in srgb, var(--on-warn-container) 80%, transparent); }
-.running { display: flex; flex-direction: column; gap: 4px; background: var(--surface-low); border-radius: 14px; padding: 10px 12px; font-size: 13px; color: var(--text-3); }
-.running code { font: 12px/1.45 var(--mono); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 4.4em; overflow: hidden; }
 .sheet-body.scroll { overflow-y: auto; overscroll-behavior: contain; }
-.sheet-body.scroll .wlog { flex: none; overflow: visible; }
 
 /* Activity log */
 /* Phone app sheet */
@@ -673,26 +635,6 @@ body.typing .composer { padding-bottom: 10px; }
 .sec { display: flex; align-items: baseline; justify-content: space-between; padding: 16px 4px 8px; font-size: 14px; font-weight: 500; color: var(--primary); }
 .sec small { font-size: 12px; font-weight: 400; color: var(--text-3); }
 .group { display: flex; flex-direction: column; gap: 2px; }
-.li {
-  display: flex; align-items: center; gap: 14px; min-height: 72px; padding: 10px 16px; width: 100%;
-  border: 0; border-radius: 4px; background: var(--container); color: var(--text); text-align: left;
-}
-.li:first-child { border-top-left-radius: 20px; border-top-right-radius: 20px; }
-.li:last-child { border-bottom-left-radius: 20px; border-bottom-right-radius: 20px; }
-.li .txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.li .hl { font-size: 16px; font-weight: 500; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.li .sup { font-size: 14px; color: var(--text-3); line-height: 1.35; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.li .trail { flex: none; font-size: 12px; color: var(--text-3); display: flex; align-items: center; gap: 6px; }
-.li .trail.fresh::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--primary); }
-.li .btn.small { flex: none; min-height: 32px; padding: 0 14px; font-size: 13px; }
-.av { flex: none; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font: 500 16px var(--sans); background: var(--primary-container); color: var(--on-primary-container); }
-.av.user { background: none; box-shadow: inset 0 0 0 1px var(--outline); color: var(--text-2); }
-.av.ask { background: var(--warn-container); color: var(--on-warn-container); box-shadow: none; }
-.av.done { background: var(--container-high); color: var(--text-3); }
-.av.done.bad { color: var(--error); }
-.fade1 > * { opacity: .8; }
-.fade2 > * { opacity: .6; }
-.fade3 > * { opacity: .45; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .spinner { flex: none; width: 24px; height: 24px; animation: spin 1.4s linear infinite; }
 .spinner circle { fill: none; stroke-width: 3; stroke-linecap: round; }

@@ -22,7 +22,7 @@ sealed interface Item {
     data class Activity(override val key: String, val calls: List<Call>) : Item
     data class Worker(
         override val key: String, val event: String, val name: String, val worker: String,
-        val text: String, val model: String, val cwd: String, val effort: String = "", val contextCap: String = "",
+        val text: String, val model: String, val cwd: String, val effort: String = "",
         /** An "asks" card that something later settled: "Answered" or "Closed". */
         val settled: String? = null,
     ) : Item
@@ -296,7 +296,7 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
                 } else if (event in WORKER_CARDS) {
                     if (event == "asking") asks[wid] = this to items.size
                     put(Item.Worker(key, event, ev.str("name"), ev.str("worker"), ev.str("text"), ev.str("model"), ev.str("cwd"),
-                        ev.str("effort"), ev.str("context_cap")))
+                        ev.str("effort")))
                     lastSaid = "${ev.str("name")} ${ENDED[event] ?: event}"
                 } else {
                     val what = if (event == "stopped") "was stopped" else "was interrupted by a restart"

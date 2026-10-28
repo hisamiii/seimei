@@ -124,7 +124,6 @@ import androidx.compose.ui.graphics.SolidColor
 // The theme's tokens (Theme.kt) under the names the pages use.
 val PEACH: Color @Composable get() = LocalTokens.current.warn
 val MAUVE: Color @Composable get() = LocalTokens.current.primary
-val ASK_BG: Color @Composable get() = LocalTokens.current.tint
 
 /** "at 10:28 PM" today, "on 18 Oct at 10:28 PM" another day. */
 fun atTime(t: Double): String =
