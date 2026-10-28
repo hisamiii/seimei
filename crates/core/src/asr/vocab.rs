@@ -1,6 +1,5 @@
-//! Words for the recognizer: which ones are rare enough to send, ranked per source, merged and capped. A port of
-//! dictate's vocab.py (~/Development/Projects/dictate): the same word shape, English test, `worth()` filter, repo
-//! identifiers and nightly auto list.
+//! Words for the recognizer: which ones are rare enough to send, ranked per source, merged and capped.
+//! A port of dictate's vocab.py: the same word shape, English test, `worth()` filter, repo identifiers and nightly auto list.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -91,8 +90,7 @@ fn re(cell: &'static OnceLock<Regex>, pat: &str) -> &'static Regex {
     cell.get_or_init(|| Regex::new(pat).expect("a valid pattern"))
 }
 
-/// Words: letters first, then letters and digits, maybe joined by `.`, `+` or `-` (llama.cpp, Mod+H, gfx1151), not
-/// inside a longer token (vocab.py's `(?<![\w.+-])`, which Rust's regex has no look-behind for).
+/// Words: letters first, then letters and digits, maybe joined by `.`, `+` or `-` (llama.cpp, Mod+H, zfx2048), not inside a longer token (vocab.py's `(?<![\w.+-])`, which Rust's regex has no look-behind for).
 pub fn words(text: &str) -> Vec<&str> {
     static W: OnceLock<Regex> = OnceLock::new();
     let w = re(&W, r"[A-Za-z][A-Za-z0-9]*(?:[.+\-][A-Za-z0-9]+)*");
@@ -102,8 +100,8 @@ pub fn words(text: &str) -> Vec<&str> {
         .collect()
 }
 
-/// English: the dictionaries in `dir`, loaded once. Empty when they are missing (then no word counts as English, so
-/// callers skip the rare-word sources: see `Dict::ready`).
+/// English: the dictionaries in `dir`, loaded once.
+/// Empty when they are missing (then no word counts as English, so callers skip the rare-word sources: see `Dict::ready`).
 pub struct Dict {
     words: HashSet<String>,
 }
@@ -231,8 +229,7 @@ fn best_form(f: &HashMap<String, usize>) -> String {
 /// A list's entries with their source, for the send log.
 pub type Tagged = Vec<(String, &'static str)>;
 
-/// Dedupe case-insensitively (the first spelling wins), drop commas (voxtral gets the list comma-joined) and the
-/// denied, cap.
+/// Dedupe case-insensitively (the first spelling wins), drop commas (voxtral gets the list comma-joined) and the denied, cap.
 pub fn merge(lists: Vec<(&'static str, Vec<String>)>, deny: &[String], cap: usize) -> Tagged {
     let mut out = vec![];
     let mut have = HashSet::new();
@@ -270,8 +267,7 @@ pub fn repo_top(cwd: &str) -> Option<PathBuf> {
     }
 }
 
-/// A repo's 30 most common rare identifiers in its tracked code files (no snake_case: nobody says the
-/// underscores), cached by HEAD.
+/// A repo's 30 most common rare identifiers in its tracked code files (no snake_case: nobody says the underscores), cached by HEAD.
 pub fn repo_words(dict: &Dict, top: &Path, cache: &mut HashMap<(PathBuf, String), Vec<String>>) -> Vec<String> {
     static IDENT: OnceLock<Regex> = OnceLock::new();
     let git = |args: &[&str]| {
@@ -409,8 +405,8 @@ fn fish_commands(history: &Path, out: &mut Vec<String>) {
     }
 }
 
-/// The auto list: the git repos under ~/Development, then the rare words in your own Claude turns and fish history,
-/// ranked by how many messages and commands use them (at least 3), top AUTO_MAX. Returns (words, messages).
+/// The auto list: the git repos under ~/Development, then the rare words in your own agent turns and fish history, ranked by how many messages and commands use them (at least 3), top AUTO_MAX.
+/// Returns (words, messages).
 pub fn build_auto(dict: &Dict, home: &Path) -> (Vec<String>, usize) {
     let mut texts = vec![];
     claude_messages(&home.join(".claude/projects"), &mut texts);
@@ -449,7 +445,7 @@ mod tests {
 
     #[test]
     fn word_shapes() {
-        assert_eq!(words("use llama.cpp, Mod+H and gfx1151"), ["use", "llama.cpp", "Mod+H", "and", "gfx1151"]);
+        assert_eq!(words("use llama.cpp, Mod+H and zfx2048"), ["use", "llama.cpp", "Mod+H", "and", "zfx2048"]);
         assert_eq!(words("snake_case x.y_z"), ["snake", "x.y"]);
         assert!(words("_foo").is_empty());
     }
@@ -458,21 +454,21 @@ mod tests {
     fn rare_and_ranked() {
         let d = dict();
         assert!(d.english("holds") && d.english("checked") && d.english("rebuild"));
-        assert!(d.worth("kubus") && d.worth("shikigami") && !d.worth("grep") && !d.worth("deadbeef12"));
-        let chat = vec!["ask niri about kubus".to_string(), "the shikigami on kubus still holds gfx1151".to_string()];
+        assert!(d.worth("rebus") && d.worth("shikigami") && !d.worth("grep") && !d.worth("deadbeef12"));
+        let chat = vec!["ask tiro about rebus".to_string(), "the shikigami on rebus still holds zfx2048".to_string()];
         let r = rare(&d, &chat);
-        // gfx1151 is half digits: dictate's worth() leaves it to the pins too.
-        assert_eq!(&r[..2], ["kubus", "shikigami"]);
+        // zfx2048 is half digits: dictate's worth() leaves it to the pins too.
+        assert_eq!(&r[..2], ["rebus", "shikigami"]);
         assert!(
-            r.contains(&"niri".to_string()) && !r.contains(&"holds".to_string()) && !r.contains(&"gfx1151".to_string())
+            r.contains(&"tiro".to_string()) && !r.contains(&"holds".to_string()) && !r.contains(&"zfx2048".to_string())
         );
     }
 
     #[test]
     fn cleaning() {
-        let t = "keep <system-reminder>drop kubus</system-reminder> this ```code niri``` see https://x.io/a";
+        let t = "keep <system-reminder>drop rebus</system-reminder> this ```code tiro``` see https://x.io/a";
         let c = clean(t);
-        assert!(c.contains("keep") && c.contains("this") && !c.contains("kubus") && !c.contains("niri"));
+        assert!(c.contains("keep") && c.contains("this") && !c.contains("rebus") && !c.contains("tiro"));
         assert!(!c.contains("x.io"));
     }
 
@@ -480,12 +476,12 @@ mod tests {
     fn merging() {
         let m = merge(
             vec![
-                ("pin", vec!["Kubus".into(), "a,b".into()]),
-                ("chat", vec!["kubus".into(), "secret".into(), "niri".into()]),
+                ("pin", vec!["Rebus".into(), "a,b".into()]),
+                ("chat", vec!["rebus".into(), "secret".into(), "tiro".into()]),
             ],
             &["sec*".to_string()],
             3,
         );
-        assert_eq!(m, vec![("Kubus".into(), "pin"), ("a b".into(), "pin"), ("niri".into(), "chat")]);
+        assert_eq!(m, vec![("Rebus".into(), "pin"), ("a b".into(), "pin"), ("tiro".into(), "chat")]);
     }
 }

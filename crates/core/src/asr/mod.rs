@@ -1,8 +1,7 @@
-//! Dictation (docs/asr.md): audio in, text out. Per request seimei builds the word list the recognizer is biased
-//! with, from what it knows (pins, the open chat, running agents, the board, the focused window, the nightly auto
-//! list), sends terms only, calls OpenRouter (MAI-Transcribe-2 with Azure's phraseList, voxtral-mini as the
-//! fallback), and puts the answer through the fixes table and a fixer that may only insert listed terms. Every
-//! request's terms go to sent.jsonl. Files live in `<state>/asr/`.
+//! Dictation (docs/asr.md): audio in, text out.
+//! Per request seimei builds the word list the recognizer is biased with, from what it knows (pins, the open chat, running agents, the board, the focused window, the nightly auto list), sends terms only, calls OpenRouter (MAI-Transcribe-2 with Azure's phraseList, voxtral-mini as the fallback), and puts the answer through the fixes table and a fixer that may only insert listed terms.
+//! Every request's terms go to sent.jsonl.
+//! Files live in `<state>/asr/`.
 
 pub mod fix;
 pub mod vocab;
@@ -411,12 +410,12 @@ mod tests {
         }
         std::fs::write(dir.join("en-20k.txt"), d.replace("shikigami\n", "")).unwrap();
         std::fs::write(dir.join("words.txt"), "seimei\n# a comment\nMod+H\n").unwrap();
-        std::fs::write(dir.join("words-auto.txt"), "# header\nloom\nkubus\n").unwrap();
+        std::fs::write(dir.join("words-auto.txt"), "# header\nloom\nrebus\n").unwrap();
         let mut cfg = Config::from_toml(None);
         cfg.deny = vec!["acme*".into()];
         let asr = Asr::new(cfg, &state);
         let ctx = Context {
-            chat: vec!["ask acmecorp about niri".into(), "the shikigami on kubus holds gfx1151".into()],
+            chat: vec!["ask acmecorp about tiro".into(), "the shikigami on rebus holds zfx2048".into()],
             agent: vec!["dev".into(), "seimei".into()],
             names: vec!["phonewm_mockups".into()],
             board: vec!["seimei usage: rate-limits log".into()],
@@ -425,9 +424,9 @@ mod tests {
         let (list, desc) = asr.list(&ctx);
         let words: Vec<&str> = list.iter().map(|(w, _)| w.as_str()).collect();
         assert_eq!(&words[..3], ["seimei", "Mod+H", "dev"]);
-        assert!(words.contains(&"shikigami") && words.contains(&"niri") && words.contains(&"phonewm_mockups"));
+        assert!(words.contains(&"shikigami") && words.contains(&"tiro") && words.contains(&"phonewm_mockups"));
         assert!(!words.iter().any(|w| w.starts_with("acme")));
-        assert_eq!(list.iter().find(|(w, _)| w == "kubus").unwrap().1, "chat");
+        assert_eq!(list.iter().find(|(w, _)| w == "rebus").unwrap().1, "chat");
         assert_eq!(list.iter().find(|(w, _)| w == "loom").unwrap().1, "auto");
         assert!(!desc.contains(','));
         let _ = std::fs::remove_dir_all(&state);

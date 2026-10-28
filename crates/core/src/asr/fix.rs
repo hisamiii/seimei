@@ -1,5 +1,5 @@
-//! After the model: the shared fixes table, then a constrained fixer that only swaps a misheard word (or a run of
-//! up to four, "Ku bus", "shi ki ga me") for a term that was in this request's list. No LLM rewrite.
+//! After the model: the shared fixes table, then a constrained fixer that only swaps a misheard word (or a run of up to four, "Re bus", "shi ki ga me") for a term that was in this request's list.
+//! No LLM rewrite.
 
 use std::path::Path;
 
@@ -46,7 +46,7 @@ pub fn apply_fixes(text: &str, fixes: &[(Regex, String)]) -> String {
 }
 
 /// A rough sound key: the first letter, then consonants with the usual confusions merged, vowels and repeats out
-/// ("shikigami" and "shi ki ga me" both give "skkgm"; "neri" and "niri" give "nr").
+/// ("shikigami" and "shi ki ga me" both give "skkgm"; "tero" and "tiro" give "tr").
 fn sound(s: &str) -> String {
     let s = s.to_lowercase().replace("ph", "f").replace("ck", "k").replace("sh", "s").replace("ch", "k");
     let mut out = String::new();
@@ -82,10 +82,10 @@ pub struct Fixed {
     pub suspects: Vec<String>,
 }
 
-/// Swap misheard words for terms of this request's list. A run of 1 to 4 words is a candidate when its letters
-/// together are close to a term (similarity >= 0.8, or the same sound key with 4+ letters and similarity >= 0.6), it is not already that
-/// term, and, for one word, it is not English ("build" is not a miss for ebuild). Of the runs at a position the
-/// closest wins, the shorter on a tie, and a run whose first word the term does not need is left to the next position. `known` also has words that count as right but are never inserted (the auto list).
+/// Swap misheard words for terms of this request's list.
+/// A run of 1 to 4 words is a candidate when its letters together are close to a term (similarity >= 0.8, or the same sound key with 4+ letters and similarity >= 0.6), it is not already that term, and, for one word, it is not English ("build" is not a miss for xbuild).
+/// Of the runs at a position the closest wins, the shorter on a tie, and a run whose first word the term does not need is left to the next position.
+/// `known` also has words that count as right but are never inserted (the auto list).
 pub fn fix(dict: &Dict, text: &str, terms: &[String], known: &[String]) -> Fixed {
     let terms_l: Vec<String> = terms.iter().map(|t| t.to_lowercase()).collect();
     let known_l: std::collections::HashSet<String> =
@@ -105,13 +105,12 @@ pub fn fix(dict: &Dict, text: &str, terms: &[String], known: &[String]) -> Fixed
             if g.chars().count() < 4 {
                 continue;
             }
-            // A run with a known word or a listed term in it ("shiki" in "shiki ga me") takes a higher bar; that it
-            // does not just spell the word it holds is checked below ("seimei is" stays).
+            // A run with a known word or a listed term in it ("shiki" in "shiki ga me") takes a higher bar; that it does not just spell the word it holds is checked below ("seimei is" stays).
             let has_known = j > 1 && grams.iter().any(|t| known_l.contains(&t.to_lowercase()));
             if j == 1 && (known_l.contains(&g) || dict.english(&g)) {
                 continue;
             }
-            // A run of common words is a term only when it spells it nearly exactly ("Ku bus" for kubus).
+            // A run of common words is a term only when it spells it nearly exactly ("Re bus" for rebus).
             let all_english = j > 1 && grams.iter().all(|t| dict.english(t));
             let cutoff = if all_english {
                 0.9
@@ -136,8 +135,7 @@ pub fn fix(dict: &Dict, text: &str, terms: &[String], known: &[String]) -> Fixed
                         })
                         .flatten()
                 });
-            // Every word of the run is needed: no shorter part of it, from either end, is as close to the term ("on Ku
-            // bus" leaves "on", "seimei is" is just seimei).
+            // Every word of the run is needed: no shorter part of it, from either end, is as close to the term ("on Re bus" leaves "on", "seimei is" is just seimei).
             let ratio = |s: &str, t: &str| similar::TextDiff::from_chars(s, t).ratio();
             let tight = |t: &str, score: f32| {
                 (1..j).all(|k| {
@@ -157,7 +155,7 @@ pub fn fix(dict: &Dict, text: &str, terms: &[String], known: &[String]) -> Fixed
             let (s, _) = span(text, toks[i]);
             let (_, e) = span(text, toks[i + j - 1]);
             out.push_str(&text[at..s]);
-            // A sentence starts with a capital, whatever the term's own spelling ("Neri crashed" -> "Niri crashed").
+            // A sentence starts with a capital, whatever the term's own spelling ("Tero crashed" -> "Tiro crashed").
             let starts = text[..s].trim_end().is_empty() || text[..s].trim_end().ends_with(['.', '!', '?']);
             let mut term = terms[ti].clone();
             if starts && toks[i].starts_with(char::is_uppercase) && term.starts_with(char::is_lowercase) {
@@ -182,8 +180,8 @@ pub fn fix(dict: &Dict, text: &str, terms: &[String], known: &[String]) -> Fixed
     Fixed { text: out, fixed, suspects }
 }
 
-/// A phrase the model starts with a list term in the term's lowercase spelling ("niri crashed") starts with a capital,
-/// as every other phrase does. Only plain words: "gfx1151" and "llama.cpp" keep their spelling.
+/// A phrase the model starts with a list term in the term's lowercase spelling ("tiro crashed") starts with a capital, as every other phrase does.
+/// Only plain words: "zfx2048" and "llama.cpp" keep their spelling.
 pub fn capital(text: &str, terms: &[String]) -> String {
     let first = words(text).into_iter().next().unwrap_or("");
     let lead = text.trim_start();
@@ -221,16 +219,16 @@ mod tests {
     }
 
     fn terms() -> Vec<String> {
-        ["kubus", "shikigami", "gfx1151", "niri", "ebuild", "seimei"].map(String::from).to_vec()
+        ["rebus", "shikigami", "zfx2048", "tiro", "xbuild", "seimei"].map(String::from).to_vec()
     }
 
     #[test]
     fn misheard_terms_are_swapped() {
         let d = dict();
-        let f = fix(&d, "Check whether the shi ki ga me on Ku bus still holds GEFX1151.", &terms(), &[]);
-        assert_eq!(f.text, "Check whether the shikigami on kubus still holds gfx1151.", "{:?}", f.fixed);
+        let f = fix(&d, "Check whether the shi ki ga me on Re bus still holds ZEFX2048.", &terms(), &[]);
+        assert_eq!(f.text, "Check whether the shikigami on rebus still holds zfx2048.", "{:?}", f.fixed);
         assert_eq!(f.fixed.len(), 3);
-        assert_eq!(fix(&d, "cuBus is back", &terms(), &[]).text, "kubus is back");
+        assert_eq!(fix(&d, "riBus is back", &terms(), &[]).text, "rebus is back");
         // "shiki" is a word of the auto list, and still part of the misheard run.
         assert_eq!(
             fix(&d, "Ask the shiki ga me to check", &terms(), &["shiki".into()]).text,
@@ -241,33 +239,33 @@ mod tests {
         let mut with_shiki = terms();
         with_shiki.push("shiki".into());
         assert_eq!(fix(&d, "Ask the shiki ga me to check", &with_shiki, &[]).text, "Ask the shikigami to check");
-        assert_eq!(fix(&d, "Neri and many", &terms(), &[]).text, "Niri and many");
-        assert_eq!(fix(&d, "on Neri. Neri and the Neri", &terms(), &[]).text, "on niri. Niri and the niri");
+        assert_eq!(fix(&d, "Tero and many", &terms(), &[]).text, "Tiro and many");
+        assert_eq!(fix(&d, "on Tero. Tero and the Tero", &terms(), &[]).text, "on tiro. Tiro and the tiro");
     }
 
     #[test]
     fn right_and_english_words_stay() {
         let d = dict();
         for s in [
-            "build the kubus",
+            "build the rebus",
             "seimei is back",
             "the bus is low",
             "Check whether it holds",
-            "on niri now",
+            "on tiro now",
             "is seimei",
         ] {
             let f = fix(&d, s, &terms(), &[]);
             assert_eq!(f.text, s, "{:?}", f.fixed);
         }
-        // Only listed terms go in: "Ku bus" stays without kubus on the list.
-        assert_eq!(fix(&d, "Ku bus", &["niri".into()], &[]).text, "Ku bus");
+        // Only listed terms go in: "Re bus" stays without rebus on the list.
+        assert_eq!(fix(&d, "Re bus", &["tiro".into()], &[]).text, "Re bus");
     }
 
     #[test]
     fn a_term_starting_a_phrase_gets_a_capital() {
-        assert_eq!(capital("niri crashed again, so niri", &terms()), "Niri crashed again, so niri");
-        assert_eq!(capital("the niri", &terms()), "the niri");
-        assert_eq!(capital("gfx1151 is fine", &terms()), "gfx1151 is fine");
+        assert_eq!(capital("tiro crashed again, so tiro", &terms()), "Tiro crashed again, so tiro");
+        assert_eq!(capital("the tiro", &terms()), "the tiro");
+        assert_eq!(capital("zfx2048 is fine", &terms()), "zfx2048 is fine");
     }
 
     #[test]
