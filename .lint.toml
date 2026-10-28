@@ -1,0 +1,9 @@
+# The writing rules in AGENTS.md, checked by https://github.com/hisamiii/lint (`lint install`, then `lint --all`).
+
+[files]
+exclude = ["android/gradlew", "android/gradlew.bat"]
+
+# Model prompts are read by the agent, not by a person: the prose rules for docs do not apply to them.
+[[override]]
+paths = ["crates/core/src/dispatcher.md", "crates/core/src/checklist.md", "plugins/*/prompt.md"]
+disable = ["doc-sentence-length", "doc-parens", "doc-table-cell", "doc-section-intro"]
