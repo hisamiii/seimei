@@ -9,6 +9,7 @@ use std::io::Write;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::path::Path;
 
+use crate::uinput::NAMED_KEYS;
 use crate::wire::{Conn, fixed, words};
 
 /// What one call does on the display.
@@ -33,27 +34,7 @@ pub const MOD_KEYS: [(u32, u32); 4] = [(SHIFT, 0xffe1), (CONTROL, 0xffe3), (ALT,
 
 /// A key name of press_keys to its keysym; modifiers are not keys here.
 fn keysym(name: &str) -> Option<u32> {
-    let named = match name {
-        "esc" | "escape" => 0xff1b,
-        "backspace" => 0xff08,
-        "tab" => 0xff09,
-        "enter" | "return" => 0xff0d,
-        "space" => 0x20,
-        "capslock" => 0xffe5,
-        "home" => 0xff50,
-        "left" => 0xff51,
-        "up" => 0xff52,
-        "right" => 0xff53,
-        "down" => 0xff54,
-        "pageup" | "pgup" => 0xff55,
-        "pagedown" | "pgdn" => 0xff56,
-        "end" => 0xff57,
-        "insert" => 0xff63,
-        "delete" | "del" => 0xffff,
-        "menu" => 0xff67,
-        "print" => 0xff61,
-        _ => 0,
-    };
+    let named = NAMED_KEYS.iter().find(|k| k.0.contains(&name)).map_or(0, |k| k.2);
     if named != 0 {
         return Some(named);
     }

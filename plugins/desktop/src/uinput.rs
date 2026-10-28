@@ -60,43 +60,40 @@ pub static CHARS: LazyLock<HashMap<char, (u16, bool)>> = LazyLock::new(|| {
     out
 });
 
+/// The named keys of press_keys: their names, evdev code and keysym (0 for a modifier, which vinput takes as a
+/// modifier bit).
+pub const NAMED_KEYS: [(&[&str], u16, u32); 23] = [
+    (&["esc", "escape"], 1, 0xff1b),
+    (&["backspace"], 14, 0xff08),
+    (&["tab"], 15, 0xff09),
+    (&["enter", "return"], 28, 0xff0d),
+    (&["ctrl", "control"], 29, 0),
+    (&["shift"], 42, 0),
+    (&["alt"], 56, 0),
+    (&["space"], 57, 0x20),
+    (&["capslock"], 58, 0xffe5),
+    (&["super", "meta", "win"], 125, 0),
+    (&["altgr"], 100, 0),
+    (&["home"], 102, 0xff50),
+    (&["up"], 103, 0xff52),
+    (&["pageup", "pgup"], 104, 0xff55),
+    (&["left"], 105, 0xff51),
+    (&["right"], 106, 0xff53),
+    (&["end"], 107, 0xff57),
+    (&["down"], 108, 0xff54),
+    (&["pagedown", "pgdn"], 109, 0xff56),
+    (&["insert"], 110, 0xff63),
+    (&["delete", "del"], 111, 0xffff),
+    (&["menu"], 139, 0xff67),
+    (&["print"], 99, 0xff61),
+];
+
 /// evdev key codes by name.
 pub static KEYS: LazyLock<HashMap<String, u16>> = LazyLock::new(|| {
-    let named: [(&str, u16); 32] = [
-        ("esc", 1),
-        ("escape", 1),
-        ("backspace", 14),
-        ("tab", 15),
-        ("enter", 28),
-        ("return", 28),
-        ("ctrl", 29),
-        ("control", 29),
-        ("shift", 42),
-        ("alt", 56),
-        ("space", 57),
-        ("capslock", 58),
-        ("super", 125),
-        ("meta", 125),
-        ("win", 125),
-        ("altgr", 100),
-        ("home", 102),
-        ("up", 103),
-        ("pageup", 104),
-        ("pgup", 104),
-        ("left", 105),
-        ("right", 106),
-        ("end", 107),
-        ("down", 108),
-        ("pagedown", 109),
-        ("pgdn", 109),
-        ("insert", 110),
-        ("delete", 111),
-        ("del", 111),
-        ("menu", 139),
-        ("print", 99),
-        ("f1", 59),
-    ];
-    let mut out: HashMap<String, u16> = named.iter().map(|(k, c)| (k.to_string(), *c)).collect();
+    let mut out: HashMap<String, u16> = HashMap::new();
+    for (names, code, _) in NAMED_KEYS {
+        out.extend(names.iter().map(|n| (n.to_string(), code)));
+    }
     for (i, c) in [59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 87, 88].into_iter().enumerate() {
         out.insert(format!("f{}", i + 1), c);
     }
