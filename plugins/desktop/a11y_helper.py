@@ -1,6 +1,5 @@
 """AT-SPI access for seimei, run with the system Python (python3 -I), which has PyGObject.
 
-  a11y_helper.py apps
   a11y_helper.py tree <pid> [depth] [filter]
   a11y_helper.py act <pid> <path> <action name or index>
   a11y_helper.py set-text <pid> <path> <text>
@@ -124,14 +123,6 @@ def set_text(pid: int, path: str, text: str):
 
 def main(argv):
     cmd = argv[0]
-    if cmd == "apps":
-        out = []
-        for a in apps():
-            try:
-                out.append({"name": a.get_name(), "pid": a.get_process_id(), "windows": a.get_child_count()})
-            except Exception:
-                pass
-        return out
     if cmd == "tree":
         return tree(int(argv[1]), int(argv[2]) if len(argv) > 2 else 12, argv[3] if len(argv) > 3 else "")
     if cmd == "act":

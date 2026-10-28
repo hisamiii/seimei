@@ -64,10 +64,6 @@ impl<'a> Args<'a> {
         self.uint() as i32
     }
 
-    pub fn fixed(&mut self) -> f64 {
-        self.int() as f64 / 256.0
-    }
-
     pub fn bytes(&mut self) -> &'a [u8] {
         let n = self.uint() as usize;
         let v = self.b.get(self.at..self.at + n).unwrap_or(&[]);
@@ -84,6 +80,32 @@ impl<'a> Args<'a> {
 /// The socket a WAYLAND_DISPLAY value names: a path, or a name in the runtime dir.
 pub fn socket_path(run: &Path, display: &str) -> std::path::PathBuf {
     if display.starts_with('/') { display.into() } else { run.join(display) }
+}
+
+/// Write data with file descriptors attached (SCM_RIGHTS), in one sendmsg.
+pub fn send_fds(sock: &UnixStream, data: &[u8], fds: &[i32]) -> std::io::Result<()> {
+    let mut iov = libc::iovec { iov_base: data.as_ptr() as *mut _, iov_len: data.len() };
+    let size = std::mem::size_of_val(fds) as u32;
+    let space = unsafe { libc::CMSG_SPACE(size) } as usize;
+    let mut ctrl = vec![0u8; space];
+    // SAFETY: msghdr points at iov and ctrl, both alive for the call; the fds fit in ctrl's data part.
+    let sent = unsafe {
+        let mut msg: libc::msghdr = std::mem::zeroed();
+        msg.msg_iov = &mut iov;
+        msg.msg_iovlen = 1;
+        msg.msg_control = ctrl.as_mut_ptr().cast();
+        msg.msg_controllen = space as _;
+        let c = libc::CMSG_FIRSTHDR(&msg);
+        (*c).cmsg_level = libc::SOL_SOCKET;
+        (*c).cmsg_type = libc::SCM_RIGHTS;
+        (*c).cmsg_len = libc::CMSG_LEN(size) as _;
+        std::ptr::copy_nonoverlapping(fds.as_ptr().cast::<u8>(), libc::CMSG_DATA(c), size as usize);
+        libc::sendmsg(sock.as_raw_fd(), &msg, 0)
+    };
+    if sent as usize != data.len() {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 impl Conn {
@@ -139,6 +161,15 @@ impl Conn {
         Ok(id)
     }
 
+    /// A request that makes an object from a string (its arguments: the new id, then s); returns the object.
+    pub fn create(&mut self, obj: u32, op: u16, s: &str) -> Result<u32, String> {
+        let id = self.id();
+        let mut args = words(&[id]);
+        args.extend(string(s));
+        self.send(obj, op, &args)?;
+        Ok(id)
+    }
+
     fn missing(&self, iface: &str) -> String {
         format!("{} does not offer {iface}", self.label)
     }
@@ -153,27 +184,7 @@ impl Conn {
     pub fn send_fd(&mut self, obj: u32, op: u16, args: &[u8], fd: i32) -> Result<(), String> {
         let mut m = words(&[obj, ((8 + args.len() as u32) << 16) | op as u32]);
         m.extend(args);
-        let mut iov = libc::iovec { iov_base: m.as_mut_ptr().cast(), iov_len: m.len() };
-        let space = unsafe { libc::CMSG_SPACE(size_of::<i32>() as u32) } as usize;
-        let mut ctrl = vec![0u8; space];
-        // SAFETY: msghdr points at iov and ctrl, both alive for the call; the cmsg header fits in ctrl.
-        let sent = unsafe {
-            let mut msg: libc::msghdr = std::mem::zeroed();
-            msg.msg_iov = &mut iov;
-            msg.msg_iovlen = 1;
-            msg.msg_control = ctrl.as_mut_ptr().cast();
-            msg.msg_controllen = space as _;
-            let c = libc::CMSG_FIRSTHDR(&msg);
-            (*c).cmsg_level = libc::SOL_SOCKET;
-            (*c).cmsg_type = libc::SCM_RIGHTS;
-            (*c).cmsg_len = libc::CMSG_LEN(size_of::<i32>() as u32) as _;
-            std::ptr::write_unaligned(libc::CMSG_DATA(c).cast::<i32>(), fd);
-            libc::sendmsg(self.sock.as_raw_fd(), &msg, 0)
-        };
-        if sent as usize != m.len() {
-            return Err(format!("sending to {}: {}", self.label, std::io::Error::last_os_error()));
-        }
-        Ok(())
+        send_fds(&self.sock, &m, &[fd]).map_err(|e| format!("sending to {}: {e}", self.label))
     }
 
     /// The next event: object, opcode and arguments. The compositor's protocol error ends it with Err.

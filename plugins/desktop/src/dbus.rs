@@ -3,7 +3,6 @@
 //! extension.
 
 use std::io::{Read, Write};
-use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
@@ -349,31 +348,8 @@ impl Bus {
     }
 
     fn send(&mut self, m: &[u8], fds: &[i32]) -> Result<(), String> {
-        if fds.is_empty() {
-            return self.sock.write_all(m).map_err(|e| format!("the session bus: {e}"));
-        }
-        let mut iov = libc::iovec { iov_base: m.as_ptr() as *mut _, iov_len: m.len() };
-        let size = std::mem::size_of_val(fds) as u32;
-        let space = unsafe { libc::CMSG_SPACE(size) } as usize;
-        let mut ctrl = vec![0u8; space];
-        // SAFETY: msghdr points at iov and ctrl, both alive for the call; the fds fit in ctrl's data part.
-        let sent = unsafe {
-            let mut msg: libc::msghdr = std::mem::zeroed();
-            msg.msg_iov = &mut iov;
-            msg.msg_iovlen = 1;
-            msg.msg_control = ctrl.as_mut_ptr().cast();
-            msg.msg_controllen = space as _;
-            let c = libc::CMSG_FIRSTHDR(&msg);
-            (*c).cmsg_level = libc::SOL_SOCKET;
-            (*c).cmsg_type = libc::SCM_RIGHTS;
-            (*c).cmsg_len = libc::CMSG_LEN(size) as _;
-            std::ptr::copy_nonoverlapping(fds.as_ptr(), libc::CMSG_DATA(c).cast::<i32>(), fds.len());
-            libc::sendmsg(self.sock.as_raw_fd(), &msg, 0)
-        };
-        if sent as usize != m.len() {
-            return Err(format!("the session bus: {}", std::io::Error::last_os_error()));
-        }
-        Ok(())
+        let r = if fds.is_empty() { self.sock.write_all(m) } else { crate::wire::send_fds(&self.sock, m, fds) };
+        r.map_err(|e| format!("the session bus: {e}"))
     }
 
     /// The next whole message.

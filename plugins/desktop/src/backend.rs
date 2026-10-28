@@ -7,7 +7,7 @@
 //!   layouts    {names, current_idx}, or None when the backend cannot switch layouts
 
 use std::collections::HashSet;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -62,7 +62,7 @@ pub type Env = Vec<(String, String)>;
 /// Windows seimei opened: closing them needs no card.
 pub type Ours = HashSet<i64>;
 /// What the event stream sends: ("windows", [window]), ("opened", window), ("closed", id), ("urgent", [id, bool]),
-/// ("workspaces", [workspace]), ("layouts", layouts), ("layout_idx", n), and ("up", null) once it is connected.
+/// and ("up", null) once it is connected.
 pub type Emit<'a> = &'a mut dyn FnMut(&str, Value);
 
 /// A window manager's names, for the prompt, errors and cards.
@@ -95,11 +95,7 @@ pub trait Backend: Send + Sync {
     }
     /// A screen locker is up. Most WMs do not say, so look for the locker process.
     fn locked(&self) -> bool {
-        let Ok(dir) = std::fs::read_dir(&self.ctx().proc) else { return false };
-        dir.flatten().any(|p| {
-            p.file_name().to_str().is_some_and(|n| n.bytes().all(|b| b.is_ascii_digit()))
-                && std::fs::read_to_string(p.path().join("comm")).is_ok_and(|c| LOCKERS.contains(&c.trim()))
-        })
+        running(self.ctx(), |comm| LOCKERS.contains(&comm))
     }
     /// The WM's config folder: writes there wait for the user's OK.
     fn config_dir(&self) -> Option<PathBuf> {
@@ -126,15 +122,18 @@ pub trait Backend: Send + Sync {
             env.iter().find(|(k, _)| k == "WAYLAND_DISPLAY").map(|(_, v)| v.as_str()).ok_or("no Wayland display")?;
         vinput::run(&socket_path(&self.ctx().run, wl), ops)
     }
-    fn queries(&self) -> &'static [&'static str];
     /// Read-only state as compact JSON.
     fn query(&self, what: &str) -> Result<String, String>;
 
     /// The native tool: one WM command.
     fn action(&self, args: &[String]) -> Result<String, String>;
     /// What a native command needs the user's OK for (closing a window seimei did not open, ending the session).
-    fn action_hit(&self, _args: &[String], _ours: &Ours) -> Option<String> {
-        None
+    /// By default the native tool closes a window with `close <window>`.
+    fn action_hit(&self, args: &[String], ours: &Ours) -> Option<String> {
+        if args.first()? != "close" {
+            return None;
+        }
+        self.close_hit(args.get(1).and_then(|n| n.parse().ok()), ours)
     }
     /// The same for one command of a Bash line.
     fn bash_hit(&self, _argv: &[String], _ours: &Ours) -> Option<String> {
@@ -163,16 +162,9 @@ pub trait Backend: Send + Sync {
     }
     /// Run a shell line in the desktop session, outside seimei (the WM's exec when it has one).
     fn spawn_sh(&self, script: &str) -> Result<(), String> {
-        use std::os::unix::process::CommandExt;
         let mut c = Command::new("sh");
         c.args(["-c", script]).envs(self.env()?).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-        // SAFETY: setsid only moves the child into a session of its own; it runs between fork and exec.
-        unsafe {
-            c.pre_exec(|| {
-                libc::setsid();
-                Ok(())
-            });
-        }
+        detach(&mut c);
         let mut child = c.spawn().map_err(|e| format!("sh: {e}"))?;
         std::thread::spawn(move || child.wait());
         Ok(())
@@ -213,6 +205,25 @@ impl Out {
     }
     pub fn err(&self) -> String {
         String::from_utf8_lossy(&self.stderr).into_owned()
+    }
+    /// Err with its stderr (or "<what> failed") when it failed.
+    pub fn ok(self, what: &str) -> Result<Out, String> {
+        if self.code == 0 {
+            return Ok(self);
+        }
+        let e = self.err();
+        Err(if e.trim().is_empty() { format!("{what} failed") } else { e.trim().to_string() })
+    }
+}
+
+/// Start the command in a session of its own, so it outlives seimei.
+pub fn detach(c: &mut Command) {
+    // SAFETY: setsid only moves the child into a session of its own; it runs between fork and exec.
+    unsafe {
+        std::os::unix::process::CommandExt::pre_exec(c, || {
+            libc::setsid();
+            Ok(())
+        });
     }
 }
 
@@ -258,12 +269,83 @@ pub fn exec(argv: &[&str], env: &Env, input: Option<&[u8]>, timeout: f64) -> Res
 
 /// Run a command for its output: Err with its stderr (or "<cmd> failed") when it fails.
 pub fn run(argv: &[&str], env: &Env, input: Option<&[u8]>, timeout: f64) -> Result<Vec<u8>, String> {
-    let r = exec(argv, env, input, timeout)?;
-    if r.code != 0 {
-        let e = r.err();
-        return Err(if e.trim().is_empty() { format!("{} failed", argv[0]) } else { e.trim().to_string() });
+    Ok(exec(argv, env, input, timeout)?.ok(argv[0])?.stdout)
+}
+
+/// A process whose name (its comm) passes f runs.
+pub fn running(ctx: &Ctx, f: impl Fn(&str) -> bool) -> bool {
+    let Ok(dir) = std::fs::read_dir(&ctx.proc) else { return false };
+    dir.flatten().any(|p| {
+        p.file_name().to_str().is_some_and(digits)
+            && std::fs::read_to_string(p.path().join("comm")).is_ok_and(|c| f(c.trim()))
+    })
+}
+
+/// A new file only this user can read, holding data.
+pub fn private_file(path: &Path, data: &[u8]) -> Result<(), String> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(path);
+    f.as_mut().map_err(|e| e.to_string())?.write_all(data).map_err(|e| e.to_string())
+}
+
+/// Start command in b's session (not under seimei) and return its pid, which the shell writes to a file first.
+pub fn start(b: &dyn Backend, command: &str) -> Result<i64, String> {
+    let pidfile = std::env::temp_dir().join(format!("seimei-spawn-{}", seimei_core::util::token_urlsafe(6)));
+    private_file(&pidfile, b"")?;
+    let started = b.spawn_sh(&format!("echo $$ > {}; exec {command}", pidfile.display()));
+    let mut pid = None;
+    if started.is_ok() {
+        for _ in 0..40 {
+            if let Ok(p) = std::fs::read_to_string(&pidfile).unwrap_or_default().trim().parse::<i64>() {
+                pid = Some(p);
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
     }
-    Ok(r.stdout)
+    let _ = std::fs::remove_file(&pidfile);
+    started?;
+    pid.ok_or_else(|| "the command did not start".into())
+}
+
+/// makoctl's JSON (a plain list, or {"data": [[...]]}) as one list of notifications; None when it is not JSON.
+pub fn mako_rows(raw: &str) -> Option<Vec<Value>> {
+    let rows: Value = serde_json::from_str(if raw.is_empty() { "[]" } else { raw }).ok()?;
+    Some(match rows {
+        Value::Array(a) => a,
+        Value::Object(o) => o
+            .get("data")
+            .and_then(|d| d.as_array())
+            .into_iter()
+            .flatten()
+            .flat_map(|g| g.as_array().cloned().unwrap_or_default())
+            .collect(),
+        _ => vec![],
+    })
+}
+
+/// "x,y wxh" as numbers.
+pub fn geometry(geo: &str) -> Result<(f64, f64, f64, f64), String> {
+    let nums: Vec<f64> = geo.split([',', ' ', 'x']).filter_map(|n| n.trim().parse().ok()).collect();
+    match nums[..] {
+        [x, y, w, h] => Ok((x, y, w, h)),
+        _ => Err(format!("not a geometry: {geo}")),
+    }
+}
+
+/// A query the common model answers: windows, workspaces (spaces names them for this WM) and outputs.
+pub fn model(b: &dyn Backend, what: &str, spaces: &str) -> Result<Option<Value>, String> {
+    Ok(Some(match what {
+        "windows" => Value::Array(b.windows()?),
+        w if w == spaces => Value::Array(b.workspaces()?),
+        "outputs" => Value::Object(b.outputs()?.into_iter().collect()),
+        _ => return Ok(None),
+    }))
+}
+
+/// The error for a query that is not one of queries.
+pub fn one_of(queries: &[&str]) -> String {
+    format!("what is one of {}", queries.join(", "))
 }
 
 /// The sockets matching prefix*suffix in dir, newest first.

@@ -138,6 +138,12 @@ pub fn describe(plan: &[Value]) -> String {
     lines.join("\n")
 }
 
+/// The card that asks to bring the plan back.
+pub fn card(plan: &[Value]) -> Value {
+    json!({"action": "desktop", "target": format!("bring back your desktop ({} windows)", plan.len()),
+           "detail": describe(plan)})
+}
+
 fn sort_key(r: &Value) -> (String, f64, Vec<f64>) {
     let ws = if truthy(&r["workspace"]) { r["workspace"].as_f64().unwrap_or(99.0) } else { 99.0 };
     let pos = match r["pos"].as_array() {
@@ -262,9 +268,7 @@ impl Desktop {
         tokio::time::sleep(Duration::from_secs(15)).await;
         let Ok(plan) = self.blocking(|d| d.plan()).await else { return };
         let Some(h) = self.hooks.get().filter(|_| !plan.is_empty()) else { return };
-        let card = json!({"action": "desktop", "target": format!("bring back your desktop ({} windows)", plan.len()),
-                          "detail": describe(&plan)});
-        if h.approvals.hold(card, "seimei", None).await == "approved" {
+        if h.approvals.hold(card(&plan), "seimei", None).await == "approved" {
             self.restore(&plan).await;
         } else {
             h.events.add(json!({"type": "system", "text": "The old desktop layout was not restored; ask seimei to restore it later."}));

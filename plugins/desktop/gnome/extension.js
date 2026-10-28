@@ -9,7 +9,6 @@ import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
-import * as Config from 'resource:///org/gnome/shell/misc/config.js';
 
 const IFACE = `<node><interface name="org.seimei.Desktop">
   <method name="Call"><arg type="s" direction="in" name="request"/><arg type="s" direction="out" name="reply"/></method>
@@ -198,10 +197,6 @@ function act(args) {
     }
 }
 
-function finish(source, res, name) {
-    return source[`${name}_finish`](res);
-}
-
 /** A screenshot written as PNG to path: the screen, an area {x, y, width, height}, or one window by id. */
 function shoot(req) {
     const file = Gio.File.new_for_path(req.path);
@@ -209,7 +204,7 @@ function shoot(req) {
     return new Promise((resolve, reject) => {
         const done = (source, res, name) => {
             try {
-                finish(source, res, name);
+                source[`${name}_finish`](res);
                 stream.close(null);
                 resolve({path: req.path});
             } catch (e) {
@@ -346,8 +341,6 @@ export default class SeimeiExtension extends Extension {
 
     async _call(req) {
         switch (req.op) {
-        case 'version':
-            return {version: this.metadata.version, shell: Config.PACKAGE_VERSION};
         case 'windows':
             return windows();
         case 'workspaces':
@@ -365,10 +358,6 @@ export default class SeimeiExtension extends Extension {
             this._input ??= new Input();
             await this._input.run(req.events);
             return null;
-        case 'pointer': {
-            const [x, y] = global.get_pointer();
-            return {x, y};
-        }
         default:
             throw new Error(`unknown op ${req.op}`);
         }

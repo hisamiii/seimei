@@ -28,8 +28,9 @@ pub const CONTROL: u32 = 4;
 pub const ALT: u32 = 8;
 pub const SUPER: u32 = 64;
 
-/// Each modifier bit with its left key's keysym.
-pub const MOD_KEYS: [(u32, u32); 4] = [(SHIFT, 0xffe1), (CONTROL, 0xffe3), (ALT, 0xffe9), (SUPER, 0xffeb)];
+/// Each modifier bit with its left key's keysym and its name in seimei's GNOME Shell extension.
+pub const MOD_KEYS: [(u32, u32, &str); 4] =
+    [(SHIFT, 0xffe1, "shift"), (CONTROL, 0xffe3, "ctrl"), (ALT, 0xffe9, "alt"), (SUPER, 0xffeb, "super")];
 
 /// A key name of press_keys to its keysym; modifiers are not keys here.
 fn keysym(name: &str) -> Option<u32> {

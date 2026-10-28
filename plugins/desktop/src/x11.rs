@@ -11,7 +11,7 @@ use std::time::Duration;
 use regex::Regex;
 use serde_json::{Value, json};
 
-use super::backend::{Backend, Ctx, Emit, Env, Meta, Ours, digits, exec, run};
+use super::backend::{Backend, Ctx, Emit, Env, Meta, Ours, digits, exec, model, one_of, run};
 
 const QUERIES: [&str; 4] = ["windows", "workspaces", "outputs", "root"];
 const ROOT_PROPS: [&str; 6] = [
@@ -84,12 +84,7 @@ fn ids(v: Option<&String>) -> Vec<i64> {
 fn xdotool(args: &[&str], timeout: f64) -> Result<String, String> {
     let mut argv = vec!["xdotool"];
     argv.extend(args);
-    let r = exec(&argv, &env(), None, timeout)?;
-    if r.code != 0 {
-        let e = r.err();
-        return Err(if e.trim().is_empty() { format!("xdotool {} failed", args[0]) } else { e.trim().into() });
-    }
-    Ok(r.text().trim().into())
+    Ok(exec(&argv, &env(), None, timeout)?.ok(&format!("xdotool {}", args[0]))?.text().trim().into())
 }
 
 impl X11 {
@@ -205,19 +200,9 @@ impl Backend for X11 {
         Ok(vec![("screen".into(), json!({"x": 0, "y": 0, "width": w, "height": h, "scale": 1}))])
     }
 
-    fn queries(&self) -> &'static [&'static str] {
-        &QUERIES
-    }
-
     fn query(&self, what: &str) -> Result<String, String> {
-        let data = match what {
-            "windows" => Value::Array(self.windows()?),
-            "workspaces" => Value::Array(self.workspaces()?),
-            "outputs" => Value::Object(self.outputs()?.into_iter().collect()),
-            "root" => json!(self.root()?),
-            _ => return Err(format!("what is one of {}", QUERIES.join(", "))),
-        };
-        Ok(data.to_string())
+        let data = if what == "root" { Some(json!(self.root()?)) } else { model(self, what, "workspaces")? };
+        Ok(data.ok_or_else(|| one_of(&QUERIES))?.to_string())
     }
 
     fn action(&self, args: &[String]) -> Result<String, String> {
@@ -280,11 +265,10 @@ impl Backend for X11 {
     }
 
     fn to_named_workspace(&self, wid: i64, name: &str) -> Result<(), String> {
-        let desk = match self.desktop(name) {
-            Ok(d) => d,
-            Err(_) => self.workspaces()?.len() as i64 - 1,
-        };
-        xdotool(&["set_desktop_for_window", &wid.to_string(), &desk.to_string()], 10.0).map(drop)
+        match self.desktop(name) {
+            Ok(_) => self.move_to_workspace(wid, name),
+            Err(_) => self.move_to_workspace(wid, &self.workspaces()?.len().to_string()),
+        }
     }
 
     fn screen(&self, scale: f64, quality: i64) -> Result<Vec<u8>, String> {
@@ -346,12 +330,10 @@ impl Backend for X11 {
         let result = (|| {
             emit("up", Value::Null);
             emit("windows", Value::Array(self.windows()?));
-            emit("workspaces", Value::Array(self.workspaces()?));
             while rx.recv().is_ok() {
                 // A change often comes as several lines at once: take them together.
                 while rx.recv_timeout(Duration::from_millis(50)).is_ok() {}
                 emit("windows", Value::Array(self.windows()?));
-                emit("workspaces", Value::Array(self.workspaces()?));
             }
             Ok(())
         })();

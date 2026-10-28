@@ -38,7 +38,7 @@ use seimei_core::approvals::Approvals;
 use seimei_core::events::EventLog;
 use seimei_core::plugins::{Builtin, Factory, Fut, Host, Session, Windows, ask_guard, int, shot_file, strip};
 use seimei_core::tools::text;
-use seimei_core::util::{as_text, b64, chars, now, token_urlsafe, truthy};
+use seimei_core::util::{as_text, b64, chars, now, truthy};
 use uinput::Device;
 
 /// The workspace apps opened for a task go to.
@@ -196,6 +196,26 @@ fn float(args: &Value, k: &str) -> Result<f64, String> {
 
 fn sleep(s: f64) {
     std::thread::sleep(Duration::from_secs_f64(s));
+}
+
+/// A window as the tools name it: `id: app "title"`.
+fn label(w: &Value) -> String {
+    format!("{}: {} \"{}\"", as_text(&w["id"]), as_text(&w["app_id"]), as_text(&w["title"]))
+}
+
+/// The native tool's command on b: its output, or "Done.".
+fn native(b: &dyn Backend, action: &Value, args: &Value) -> Result<String, String> {
+    let mut argv = vec![as_text(action)];
+    argv.extend(args.as_array().into_iter().flatten().map(as_text));
+    b.action(&argv).map(|o| if o.is_empty() { "Done.".into() } else { o })
+}
+
+/// A tool's text answer, or its error.
+fn reply(r: Result<String, String>) -> Value {
+    match r {
+        Ok(t) => text(&t, false),
+        Err(e) => text(&e, true),
+    }
 }
 
 impl Desktop {
@@ -447,21 +467,11 @@ impl Desktop {
                 .map(|f| f.0)
                 .collect();
                 let flags = if flags.is_empty() { String::new() } else { format!(" [{}]", flags.join(", ")) };
-                lines.push(format!(
-                    "  window {}: {} \"{}\"{flags}",
-                    as_text(&w["id"]),
-                    as_text(&w["app_id"]),
-                    as_text(&w["title"])
-                ));
+                lines.push(format!("  window {}{flags}", label(w)));
             }
         }
         for w in wins.iter().filter(|w| w["workspace_id"].is_null()) {
-            lines.push(format!(
-                "  window {}: {} \"{}\" (no workspace)",
-                as_text(&w["id"]),
-                as_text(&w["app_id"]),
-                as_text(&w["title"])
-            ));
+            lines.push(format!("  window {} (no workspace)", label(w)));
         }
         if let Some(l) = layouts.filter(|l| truthy(&l["names"])) {
             let names: Vec<String> = l["names"].as_array().unwrap().iter().map(as_text).collect();
@@ -569,33 +579,9 @@ impl Desktop {
     /// the window it opens, which counts as seimei's; None when no window of its own showed up in time.
     pub async fn spawn(self: &Arc<Self>, command: &str, own_workspace: bool) -> Result<Option<Value>, String> {
         let wait = Duration::from_secs(15);
-        let pidfile = std::env::temp_dir().join(format!("seimei-spawn-{}", token_urlsafe(6)));
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .open(&pidfile)
-                .map_err(|e| e.to_string())?;
-        }
-        let me = self.clone();
-        let script = format!("echo $$ > {}; exec {command}", pidfile.display());
-        let started = tokio::task::spawn_blocking(move || me.b.spawn_sh(&script)).await.map_err(|e| e.to_string());
-        let mut pid = None;
-        if matches!(started, Ok(Ok(()))) {
-            for _ in 0..40 {
-                let t = std::fs::read_to_string(&pidfile).unwrap_or_default();
-                if let Ok(p) = t.trim().parse::<i64>() {
-                    pid = Some(p);
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(50)).await;
-            }
-        }
-        let _ = std::fs::remove_file(&pidfile);
-        started??;
-        let pid = pid.ok_or("the command did not start")?;
+        let (me, cmd) = (self.clone(), command.to_string());
+        let pid =
+            tokio::task::spawn_blocking(move || backend::start(&*me.b, &cmd)).await.map_err(|e| e.to_string())??;
         let ctx = self.b.ctx().clone();
         let mine = |w: &Value| ctx.ancestors(w["pid"].as_i64().unwrap_or(0)).contains(&pid);
         // Look and start waiting under one lock: the event stream cannot hand the window over in between.
@@ -757,13 +743,22 @@ impl Desktop {
             .into())
     }
 
-    pub fn type_into(&self, wid: i64, text: &str) -> Result<(), String> {
+    /// The keyboard on window wid, focused and checked first, in the US layout while send runs.
+    fn keyboard(&self, wid: i64, send: impl FnOnce(&mut Device) -> Result<(), String>) -> Result<(), String> {
         let mut input = self.input.lock().unwrap();
         self.target(wid)?;
         self.drive()?;
         let back = self.us_layout()?;
+        let sent = send(&mut input.1);
+        if let Some(back) = back {
+            self.b.switch_layout(back)?;
+        }
+        sent
+    }
+
+    pub fn type_into(&self, wid: i64, text: &str) -> Result<(), String> {
         let chars: Vec<char> = text.chars().collect();
-        let typed = (|| {
+        self.keyboard(wid, |kb| {
             for (i, chunk) in chars.chunks(64).enumerate() {
                 if self.halted() {
                     return Err(STOPPED.to_string());
@@ -771,22 +766,14 @@ impl Desktop {
                 if self.b.focused_id() != Some(wid) {
                     return Err(format!("focus moved away from window {wid} after {} characters; stopped", i * 64));
                 }
-                input.1.type_text(&chunk.iter().collect::<String>(), 0.008)?;
+                kb.type_text(&chunk.iter().collect::<String>(), 0.008)?;
             }
             Ok(())
-        })();
-        if let Some(back) = back {
-            self.b.switch_layout(back)?;
-        }
-        typed
+        })
     }
 
     pub fn keys(&self, wid: i64, combos: &[String]) -> Result<(), String> {
-        let mut input = self.input.lock().unwrap();
-        self.target(wid)?;
-        self.drive()?;
-        let back = self.us_layout()?;
-        let pressed = (|| {
+        self.keyboard(wid, |kb| {
             for c in combos {
                 if self.halted() {
                     return Err(STOPPED.to_string());
@@ -794,15 +781,11 @@ impl Desktop {
                 if self.b.focused_id() != Some(wid) {
                     return Err(format!("focus moved away from window {wid}; stopped"));
                 }
-                input.1.combo(c)?;
+                kb.combo(c)?;
                 sleep(0.05);
             }
             Ok(())
-        })();
-        if let Some(back) = back {
-            self.b.switch_layout(back)?;
-        }
-        pressed
+        })
     }
 
     /// x, y are pixels of the latest full-screen screenshot. A window id only guards that the screen still shows what
@@ -853,119 +836,103 @@ impl Desktop {
         if tool == "agent_display" || args["display"] == "agent" {
             return self.agent_tool(tool, args, session).await;
         }
+        match tool {
+            "screenshot" => self.screenshot_tool(args).await,
+            // mako runs beside wlroots compositors and niri only.
+            "notifications" if matches!(self.b.meta().name, "niri" | "sway" | "hyprland") => notifications(args).await,
+            "clipboard_read" => self.clipboard(None, session).await,
+            "restore_desktop" => self.restore_tool(args, session).await,
+            _ => reply(self.text_tool(tool, args).await),
+        }
+    }
+
+    /// The tools on the user's display that answer with text.
+    async fn text_tool(self: &Arc<Self>, tool: &str, args: &Value) -> Result<String, String> {
         let name = self.b.meta().name;
-        let r: Result<String, String> = match tool {
-            "desktop" => self.blocking(|d| d.overview()).await,
-            "screenshot" => return self.screenshot_tool(args).await,
-            t if t == name => match need(args, "action") {
-                Err(e) => Err(e),
-                Ok(a) => {
-                    let mut argv = vec![as_text(a)];
-                    argv.extend(args["args"].as_array().into_iter().flatten().map(as_text));
-                    self.blocking(move |d| d.b.action(&argv))
-                        .await
-                        .map(|o| if o.is_empty() { "Done.".into() } else { o })
-                }
-            },
+        Ok(match tool {
+            "desktop" => self.blocking(|d| d.overview()).await?,
+            t if t == name => {
+                let (action, rest) = (need(args, "action")?.clone(), args["args"].clone());
+                self.blocking(move |d| native(&*d.b, &action, &rest)).await?
+            }
             t if t == format!("{name}_query") => {
                 let what = args.get("what").map_or(String::new(), as_text);
-                self.blocking(move |d| d.b.query(&what)).await.map(|out| {
-                    if out.chars().count() <= 30_000 {
-                        out
-                    } else {
-                        format!("{} … (cut at 30000 characters)", chars(&out, 30_000))
-                    }
-                })
+                let out = self.blocking(move |d| d.b.query(&what)).await?;
+                if out.chars().count() <= 30_000 {
+                    out
+                } else {
+                    format!("{} … (cut at 30000 characters)", chars(&out, 30_000))
+                }
             }
-            "open_app" => match need(args, "command") {
-                Err(e) => Err(e),
-                Ok(c) => {
-                    let own = args.get("workspace").map_or("seimei".into(), as_text) == "seimei";
-                    match self.spawn(&as_text(c), own).await {
-                        Ok(Some(w)) => Ok(format!(
-                            "Opened window {}: {} \"{}\".",
-                            as_text(&w["id"]),
-                            as_text(&w["app_id"]),
-                            as_text(&w["title"])
-                        )),
-                        Ok(None) => {
-                            Ok("Started, but no new window of its own showed up within 15 s (apps like Firefox open \
-                                        new windows in their running process; find it with the desktop tool)."
-                                .into())
-                        }
-                        Err(e) => Err(e),
-                    }
+            "open_app" => {
+                let command = as_text(need(args, "command")?);
+                let own = args.get("workspace").map_or("seimei".into(), as_text) == "seimei";
+                match self.spawn(&command, own).await? {
+                    Some(w) => format!("Opened window {}.", label(&w)),
+                    None => "Started, but no new window of its own showed up within 15 s (apps like Firefox open new \
+                             windows in their running process; find it with the desktop tool)."
+                        .into(),
                 }
-            },
-            "type_text" => match (need(args, "window").and_then(int), need(args, "text").map(as_text)) {
-                (Ok(w), Ok(t)) => self.blocking(move |d| d.type_into(w, &t)).await.map(|_| "Typed.".into()),
-                (Err(e), _) | (_, Err(e)) => Err(e),
-            },
-            "press_keys" => match (need(args, "window").and_then(int), need(args, "keys")) {
-                (Ok(w), Ok(k)) => {
-                    let keys: Vec<String> = k.as_array().into_iter().flatten().map(as_text).collect();
-                    self.blocking(move |d| d.keys(w, &keys)).await.map(|_| "Pressed.".into())
-                }
-                (Err(e), _) | (_, Err(e)) => Err(e),
-            },
-            "click" | "scroll" => self.click_tool(tool, args).await,
-            "ui_tree" | "ui_action" => self.a11y_tool(tool, args, None).await,
-            // mako runs beside wlroots compositors and niri only.
-            "notifications" if matches!(name, "niri" | "sway" | "hyprland") => return notifications(args).await,
-            "clipboard_read" => return self.clipboard(None, session).await,
-            "unlock_screen" => self.blocking(|d| d.unlock()).await,
-            "restore_desktop" => return self.restore_tool(args, session).await,
-            _ => Err(format!("no tool {tool}")),
-        };
-        match r {
-            Ok(t) => text(&t, false),
-            Err(e) => text(&e, true),
-        }
+            }
+            "type_text" => {
+                let (w, t) = (int(need(args, "window")?)?, as_text(need(args, "text")?));
+                self.blocking(move |d| d.type_into(w, &t)).await?;
+                "Typed.".into()
+            }
+            "press_keys" => {
+                let w = int(need(args, "window")?)?;
+                let keys: Vec<String> = need(args, "keys")?.as_array().into_iter().flatten().map(as_text).collect();
+                self.blocking(move |d| d.keys(w, &keys)).await?;
+                "Pressed.".into()
+            }
+            "click" | "scroll" => self.click_tool(tool, args).await?,
+            "ui_tree" | "ui_action" => self.a11y_tool(tool, args, None).await?,
+            "unlock_screen" => self.blocking(|d| d.unlock()).await?,
+            _ => return Err(format!("no tool {tool}")),
+        })
     }
 
     async fn screenshot_tool(self: &Arc<Self>, args: &Value) -> Value {
         let window = args.get("window").cloned().unwrap_or(Value::Null);
-        let shot = if truthy(&args["region"]) || truthy(&args["target"]) {
-            let area: Option<Vec<f64>> = args["region"].as_array().map(|a| a.iter().map(number).collect());
-            let target = args["target"].as_str().filter(|t| !t.is_empty()).map(String::from);
-            self.blocking(move |d| d.region(area.as_deref(), target.as_deref())).await.map(|(data, mime, geo)| {
-                (data, mime, format!("Region {geo} (logical pixels) at full resolution; not for click coordinates."))
-            })
-        } else {
-            let wid = if window.is_null() { Ok(None) } else { int(&window).map(Some) };
-            match wid {
-                Err(e) => Err(e),
-                Ok(wid) => self.blocking(move |d| d.screenshot(wid)).await.map(|(data, mime)| {
-                    let note = match wid {
-                        None => "Whole screen; click coordinates are pixels of this image.".into(),
-                        Some(_) => format!("Window {}.", as_text(&window)),
-                    };
-                    (data, mime.to_string(), note)
-                }),
+        let shot = async {
+            if truthy(&args["region"]) || truthy(&args["target"]) {
+                let area: Option<Vec<f64>> = args["region"].as_array().map(|a| a.iter().map(number).collect());
+                let target = args["target"].as_str().filter(|t| !t.is_empty()).map(String::from);
+                let (data, mime, geo) = self.blocking(move |d| d.region(area.as_deref(), target.as_deref())).await?;
+                let note = format!("Region {geo} (logical pixels) at full resolution; not for click coordinates.");
+                return Ok((data, mime, note));
             }
+            let wid = if window.is_null() { None } else { Some(int(&window)?) };
+            let (data, mime) = self.blocking(move |d| d.screenshot(wid)).await?;
+            let note = match wid {
+                None => "Whole screen; click coordinates are pixels of this image.".into(),
+                Some(_) => format!("Window {}.", as_text(&window)),
+            };
+            Ok::<_, String>((data, mime.to_string(), note))
         };
-        match shot {
-            Ok((data, mime, note)) => self.deliver(&data, &mime, note, args),
-            Err(e) => text(&e, true),
-        }
+        self.deliver(shot.await, args)
     }
 
-    /// A screenshot as the tool returns it: a path to Read, or the image in the chat with show=true.
-    fn deliver(&self, data: &[u8], mime: &str, mut note: String, args: &Value) -> Value {
+    /// A screenshot (data, type, note) as the tool returns it: a path to Read, or the image in the chat with show=true.
+    fn deliver(&self, shot: Result<(Vec<u8>, String, String), String>, args: &Value) -> Value {
+        let (data, mime, mut note) = match shot {
+            Ok(s) => s,
+            Err(e) => return text(&e, true),
+        };
         if truthy(&args["show"]) {
             let files = seimei_core::files::Files::new(&self.state);
-            let name = match files.save(data) {
+            let name = match files.save(&data) {
                 Ok((name, _)) => name,
                 Err(e) => return text(&e, true),
             };
             let caption = chars(&if truthy(&args["caption"]) { as_text(&args["caption"]) } else { String::new() }, 300);
             self.system(json!({"type": "image", "file": name, "caption": caption}), None);
             note += " Shown to the user.";
-            return json!({"content": [{"type": "image", "data": b64(data), "mimeType": mime},
+            return json!({"content": [{"type": "image", "data": b64(&data), "mimeType": mime},
                                       {"type": "text", "text": note}]});
         }
         // A path, not the pixels: an image in every result was 8% of the dispatcher's context growth.
-        match shot_file(&self.state.join("shots"), data, mime) {
+        match shot_file(&self.state.join("shots"), &data, &mime) {
             Ok(path) => text(&format!("{}\n{note}", path.display()), false),
             Err(e) => text(&e, true),
         }
@@ -1064,9 +1031,7 @@ impl Desktop {
         if !truthy(&args["go"]) {
             return text(&layout::describe(&plan), false);
         }
-        let card = json!({"action": "desktop", "target": format!("bring back your desktop ({} windows)", plan.len()),
-                          "detail": layout::describe(&plan)});
-        match session.card(card).await {
+        match session.card(layout::card(&plan)).await {
             Err(e) => text(&e, true),
             Ok(o) if o == "expired" => text("No answer in 10 minutes; not restored.", false),
             Ok(o) if o != "approved" => text(&format!("The user {o} the restore."), false),
@@ -1113,20 +1078,8 @@ async fn notifications(args: &Value) -> Value {
             Ok(o) => (o.text(), o.err()),
             Err(e) => (String::new(), e),
         };
-        let rows: Value = match serde_json::from_str(if raw.is_empty() { "[]" } else { &raw }) {
-            Ok(v) => v,
-            Err(_) => return text(if err.trim().is_empty() { "Could not read mako." } else { err.trim() }, true),
-        };
-        let rows: Vec<Value> = match rows {
-            Value::Array(a) => a,
-            Value::Object(o) => o
-                .get("data")
-                .and_then(|d| d.as_array())
-                .into_iter()
-                .flatten()
-                .flat_map(|g| g.as_array().cloned().unwrap_or_default())
-                .collect(),
-            _ => vec![],
+        let Some(rows) = backend::mako_rows(&raw) else {
+            return text(if err.trim().is_empty() { "Could not read mako." } else { err.trim() }, true);
         };
         // niri's own "Screenshot captured" notices, mostly from seimei's window shots, are noise.
         let rows = rows.into_iter().filter(|n| !(n["app_name"] == "niri" && n["summary"] == "Screenshot captured"));
