@@ -42,17 +42,7 @@ fn texts(events: &[seimei_core::events::Event]) -> Vec<String> {
 /// The request's context: the hint, and what seimei knows about the open chat, its agents and the board.
 pub fn context(app: &App, hint: &Value, client: &str) -> Context {
     let mut ctx = Context { client: client.into(), ..Default::default() };
-    let f = &hint["fixture"];
-    if f.is_object() {
-        // A saved chat, board and names, for the eval (contrib/asr_eval.py): the same list every run.
-        let v = |k: &str| f[k].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect());
-        ctx.chat = v("chat").unwrap_or_default();
-        ctx.agent = v("agent").unwrap_or_default();
-        ctx.names = v("names").unwrap_or_default();
-        ctx.board = v("board").unwrap_or_default();
-    } else {
-        live(app, hint, &mut ctx);
-    }
+    live(app, hint, &mut ctx);
     let w = &hint["window"];
     if w.is_object() {
         let s = |k: &str| w[k].as_str().unwrap_or("").to_string();

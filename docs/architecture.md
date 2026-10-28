@@ -63,7 +63,7 @@ A theme is one token file in `web/themes/`, built by `contrib/themes.py` from a 
 
 ## Dictation
 
-`POST /api/asr` (the app and the page) and `<state>/asr.sock` (dictate on the laptop, no login, mode 600) take a 16 kHz WAV and a hint (`X-Seimei-Asr`: the open chat, the focused window, the draft). `crates/core/src/asr` builds the word list per request from the pins, the open chat's rare words, the live names, the board and the window, calls OpenRouter, applies `asr/fixes`, then swaps misheard words only for terms that were in the list (`fix.rs`). Each call is a line in `asr/sent.jsonl` (the terms sent and their sources, no audio, no text). The socket's `/context` returns the list a hint gets, for checking what goes out and for `contrib/asr_eval.py`. Details and the eval in [asr.md](asr.md).
+`POST /api/asr` (the app and the page) and `<state>/asr.sock` (dictate on the laptop, no login, mode 600) take a 16 kHz WAV and a hint (`X-Seimei-Asr`: the open chat, the focused window, the draft). `crates/core/src/asr` builds the word list per request from the pins, the open chat's rare words, the live names, the board and the window, calls OpenRouter, applies `asr/fixes`, then swaps misheard words only for terms that were in the list (`fix.rs`). Each call is a line in `asr/sent.jsonl` (the terms sent and their sources, no audio, no text). The socket's `/context` returns the list a hint gets, for checking what goes out. Details in [asr.md](asr.md).
 
 ## Deploys
 

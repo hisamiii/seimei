@@ -10,6 +10,5 @@
 - [asr.md](asr.md): dictation in seimei: one ASR endpoint with a word list built from live context, a constrained fixer, the phone's mic and dictate as a client; built, with the eval results.
 - [connectors/DESIGN.md](connectors/DESIGN.md): the desktop and browser plugins' plan, so agents work beside the user without taking the screen: what is built and what is next.
 - [troubleshooting.md](troubleshooting.md): logs, a page that does not load, logins, failed turns, missing notifications, a leak.
-- [audit/](audit/): the publishability and functionality audits that the current state was checked against.
 
 Contributing: [CONTRIBUTING.md](../CONTRIBUTING.md) and [AGENTS.md](../AGENTS.md) (style, tests, commits). Security reports: [SECURITY.md](../SECURITY.md).
