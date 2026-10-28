@@ -21,7 +21,7 @@ pub mod link;
 use std::any::Any;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, LazyLock, Mutex, OnceLock, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use serde_json::{Map, Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
@@ -136,11 +136,6 @@ pub struct Host {
 }
 /// What an external entry may pass on to Claude Code (its mcpServers format).
 const MCP_KEYS: [&str; 6] = ["type", "command", "args", "env", "url", "headers"];
-/// The shikigami's own server (ask, board): in-process for Claude Code, `seimei plugin shikigami` for an ACP agent.
-static OWN: LazyLock<Value> = LazyLock::new(|| {
-    let all: Value = serde_json::from_str(include_str!("../../data/tools.json")).expect("tools.json");
-    all["shikigami"].clone()
-});
 
 /// Runs a shikigami's own tool for it: (worker id, tool, args) to the tool's result, None for no such worker.
 pub type OwnTools = Box<dyn Fn(&str, &str, &Value) -> Option<Value> + Send + Sync>;
@@ -190,10 +185,7 @@ fn descends(pid: u32, root: u32) -> bool {
         if p == root {
             return true;
         }
-        let Ok(stat) = std::fs::read_to_string(format!("/proc/{p}/stat")) else { return false };
-        // The fields after the command name, which may hold spaces and parentheses itself.
-        let rest = stat.rsplit_once(')').map_or("", |(_, r)| r);
-        match rest.split_whitespace().nth(1).and_then(|v| v.parse().ok()) {
+        match crate::util::stat_field(p.into(), 1).and_then(|v| v.parse().ok()) {
             Some(parent) if parent > 1 => p = parent,
             _ => return false,
         }
@@ -432,8 +424,7 @@ impl Plugins {
         for p in self.wanted(groups) {
             let mut entry = p.mcp.clone();
             if p.linked {
-                let mut env = json!({"SEIMEI_SOCKET": self.socket.display().to_string(),
-                                     "SEIMEI_TOKEN": self.token(who, worker, &names), "SEIMEI_STATE": self.state.display().to_string()});
+                let mut env = self.link_env(self.token(who, worker, &names));
                 // Which of its specs the process serves (the desktop's tools are named after its window manager).
                 if let Some(v) = self.made.iter().find(|(n, _)| *n == p.name).and_then(|(_, b)| b.variant()) {
                     env["SEIMEI_VARIANT"] = json!(v);
@@ -454,13 +445,18 @@ impl Plugins {
             .unwrap_or_default();
         names.retain(|n| n != "shikigami");
         names.push("shikigami".into());
-        let env = json!({"SEIMEI_SOCKET": self.socket.display().to_string(),
-            "SEIMEI_TOKEN": self.token(who, Some(worker), &names), "SEIMEI_STATE": self.state.display().to_string()});
+        let env = self.link_env(self.token(who, Some(worker), &names));
         Map::from_iter([
             ("command".into(), json!(self.exe)),
             ("args".into(), json!(["plugin", "shikigami"])),
             ("env".into(), env),
         ])
+    }
+
+    /// What a linked plugin process gets: seimei's socket, its session's token and the state folder.
+    fn link_env(&self, token: String) -> Value {
+        json!({"SEIMEI_SOCKET": self.socket.display().to_string(), "SEIMEI_TOKEN": token,
+            "SEIMEI_STATE": self.state.display().to_string()})
     }
 
     /// The tool names that need no permission card: the built-ins carry their own.
@@ -508,6 +504,14 @@ impl Plugins {
             if rules.iter().any(|r| b.triggers().iter().any(|(t, _)| r["trigger"] == *t)) {
                 b.watch(watches, &self.state).await;
             }
+        }
+    }
+
+    /// A hosted plugin's tool call.
+    async fn call(&self, plugin: &str, tool: &str, args: &Value, session: &dyn Session) -> Value {
+        match self.made.iter().find(|(n, _)| *n == plugin) {
+            Some((_, b)) => b.call(tool, args, session).await,
+            None => crate::tools::text(&format!("{plugin} is not on"), true),
         }
     }
 
@@ -632,16 +636,6 @@ pub trait Session: Send + Sync {
     fn card(&self, what: Value) -> Fut<'_, Result<String, String>>;
 }
 
-impl Plugins {
-    /// A hosted plugin's tool call.
-    async fn call(&self, plugin: &str, tool: &str, args: &Value, session: &dyn Session) -> Value {
-        match self.made.iter().find(|(n, _)| *n == plugin) {
-            Some((_, b)) => b.call(tool, args, session).await,
-            None => crate::tools::text(&format!("{plugin} is not on"), true),
-        }
-    }
-}
-
 /// An integer argument, as Python's int() reads it.
 pub fn int(v: &Value) -> Result<i64, String> {
     match v {
@@ -712,39 +706,30 @@ impl Session for Remote {
     }
 }
 
-impl Remote {
-    async fn ask(&self, what: Value) -> Result<String, String> {
-        let lost = || "seimei restarted, ask again".to_string();
-        let sock = tokio::net::UnixStream::connect(&self.socket).await.map_err(|_| lost())?;
-        let (rd, mut wr) = sock.into_split();
-        let req = json!({"token": self.token, "op": "card", "card": what});
-        wr.write_all(format!("{req}\n").as_bytes()).await.map_err(|_| lost())?;
-        let mut line = String::new();
-        tokio::io::BufReader::new(rd).read_line(&mut line).await.map_err(|_| lost())?;
-        let reply: Value = serde_json::from_str(&line).map_err(|_| lost())?;
-        reply["outcome"].as_str().map(String::from).ok_or_else(lost)
-    }
-}
+const LOST: &str = "seimei restarted, ask again";
 
 impl Remote {
+    /// One request on seimei's socket and its reply; None when seimei is not there to answer.
+    async fn request(&self, req: Value) -> Option<Value> {
+        let (rd, mut wr) = tokio::net::UnixStream::connect(&self.socket).await.ok()?.into_split();
+        wr.write_all(format!("{req}\n").as_bytes()).await.ok()?;
+        let mut line = String::new();
+        tokio::io::BufReader::new(rd).read_line(&mut line).await.ok()?;
+        serde_json::from_str(&line).ok()
+    }
+
+    async fn ask(&self, what: Value) -> Result<String, String> {
+        let reply = self.request(json!({"token": self.token, "op": "card", "card": what})).await;
+        reply.and_then(|r| r["outcome"].as_str().map(String::from)).ok_or_else(|| LOST.into())
+    }
+
     /// A hosted plugin's call, run by seimei.
     async fn forward(&self, tool: &str, args: &Value) -> Value {
-        let lost = |e: &str| crate::tools::text(e, true);
-        let Ok(sock) = tokio::net::UnixStream::connect(&self.socket).await else {
-            return lost("seimei restarted, ask again");
-        };
-        let (rd, mut wr) = sock.into_split();
         let req = json!({"token": self.token, "op": "call", "plugin": self.plugin, "tool": tool, "args": args});
-        if wr.write_all(format!("{req}\n").as_bytes()).await.is_err() {
-            return lost("seimei restarted, ask again");
-        }
-        let mut line = String::new();
-        let _ = tokio::io::BufReader::new(rd).read_line(&mut line).await;
-        let reply: Value = serde_json::from_str(&line).unwrap_or_default();
-        match (reply.get("result"), reply["error"].as_str()) {
-            (Some(r), _) => r.clone(),
-            (None, Some(e)) => lost(e),
-            (None, None) => lost("seimei restarted, ask again"),
+        let reply = self.request(req).await.unwrap_or_default();
+        match reply.get("result") {
+            Some(r) => r.clone(),
+            None => crate::tools::text(reply["error"].as_str().unwrap_or(LOST), true),
         }
     }
 }
@@ -755,7 +740,8 @@ pub async fn serve_stdio(name: &str, builtins: &[Factory]) -> Result<(), String>
     let var = |k: &str| std::env::var(k).unwrap_or_default();
     let factory = builtins.iter().find(|f| f.name == name);
     let mut spec = match (name, factory) {
-        ("shikigami", _) => OWN.clone(),
+        // The shikigami's own tools, for an ACP agent (Claude Code has them in-process).
+        ("shikigami", _) => crate::tools::SERVER["shikigami"].clone(),
         (_, Some(f)) => serde_json::from_str(f.spec).map_err(|e| format!("{name}'s tools: {e}"))?,
         _ => return Err(format!("no built-in plugin {name}")),
     };

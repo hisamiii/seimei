@@ -10,7 +10,7 @@ use serde_json::{Map, Value, json};
 
 use crate::cost::Cost;
 use crate::events::EventLog;
-use crate::util::{append_line, local_time, now, read_json, write_json};
+use crate::util::{append_line, local_time, now, read_json, save_json};
 
 const NAMES: [(&str, &str); 2] = [("five_hour", "5-hour"), ("seven_day", "Weekly")];
 const WARN_AT: [f64; 2] = [0.8, 0.95];
@@ -25,7 +25,7 @@ fn today() -> String {
     Local::now().date_naive().to_string()
 }
 
-/// A Unix time in local time, as `fmt` (strftime) writes it.
+/// usage.json: the windows as last read, the warnings given, the 5-hour history and today's tokens per session.
 pub struct Usage {
     path: PathBuf,
     /// rate-limits.jsonl: every reading as it came, with its time and session, so the windows' course can be shown.
@@ -79,15 +79,9 @@ impl Usage {
     }
 
     fn changed(&self, d: &mut Value) {
-        self.save(d);
+        save_json(&self.path, d);
         if let Some(ev) = &self.events {
             ev.flash(Usage::snap(d));
-        }
-    }
-
-    fn save(&self, d: &Value) {
-        if let Err(e) = write_json(&self.path, d) {
-            eprintln!("seimei: usage.json: {e}");
         }
     }
 
@@ -172,7 +166,7 @@ impl Usage {
             seen.shift_remove(&first);
         }
         let Some(base) = base else {
-            self.save(&d);
+            save_json(&self.path, &*d);
             return;
         };
         let mut turn: Vec<(String, i64)> =
@@ -307,7 +301,8 @@ fn session_name(c: &Cost, sid: &str, names: &HashMap<String, String>) -> String 
     format!("{} ({short})", folder.filter(|f| !f.is_empty()).unwrap_or_else(|| "?".into()))
 }
 
-fn k(n: f64) -> String {
+/// A token count, short: 1.2M, 340k, 512.
+pub(crate) fn k(n: f64) -> String {
     if n >= 1e6 {
         format!("{:.1}M", n / 1e6)
     } else if n >= 1e3 {

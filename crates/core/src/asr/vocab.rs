@@ -196,24 +196,30 @@ pub fn clean(text: &str) -> String {
 /// The rare words of some texts, newest last, ranked by a recency-weighted count: a word in the last message counts
 /// 1, one twenty messages back about 0.2. Each word in its most common spelling.
 pub fn rare(dict: &Dict, texts: &[String]) -> Vec<String> {
-    let mut score: HashMap<String, f64> = HashMap::new();
-    let mut forms: HashMap<String, HashMap<String, usize>> = HashMap::new();
     let n = texts.len();
+    let (score, forms) = tally(texts, |i| 0.92f64.powi((n - 1 - i) as i32));
+    let mut ranked: Vec<(String, f64)> = score.into_iter().filter(|(k, _)| dict.worth(k)).collect();
+    ranked.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    ranked.into_iter().map(|(k, _)| best_form(&forms[&k])).collect()
+}
+
+type Forms = HashMap<String, HashMap<String, usize>>;
+
+/// Per word, lowercase: the summed weight of the texts that have it (text i weighs weight(i)), and its spellings.
+fn tally(texts: &[String], weight: impl Fn(usize) -> f64) -> (HashMap<String, f64>, Forms) {
+    let (mut score, mut forms): (HashMap<String, f64>, Forms) = Default::default();
     for (i, text) in texts.iter().enumerate() {
-        let weight = 0.92f64.powi((n - 1 - i) as i32);
         let mut seen = HashSet::new();
         for w in words(&clean(text)) {
             let w = w.trim_end_matches(['.', '-', '+']);
             let k = w.to_lowercase();
             *forms.entry(k.clone()).or_default().entry(w.to_string()).or_default() += 1;
             if seen.insert(k.clone()) {
-                *score.entry(k).or_default() += weight;
+                *score.entry(k).or_default() += weight(i);
             }
         }
     }
-    let mut ranked: Vec<(String, f64)> = score.into_iter().filter(|(k, _)| dict.worth(k)).collect();
-    ranked.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    ranked.into_iter().map(|(k, _)| best_form(&forms[&k])).collect()
+    (score, forms)
 }
 
 fn best_form(f: &HashMap<String, usize>) -> String {
@@ -409,19 +415,7 @@ pub fn build_auto(dict: &Dict, home: &Path) -> (Vec<String>, usize) {
     let mut texts = vec![];
     claude_messages(&home.join(".claude/projects"), &mut texts);
     fish_commands(&home.join(".local/share/fish/fish_history"), &mut texts);
-    let (mut df, mut forms): (HashMap<String, usize>, HashMap<String, HashMap<String, usize>>) = Default::default();
-    for text in &texts {
-        let mut seen = HashSet::new();
-        for w in words(&clean(text)) {
-            let w = w.trim_end_matches(['.', '-', '+']);
-            let k = w.to_lowercase();
-            *forms.entry(k.clone()).or_default().entry(w.to_string()).or_default() += 1;
-            seen.insert(k);
-        }
-        for k in seen {
-            *df.entry(k).or_default() += 1;
-        }
-    }
+    let (df, forms) = tally(&texts, |_| 1.0);
     let mut out = vec![];
     let mut have = HashSet::new();
     for name in repo_names(&home.join("Development")) {
@@ -429,8 +423,8 @@ pub fn build_auto(dict: &Dict, home: &Path) -> (Vec<String>, usize) {
             out.push(name);
         }
     }
-    let mut ranked: Vec<(&String, &usize)> = df.iter().filter(|(k, c)| **c >= 3 && dict.worth(k)).collect();
-    ranked.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
+    let mut ranked: Vec<(&String, &f64)> = df.iter().filter(|(k, c)| **c >= 3.0 && dict.worth(k)).collect();
+    ranked.sort_by(|a, b| b.1.total_cmp(a.1).then_with(|| a.0.cmp(b.0)));
     for (k, _) in ranked {
         if out.len() >= AUTO_MAX {
             break;

@@ -10,12 +10,13 @@
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
 
-use chrono::TimeZone;
 use regex::Regex;
 use serde_json::{Value, json};
 
 use crate::cost::Spend;
 use crate::events::EventLog;
+use crate::usage::k;
+use crate::util::local_time;
 use crate::workers::Record;
 
 const REOPEN: f64 = 24.0 * 3600.0;
@@ -111,16 +112,6 @@ fn span(sec: f64) -> String {
     }
 }
 
-fn k(n: f64) -> String {
-    if n >= 1e6 {
-        format!("{:.1}M", n / 1e6)
-    } else if n >= 1e3 {
-        format!("{:.0}k", n / 1e3)
-    } else {
-        format!("{}", n.round() as i64)
-    }
-}
-
 /// For the dispatcher's workers tool.
 pub fn text(rows: &[Value]) -> String {
     if rows.is_empty() {
@@ -172,8 +163,7 @@ pub fn text(rows: &[Value]) -> String {
             if m["reopened"] == true { "reopened" } else { "not reopened" }
         );
         for x in m["tunes"].as_array().into_iter().flatten() {
-            let at = chrono::Local.timestamp_opt(f(&x["t"]) as i64, 0).single();
-            let at = at.map(|t| t.format("%H:%M").to_string()).unwrap_or_default();
+            let at = local_time(f(&x["t"]), "%H:%M");
             line += &format!(" | {} by {} at {at}", s(&x["what"]), s(&x["by"]));
         }
         lines.push(line);

@@ -21,11 +21,12 @@ use crate::tasks::Board;
 use crate::transcripts::{project_of, transcript};
 use crate::uploads::Uploads;
 use crate::usage::Usage;
-use crate::util::{chars, flag, now, truthy};
+use crate::util::{as_text, chars, flag, now, truthy};
 use crate::watches::{DEFAULT_HOURS, NewRule, TRIGGERS, Watches, mins};
 use crate::workers::{ACTIVE, EFFORTS, MODELS, Pool, Summon, Worker};
 
-static SERVER: LazyLock<Value> =
+/// data/tools.json: the dispatcher's server, and under "shikigami" the shikigami's own (ask, board).
+pub(crate) static SERVER: LazyLock<Value> =
     LazyLock::new(|| serde_json::from_str(include_str!("../data/tools.json")).expect("tools.json"));
 
 /// More running shikigami than this need the user's OK.
@@ -88,11 +89,7 @@ where
 
 /// An argument as text: strings as they are, other values as JSON, missing as "".
 fn arg(a: &Value, k: &str) -> String {
-    match &a[k] {
-        Value::String(v) => v.clone(),
-        Value::Null => String::new(),
-        v => v.to_string(),
-    }
+    as_text(&a[k])
 }
 
 /// Why a summon call cannot go ahead (a pick missing or not one of the choices), or "".
@@ -387,7 +384,7 @@ impl Tools {
             );
         }
         let opt = |k: &str| Some(arg(a, k)).filter(|s| !s.is_empty());
-        let tools = (a["tools"].as_array().into_iter().flatten()).map(|t| arg(&json!({"t": t}), "t")).collect();
+        let tools = (a["tools"].as_array().into_iter().flatten()).map(as_text).collect();
         let s = Summon {
             name: arg(a, "name"),
             task: arg(a, "task"),
@@ -554,9 +551,6 @@ impl Tools {
             "alias" => self.alias(a),
             "watch" => self.watch(a),
             "session_peek" => self.session_peek(a),
-            _ if SERVER["tools"].as_array().into_iter().flatten().any(|t| t["name"] == name) => {
-                text(&format!("{name} is not in the Rust server yet."), true)
-            }
             _ => text(&format!("Tool '{name}' not found"), true),
         }
     }

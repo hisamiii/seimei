@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 use unicode_normalization::UnicodeNormalization;
 
-use crate::util::{hex, now, random_bytes};
+use crate::util::{hex, mtime, now, random_bytes};
 
 pub const MAX_BYTES: u64 = 50 << 20;
 /// Files go after KEEP_DAYS; pages and the app show older chips as expired, a day before the file is really gone.
@@ -136,14 +136,6 @@ impl Uploads {
     /// Delete files older than KEEP_DAYS + 1 day; returns how many went.
     pub fn prune(&self, at: Option<f64>) -> usize {
         let cut = at.unwrap_or_else(now) - (KEEP_DAYS + 1.0) * 86400.0;
-        let mtime = |p: &Path| {
-            std::fs::metadata(p)
-                .and_then(|m| m.modified())
-                .ok()
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs_f64())
-                .unwrap_or(0.0)
-        };
         let mut gone = 0;
         for d in std::fs::read_dir(&self.dir).into_iter().flatten().flatten() {
             let p = d.path();

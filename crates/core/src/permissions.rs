@@ -82,16 +82,9 @@ pub struct Rule<'a> {
     pub content: Option<&'a str>,
 }
 
-fn rules(s: &Value) -> Option<Vec<Rule<'_>>> {
-    let list = s.get("rules")?.as_array()?;
-    Some(
-        list.iter()
-            .map(|r| Rule {
-                tool: r.get("toolName").and_then(Value::as_str).unwrap_or(""),
-                content: r.get("ruleContent").and_then(Value::as_str),
-            })
-            .collect(),
-    )
+fn rules(s: &Value) -> Vec<Rule<'_>> {
+    let list = s["rules"].as_array().into_iter().flatten();
+    list.map(|r| Rule { tool: r["toolName"].as_str().unwrap_or(""), content: r["ruleContent"].as_str() }).collect()
 }
 
 /// How the card shows a rule: a Bash rule as its command pattern, the rest as Tool(pattern).
@@ -138,7 +131,7 @@ pub fn options(tool: &str, suggestions: &[Value], ceiling: &str) -> (Vec<Value>,
         let dest = s.get("destination").and_then(Value::as_str).filter(|d| !d.is_empty());
         let w = where_(dest.unwrap_or("session"));
         let kind = s.get("type").and_then(Value::as_str).unwrap_or("");
-        let list = rules(s).unwrap_or_default();
+        let list = rules(s);
         if kind == "addRules" && s.get("behavior").and_then(Value::as_str) == Some("allow") && !list.is_empty() {
             let shown: Vec<String> = list.iter().map(show).collect();
             let shown = shown.join(", ");
@@ -192,11 +185,7 @@ fn diff(path: &str, old: &str, new: &str) -> String {
 
 /// The card's action, title words and detail for a tool call.
 pub fn describe(tool: &str, inp: &Value, reason: Option<&str>) -> Value {
-    let s = |k: &str| match &inp[k] {
-        Value::String(v) => v.clone(),
-        Value::Null => String::new(),
-        v => v.to_string(),
-    };
+    let s = |k: &str| crate::util::as_text(&inp[k]);
     let path = ["file_path", "notebook_path", "path"].iter().map(|k| s(k)).find(|p| !p.is_empty()).unwrap_or_default();
     let card =
         |action: &str, target: &str, detail: String| json!({"action": action, "target": target, "detail": detail});

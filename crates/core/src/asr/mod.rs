@@ -2,7 +2,7 @@
 //! with, from what it knows (pins, the open chat, running agents, the board, the focused window, the nightly auto
 //! list), sends terms only, calls OpenRouter (MAI-Transcribe-2 with Azure's phraseList, voxtral-mini as the
 //! fallback), and puts the answer through the fixes table and a fixer that may only insert listed terms. Every
-//! request's terms go to sent.jsonl. Files live in `<state>/asr/`; the first start copies dictate's.
+//! request's terms go to sent.jsonl. Files live in `<state>/asr/`.
 
 pub mod fix;
 pub mod vocab;

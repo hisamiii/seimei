@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use serde_json::{Map, Value, json};
 
 use crate::sessions::Live;
-use crate::util::read_json;
+use crate::util::{read_json, save_json};
 
 pub struct Aliases {
     path: PathBuf,
@@ -20,15 +20,6 @@ impl Aliases {
     pub fn new(path: &Path) -> Aliases {
         let map = read_json(path).and_then(|v| v.as_object().cloned()).unwrap_or_default();
         Aliases { path: path.into(), map: Mutex::new(map) }
-    }
-
-    fn save(&self, map: &Map<String, Value>) {
-        let tmp = self.path.with_extension("tmp");
-        let ok = std::fs::write(&tmp, Value::Object(map.clone()).to_string())
-            .and_then(|_| std::fs::rename(&tmp, &self.path));
-        if let Err(e) = ok {
-            eprintln!("seimei: saving aliases: {e}");
-        }
     }
 
     /// Every alias, in the order they were set.
@@ -42,14 +33,14 @@ impl Aliases {
         let low = alias.to_lowercase();
         map.retain(|a, v| v["sid"] != json!(s.session_id) && a.to_lowercase() != low);
         map.insert(alias.into(), json!({"sid": s.session_id, "pid": s.pid, "start": s.rec["procStart"]}));
-        self.save(&map);
+        save_json(&self.path, &*map);
     }
 
     pub fn remove(&self, alias: &str) -> bool {
         let mut map = self.map.lock().unwrap();
         let Some(a) = key(&map, alias) else { return false };
         map.shift_remove(&a);
-        self.save(&map);
+        save_json(&self.path, &*map);
         true
     }
 
@@ -65,7 +56,7 @@ impl Aliases {
         let started = !v["start"].is_null() && v["start"] != json!(0) && v["start"] != json!("");
         let s = rows.iter().find(|s| json!(s.pid) == v["pid"] && started && s.rec["procStart"] == v["start"])?;
         map[&a]["sid"] = json!(s.session_id);
-        self.save(&map);
+        save_json(&self.path, &*map);
         Some(s)
     }
 

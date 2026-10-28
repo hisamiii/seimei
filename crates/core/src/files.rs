@@ -43,9 +43,7 @@ fn ext(kind: &str) -> &'static str {
 /// <32 hex>.(jpg|png|webp|gif)
 fn valid_name(name: &str) -> bool {
     let Some((stem, ext)) = name.split_once('.') else { return false };
-    stem.len() == 32
-        && stem.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-        && matches!(ext, "jpg" | "png" | "webp" | "gif")
+    crate::uploads::is_id(stem) && matches!(ext, "jpg" | "png" | "webp" | "gif")
 }
 
 pub struct Files {

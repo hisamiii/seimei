@@ -18,8 +18,8 @@ use url::Url;
 use webauthn_rs::prelude::*;
 
 use crate::util::{
-    b64url, b64url_decode, chars, hex, now, random_bytes, random_string, same, sha256_hex, token_urlsafe, unhex,
-    write_json,
+    b64url, b64url_decode, chars, hex, now, random_bytes, random_string, same, save_json, sha256_hex, token_urlsafe,
+    unhex,
 };
 
 /// How long a browser login lasts; a paired phone's session is shorter and renews by signing a fresh challenge.
@@ -209,6 +209,7 @@ impl<T> Pending<T> {
         (exp >= now()).then_some(v)
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.items.len()
     }
@@ -311,11 +312,7 @@ impl Auth {
     /// The state, fresh from disk when the CLI (passwd, logout-all, passkeys --clear) or anyone else changed it.
     fn lock(&self) -> Guard<'_> {
         let mut g = self.inner.lock().unwrap();
-        let mtime = std::fs::metadata(&self.path)
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_nanos());
+        let mtime = self.mtime();
         if mtime != g.mtime || g.known.is_none() {
             let bytes = mtime.and_then(|_| std::fs::read(&self.path).ok());
             g.data = match bytes.map(|b| serde_json::from_slice(&b)) {
@@ -391,14 +388,14 @@ impl Auth {
     }
 
     fn save(&self, g: &mut Inner) {
-        if let Err(e) = write_json(&self.path, &g.data) {
-            eprintln!("seimei: auth.json: {e}");
-        }
-        g.mtime = std::fs::metadata(&self.path)
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_nanos());
+        save_json(&self.path, &g.data);
+        g.mtime = self.mtime();
+    }
+
+    /// When auth.json last changed, to notice a change on disk.
+    fn mtime(&self) -> Option<u128> {
+        let t = std::fs::metadata(&self.path).and_then(|m| m.modified()).ok()?;
+        t.duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_nanos())
     }
 
     pub fn has_password(&self) -> bool {
@@ -634,8 +631,7 @@ impl Auth {
             serde_json::from_value(credential.clone()).map_err(|e| AuthError(e.to_string()))?;
         let pk = w.finish_passkey_registration(&reg, &state).map_err(|e| AuthError(e.to_string()))?;
         let cred: Credential = pk.into();
-        let mut cose = vec![];
-        cbor_cose(&cred.cred, &mut cose).ok_or_else(|| AuthError("unsupported key type".into()))?;
+        let cose = cbor_cose(&cred.cred).ok_or_else(|| AuthError("unsupported key type".into()))?;
         let id = b64url(cred.cred_id.as_ref());
         let mut g = self.lock();
         g.data.passkeys.push(Key {
@@ -885,6 +881,7 @@ impl Auth {
     }
 
     /// Open passkey challenges and device nonces, for the cap's test.
+    #[cfg(test)]
     pub fn pending(&self) -> (usize, usize) {
         let g = self.lock();
         (g.challenges.len(), g.nonces.len())
@@ -935,9 +932,8 @@ pub fn cookie(headers: &HeaderMap, name: &str) -> Option<String> {
 }
 
 /// A COSE key back to its CBOR bytes, in the shape py_webauthn stored (kty, alg, then the key's own fields).
-fn cbor_cose(key: &COSEKey, out: &mut Vec<u8>) -> Option<()> {
+fn cbor_cose(key: &COSEKey) -> Option<Vec<u8>> {
     use serde_cbor_2::Value as C;
-    use std::collections::BTreeMap;
     let alg = C::Integer(key.type_ as i128);
     let mut m = BTreeMap::new();
     match &key.key {
@@ -961,8 +957,7 @@ fn cbor_cose(key: &COSEKey, out: &mut Vec<u8>) -> Option<()> {
             m.insert(C::Integer(-2), C::Bytes(k.x.to_vec()));
         }
     }
-    *out = serde_cbor_2::to_vec(&C::Map(m)).ok()?;
-    Some(())
+    serde_cbor_2::to_vec(&C::Map(m)).ok()
 }
 
 #[cfg(test)]
@@ -1002,8 +997,7 @@ mod tests {
         let pk = Auth::stored_passkey(&serde_json::from_value(rec).unwrap()).expect("loads");
         let cred: Credential = pk.into();
         assert_eq!(cred.counter, 4);
-        let mut back = vec![];
-        cbor_cose(&cred.cred, &mut back).unwrap();
+        let back = cbor_cose(&cred.cred).unwrap();
         assert_eq!(
             serde_cbor_2::from_slice::<serde_cbor_2::Value>(&back).unwrap(),
             serde_cbor_2::from_slice::<serde_cbor_2::Value>(&cose).unwrap()

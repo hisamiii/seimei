@@ -16,8 +16,8 @@ use std::time::Duration;
 
 use regex::Regex;
 use seimei_proto::{
-    AssistantMessage, BoxFuture, Client, ContentBlock, Handler, HookMatcher, Message, Options, Permission,
-    PermissionRequest, ResultMessage, SystemPrompt, UserContent, UserMessage, acp, codex,
+    AssistantMessage, BoxFuture, Client, ContentBlock, Handler, Message, Options, Permission, PermissionRequest,
+    ResultMessage, SystemPrompt, UserContent, UserMessage, acp, codex,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -28,7 +28,7 @@ use crate::aliases::Aliases;
 use crate::approvals::Approvals;
 use crate::archive::Archive;
 use crate::cost::Cost;
-use crate::dispatcher::{NO_CONNECTORS, result_text, summarize};
+use crate::dispatcher::{NO_CONNECTORS, OFF_TOOLS, hook, result_text, summarize};
 use crate::events::EventLog;
 use crate::guard::{Guard, HOOK_TIMEOUT};
 use crate::metrics::{self, WorkerEvents};
@@ -38,7 +38,7 @@ use crate::sessions::{self, Own};
 use crate::tasks::{Board, Fields};
 use crate::transcripts::{brief, project_of, transcript};
 use crate::usage::Usage;
-use crate::util::{as_text, chars, far, hex, now, random_bytes, read_json, sh_quote, uuid4, write_json};
+use crate::util::{as_text, chars, far, hex, now, random_bytes, read_json, save_json, sh_quote, uuid4};
 
 mod acp_session;
 pub use acp_session::{Mode, acp_mode, claude_shaped};
@@ -80,24 +80,6 @@ const SHELLS_DONE: &str = "seimei: your background commands have finished. Check
      with your report.";
 /// An ACP agent's text chunks are one event; this long without another, what came so far is said.
 const CHUNK_PAUSE: Duration = Duration::from_millis(500);
-/// Built-in tools a shikigami has no use for: scheduling, notebooks, worktree switching, remote triggers, design sync,
-/// and talking to other sessions or the user directly (its report and ask go through seimei).
-const OFF_TOOLS: [&str; 14] = [
-    "AskUserQuestion",
-    "Workflow",
-    "NotebookEdit",
-    "CronCreate",
-    "CronDelete",
-    "CronList",
-    "RemoteTrigger",
-    "PushNotification",
-    "DesignSync",
-    "EnterWorktree",
-    "ExitWorktree",
-    "ScheduleWakeup",
-    "SendMessage",
-    "ListAgents",
-];
 /// The only skills a shikigami sees (the rest, like the claude.ai document bundle, only fill its context).
 const SKILLS: [&str; 2] = ["code-review", "simplify"];
 /// A worker cut off by a restart is resumed with this; one resumed this often within the window stays interrupted
@@ -139,12 +121,6 @@ pub fn agents_from(cfg: Option<&toml::Table>) -> BTreeMap<String, Agent> {
     }
     out
 }
-
-/// The shikigami's own MCP server (ask, board), as data/tools.json has it.
-static SERVER: LazyLock<Value> = LazyLock::new(|| {
-    let all: Value = serde_json::from_str(include_str!("../../data/tools.json")).expect("tools.json");
-    all["shikigami"].clone()
-});
 
 /// Seconds to gather a burst of events into one message for the dispatcher.
 fn batch_wait() -> Duration {
@@ -355,6 +331,20 @@ pub struct Worker {
 }
 
 impl Worker {
+    fn new(rec: Record, log: EventLog, pool: Weak<Pool>) -> Arc<Worker> {
+        let (asked, shown, calls) = (AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0));
+        Arc::new(Worker {
+            id: rec.id.clone(),
+            rec: Mutex::new(rec),
+            log,
+            pool,
+            tx: Mutex::new(None),
+            asked,
+            shown,
+            calls,
+        })
+    }
+
     fn pool(&self) -> Arc<Pool> {
         self.pool.upgrade().expect("the pool outlives its workers")
     }
@@ -496,7 +486,6 @@ impl Worker {
         let r = self.rec();
         let sid = r.session_id.clone();
         let (resume, session_id) = if r.started { (Some(sid), None) } else { (None, Some(sid)) };
-        let hook = |id: &str, timeout| HookMatcher { matcher: None, callbacks: vec![id.into()], timeout };
         let (plugins, groups) = (&self.pool().plugins, self.granted());
         Options {
             cwd: Some(PathBuf::from(&r.cwd)),
@@ -512,7 +501,9 @@ impl Worker {
             mcp_servers: plugins.servers(&r.name, Some(&self.id), Some(&groups)),
             mcp_config_file: Some(plugins.config_file(&self.id)),
             // Workers talk to the user through their report and ask, never to other sessions directly.
-            disallowed_tools: OFF_TOOLS.iter().map(|t| t.to_string()).collect(),
+            disallowed_tools: (OFF_TOOLS.iter().chain(&["AskUserQuestion", "SendMessage", "ListAgents"]))
+                .map(|t| t.to_string())
+                .collect(),
             skills: Some(SKILLS.iter().map(|s| s.to_string()).collect()),
             env: self.env(),
             effort: r.effort.clone().filter(|e| !e.is_empty()),
@@ -578,13 +569,18 @@ impl Worker {
 
     /// Close its process without a word to anyone (a start adopt takes back); its session task ends too.
     pub async fn let_go(self: &Arc<Self>) {
+        self.close().await;
+        *self.tx.lock().unwrap() = None;
+    }
+
+    /// Close its process, if one runs, and wait until it has exited: two Claude Codes must never run one session.
+    async fn close(self: &Arc<Self>) {
         let running = self.tx.lock().unwrap().as_ref().is_some_and(|t| !t.is_closed());
         if running {
             let (done, rx) = oneshot::channel();
             self.cmd(Cmd::Close { done });
             let _ = rx.await;
         }
-        *self.tx.lock().unwrap() = None;
     }
 
     /// The session is open on the server (after Open on server): its terminal window is still there, or a running
@@ -666,25 +662,16 @@ impl Worker {
         }
         if ACTIVE.contains(&self.state().as_str()) {
             self.stop().await;
-            let mut stopped = false;
-            for _ in 0..150 {
-                if !ACTIVE.contains(&self.state().as_str()) {
-                    stopped = true;
-                    break;
+            let mut tries = 0;
+            while ACTIVE.contains(&self.state().as_str()) {
+                if tries == 150 {
+                    return Err("it did not stop in 30 s".into());
                 }
+                tries += 1;
                 tokio::time::sleep(Duration::from_millis(200)).await;
             }
-            if !stopped {
-                return Err("it did not stop in 30 s".into());
-            }
         }
-        let running = self.tx.lock().unwrap().as_ref().is_some_and(|t| !t.is_closed());
-        if running {
-            // Waits until its process has exited: two Claude Codes must never run one session.
-            let (done, rx) = oneshot::channel();
-            self.cmd(Cmd::Close { done });
-            let _ = rx.await;
-        }
+        self.close().await;
         self.pool().open_terminal(self, title, extra).await
     }
 
@@ -697,8 +684,7 @@ impl Worker {
         model: Option<&str>,
         by: &str,
     ) -> Result<Vec<String>, String> {
-        if let Some(e) = effort.filter(|e| !EFFORTS.contains(e)) {
-            let _ = e;
+        if effort.is_some_and(|e| !EFFORTS.contains(&e)) {
             return Err(format!("effort is one of {}", EFFORTS.join(", ")));
         }
         if model.is_some_and(|m| !MODELS.contains(&m)) {
@@ -760,22 +746,14 @@ impl Worker {
         let text = crate::tools::text;
         match name {
             "ask" => {
-                let q = match &a["question"] {
-                    Value::String(s) => s.trim().to_string(),
-                    Value::Null => String::new(),
-                    v => v.to_string(),
-                };
+                let q = as_text(&a["question"]).trim().to_string();
                 self.set("asking", |r| r.question = Some(q.clone()));
                 self.pool().report(self, "asking", &q);
                 text("Asked. The answer arrives as your next message; end your turn now.", false)
             }
             "board" => {
                 let (name, state) = (self.name(), self.state());
-                let id = match &a["id"] {
-                    Value::String(s) => Some(s.clone()),
-                    Value::Null => None,
-                    v => Some(v.to_string()),
-                };
+                let id = (!a["id"].is_null()).then(|| as_text(&a["id"]));
                 let pool = self.pool();
                 let mut board = pool.board.lock().unwrap();
                 let got = match (a["action"].as_str(), id) {
@@ -830,16 +808,10 @@ struct Session {
     idle: Option<Instant>,
 }
 
-async fn next(client: &mut Option<Client>) -> Option<Message> {
-    match client {
-        Some(c) => c.recv().await,
-        None => std::future::pending().await,
-    }
-}
-
-async fn next_acp(client: &mut Option<acp::Client>) -> Option<acp::Event> {
-    match client {
-        Some(c) => c.recv().await,
+/// The next message of a process that runs; without one, nothing ever.
+async fn next<T>(recv: Option<impl Future<Output = Option<T>>>) -> Option<T> {
+    match recv {
+        Some(r) => r.await,
         None => std::future::pending().await,
     }
 }
@@ -879,11 +851,11 @@ impl Session {
                     Some(c) => self.command(c).await,
                     None => return,
                 },
-                msg = next(&mut self.client) => match msg {
+                msg = next(self.client.as_mut().map(Client::recv)) => match msg {
                     Some(m) => self.handle(m).await,
                     None => self.ended().await,
                 },
-                ev = next_acp(&mut self.acp) => match ev {
+                ev = next(self.acp.as_mut().map(acp::Client::recv)) => match ev {
                     Some(e) => self.acp_event(e).await,
                     None => self.ended().await,
                 },
@@ -1194,12 +1166,7 @@ impl Session {
     /// Its own todo list, mirrored onto its task: a TaskCreate gets its id from the result; a TaskUpdate applies now.
     fn step(&mut self, id: &str, name: &str, input: &Value) {
         if name == "TaskCreate" {
-            let subject = match &input["subject"] {
-                Value::String(s) => s.trim().to_string(),
-                Value::Null => String::new(),
-                v => v.to_string(),
-            };
-            self.steps.insert(id.into(), subject);
+            self.steps.insert(id.into(), as_text(&input["subject"]).trim().to_string());
         } else if name == "TaskUpdate" && !input["taskId"].is_null() {
             let sid = match &input["taskId"] {
                 Value::String(s) => s.trim_start_matches('#').to_string(),
@@ -1363,7 +1330,7 @@ impl Handler for Side {
                 let error = json!({"code": -32601, "message": format!("Server '{server}' not found")});
                 return Some(json!({"jsonrpc": "2.0", "id": id, "error": error}));
             }
-            crate::tools::serve(&SERVER, message, |name, args| {
+            crate::tools::serve(&crate::tools::SERVER["shikigami"], message, |name, args| {
                 let w = w.clone();
                 async move {
                     tokio::task::spawn_blocking(move || w.call(&name, &args))
@@ -1557,25 +1524,11 @@ impl Pool {
             };
             if !rec.id.is_empty() {
                 let log = EventLog::open(&dir.join(format!("{}.jsonl", rec.id)))?;
-                logs.push((rec.id.clone(), rec, log));
+                logs.push((rec, log));
             }
         }
         let pool = Arc::new_cyclic(|me: &Weak<Pool>| {
-            let workers = logs
-                .into_iter()
-                .map(|(id, rec, log)| {
-                    Arc::new(Worker {
-                        id,
-                        rec: Mutex::new(rec),
-                        log,
-                        pool: me.clone(),
-                        tx: Mutex::new(None),
-                        asked: AtomicU64::new(0),
-                        shown: AtomicU64::new(0),
-                        calls: AtomicU64::new(0),
-                    })
-                })
-                .collect();
+            let workers = logs.into_iter().map(|(rec, log)| Worker::new(rec, log, me.clone())).collect();
             Pool {
                 me: me.clone(),
                 workers: Mutex::new(workers),
@@ -1682,9 +1635,7 @@ impl Pool {
     /// Saves workers.json and sends the pages the new list; call it after any change to a record.
     pub fn changed(&self) {
         let recs: Vec<Record> = self.all().iter().map(|w| w.rec()).collect();
-        if let Err(e) = write_json(&self.path, &recs) {
-            eprintln!("seimei: saving workers.json: {e}");
-        }
+        save_json(&self.path, &recs);
         self.events.flash(self.listing());
     }
 
@@ -1729,9 +1680,6 @@ impl Pool {
         out
     }
 
-    /// One event line for the dispatcher about a shikigami. Lines that come close together go as one message;
-    /// repeats collapse. Urgent ones go now (into a running turn, or as a turn of their own); the rest wait for its
-    /// next turn (Dispatcher::note, at most HOLD).
     /// seimei's own sessions by session id, so listings can tell them from the user's. A released one is the
     /// user's: it shows with their sessions.
     pub fn own_sessions(&self) -> Own {
@@ -1755,7 +1703,8 @@ impl Pool {
         self.notify(&line, urgent, key);
     }
 
-    /// An event line for the dispatcher, batched with the others (see tell).
+    /// An event line for the dispatcher: lines close together go as one message, repeats collapse.
+    /// Urgent ones go now; the rest wait for its next turn (Dispatcher::note, at most HOLD).
     pub fn notify(&self, line: &str, urgent: bool, key: Option<&str>) {
         queue(&mut self.batch.lock().unwrap(), line, urgent, key);
         if !self.flushing.swap(true, Ordering::SeqCst) {
@@ -1895,27 +1844,23 @@ impl Pool {
             let _ = std::fs::remove_file(self.dir.join(format!("{}.jsonl", w.id)));
             return Err(e);
         }
-        self.events.add(json!({"type": "worker", "worker": w.id, "name": name, "event": "summoned", "text": s.task,
-            "cwd": cwd, "model": rec.model, "effort": rec.effort, "context_cap": s.context,
-            "subagents": rec.subagents}));
+        self.summoned(&w, &s.task);
         w.send(&s.task, None, vec![]).await?;
         Ok(w)
     }
 
+    /// Its card in the conversation: how it starts out.
+    fn summoned(&self, w: &Worker, text: &str) {
+        let r = w.rec();
+        self.events.add(json!({"type": "worker", "worker": w.id, "name": r.name, "event": "summoned", "text": text,
+            "cwd": r.cwd, "model": r.model, "effort": r.effort, "context_cap": r.context_cap,
+            "subagents": r.subagents}));
+    }
+
     /// A new worker on its record, with its log.
     fn add_worker(&self, rec: Record) -> Result<Arc<Worker>, String> {
-        let id = rec.id.clone();
-        let log = EventLog::open(&self.dir.join(format!("{id}.jsonl"))).map_err(|e| e.to_string())?;
-        let w = Arc::new(Worker {
-            id,
-            rec: Mutex::new(rec),
-            log,
-            pool: self.me.clone(),
-            tx: Mutex::new(None),
-            asked: AtomicU64::new(0),
-            shown: AtomicU64::new(0),
-            calls: AtomicU64::new(0),
-        });
+        let log = EventLog::open(&self.dir.join(format!("{}.jsonl", rec.id))).map_err(|e| e.to_string())?;
+        let w = Worker::new(rec, log, self.me.clone());
         self.workers.lock().unwrap().push(w.clone());
         Ok(w)
     }
@@ -2025,9 +1970,7 @@ impl Pool {
                     // The session is adopted already: a wrong task id only costs the link.
                     self.file(w, &a.origin, a.project.as_deref(), None)?;
                 }
-                self.events.add(json!({"type": "worker", "worker": w.id, "name": r.name, "event": "summoned",
-                    "text": r.task, "cwd": r.cwd, "model": r.model, "effort": r.effort,
-                    "context_cap": r.context_cap, "subagents": crate::plan::get().quick}));
+                self.summoned(w, &r.task);
             }
             Some(old) => {
                 if let Some(path) = transcript(&a.session_id, &r.cwd) {
@@ -2055,10 +1998,7 @@ impl Pool {
                 if self.file(w, &a.origin, a.project.as_deref(), link.as_deref()).is_err() {
                     self.file(w, &a.origin, a.project.as_deref(), cur.as_deref())?;
                 }
-                let r = w.rec();
-                self.events.add(json!({"type": "worker", "worker": w.id, "name": r.name, "event": "summoned",
-                    "text": "You handed it off", "cwd": r.cwd, "model": r.model,
-                    "effort": r.effort, "context_cap": r.context_cap, "subagents": r.subagents}));
+                self.summoned(w, "You handed it off");
             }
         }
         w.send(first, None, vec![]).await

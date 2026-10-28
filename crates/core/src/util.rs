@@ -85,6 +85,19 @@ pub fn write_json(path: &Path, data: &impl Serialize) -> std::io::Result<()> {
     std::fs::rename(&tmp, path)
 }
 
+/// write_json for a state file whose save may fail without stopping anything: the error goes to the log.
+pub fn save_json(path: &Path, data: &impl Serialize) {
+    if let Err(e) = write_json(path, data) {
+        eprintln!("seimei: saving {}: {e}", path.display());
+    }
+}
+
+/// When a file last changed, as a unix time; 0 when it cannot be read.
+pub fn mtime(path: &Path) -> f64 {
+    let t = std::fs::metadata(path).and_then(|m| m.modified()).ok();
+    t.and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0.0, |d| d.as_secs_f64())
+}
+
 /// A file's bytes from `off` to its end.
 pub fn read_from(path: &Path, off: u64) -> std::io::Result<Vec<u8>> {
     use std::io::{Read, Seek, SeekFrom};
@@ -93,6 +106,27 @@ pub fn read_from(path: &Path, off: u64) -> std::io::Result<Vec<u8>> {
     let mut data = vec![];
     f.read_to_end(&mut data)?;
     Ok(data)
+}
+
+/// A file's last `n` bytes (all of it when shorter).
+pub fn read_tail(path: &Path, n: u64) -> std::io::Result<Vec<u8>> {
+    read_from(path, std::fs::metadata(path)?.len().saturating_sub(n))
+}
+
+/// Field `n` of /proc/<pid>/stat after the command name (0 is the state, 1 the parent's pid).
+pub fn stat_field(pid: i64, n: usize) -> Option<String> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // The command name may hold spaces and parentheses itself.
+    stat.rsplit_once(')')?.1.split_whitespace().nth(n).map(String::from)
+}
+
+/// The pids of a process's children, from each of its threads.
+pub fn children(pid: i64) -> Vec<i64> {
+    let Ok(tasks) = std::fs::read_dir(format!("/proc/{pid}/task")) else { return vec![] };
+    (tasks.flatten())
+        .filter_map(|t| std::fs::read_to_string(t.path().join("children")).ok())
+        .flat_map(|c| c.split_whitespace().filter_map(|k| k.parse().ok()).collect::<Vec<i64>>())
+        .collect()
 }
 
 pub fn random_bytes(n: usize) -> Vec<u8> {

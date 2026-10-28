@@ -41,11 +41,9 @@ const HOLD: Duration = Duration::from_secs(30 * 60);
 /// Tokens at which the dispatcher's context compacts (CLAUDE_CODE_AUTO_COMPACT_WINDOW); config [dispatcher]
 /// compact_window.
 const COMPACT_WINDOW: i64 = 400_000;
-/// Built-in tools the dispatcher has no use for: it delegates through summon (subagents would be invisible to the
-/// user) and pings through notify. Agent is still called Task in some CLI versions.
-const OFF_TOOLS: [&str; 14] = [
-    "Agent",
-    "Task",
+/// Built-in tools no session of seimei's has a use for: scheduling, notebooks, worktree switching, remote triggers,
+/// design sync, and pushes (seimei pings through notify).
+pub const OFF_TOOLS: [&str; 11] = [
     "Workflow",
     "NotebookEdit",
     "CronCreate",
@@ -57,7 +55,6 @@ const OFF_TOOLS: [&str; 14] = [
     "EnterWorktree",
     "ExitWorktree",
     "ScheduleWakeup",
-    "LSP",
 ];
 /// Sessions seimei starts leave out the user's claude.ai connectors (Gmail, Drive, Docs).
 pub const NO_CONNECTORS: (&str, &str) = ("ENABLE_CLAUDEAI_MCP_SERVERS", "false");
@@ -210,6 +207,11 @@ pub fn quoted(ev: &Value) -> (String, String) {
 /// One space between words, case kept.
 fn flat_case(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// A hook on every tool call, answered by seimei's handler under this callback id.
+pub(crate) fn hook(id: &str, timeout: Option<f64>) -> HookMatcher {
+    HookMatcher { matcher: None, callbacks: vec![id.into()], timeout }
 }
 
 pub fn human(n: u64) -> String {
@@ -621,24 +623,16 @@ impl Dispatcher {
             setting_sources: Some(vec!["user".into(), "project".into(), "local".into()]),
             system_prompt: SystemPrompt::Preset { append: Some(self.prompt()) },
             env,
-            disallowed_tools: OFF_TOOLS.iter().map(|t| t.to_string()).collect(),
+            // It delegates through summon: subagents would be invisible to the user. Agent is still Task in some CLIs.
+            disallowed_tools: OFF_TOOLS.iter().chain(&["Agent", "Task", "LSP"]).map(|t| t.to_string()).collect(),
             skills: Some(vec![]),
             sdk_mcp_servers: vec!["seimei".into()],
             mcp_servers: plugins.servers("seimei", None, None),
             mcp_config_file: Some(plugins.config_file("seimei")),
             hooks: vec![
-                (
-                    "PreToolUse".into(),
-                    vec![HookMatcher { matcher: None, callbacks: vec!["pre".into()], timeout: Some(HOOK_TIMEOUT) }],
-                ),
-                (
-                    "PostToolUseFailure".into(),
-                    vec![HookMatcher { matcher: None, callbacks: vec!["failed".into()], timeout: None }],
-                ),
-                (
-                    "PostToolUse".into(),
-                    vec![HookMatcher { matcher: None, callbacks: vec!["style".into()], timeout: None }],
-                ),
+                ("PreToolUse".into(), vec![hook("pre", Some(HOOK_TIMEOUT))]),
+                ("PostToolUseFailure".into(), vec![hook("failed", None)]),
+                ("PostToolUse".into(), vec![hook("style", None)]),
             ],
             // Only the dispatcher's compactions get the checklist: a --settings layer, not ~/.claude.
             settings: Some(crate::recall::settings(&checklist)),
@@ -1098,21 +1092,16 @@ impl Turns {
                     let turn = self.events.turn();
                     let text = text.trim().to_string();
                     let event_turn = turn.get("lane").is_some_and(|l| l == "t") && turn.contains_key("turn");
+                    let mut ev = Map::from_iter([("type".into(), json!("assistant")), ("text".into(), json!(text))]);
                     if !text.is_empty() && event_turn && (lanes.is_empty() || asking) {
                         // In an event turn: to the chat if it asks or ends the turn; held until that shows.
-                        let mut held = Map::new();
-                        held.insert("type".into(), json!("assistant"));
-                        held.insert("text".into(), json!(text));
-                        held.extend(turn);
-                        held.extend(place);
-                        self.held = Some(held);
+                        ev.extend(turn);
+                        ev.extend(place);
+                        self.held = Some(ev);
                         if asking {
                             self.route_held(true);
                         }
                     } else if !text.is_empty() {
-                        let mut ev = Map::new();
-                        ev.insert("type".into(), json!("assistant"));
-                        ev.insert("text".into(), json!(text));
                         ev.extend(place);
                         self.events.add(Value::Object(ev));
                     }
