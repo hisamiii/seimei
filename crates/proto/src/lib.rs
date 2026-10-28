@@ -13,6 +13,7 @@ mod client;
 pub mod codex;
 mod message;
 mod options;
+mod proc;
 
 pub use client::{BoxFuture, Client, Error, Handler, Permission, PermissionRequest};
 pub use message::{

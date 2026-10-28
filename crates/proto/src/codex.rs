@@ -9,26 +9,25 @@
 //! them already.
 
 use std::collections::{HashMap, HashSet};
-use std::process::{ExitStatus, Stdio};
+use std::process::ExitStatus;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::{Map, Value, json};
 use tokio::io::BufReader;
-use tokio::process::{Child, ChildStdout, Command};
+use tokio::process::{ChildStdout, Command};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::AbortHandle;
-use tokio_util::sync::CancellationToken;
 
 use crate::acp::{
     Error, Event, Handler, Options, Outcome, PermissionOption, PermissionRequest, PlanEntry, ToolCall, Update,
     error_text,
 };
-use crate::client::{Line, read_line, write};
+use crate::client::{Line, read_line};
+use crate::proc::Proc;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
-const GRACE: Duration = Duration::from_secs(5);
 const MAX_LINE: usize = 16 << 20;
 
 enum Waiter {
@@ -89,9 +88,7 @@ impl Shared {
 pub struct Client {
     shared: Arc<Shared>,
     events: mpsc::UnboundedReceiver<Event>,
-    stop: CancellationToken,
-    child: Option<Child>,
-    pid: Option<u32>,
+    proc: Proc,
     pub session_id: String,
     /// What `initialize` answered.
     pub init: Value,
@@ -106,26 +103,15 @@ impl Client {
             return Err(Error::NoFolder(opts.cwd.clone()));
         }
         let mut cmd = Command::new(&opts.program);
-        cmd.args(&opts.args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .current_dir(&opts.cwd)
-            .env("PWD", &opts.cwd)
-            .kill_on_drop(true)
-            .process_group(0);
+        cmd.args(&opts.args).current_dir(&opts.cwd).env("PWD", &opts.cwd);
         for k in &opts.env_remove {
             cmd.env_remove(k);
         }
         for (k, v) in &opts.env {
             cmd.env(k, v);
         }
-        let mut child = cmd.spawn().map_err(Error::Spawn)?;
-        let stdin = child.stdin.take().expect("piped stdin");
-        let stdout = child.stdout.take().expect("piped stdout");
-        let (out, out_rx) = mpsc::unbounded_channel();
+        let (proc, out, stdout) = Proc::spawn(&mut cmd).map_err(Error::Spawn)?;
         let (ev_tx, events) = mpsc::unbounded_channel();
-        let stop = CancellationToken::new();
         let shared = Arc::new(Shared {
             out,
             pending: Mutex::default(),
@@ -134,19 +120,9 @@ impl Client {
             thread: Mutex::default(),
             next: AtomicU64::new(0),
         });
-        tokio::spawn(write(stdin, out_rx, stop.clone()));
         let cwd = opts.cwd.display().to_string();
         tokio::spawn(read(stdout, handler, shared.clone(), ev_tx, cwd));
-        let mut c = Client {
-            shared,
-            events,
-            stop,
-            pid: child.id(),
-            child: Some(child),
-            session_id: String::new(),
-            init: Value::Null,
-            thread: Value::Null,
-        };
+        let mut c = Client { shared, events, proc, session_id: String::new(), init: Value::Null, thread: Value::Null };
         if let Err(e) = c.open(&opts).await {
             c.close().await;
             return Err(e);
@@ -187,7 +163,7 @@ impl Client {
     }
 
     pub fn pid(&self) -> Option<u32> {
-        self.pid
+        self.proc.pid()
     }
 
     /// The next event; None once the process has exited and everything it wrote was read.
@@ -257,35 +233,7 @@ impl Client {
 
     /// End the session: close stdin, give the server time to finish, then SIGTERM its process group, then SIGKILL.
     pub async fn close(&mut self) -> Option<ExitStatus> {
-        self.stop.cancel();
-        let mut child = self.child.take()?;
-        if let Ok(Ok(s)) = tokio::time::timeout(GRACE, child.wait()).await {
-            return Some(s);
-        }
-        self.signal(libc::SIGTERM);
-        if let Ok(Ok(s)) = tokio::time::timeout(GRACE, child.wait()).await {
-            return Some(s);
-        }
-        self.signal(libc::SIGKILL);
-        child.wait().await.ok()
-    }
-
-    fn signal(&self, sig: i32) {
-        if let Some(pid) = self.pid {
-            // SAFETY: killpg only sends a signal; the group is the child's own (process_group(0)).
-            unsafe {
-                libc::killpg(pid as i32, sig);
-            }
-        }
-    }
-}
-
-impl Drop for Client {
-    fn drop(&mut self) {
-        self.stop.cancel();
-        if self.child.is_some() {
-            self.signal(libc::SIGKILL);
-        }
+        self.proc.close().await
     }
 }
 

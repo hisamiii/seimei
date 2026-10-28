@@ -7,26 +7,24 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::process::{ExitStatus, Stdio};
+use std::process::ExitStatus;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::{Value, json};
 use tokio::io::BufReader;
-use tokio::process::{Child, ChildStdout, Command};
+use tokio::process::{ChildStdout, Command};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::AbortHandle;
-use tokio_util::sync::CancellationToken;
 
-use crate::client::{BoxFuture, Line, read_line, write};
+use crate::client::{BoxFuture, Line, read_line};
+use crate::proc::Proc;
 
 /// The protocol version this client speaks.
 pub const PROTOCOL_VERSION: u64 = 1;
 /// How long a request waits for its answer (a prompt waits for as long as its turn runs).
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
-/// After stdin closes, the agent gets this long to finish before SIGTERM, and again before SIGKILL.
-const GRACE: Duration = Duration::from_secs(5);
 /// The longest line read from the agent.
 const MAX_LINE: usize = 16 << 20;
 
@@ -208,9 +206,7 @@ pub struct Client {
     inflight: Inflight,
     next: AtomicU64,
     events: mpsc::UnboundedReceiver<Event>,
-    stop: CancellationToken,
-    child: Option<Child>,
-    pid: Option<u32>,
+    proc: Proc,
     pub session_id: String,
     /// What `initialize` answered (agentCapabilities, agentInfo, authMethods).
     pub init: Value,
@@ -225,29 +221,16 @@ impl Client {
             return Err(Error::NoFolder(opts.cwd.clone()));
         }
         let mut cmd = Command::new(&opts.program);
-        cmd.args(&opts.args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .current_dir(&opts.cwd)
-            .env("PWD", &opts.cwd)
-            .kill_on_drop(true)
-            // Its own process group: a stop reaches the commands it runs.
-            .process_group(0);
+        cmd.args(&opts.args).current_dir(&opts.cwd).env("PWD", &opts.cwd);
         for k in &opts.env_remove {
             cmd.env_remove(k);
         }
         for (k, v) in &opts.env {
             cmd.env(k, v);
         }
-        let mut child = cmd.spawn().map_err(Error::Spawn)?;
-        let stdin = child.stdin.take().expect("piped stdin");
-        let stdout = child.stdout.take().expect("piped stdout");
-        let (out, out_rx) = mpsc::unbounded_channel();
+        let (proc, out, stdout) = Proc::spawn(&mut cmd).map_err(Error::Spawn)?;
         let (ev_tx, events) = mpsc::unbounded_channel();
         let (pending, inflight): (Pending, Inflight) = Default::default();
-        let stop = CancellationToken::new();
-        tokio::spawn(write(stdin, out_rx, stop.clone()));
         tokio::spawn(read(stdout, handler, out.clone(), pending.clone(), inflight.clone(), ev_tx));
         let mut c = Client {
             out,
@@ -255,9 +238,7 @@ impl Client {
             inflight,
             next: AtomicU64::new(0),
             events,
-            stop,
-            pid: child.id(),
-            child: Some(child),
+            proc,
             session_id: String::new(),
             init: Value::Null,
             modes: Value::Null,
@@ -306,7 +287,7 @@ impl Client {
 
     /// The process id from spawn time; None when it was gone before that.
     pub fn pid(&self) -> Option<u32> {
-        self.pid
+        self.proc.pid()
     }
 
     /// The next event; None once the agent has exited and everything it wrote was read.
@@ -380,35 +361,7 @@ impl Client {
 
     /// End the session: close stdin, give the agent time to finish, then SIGTERM its process group, then SIGKILL.
     pub async fn close(&mut self) -> Option<ExitStatus> {
-        self.stop.cancel();
-        let mut child = self.child.take()?;
-        if let Ok(Ok(s)) = tokio::time::timeout(GRACE, child.wait()).await {
-            return Some(s);
-        }
-        self.signal(libc::SIGTERM);
-        if let Ok(Ok(s)) = tokio::time::timeout(GRACE, child.wait()).await {
-            return Some(s);
-        }
-        self.signal(libc::SIGKILL);
-        child.wait().await.ok()
-    }
-
-    fn signal(&self, sig: i32) {
-        if let Some(pid) = self.pid {
-            // SAFETY: killpg only sends a signal; the group is the child's own (process_group(0)).
-            unsafe {
-                libc::killpg(pid as i32, sig);
-            }
-        }
-    }
-}
-
-impl Drop for Client {
-    fn drop(&mut self) {
-        self.stop.cancel();
-        if self.child.is_some() {
-            self.signal(libc::SIGKILL);
-        }
+        self.proc.close().await
     }
 }
 
