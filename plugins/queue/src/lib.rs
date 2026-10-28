@@ -530,7 +530,8 @@ pub async fn call(tool: &str, a: &Value, session: &dyn Session) -> Value {
             text(&blocking(move || describe(&snapshot(&names))).await, false)
         }
         "queue_control" => {
-            let mut action = s(&a["action"]);
+            let Some(action) = a["action"].as_str() else { return text("action is required", true) };
+            let mut action = action.to_string();
             if action == "revoke" && truthy(&a["kill"]) {
                 let snap = blocking(|| snapshot(&HashMap::new())).await;
                 let t = &a["target"];
