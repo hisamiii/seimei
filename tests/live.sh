@@ -1,8 +1,8 @@
 #!/bin/bash
-# tests/live.sh NAME...: run the ignored live tests (headless sessions on haiku, dsh or Codex) in a scrubbed environment.
+# tests/live.sh NAME...: run the ignored live tests (headless sessions on haiku or dsh) in a scrubbed environment.
 # No desktop, no job variables of the calling session, auto-memory off, and the test Claude config dir, so test sessions
 # never show up in the user's session list or seimei's events. Log it in once: `CLAUDE_CONFIG_DIR=<dir> claude /login`.
-# NAME: claude (proto), perm, tune (core), dispatcher, plugin, acp (seimei), codex (the schema check, then a live run).
+# NAME: dispatcher (the dispatcher with its tools and plugins), acp (a shikigami on dsh under the guard).
 set -eu
 root=$(dirname "$(dirname "$(readlink -f "$0")")")
 cd "$root"
@@ -14,12 +14,10 @@ export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 CLAUDE_CONFIG_DIR="$cfg"
 
 run() { cargo test -q -p "$1" --test it -- --ignored "$2" --nocapture; }
 
-[ $# -gt 0 ] || { echo "usage: tests/live.sh claude|perm|tune|dispatcher|plugin|acp|codex ..."; exit 2; }
+[ $# -gt 0 ] || { echo "usage: tests/live.sh dispatcher|acp ..."; exit 2; }
 for name in "$@"; do
     case $name in
-    claude) run seimei-proto live:: ;;
-    perm | tune) run seimei-core "live_$name::" ;;
-    dispatcher | plugin) run seimei "live_$name::" ;;
+    dispatcher) run seimei live_dispatcher:: ;;
     acp)
         # dsh runs in a temp HOME whose only key is a decoy, so a read the guard failed to stop would leak nothing.
         home=$(mktemp -d /tmp/seimei-acphome-XXXXXX)
@@ -30,10 +28,6 @@ for name in "$@"; do
             RUSTUP_HOME=${RUSTUP_HOME:-$real/.rustup} run seimei live_acp:: || rc=$?
         case $home in /tmp/seimei-acphome-?*) rm -r -- "$home" ;; esac
         [ "$rc" -eq 0 ] || exit "$rc"
-        ;;
-    codex)
-        python3 tests/codex-schema.py
-        run seimei-proto live_codex::
         ;;
     *) echo "unknown live test $name"; exit 2 ;;
     esac

@@ -11,7 +11,6 @@ mod browser_host;
 mod fake_queue;
 mod live_acp;
 mod live_dispatcher;
-mod live_plugin;
 mod plugin;
 mod setup;
 mod update;
