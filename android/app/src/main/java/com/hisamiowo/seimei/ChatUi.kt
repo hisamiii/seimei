@@ -25,7 +25,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.ui.draw.clipToBounds
@@ -518,7 +517,7 @@ fun PendingMsg(p: Pending, vm: Seimei) {
                 Spacer(Modifier.size(6.dp))
             }
             if (p.text.isNotEmpty()) Text(p.text, color = cs.onPrimaryContainer, lineHeight = 23.2.sp, fontSize = 16.sp)
-            if (p.failed) Text("Not sent. Tap to retry", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = cs.error,
+            if (p.failed) Text("Not sent. Tap to retry.", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = cs.error,
                 modifier = Modifier.padding(top = 4.dp).clip(RoundedCornerShape(8.dp)).clickable { vm.retry(p) }.padding(vertical = 12.dp, horizontal = 4.dp))
         }
     } }
@@ -1012,15 +1011,8 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
             haptic.performHapticFeedback(if (ok) HapticFeedbackType.Confirm else HapticFeedbackType.Reject)
         }) { sent = false }
     }
-    // The indicator sits over the hidden label, so the button keeps its size (final/ 18: the shape loader in the tapped button's colour).
     @Composable
-    fun Label(key: String, text: String) {
-        val busy = slow && tapped == key
-        Box(contentAlignment = Alignment.Center) {
-            Text(text, Modifier.alpha(if (busy) 0f else 1f))
-            if (busy) Loader(24.dp, contained = false, color = LocalContentColor.current)
-        }
-    }
+    fun Label(key: String, text: String) = BusyLabel(text, slow && tapped == key)
     // While an answer is on its way the tapped control keeps its colours and the rest are held at .38 (final/ 18)
     fun held(key: String) = Modifier.alpha(if (sent && tapped != key) .38f else 1f)
     val who = if (a.subagent) "${a.who}'s subagent" else a.who

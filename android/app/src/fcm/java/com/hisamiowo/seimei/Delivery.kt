@@ -21,7 +21,7 @@ object Delivery {
     fun label(ctx: Context, pkg: String?) = pkg ?: "none"
     fun pick(ctx: Context, pkg: String) {}
 
-    fun route(ctx: Context, prefs: Prefs) = Route("Through Firebase", "Google's push service carries them to this phone.", true)
+    fun route(ctx: Context, prefs: Prefs) = Route("Through Firebase", "", true)
 
     fun start(ctx: Context) {
         if (!available || FirebaseApp.getApps(ctx).isNotEmpty()) return

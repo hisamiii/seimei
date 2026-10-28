@@ -191,7 +191,7 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
         }
         val label = when (type) {
             "worker" -> "${ev.str("name")} ${ENDED[ev.str("event")] ?: ev.str("event")}"
-            "system" -> ev.str("text").removeSuffix(".")
+            "system" -> noteText(ev).removeSuffix(".")
             "rate_limit" -> limitText(ev)
             // A reply of the user's turn that seimei marked trajectory:.
             "assistant" -> if (ev.optLong("re") > 0) "a reply to you" else ""
@@ -284,7 +284,7 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
         // What the turn itself shows (lane c: a summoned card, a picture) does not come between.
         if (ev.str("lane") != "c") between = true
         when (type) {
-            "system" -> note(ev.str("text"), ev.str("level"), t, key)
+            "system" -> note(noteText(ev), ev.str("level"), t, key)
             "worker" -> {
                 val event = ev.str("event")
                 val wid = ev.str("worker")
@@ -345,6 +345,14 @@ fun resetsAt(t: Double): String {
     if (at.toLocalDate() == java.time.LocalDate.now()) return clock(t)
     return at.dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.ENGLISH).lowercase() +
         " " + clock(t)
+}
+
+// A server note's times in this device's clock: "clock" pairs each time with its text in the note.
+fun noteText(ev: JSONObject): String {
+    var text = ev.str("text")
+    val pairs = ev.optJSONArray("clock") ?: return text
+    for (i in 0 until pairs.length()) pairs.optJSONArray(i)?.let { text = text.replace(it.optString(1), clock(it.optDouble(0))) }
+    return text
 }
 
 // The locale's short time, as the web page shows it ("6:13 PM" in English)

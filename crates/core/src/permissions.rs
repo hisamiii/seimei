@@ -29,7 +29,7 @@ pub fn rank(mode: &str) -> Option<u8> {
 
 pub fn label(mode: &str) -> &'static str {
     match mode {
-        "default" => "Ask",
+        "default" => "Ask first",
         "acceptEdits" => "Allow edits",
         "plan" => "Plan first",
         "auto" => "Auto",

@@ -677,7 +677,7 @@ impl Dispatcher {
                     self.tools.pool.plugins.root("seimei", None, client.pid());
                     t.set(Some(true), None);
                     if failures > 0 {
-                        self.events.add(json!({"type": "system", "text": "Session is back."}));
+                        self.events.add(json!({"type": "system", "text": "Session is back"}));
                     }
                     (delay, failures) = (Duration::from_secs(1), 0);
                     let why = t.session(&mut client, &mut rx).await;
@@ -1016,7 +1016,7 @@ impl Turns {
                 }
                 if s.subtype == "compact_boundary" {
                     let _ = std::fs::write(self.d.state.join("compacted"), "");
-                    self.events.add(json!({"type": "system", "text": "Older context was compacted."}));
+                    self.events.add(json!({"type": "system", "text": "Older context was compacted"}));
                 }
             }
             Message::Result(r) => return self.result(r),
@@ -1169,7 +1169,7 @@ impl Turns {
         if msg.is_error {
             let lane = self.events.turn().get("lane").cloned().unwrap_or(json!("c"));
             if self.stopping {
-                self.events.add(json!({"type": "system", "text": "Stopped.", "lane": lane}));
+                self.events.add(json!({"type": "system", "text": "Stopped", "lane": lane}));
             } else {
                 let why = msg.result.clone().filter(|r| !r.is_empty()).unwrap_or(msg.subtype.clone());
                 self.events.add(

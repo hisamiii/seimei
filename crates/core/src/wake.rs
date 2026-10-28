@@ -71,7 +71,9 @@ impl WakeWatch {
     pub async fn woke(&self, slept: f64) {
         let at = now();
         let when = format!("{} to {}", hm(at - slept), hm(at));
-        self.events.add(json!({"type": "system", "text": format!("The server slept from {when}")}));
+        // clock: each time with its text here, for the phone to show in its own 12 or 24 hour clock.
+        let clock = json!([[at - slept, hm(at - slept)], [at, hm(at)]]);
+        self.events.add(json!({"type": "system", "text": format!("The server slept from {when}"), "clock": clock}));
         let mut lines = vec![format!(
             "The server was asleep for {} ({when}). Network calls in flight then may have failed or stalled.",
             span(slept)

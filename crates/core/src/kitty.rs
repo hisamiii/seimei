@@ -19,7 +19,7 @@ use crate::util::{chars, data_dir, sha256_hex, splitlines};
 
 const REOPEN: &str = "This session's kitty was started before remote control was on. Close that kitty window (all \
                       its tabs) and resume the session in a new one to reply from here.";
-const NO_RC: &str = "kitty remote control is not set up on the server (`seimei setup` offers it).";
+const NO_RC: &str = "kitty remote control isn't set up on the server (`seimei setup` offers it)";
 
 fn re(p: &str) -> Regex {
     Regex::new(p).expect("a valid pattern")
@@ -58,7 +58,7 @@ pub fn window(pid: i64) -> Result<Window, String> {
     let raw = String::from_utf8_lossy(&raw);
     let env: HashMap<&str, &str> = raw.split('\0').filter_map(|x| x.split_once('=')).collect();
     let Some(id) = env.get("KITTY_WINDOW_ID") else {
-        return Err("This session does not run in a kitty window.".into());
+        return Err("This session doesn't run in a kitty window".into());
     };
     let (to, key) =
         (env.get("KITTY_LISTEN_ON").copied().unwrap_or(""), env.get("KITTY_PUBLIC_KEY").copied().unwrap_or(""));
@@ -120,7 +120,7 @@ fn run(w: &Window, cmd: &str, args: &[&str], data: Option<&str>, limit: Duration
             _ => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err("kitty did not answer.".into());
+                return Err("kitty didn't answer".into());
             }
         }
     };
@@ -365,7 +365,7 @@ pub async fn type_message(pid: i64, text: &str) -> Result<(), String> {
 pub async fn answer(pid: i64, question: &str, n: i64, label: &str) -> Result<(), String> {
     let w = window(pid)?;
     if !visible(&rc(&w, "get-text", &[], None).await?, question, n, label) {
-        return Err("That question is not on the session's screen any more.".into());
+        return Err("That question isn't on the session's screen any more".into());
     }
     rc(&w, "send-text", &[], Some(&n.to_string())).await.map(|_| ())
 }
@@ -374,7 +374,7 @@ pub async fn answer(pid: i64, question: &str, n: i64, label: &str) -> Result<(),
 pub async fn answer_text(pid: i64, question: &str, other: i64, text: &str) -> Result<(), String> {
     let w = window(pid)?;
     if !visible(&rc(&w, "get-text", &[], None).await?, question, other, "Type something") {
-        return Err("That question is not on the session's screen any more.".into());
+        return Err("That question isn't on the session's screen any more".into());
     }
     rc(&w, "send-text", &[], Some(&other.to_string())).await?;
     tokio::time::sleep(Duration::from_millis(300)).await;

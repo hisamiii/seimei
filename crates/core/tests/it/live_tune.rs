@@ -100,7 +100,7 @@ async fn tune_live() {
         &m["tunes"],
     );
     let by_user = (log.iter())
-        .filter(|e| e["type"] == "system" && e["text"].as_str().unwrap_or("").contains("by the user"))
+        .filter(|e| e["type"] == "system" && e["text"].as_str().unwrap_or("").contains("by you"))
         .count();
     c.check("its log says so", by_user == 2, by_user);
     c.check("a bad effort is refused", w.tune(Some("huge"), None, "the user").await.is_err(), "");

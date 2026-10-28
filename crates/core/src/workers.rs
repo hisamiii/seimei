@@ -1072,7 +1072,7 @@ impl Session {
                 }
                 tunes.as_array_mut().expect("a list").push(json!({"t": now(), "by": by, "what": what}));
             });
-            self.w.add(json!({"type": "system", "text": format!("{} (by {by}).", capitalize(&what))}));
+            self.w.add(json!({"type": "system", "text": format!("{}, by {}", capitalize(&what), if by == "the user" { "you" } else { by })}));
             self.pool.changed();
             if self.w.get("effort_next").as_str().is_some_and(|e| !e.is_empty()) && self.w.state() != "running" {
                 self.apply_effort();
@@ -2343,7 +2343,7 @@ impl Pool {
             }
             None => {
                 let at = now();
-                let task = format!("Adopted from your session \"{}\".", a.origin);
+                let task = format!("You handed off your session \"{}\"", a.origin);
                 let rec = json!({"id": hex(&random_bytes(4)), "name": slug(&a.name), "task": task, "cwd": a.cwd,
                     "model": a.model, "effort": a.effort, "context_cap": a.context, "subagents": crate::plan::get().quick,
                     "session_id": a.session_id, "state": "starting", "created": at, "updated": at, "summary": "",
@@ -2426,7 +2426,7 @@ impl Pool {
                 }
                 let r = w.rec();
                 self.events.add(json!({"type": "worker", "worker": w.id, "name": r["name"], "event": "summoned",
-                    "text": format!("Back from your session \"{}\".", a.origin), "cwd": r["cwd"], "model": r["model"],
+                    "text": "You handed it off", "cwd": r["cwd"], "model": r["model"],
                     "effort": r["effort"], "context_cap": r["context_cap"], "subagents": r["subagents"]}));
             }
         }
@@ -2487,7 +2487,7 @@ impl Pool {
         }
         if !names.is_empty() {
             let names = names.join(", ");
-            self.events.add(json!({"type": "system", "text": format!("Resumed after the restart: {names}.")}));
+            self.events.add(json!({"type": "system", "text": format!("Resumed after the restart: {names}")}));
             self.notify(
                 &format!("seimei restarted; resumed shikigami {names} (told to check their state first)"),
                 false,

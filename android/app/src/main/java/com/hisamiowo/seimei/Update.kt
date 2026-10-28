@@ -90,7 +90,7 @@ object Updater {
             }
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
-            state = Updating.Failed(if (e is HttpError) "The server has no app to give (${e.code})." else "Could not download the update.")
+            state = Updating.Failed(if (e is HttpError) "The server has no app to give (${e.code})" else "Couldn't download the update")
         } finally {
             if (state !is Updating.Confirming) apk.delete()
         }
@@ -110,7 +110,7 @@ class InstallResult : BroadcastReceiver() {
             PackageInstaller.STATUS_SUCCESS -> Updater.state = Updating.Idle
             PackageInstaller.STATUS_FAILURE_ABORTED -> Updater.state = Updating.Idle
             else -> Updater.state = Updating.Failed(
-                intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)?.let { "The install failed: $it" } ?: "The install failed.")
+                intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)?.let { "The install failed: $it" } ?: "The install failed")
         }
         if (Updater.state !is Updating.Confirming) File(ctx.cacheDir, "update.apk").delete()
     }
@@ -131,14 +131,14 @@ fun AboutSheet(vm: Seimei, onClose: () -> Unit) {
             Text("Version ${BuildConfig.VERSION_NAME}", fontSize = 14.sp, color = LocalExtra.current.text3)
             Spacer(Modifier.height(10.dp))
             when {
-                !Updater.enabled -> Text("Debug builds don't update themselves.", fontSize = 14.sp, color = LocalExtra.current.text2)
+                !Updater.enabled -> Text("Debug builds don't update themselves", fontSize = 14.sp, color = LocalExtra.current.text2)
                 r == null -> {
-                    Text(if (vm.checking) "Checking for updates…" else "Up to date.", fontSize = 15.sp)
+                    Text(if (vm.checking) "Checking for updates…" else "Up to date", fontSize = 15.sp)
                     TextButton(vm::checkUpdate, enabled = !vm.checking) { Text("Check again") }
                 }
                 else -> {
                     Text("Update available: ${r.version}", fontSize = 16.sp, color = MaterialTheme.colorScheme.primary)
-                    Text("${sizeMb(r.size)}, signed with the same key. Android asks you to confirm the install.",
+                    Text(sizeMb(r.size),
                         fontSize = 13.sp, color = LocalExtra.current.text3)
                     Spacer(Modifier.height(8.dp))
                     when (st) {
@@ -146,13 +146,13 @@ fun AboutSheet(vm: Seimei, onClose: () -> Unit) {
                             LinearProgressIndicator({ if (st.total > 0) st.done.toFloat() / st.total else 0f }, Modifier.fillMaxWidth())
                             Text("Downloading…", fontSize = 13.sp, color = LocalExtra.current.text3)
                         }
-                        Updating.Confirming -> Text("Waiting for you to confirm the install.", fontSize = 14.sp)
+                        Updating.Confirming -> Text("Waiting for you to confirm the install", fontSize = 14.sp)
                         else -> {
                             if (st is Updating.Failed) Text(st.why, fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
                             if (vm.installAllowed) {
                                 Button(vm::installUpdate, Modifier.fillMaxWidth()) { Text("Download and install") }
                             } else {
-                                Text("First allow seimei to install updates. Android opens the setting; switch it on and come back.",
+                                Text("Allow seimei to install updates first",
                                     fontSize = 13.sp, color = LocalExtra.current.text2)
                                 Button({ Updater.allowInstalls(ctx) }, Modifier.fillMaxWidth()) { Text("Allow updates from seimei") }
                             }

@@ -88,6 +88,7 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -116,6 +117,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.DefaultLifecycleObserver
@@ -367,15 +369,24 @@ fun FirstRun(title: String, line: String, content: @Composable ColumnScope.() ->
     }
 }
 
+/** A button's label that stays while it works: the indicator sits over the hidden label, so the button keeps its size. */
+@Composable
+fun BusyLabel(text: String, busy: Boolean, fontSize: TextUnit = TextUnit.Unspecified) {
+    Box(contentAlignment = Alignment.Center) {
+        Text(text, Modifier.alpha(if (busy) 0f else 1f), fontSize = fontSize)
+        if (busy) Loader(24.dp, contained = false, color = LocalContentColor.current)
+    }
+}
+
 /** Step 1 when no server is built in: the address, checked before going on. */
 @Composable
 fun ServerScreen(vm: Seimei) {
     var typed by remember { mutableStateOf(vm.lastServer.removePrefix("https://")) }
-    FirstRun("Connect to your seimei", "The address of the computer that runs seimei. Its page shows it under Phone app.") {
+    FirstRun("Server address", "The seimei page shows it under Phone app") {
         OutlinedTextField(
             typed,
             { typed = it.trim(); vm.serverError = null },
-            label = { Text("Server address") },
+            label = { Text("Address") },
             singleLine = true,
             isError = vm.serverError != null,
             supportingText = vm.serverError?.let { { Text(it) } },
@@ -388,7 +399,7 @@ fun ServerScreen(vm: Seimei) {
             onClick = { vm.checkServer(typed) },
             enabled = !vm.authBusy && typed.isNotBlank(),
             modifier = Modifier.fillMaxWidth().height(56.dp),
-        ) { Text(if (vm.authBusy) "Checking" else "Continue", fontSize = 16.sp) }
+        ) { BusyLabel("Continue", vm.authBusy, fontSize = 16.sp) }
     }
 }
 
@@ -400,8 +411,8 @@ fun PairScreen(vm: Seimei, activity: Activity) {
     var password by remember { mutableStateOf("") }
     var withPassword by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf(Build.MODEL ?: "phone") }
-    val line = if (withPassword) "Type seimei's password. The phone pairs itself and keeps only its own key; the password is not stored."
-        else "On the seimei page, open the menu, then Phone app, then Pair a phone. Type the code it shows."
+    val line = if (withPassword) "The password isn't stored"
+        else "On the seimei page: menu, Phone app, Pair a phone"
     FirstRun("Pair this phone", line) {
         ServerChip(vm)
         Spacer(Modifier.height(20.dp))
@@ -439,7 +450,7 @@ fun PairScreen(vm: Seimei, activity: Activity) {
             onClick = { if (withPassword) vm.pair(activity, name, password = password) else vm.pair(activity, name, code = code) },
             enabled = !vm.authBusy && (if (withPassword) password.isNotEmpty() else code.length == 8),
             modifier = Modifier.fillMaxWidth().height(56.dp),
-        ) { Text(if (vm.authBusy) "Pairing" else "Pair", fontSize = 16.sp) }
+        ) { BusyLabel("Pair", vm.authBusy, fontSize = 16.sp) }
         TextButton({
             withPassword = !withPassword
             password = ""

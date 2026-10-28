@@ -1211,7 +1211,7 @@ impl Guard {
                 rec["decision"] = json!("blocked");
                 rec["why"] = json!(why);
                 self.audit(rec);
-                self.events.add(json!({"type": "system", "level": "error", "text": format!("Blocked {who}: {why}.")}));
+                self.events.add(json!({"type": "system", "level": "error", "text": format!("Blocked {who}: {why}")}));
                 self.tell(worker, &format!("the guard blocked {why}: {}", excerpt(tool, &args, 120)), false, None);
                 decision(
                     false,

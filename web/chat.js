@@ -634,9 +634,16 @@ const said = new Map();
 const REPLY = 'M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11';
 const ENDED = { done: 'finished', failed: 'failed', stopped: 'was stopped', interrupted: 'was interrupted' };
 
+// A server note's times in this device's clock: clock pairs each time with its text in the note.
+function noteText(ev) {
+  let text = ev.text;
+  for (const [t, was] of ev.clock || []) text = text.replace(was, clock(t));
+  return text;
+}
+
 function foldLabel(ev) {
   if (ev.type === 'worker') return `${ev.name} ${ENDED[ev.event] || ev.event}`;
-  if (ev.type === 'system') return ev.text.replace(/\.$/, '');
+  if (ev.type === 'system') return noteText(ev).replace(/\.$/, '');
   if (ev.type === 'rate_limit') return limitText(ev);
   // A reply of the user's turn that seimei marked trajectory:.
   if (ev.type === 'assistant' && ev.re) return 'a reply to you';
@@ -749,7 +756,7 @@ export class Renderer {
       seen.node.dataset.n = `×${seen.n}`;
       return;
     }
-    const node = this.put(el('div', `note ${ev.level || ''}`, ev.text));
+    const node = this.put(el('div', `note ${ev.level || ''}`, noteText(ev)));
     this.notes.set(ev.text, { node, t: ev.t || 0, n: 1 });
   }
 
@@ -1152,7 +1159,7 @@ async function deliver(text, sending, reply = null) {
   } catch {
     if (!pending.has(cid)) return;
     node.classList.add('failed');
-    const again = el('button', 'retry sl', 'Not sent. Tap to retry');
+    const again = el('button', 'retry sl', 'Not sent. Tap to retry.');
     again.type = 'button';
     again.addEventListener('click', () => {
       pending.delete(cid);

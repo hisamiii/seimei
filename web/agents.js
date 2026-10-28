@@ -397,7 +397,7 @@ function ring(pct) {
     return b;
   }
   const n = Math.max(0, Math.min(100, pct ?? 0));
-  b.setAttribute('aria-label', pct == null ? 'Details' : `Context ${n}% used, session details`);
+  b.setAttribute('aria-label', pct == null ? 'Details' : `Context ${n}% used`);
   b.innerHTML = `<svg width="34" height="34" viewBox="0 0 36 36" aria-hidden="true"><circle class="t" cx="18" cy="18" r="15"/>`
     + `<circle class="f" cx="18" cy="18" r="15" pathLength="100" stroke-dasharray="${n} 100" transform="rotate(-90 18 18)"/></svg>`;
   b.append(el('span', null, pct == null ? '' : String(n)));
@@ -692,7 +692,7 @@ async function poll(soon = false) {
   const p = P;
   if (soon) await new Promise((r) => setTimeout(r, 600));
   const r = await getJSON(`api/sessions/${p.id}${p.next != null ? `?from=${p.next}` : ''}`, () => {
-    p.row = { ...p.row, reach: 'The session has ended.', via: null };
+    p.row = { ...p.row, reach: 'The session has ended', via: null };
   });
   if (P !== p) return;
   if (!r) composerState();
@@ -1025,7 +1025,7 @@ export async function openPage(kind, id) {
     if (r) r.reset = true;
   }
   if (kept && P !== p) return;
-  if (!r && kept && gone) return note('The server no longer has this; it shows the last copy.');
+  if (!r && kept && gone) return note('Gone from the server: this is the last copy');
   if (!r) return kept ? snack('Offline: this is the last copy') : snack("Couldn't reach the server");
   // Drawn anew when there was no copy, or the server says the copy is too old to extend.
   if (!kept || r.reset) build(kind, id, kind === 'worker' ? { ...r.worker, ...live } : { ...r.session, reach: r.reach, via: r.via });

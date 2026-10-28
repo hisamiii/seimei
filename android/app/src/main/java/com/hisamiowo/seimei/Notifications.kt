@@ -77,7 +77,7 @@ fun NotificationsSheet(vm: Seimei, done: () -> Unit) {
                 Spacer(Modifier.width(14.dp))
                 Column {
                     Text(route.title, fontSize = 16.sp)
-                    Text(route.text, fontSize = 13.sp, color = x.text2)
+                    if (route.text.isNotEmpty()) Text(route.text, fontSize = 13.sp, color = x.text2)
                 }
             }
             Spacer(Modifier.height(4.dp))
@@ -98,10 +98,7 @@ fun NotificationsSheet(vm: Seimei, done: () -> Unit) {
                 }
             } else if (Delivery.FOSS) {
                 Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Background connection", fontSize = 16.sp)
-                        Text("Android shows it as a silent notification that stays (top).", fontSize = 13.sp, color = x.text2)
-                    }
+                    Text("Background connection", Modifier.weight(1f), fontSize = 16.sp)
                     Spacer(Modifier.width(12.dp))
                     Switch(vm.prefs.listen, {
                         vm.prefs.listen = it
@@ -119,11 +116,16 @@ fun NotificationsSheet(vm: Seimei, done: () -> Unit) {
                     }
                 }
             }
-            SheetRow(bell, "Sounds and channels", "Approvals, pings, quiet, urgent") {
-                ctx.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName))
+            // Each kind opens its own channel's settings: sound, vibration, on the lock screen.
+            for ((id, name, _) in Push.CHANNELS) {
+                if (id == "listen" && !vm.prefs.listen) continue
+                SheetRow(bell, name, Push.ABOUT[id].orEmpty()) {
+                    ctx.startActivity(Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName).putExtra(Settings.EXTRA_CHANNEL_ID, id))
+                }
             }
             Spacer(Modifier.height(8.dp))
-            FilledTonalButton({ vm.testPush() }, Modifier.fillMaxWidth().height(48.dp), enabled = vm.pushTest != "Sending") {
+            FilledTonalButton({ vm.testPush() }, Modifier.fillMaxWidth().height(48.dp), enabled = vm.pushTest != "Sending…") {
                 Text("Send a test notification")
             }
             vm.pushTest?.let { Text(it, Modifier.fillMaxWidth().padding(top = 4.dp), fontSize = 13.sp, color = x.text2, textAlign = TextAlign.Center) }

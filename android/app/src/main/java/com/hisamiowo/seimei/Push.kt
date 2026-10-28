@@ -28,14 +28,14 @@ class SeimeiApp : Application() {
 
 object Push {
     /** One channel per kind, so each can be tuned or muted in the system settings. */
-    private val CHANNELS = listOf(
+    val CHANNELS = listOf(
         Triple("approval", "Approvals", NotificationManager.IMPORTANCE_HIGH),
         Triple("listen", "Background connection", NotificationManager.IMPORTANCE_MIN),
         Triple("quiet", "Quiet pings", NotificationManager.IMPORTANCE_LOW),
         Triple("ping", "Pings", NotificationManager.IMPORTANCE_DEFAULT),
         Triple("urgent", "Urgent", NotificationManager.IMPORTANCE_HIGH),
     )
-    private val ABOUT = mapOf(
+    val ABOUT = mapOf(
         "approval" to "What a session wants to run, edit, or do",
         "quiet" to "Pings without sound",
         "ping" to "What seimei tells you",

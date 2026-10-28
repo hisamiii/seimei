@@ -163,7 +163,7 @@ suspend fun fingerprint(activity: Activity, signer: Signature): Unlock = suspend
         object : BiometricPrompt.AuthenticationCallback() {
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                 val s = result.cryptoObject?.signature
-                finish(if (s != null) Unlock.Ok(s) else Unlock.Failed("The fingerprint did not unlock the key."))
+                finish(if (s != null) Unlock.Ok(s) else Unlock.Failed("The fingerprint didn't unlock the key"))
             }
 
             override fun onAuthenticationError(code: Int, msg: CharSequence) {

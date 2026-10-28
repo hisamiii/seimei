@@ -1562,10 +1562,10 @@ async fn session_answer(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes
     .ok()
     .flatten();
     let Some(ask) = ask.filter(|a| a["tool_id"] == b["tool_id"]) else {
-        return json_status(StatusCode::CONFLICT, json!({"error": "That question was already answered."}));
+        return json_status(StatusCode::CONFLICT, json!({"error": "That question was already answered"}));
     };
     if !truthy(&ask["answerable"]) {
-        return json_status(StatusCode::CONFLICT, json!({"error": "Answer this one on the server."}));
+        return json_status(StatusCode::CONFLICT, json!({"error": "Answer this one on the server"}));
     }
     let q = &ask["questions"][0];
     let question = s(q, "question");

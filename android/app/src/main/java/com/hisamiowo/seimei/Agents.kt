@@ -552,7 +552,7 @@ fun ContextRing(pct: Int?, onClick: () -> Unit) {
     val fill = if (n >= 80) PEACH else LocalExtra.current.text3
     Box(
         Modifier.size(48.dp).clip(CircleShape).clickable(onClick = onClick)
-            .semantics { contentDescription = if (pct == null) "Details" else "Context $n% used, session details" },
+            .semantics { contentDescription = if (pct == null) "Details" else "Context $n% used" },
         contentAlignment = Alignment.Center,
     ) {
         // No context figure yet: an info icon, not an empty track that reads as a spinner.
@@ -1016,7 +1016,7 @@ fun Details(vm: Seimei, pg: Page) {
             }
             if (pg.kind == "worker" && r.str("task").isNotEmpty()) TaskRow(r.str("task"), r.optJSONObject("now"))
             if (pg.kind == "session") Text(if (pg.via == "seimei") "seimei passes messages on with Claude Code's SendMessage: this terminal can't be typed into."
-                else pg.reach ?: "Messages you send here are typed into this session's window on the server.",
+                else pg.reach ?: "Typed into its terminal on the server",
                 fontSize = 13.sp, color = LocalExtra.current.text3)
         }
     }

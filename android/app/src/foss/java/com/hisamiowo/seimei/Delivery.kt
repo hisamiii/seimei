@@ -55,11 +55,11 @@ object Delivery {
     fun route(ctx: Context, prefs: Prefs): Route {
         val app = current(ctx)
         return when {
-            app != null -> label(ctx, app).let { Route("Through $it", "UnifiedPush. Each notification is encrypted for this phone; $it only carries it.", true) }
+            app != null -> label(ctx, app).let { Route("Through $it", "End-to-end encrypted", true) }
             prefs.listen -> Route("No push app on this phone",
-                "seimei keeps its own connection to the server instead. Install ntfy or another UnifiedPush app to save battery.", false)
+                "seimei keeps its own connection instead. A push app saves battery.", false)
             else -> Route("No notifications",
-                "No push app, and the background connection is off. Install ntfy or another UnifiedPush app, or turn the connection on.", false)
+                "Install a push app, or turn on the background connection", false)
         }
     }
 

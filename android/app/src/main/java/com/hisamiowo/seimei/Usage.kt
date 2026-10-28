@@ -233,7 +233,7 @@ fun metricFacts(m: JSONObject): List<Pair<String, String>> {
     ) + m.optJSONArray("tunes").objects().let { t ->
         // Effort, model or permissions changed on the way, oldest first.
         if (t.isEmpty()) emptyList() else listOf("Changes" to t.joinToString(" · ") {
-            "${it.str("what")} at ${java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date((it.optDouble("t") * 1000).toLong()))}"
+            "${it.str("what")} at ${clock(it.optDouble("t"))}"
         })
     }
 }

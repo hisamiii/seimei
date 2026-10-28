@@ -309,7 +309,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             try {
                 val fp = canFingerprint(activity)
                 if (!fp && !BuildConfig.TEST_KEY) {
-                    authError = "Set up a fingerprint on this phone first (Settings, Security)."
+                    authError = "Set up a fingerprint on this phone first (Settings, Security)"
                     return@launch
                 }
                 forgetConversations()
@@ -319,7 +319,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                     } catch (e: HttpError) {
                         if (e.code != 401) throw e
                         val wait = runCatching { JSONObject(e.body).optInt("wait") }.getOrDefault(0)
-                        authError = if (wait > 0) "Too many wrong tries. Try again in $wait s." else "That password is wrong."
+                        authError = if (wait > 0) "Too many wrong tries. Try again in $wait s." else "Wrong password"
                         return@launch
                     }
                     api.postAsPage("api/devices/pair").getString("code")
@@ -336,7 +336,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             } catch (e: HttpError) {
                 DeviceKey.delete()
                 authError = when (e.code) {
-                    401 -> "That code is wrong or has expired. Make a new one on the server."
+                    401 -> "Wrong or expired code"
                     // The Origin check: the address typed is not the one in the server's config.
                     403 -> "The server refused this address. Use the one its config.toml gives as origin."
                     else -> "The server said: ${e.message}"
@@ -370,7 +370,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 val signer = try {
                     DeviceKey.signer()
                 } catch (e: KeyPermanentlyInvalidatedException) {
-                    return@launch unpaired("A fingerprint was added or removed on this phone, so it needs pairing again.")
+                    return@launch unpaired("A fingerprint was added or removed on this phone, so it needs pairing again")
                 }
                 val ready = if (prefs.keyAuth) {
                     when (val u = fingerprint(activity, signer)) {
@@ -392,7 +392,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 checkUpdate()
                 pendingShare?.let { pendingShare = null; applyShare(it) }
             } catch (e: HttpError) {
-                authError = "Login failed (${e.code})."
+                authError = "Login failed (${e.code})"
             } catch (e: IOException) {
                 authError = "Couldn't reach the server"
             } finally {
@@ -422,9 +422,9 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 val wait = runCatching { JSONObject(e.body).optInt("wait") }.getOrDefault(0)
                 authError = when {
                     e.code == 401 && wait > 0 -> "Too many wrong tries. Try again in $wait s."
-                    e.code == 401 -> "That password is wrong."
+                    e.code == 401 -> "Wrong password"
                     e.code == 403 -> "The server refused this address. Use the one its config.toml gives as origin."
-                    else -> "Login failed (${e.code})."
+                    else -> "Login failed (${e.code})"
                 }
             } catch (e: IOException) {
                 authError = "Couldn't reach the server"
@@ -439,13 +439,13 @@ class Seimei(app: Application) : AndroidViewModel(app) {
 
     /** The Notifications sheet's test: the server sends one through whatever this phone registered. */
     fun testPush() {
-        pushTest = "Sending"
+        pushTest = "Sending…"
         viewModelScope.launch {
             pushTest = try {
                 api.post("api/devices/push/test")
-                "Sent. It should arrive in a few seconds."
+                "Sent"
             } catch (e: HttpError) {
-                if (e.code == 409) "This phone has no notifications registered yet." else "The server said: ${e.message}"
+                if (e.code == 409) "This phone has no notifications registered yet" else "The server said: ${e.message}"
             } catch (e: IOException) {
                 "Couldn't reach the server"
             }
@@ -989,7 +989,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 savePage(pg)
             } catch (e: HttpError) {
                 if (shown == null) snack = "Couldn't reach the server"
-                else if (e.code == 404) shown.note = "The server no longer has this; it shows the last copy."
+                else if (e.code == 404) shown.note = "Gone from the server: this is the last copy"
             } catch (e: IOException) {
                 snack = if (shown == null) "Couldn't reach the server" else "Offline: this is the last copy"
             }
@@ -1035,7 +1035,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 takeSession(pg, r)
                 savePage(pg)
             } catch (e: HttpError) {
-                if (e.code == 404) pg.reach = "The session has ended."
+                if (e.code == 404) pg.reach = "The session has ended"
             } catch (e: IOException) {
             }
         }
@@ -1406,7 +1406,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 } catch (e: IOException) {
                     attachments = attachments - doc
                     val why = (e as? HttpError)?.let { try { JSONObject(it.body).str("error") } catch (x: JSONException) { "" } }
-                    chat.local("Could not upload $name" + if (why.isNullOrEmpty()) "." else ": $why.")
+                    chat.local("Couldn't upload $name" + if (why.isNullOrEmpty()) "" else ": $why")
                     publish()
                 } finally {
                     doc.uploading = false
@@ -1507,7 +1507,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 uri?.let { withContext(Dispatchers.IO + NonCancellable) { cr.delete(it, null, null) } }
                 if (e !is kotlinx.coroutines.CancellationException) {
-                    chat.local(if ((e as? HttpError)?.code == 404) "${f.name} has expired on the server." else "Could not download ${f.name}.")
+                    chat.local(if ((e as? HttpError)?.code == 404) "${f.name} has expired on the server" else "Couldn't download ${f.name}")
                     publish()
                 }
             } finally {
@@ -1535,7 +1535,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         try {
             getApplication<Application>().startActivity(view)
         } catch (e: ActivityNotFoundException) {
-            chat.local("No app on this phone opens ${f.name}. It is in Downloads/seimei.")
+            chat.local("No app on this phone opens ${f.name}. It's in Downloads/seimei.")
             publish()
         }
     }
@@ -1615,7 +1615,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 uri?.let { withContext(Dispatchers.IO + NonCancellable) { cr.delete(it, null, null) } }
                 if (e !is kotlinx.coroutines.CancellationException) {
-                    chat.local("Could not save the picture.")
+                    chat.local("Couldn't save the picture")
                     publish()
                 }
             } finally {

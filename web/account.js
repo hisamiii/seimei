@@ -224,7 +224,7 @@ async function openPhones() {
         pairBtn.hidden = false;
         return;
       }
-      left.textContent = `Works once, for ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}.`;
+      left.textContent = `Works once, for ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
     };
     tick();
     pairTimer = setInterval(tick, 1000);
