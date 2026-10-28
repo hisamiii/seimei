@@ -127,17 +127,17 @@ async fn dsh_shikigami_live() {
         .unwrap();
     let w2 = w.clone();
     until(240, || idle(&w2)).await;
-    c.check("first turn done", w.state() == "done", (w.state(), w.get("summary"), w.log.after(0)));
+    c.check("first turn done", w.state() == "done", (w.state(), w.rec().summary, w.log.after(0)));
     let bird = std::fs::read_to_string(work.join("bird.txt")).unwrap_or_default();
     c.check("bird.txt written", bird.trim() == "kingfisher", &bird);
     c.check("a reply", !said(&w, 0).is_empty(), said(&w, 0));
-    c.check("result is the reply", w.get("result").as_str().is_some_and(|r| !r.is_empty()), w.get("result"));
+    c.check("result is the reply", !w.rec().result.is_empty(), w.rec().result);
     let n = cards.lock().unwrap().len();
     c.check("a card for the command", n >= 1, cards.lock().unwrap().clone());
     let tools = w.log.after(0).iter().filter(|e| e["type"] == "tool").count();
     c.check("tool events", tools >= 1, tools);
-    let sid = w.get("session_id");
-    c.check("session id on the record", sid.as_str().is_some_and(|s| !s.is_empty()), &sid);
+    let sid = w.rec().session_id;
+    c.check("session id on the record", !sid.is_empty(), &sid);
 
     // 2. A denied command: the file stays.
     let from = w.log.after(0).len();
@@ -169,7 +169,7 @@ async fn dsh_shikigami_live() {
     w.send(ask, None, vec![]).await.unwrap();
     until(240, || idle(&w2)).await;
     c.check("asking", w.state() == "asking", (w.state(), w.log.after(0)[from..].to_vec()));
-    c.check("the question", w.get("question").as_str().is_some_and(|q| q.contains("Blue or green")), w.get("question"));
+    c.check("the question", w.rec().question.is_some_and(|q| q.contains("Blue or green")), w.rec().question);
     if w.state() == "asking" {
         let from = w.log.after(0).len();
         w.send("green", None, vec![]).await.unwrap();
@@ -189,7 +189,7 @@ async fn dsh_shikigami_live() {
     c.check("resumed and remembers", w.state() == "done" && r.contains("kingfisher"), (w.state(), &r));
     let old = said(&w, 0)[..said(&w, 0).len() - said(&w, from).len()].to_vec();
     c.check("no replay", !said(&w, from).iter().any(|t| old.contains(t)), said(&w, from));
-    c.check("same session", w.get("session_id") == sid, w.get("session_id"));
+    c.check("same session", w.rec().session_id == sid, w.rec().session_id);
 
     // 5. Bypass: no cards, and rm runs (the guard still looks at it first).
     w.set_mode("bypassPermissions").await.unwrap();

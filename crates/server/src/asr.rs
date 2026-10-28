@@ -58,7 +58,7 @@ fn live(app: &App, hint: &Value, ctx: &mut Context) {
         if let Some(w) = app.pool.get(id) {
             ctx.chat = texts(&w.log.before(None, 200));
             let rec = w.rec();
-            ctx.agent = vec![w.name(), base(rec["cwd"].as_str().unwrap_or(""))];
+            ctx.agent = vec![w.name(), base(&rec.cwd)];
         }
     } else if let Some(pid) = chat.strip_prefix("s:") {
         if let Some(row) = pid.parse().ok().and_then(|p| app.watcher.row(p)) {
@@ -75,7 +75,7 @@ fn live(app: &App, hint: &Value, ctx: &mut Context) {
             continue;
         }
         ctx.names.push(w.name());
-        ctx.names.push(base(rec["cwd"].as_str().unwrap_or("")));
+        ctx.names.push(base(&rec.cwd));
     }
     if let Some(rows) = app.watcher.snapshot()["list"].as_array() {
         ctx.names.extend(rows.iter().filter_map(|r| r["name"].as_str().map(String::from)));

@@ -88,7 +88,7 @@ async fn permissions_live() {
     let w = pool.summon(summon("perm", task, &cwd, None)).await.unwrap();
     c.check("info shows the mode", pool.info(&w.rec())["mode"] == "default", pool.info(&w.rec()));
     until(240, || ended(&w)).await;
-    println!("report: {}", w.get("summary").as_str().unwrap_or("").chars().take(800).collect::<String>());
+    println!("report: {}", w.rec().summary.chars().take(800).collect::<String>());
     let all = since(0);
     let first = all.iter().find(|c| c["detail"].as_str().unwrap_or("").contains("touch a.txt"));
     let offers_always = first.is_some_and(|f| {
@@ -119,7 +119,7 @@ async fn permissions_live() {
         targets,
     );
     c.check("the deny kept a.txt", work.join("a.txt").exists(), "");
-    let t = transcript(&work, w.get("session_id").as_str().unwrap_or(""));
+    let t = transcript(&work, &w.rec().session_id);
     let said = std::fs::read_to_string(&t).unwrap_or_default();
     c.check("the deny note reached it", said.contains("They said: keep a.txt, it is needed"), &t);
     let details: Vec<&Value> = all.iter().map(|c| &c["detail"]).collect();
@@ -137,8 +137,8 @@ async fn permissions_live() {
         .collect();
     c.check(
         "no card left open, card cleared on the worker",
-        open.is_empty() && !seimei_core::util::truthy(&w.get("card")),
-        (&open, w.get("card")),
+        open.is_empty() && w.rec().card.is_none(),
+        (&open, w.rec().card),
     );
     let lines = heard.0.lock().unwrap().clone();
     let tail = lines[lines.len().saturating_sub(5)..].to_vec();
@@ -176,7 +176,7 @@ async fn permissions_live() {
     });
     let shown: Vec<(Value, Value)> = new.iter().map(|c| (c["action"].clone(), c["options"].clone())).collect();
     c.check("plan card with Go ahead", go_ahead, shown);
-    c.check("Go ahead set the ceiling mode", p.get("mode") == "default", p.get("mode"));
+    c.check("Go ahead set the ceiling mode", p.rec().mode.as_deref() == Some("default"), p.rec().mode);
     c.check(
         "then the write asked and happened",
         work.join("c.txt").exists() && new.iter().any(|c| c["action"] == "edit"),

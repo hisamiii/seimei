@@ -95,7 +95,7 @@ async fn acp_own_tools() {
         got["content"][0]["text"], "Asked. The answer arrives as your next message; end your turn now.",
         "{got}"
     );
-    assert_eq!((w.state(), w.get("question")), ("asking".to_string(), json!("Blue or green?")));
+    assert_eq!((w.state(), w.rec().question.as_deref()), ("asking".to_string(), Some("Blue or green?")));
     w.send("green", None, vec![]).await.unwrap();
     assert!(until(20, || w2.state() == "done").await, "{}", w.state());
     assert_eq!(said(&w)[1], "You said: green");
@@ -123,7 +123,7 @@ async fn acp_own_tools() {
     let mut line = String::new();
     BufReader::new(&sock).read_line(&mut line).unwrap();
     assert_eq!(serde_json::from_str::<Value>(&line).unwrap(), json!({"error": "not this session's process"}));
-    assert_eq!(w.get("question"), json!(null), "the outside call asked nothing");
+    assert_eq!(w.rec().question, None, "the outside call asked nothing");
 
     let _ = std::fs::remove_dir_all(&base);
 }

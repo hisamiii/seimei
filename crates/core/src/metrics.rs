@@ -16,6 +16,7 @@ use serde_json::{Value, json};
 
 use crate::cost::Spend;
 use crate::events::EventLog;
+use crate::workers::Record;
 
 const REOPEN: f64 = 24.0 * 3600.0;
 static ACK: LazyLock<Regex> = LazyLock::new(|| {
@@ -32,7 +33,7 @@ fn t(e: &Value) -> f64 {
 }
 
 /// One shikigami's metrics. log: its own log; events: its worker events from the main log.
-pub fn worker(rec: &Value, log: &[Value], events: &[Value], spend: Option<&Spend>, now: f64) -> Value {
+pub fn worker(rec: &Record, log: &[Value], events: &[Value], spend: Option<&Spend>, now: f64) -> Value {
     let of = |kind: &'static str| events.iter().filter(move |e| e["event"] == kind).map(t);
     let mut dones: Vec<f64> = of("done").collect();
     dones.sort_by(f64::total_cmp);
@@ -52,16 +53,15 @@ pub fn worker(rec: &Value, log: &[Value], events: &[Value], spend: Option<&Spend
             reopened = true;
         }
     }
-    let state = rec["state"].as_str().unwrap_or("");
-    let active = matches!(state, "starting" | "running");
-    let created = rec["created"].as_f64().unwrap_or(0.0);
+    let active = matches!(rec.state.as_str(), "starting" | "running");
+    let created = rec.created;
     let ends: Vec<f64> = events.iter().filter(|e| PAUSE.iter().any(|p| e["event"] == *p)).map(t).collect();
     let end = if active {
         now
     } else if !ends.is_empty() {
         ends.iter().copied().fold(f64::MIN, f64::max)
     } else {
-        rec["updated"].as_f64().unwrap_or(now)
+        rec.updated
     };
     // Busy time: each message it got starts a stretch (the task at summoning), the next pause ends it.
     let mut marks: Vec<(f64, bool)> = vec![(created, true)];
@@ -85,21 +85,17 @@ pub fn worker(rec: &Value, log: &[Value], events: &[Value], spend: Option<&Spend
     let s = spend.cloned().unwrap_or_default();
     let by = |who: &str| follow.iter().filter(|f| **f == who).count();
     json!({
-        "id": rec["id"], "name": rec["name"], "model": rec["model"], "effort": rec["effort"],
-        "context": rec["context_cap"], "cwd": rec["cwd"], "state": rec["state"],
+        "id": rec.id, "name": rec.name, "model": rec.model, "effort": rec.effort,
+        "context": rec.context_cap, "cwd": rec.cwd, "state": rec.state,
         // The session it was adopted from (its name), or nothing.
-        "adopted": match &rec["adopted"] {
-            Value::Null | Value::Bool(false) => false,
-            Value::String(s) => !s.is_empty(),
-            _ => true,
-        }, "created": created,
+        "adopted": rec.adopted.as_ref().is_some_and(|s| !s.is_empty()), "created": created,
         "wall": (end - created).max(0.0), "busy": busy, "first_done": dones.first(),
         "tokens": {"input": s.input, "cache_read": s.cache_read, "cache_write": s.cache_write, "output": s.output},
         "calls": s.calls, "usd": (s.usd * 1e4).round() / 1e4, "asks": of("asking").count(),
         "followups": follow.len(), "followups_by": {"seimei": by("seimei"), "user": by("user")},
         "reopened": reopened,
         // Changes of effort, model or permissions on the way (tune): when, by whom, what.
-        "tunes": rec["tunes"].as_array().cloned().unwrap_or_default(),
+        "tunes": rec.tunes,
     })
 }
 

@@ -2,6 +2,7 @@
 //! the archive. It sets TZ for the local-time cases under the Env lock.
 
 use seimei_core::cost::{PRICES, Spend, Tokens, cost, week_start};
+use seimei_core::workers::Record;
 use seimei_core::{archive, metrics};
 use serde_json::Value;
 
@@ -45,7 +46,13 @@ fn view_cases() {
             cache_write: n("cache_write"),
         });
         let list = |k: &str| c[k].as_array().cloned().unwrap_or_default();
-        let got = metrics::worker(&c["rec"], &list("log"), &list("events"), spend.as_ref(), c["now"].as_f64().unwrap());
+        let got = metrics::worker(
+            &Record::parse(c["rec"].clone()).unwrap(),
+            &list("log"),
+            &list("events"),
+            spend.as_ref(),
+            c["now"].as_f64().unwrap(),
+        );
         if got != c["metrics"] {
             fails.push(format!("metrics {}: {got}", c["what"]));
         }

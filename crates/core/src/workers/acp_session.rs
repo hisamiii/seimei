@@ -12,8 +12,7 @@ impl Session {
         let a = (self.pool.agents.get().and_then(|m| m.get(agent)).cloned())
             .ok_or(format!("no ACP agent {agent} in config [agents]"))?;
         let r = self.w.rec();
-        let name = as_text(&r["name"]);
-        let started = r["started"] == true;
+        let (name, started) = (r.name.clone(), r.started);
         let groups = self.w.granted();
         let plugins = &self.pool.plugins;
         let mut servers = Map::from_iter([("shikigami".into(), json!({}))]);
@@ -25,11 +24,11 @@ impl Session {
         let opts = acp::Options {
             program: a.command.into(),
             args: a.args,
-            cwd: PathBuf::from(as_text(&r["cwd"])),
+            cwd: PathBuf::from(&r.cwd),
             env,
             env_remove: vec![],
             mcp_servers: mcp,
-            load: started.then(|| as_text(&r["session_id"])),
+            load: started.then(|| r.session_id.clone()),
         };
         let handler: Arc<dyn acp::Handler> = Arc::new(AcpSide { w: self.w.clone() });
         let c = match a.protocol.as_str() {
@@ -43,8 +42,8 @@ impl Session {
         if !started {
             let sid = c.session_id.clone();
             self.w.edit(|r| {
-                r.insert("session_id".into(), json!(sid));
-                r.insert("started".into(), json!(true));
+                r.session_id = sid;
+                r.started = true;
             });
             self.pool.changed();
             self.fresh = true;
@@ -62,7 +61,7 @@ impl Session {
         self.stopping = false;
         self.last_text.clear();
         self.message.clear();
-        self.w.set("running", json!({"question": null}));
+        self.w.set("running", |r| r.question = None);
         let text = match self.guard_note.take() {
             Some(note) => format!("{note}\n\n{text}"),
             None => text,
@@ -127,9 +126,9 @@ impl Session {
     /// for a card, stops the turn; the agent hears why with its next message.
     pub(super) async fn unasked(&mut self, t: acp::ToolCall) {
         let (tool, input) = claude_shaped(&t);
-        let (name, cwd) = (self.w.name(), as_text(&self.w.get("cwd")));
-        let hook = json!({"tool_name": tool, "tool_input": input, "cwd": cwd, "session_id": self.w.get("session_id")});
-        let Some(why) = self.pool.guard.unasked(&name, Some(&self.w.id), &hook, Some(&t.id)).await else { return };
+        let r = self.w.rec();
+        let hook = json!({"tool_name": tool, "tool_input": input, "cwd": r.cwd, "session_id": r.session_id});
+        let Some(why) = self.pool.guard.unasked(&r.name, Some(&self.w.id), &hook, Some(&t.id)).await else { return };
         let said = format!("The guard stopped this turn: the agent ran a call without asking, and {why}.");
         self.w.add(json!({"type": "system", "text": said}));
         self.guard_note = Some(format!(
@@ -162,8 +161,7 @@ impl Session {
 
     /// A turn ended with its stop reason (or the agent failed): the next queued message goes on, else it reports.
     pub(super) fn turn_ended(&mut self, end: Result<String, String>) {
-        let n = self.w.get("turns").as_i64().unwrap_or(0);
-        self.w.edit(|r| r.insert("turns".into(), json!(n + 1)));
+        self.w.edit(|r| r.turns += 1);
         let stopped = self.stopping || end.as_deref() == Ok("cancelled");
         if !stopped && end.is_ok() && !self.queued.is_empty() {
             let text = std::mem::take(&mut self.queued).join("\n\n");
@@ -176,13 +174,11 @@ impl Session {
         let state = self.w.state();
         if state == "asking" && !stopped {
         } else if stopped {
-            self.w.set("stopped", json!({"summary": "Stopped.", "question": null}));
-            self.pool.report(&self.w, "stopped", "");
+            self.stopped();
         } else {
             match end {
                 Ok(reason) if reason == "end_turn" => {
-                    self.w.set("done", json!({"summary": first_line(&text, 160), "result": chars(&text, 4000)}));
-                    self.pool.report(&self.w, "done", &text);
+                    self.done(&text);
                 }
                 Ok(reason) | Err(reason) => {
                     let why = match reason.as_str() {
@@ -191,7 +187,7 @@ impl Session {
                         "refusal" => "Refused".to_string(),
                         r => format!("Failed: {r}"),
                     };
-                    self.w.set("failed", json!({"summary": why}));
+                    self.w.set("failed", |r| r.summary = why.clone());
                     let said = if text.is_empty() { why } else { format!("{why} It said: {text}") };
                     self.pool.report(&self.w, "failed", &said);
                 }
@@ -294,9 +290,9 @@ impl acp::Handler for AcpSide {
             let reject = pick("reject_once").map_or(acp::Outcome::Cancelled, acp::Outcome::Selected);
             let Some(allow) = pick("allow_once") else { return reject };
             let (tool, input) = claude_shaped(&req.tool);
-            let (name, cwd) = (w.name(), as_text(&w.get("cwd")));
-            let hook = json!({"tool_name": tool, "tool_input": input, "cwd": cwd, "session_id": w.get("session_id")});
-            let said = pool.guard.pre(&name, Some(&w.id), &hook, Some(&req.tool.id)).await;
+            let r = w.rec();
+            let hook = json!({"tool_name": tool, "tool_input": input, "cwd": r.cwd, "session_id": r.session_id});
+            let said = pool.guard.pre(&r.name, Some(&w.id), &hook, Some(&req.tool.id)).await;
             match said["hookSpecificOutput"]["permissionDecision"].as_str() {
                 Some("deny") => return reject,
                 // Its own card was approved.
@@ -324,7 +320,7 @@ impl acp::Handler for AcpSide {
             // acp_mode already applied the session's mode; what is left is a card ("default").
             let d = crate::permissions::can_use(
                 &pool.approvals,
-                &name,
+                &r.name,
                 Some(&w.id),
                 &ask,
                 &pool.mode,

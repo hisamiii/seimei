@@ -10,6 +10,7 @@ use std::sync::Mutex;
 use serde_json::{Map, Value, json};
 
 use crate::util::{now, read_json, write_json};
+use crate::workers::Record;
 
 /// An ended item with no mark hides itself this long after its last activity.
 pub const AUTO: f64 = 12.0 * 3600.0;
@@ -51,10 +52,8 @@ impl Archive {
     }
 
     /// Whether a shikigami's row is hidden now.
-    pub fn worker(&self, rec: &Value) -> bool {
-        let id = rec["id"].as_str().unwrap_or("");
-        let state = rec["state"].as_str().unwrap_or("");
-        hidden(&self.mark(&format!("w:{id}")), rec["updated"].as_f64().unwrap_or(0.0), !ENDED.contains(&state), now())
+    pub fn worker(&self, rec: &Record) -> bool {
+        hidden(&self.mark(&format!("w:{}", rec.id)), rec.updated, !ENDED.contains(&rec.state.as_str()), now())
     }
 
     /// Whether one of the user's own sessions is hidden now.

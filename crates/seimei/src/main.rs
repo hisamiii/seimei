@@ -564,10 +564,7 @@ fn wire(app: &Arc<seimei_server::App>) {
         let workers: Vec<(String, String, String)> = (a.pool.all().iter())
             .map(|w| (w.id.clone(), w.rec()))
             .filter(|(id, rec)| !a.pool.archive.worker(rec) || board.current(id).is_some())
-            .map(|(id, rec)| {
-                let s = |k: &str| rec[k].as_str().unwrap_or("").to_string();
-                (id, s("name"), s("state"))
-            })
+            .map(|(id, rec)| (id, rec.name, rec.state))
             .collect();
         let at = seimei_core::util::now();
         let lines: Vec<String> = [board.drift(&workers, at), board.stale_note(at)].into_iter().flatten().collect();
@@ -577,18 +574,17 @@ fn wire(app: &Arc<seimei_server::App>) {
     let _ = app.dispatcher.recall.set(Box::new(move || {
         let live: Vec<String> = (a.pool.all().iter())
             .map(|w| w.rec())
-            .filter(|rec| matches!(rec["state"].as_str(), Some("running" | "asking" | "laptop")))
+            .filter(|rec| matches!(rec.state.as_str(), "running" | "asking" | "laptop"))
             .map(|rec| {
-                let s = |k: &str| rec[k].as_str().unwrap_or("").to_string();
                 // What it works on now; the summon's first line only when the board has nothing.
-                let (task, first) = match a.pool.current(&s("id")) {
+                let (task, first) = match a.pool.current(&rec.id) {
                     Some((id, title)) => (format!(", task {id}"), title),
                     None => {
-                        let first = s("task").trim().lines().next().map(|l| seimei_core::util::chars(l, 200));
+                        let first = rec.task.trim().lines().next().map(|l| seimei_core::util::chars(l, 200));
                         (String::new(), first.unwrap_or_default())
                     }
                 };
-                format!("- {} ({}) {} in {}{task}: {first}", s("name"), s("id"), s("state"), s("cwd"))
+                format!("- {} ({}) {} in {}{task}: {first}", rec.name, rec.id, rec.state, rec.cwd)
             })
             .collect();
         let live = if live.is_empty() { "(none)".to_string() } else { live.join("\n") };

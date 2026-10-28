@@ -14,7 +14,7 @@ use serde_json::Value;
 
 /// (effort, model) of each of its turns' replies, from its transcript.
 fn turns(w: &Worker, cwd: &std::path::Path) -> Vec<(String, String)> {
-    let t = transcript(cwd, w.get("session_id").as_str().unwrap_or(""));
+    let t = transcript(cwd, &w.rec().session_id);
     (std::fs::read_to_string(t).unwrap_or_default().lines())
         .filter_map(|l| serde_json::from_str::<Value>(l).ok())
         .filter(|r| r["type"] == "assistant" && r["isSidechain"] != true)
@@ -62,11 +62,15 @@ async fn tune_live() {
     let changed = w.tune(Some("high"), Some("haiku"), "the user").await;
     let want = vec!["model sonnet → haiku".to_string(), "effort low → high".to_string()];
     c.check("tune mid-turn says what changed", changed.as_ref() == Ok(&want), &changed);
-    c.check("the effort waits for the turn's end", w.get("effort_next") == "high" && w.get("effort") == "low", w.rec());
+    c.check(
+        "the effort waits for the turn's end",
+        w.effort_pending() && w.rec().effort.as_deref() == Some("low"),
+        w.rec(),
+    );
     until(120, || w.state() == "done").await;
-    until(30, || w.get("effort_next").as_str().unwrap_or("").is_empty() && w.get("effort") == "high").await;
+    until(30, || !w.effort_pending() && w.rec().effort.as_deref() == Some("high")).await;
     tokio::time::sleep(Duration::from_secs(3)).await;
-    let applied = w.get("effort") == "high" && w.get("effort_next").as_str().unwrap_or("").is_empty();
+    let applied = w.rec().effort.as_deref() == Some("high") && !w.effort_pending();
     c.check("after the turn the effort applied", applied, w.rec());
     c.check("one done report, none for /effort", reports() == ["done"], reports());
     c.check("still done (the /effort result is not a turn)", w.state() == "done", w.state());
@@ -83,7 +87,7 @@ async fn tune_live() {
     // Idle: applies at once.
     let _ = w.tune(Some("medium"), None, "the user").await;
     tokio::time::sleep(Duration::from_secs(3)).await;
-    let applied = w.get("effort") == "medium" && w.get("effort_next").as_str().unwrap_or("").is_empty();
+    let applied = w.rec().effort.as_deref() == Some("medium") && !w.effort_pending();
     c.check("idle: applied at once", applied, w.rec());
     c.check("no report from the idle /effort", reports().len() == 2, reports());
     w.send("Reply with just the word three.", None, vec![]).await.unwrap();

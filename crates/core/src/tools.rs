@@ -180,7 +180,7 @@ fn repo_of(path: &str) -> String {
 /// session of the user's in that project. Home is no checkout, so a worker in ~ gets none.
 fn writers(pool: &Pool, w: &Worker) -> Option<String> {
     let home = home().display().to_string();
-    let cwd = w.get("cwd").as_str().unwrap_or("").to_string();
+    let cwd = w.rec().cwd;
     if cwd == home {
         return None;
     }
@@ -189,10 +189,10 @@ fn writers(pool: &Pool, w: &Worker) -> Option<String> {
         .filter(|x| x.id != w.id)
         .map(|x| x.rec())
         .filter(|x| {
-            let xc = x["cwd"].as_str().unwrap_or("");
-            ACTIVE.contains(&x["state"].as_str().unwrap_or("")) && xc != home && (xc == cwd || repo_of(xc) == root)
+            let xc = x.cwd.as_str();
+            ACTIVE.contains(&x.state.as_str()) && xc != home && (xc == cwd || repo_of(xc) == root)
         })
-        .map(|x| format!("{} (shikigami, {})", x["name"].as_str().unwrap_or(""), x["state"].as_str().unwrap_or("")))
+        .map(|x| format!("{} (shikigami, {})", x.name, x.state))
         .collect();
     let project = project_of(&format!("{root}/x"));
     busy.extend(
@@ -357,11 +357,7 @@ impl Tools {
                     Err(e) => text(&e, true),
                     Ok(changed) if changed.is_empty() => text(&format!("{} already runs like that.", w.name()), false),
                     Ok(changed) => {
-                        let later = if w.get("effort_next").as_str().is_some_and(|e| !e.is_empty()) {
-                            " (the effort from its next turn)"
-                        } else {
-                            ""
-                        };
+                        let later = if w.effort_pending() { " (the effort from its next turn)" } else { "" };
                         text(&format!("{}: {}{later}.", w.name(), changed.join(", ")), false)
                     }
                 }
@@ -411,17 +407,16 @@ impl Tools {
             Err(e) => return text(&format!("Could not summon: {e}"), true),
         };
         let r = w.rec();
-        let s = |k: &str| r[k].as_str().unwrap_or("").to_string();
-        let effort = r["effort"].as_str().filter(|e| !e.is_empty()).unwrap_or("default");
+        let effort = r.effort.as_deref().filter(|e| !e.is_empty()).unwrap_or("default");
         let mut said = format!(
             "Summoned {} ({}) in {} on {}, effort {effort}, mode {}, context {}, subagents on {}.",
-            s("name"),
+            r.name,
             w.id,
-            s("cwd"),
-            s("model"),
+            r.cwd,
+            r.model,
             w.mode(),
-            s("context_cap"),
-            s("subagents")
+            r.context_cap,
+            r.subagents
         );
         if let Some((t, _)) = self.pool.current(&w.id) {
             said += &format!(" On the board as {t}.");
@@ -456,14 +451,12 @@ impl Tools {
                     }
                 }
                 let r = w.rec();
-                let path = (r["started"] == true)
-                    .then(|| transcript(r["session_id"].as_str().unwrap_or(""), r["cwd"].as_str().unwrap_or("")))
-                    .flatten();
+                let path = r.started.then(|| transcript(&r.session_id, &r.cwd)).flatten();
                 let full = match path {
                     Some(p) => format!("its transcript: {}", p.display()),
                     None => format!("its log: {}", w.log.path().display()),
                 };
-                let task = chars(r["task"].as_str().unwrap_or(""), 500);
+                let task = chars(&r.task, 500);
                 let head = match self.pool.current(&w.id) {
                     Some((id, title)) => {
                         format!("{} ({}) is {}. Now on {id} {title}. First task: {task}", w.name(), w.id, w.state())
@@ -741,10 +734,9 @@ impl Tools {
         }
         let archived = a["archived"] == true;
         let rows: Vec<Value> = if archived {
-            let mut old: Vec<Value> =
+            let mut old: Vec<_> =
                 self.pool.all().iter().map(|w| w.rec()).filter(|r| self.pool.archive.worker(r)).collect();
-            let updated = |r: &Value| r["updated"].as_f64().unwrap_or(0.0);
-            old.sort_by(|x, y| updated(y).total_cmp(&updated(x)));
+            old.sort_by(|x, y| y.updated.total_cmp(&x.updated));
             old.iter().take(50).map(|r| self.pool.info(r)).collect()
         } else {
             let listing = self.pool.listing();

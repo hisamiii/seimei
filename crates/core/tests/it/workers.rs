@@ -1,7 +1,7 @@
 //! tests/cases/workers.json: the shikigami helpers.
 
 use seimei_core::tools::{capped, summon_problem};
-use seimei_core::workers::{Batch, Out, first_line, flushed, queue, slug, title_of};
+use seimei_core::workers::{Batch, Out, Record, first_line, flushed, queue, slug, title_of};
 use serde_json::{Value, json};
 
 #[test]
@@ -57,6 +57,12 @@ fn worker_cases() {
             })
             .collect();
         check(format!("batch {}", c["calls"]), json!(got), &c["dispatcher"]);
+    }
+    for c in doc["record"].as_array().unwrap() {
+        let back = serde_json::to_value(Record::parse(c.clone()).unwrap()).unwrap();
+        for (k, v) in c.as_object().unwrap().iter().filter(|(_, v)| !v.is_null()) {
+            check(format!("record {} {k}", c["id"]), back[k].clone(), v);
+        }
     }
     for f in &fails {
         eprintln!("FAIL {f}");

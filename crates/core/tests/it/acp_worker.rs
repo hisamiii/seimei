@@ -137,29 +137,26 @@ async fn acp_shikigami() {
     let w2 = w.clone();
     assert!(until(20, || w2.state() == "done").await, "{}", w.state());
     let r = w.rec();
-    assert_eq!(
-        (r["harness"].as_str(), r["model"].as_str(), &r["started"]),
-        (Some("acp:fake"), Some("acp:fake"), &json!(true))
-    );
-    let sid = r["session_id"].as_str().unwrap().to_string();
+    assert_eq!((r.harness.as_deref(), r.model.as_str(), r.started), (Some("acp:fake"), "acp:fake", true));
+    let sid = r.session_id.clone();
     assert!(fake.join(format!("sessions/{sid}.json")).exists(), "the record has the agent's session id");
     let first = said(&w, 0);
     assert_eq!(first.len(), 1, "{first:?}");
     assert!(first[0].starts_with("You said: # You are a shikigami") && first[0].contains("hello there"), "{first:?}");
     assert!(first[0].contains("You are `fakey`"));
-    assert_eq!(r["summary"].as_str().unwrap(), "You said: # You are a shikigami");
+    assert_eq!(r.summary, "You said: # You are a shikigami");
 
     // 2. Chunks are one event.
     let (from, ok) = turn(&w, "!chunks", "done").await;
     assert!(ok);
     assert_eq!(said(&w, from), ["one two three"]);
-    assert_eq!(w.get("result"), json!("one two three"));
+    assert_eq!(w.rec().result, "one two three");
 
     // A pause mid-message says it in parts; the report is all of it.
     let (from, ok) = turn(&w, "!slow", "done").await;
     assert!(ok);
     assert_eq!(said(&w, from), ["First half, ", "second half."]);
-    assert_eq!(w.get("result"), json!("First half, second half."));
+    assert_eq!(w.rec().result, "First half, second half.");
 
     // 3. A command, allowed on its card: only the once option is picked.
     answers.lock().unwrap().push(true);
@@ -338,7 +335,7 @@ async fn acp_shikigami() {
     assert!(ok);
     assert_eq!(log(&w)[from..].iter().map(|e| e["type"].as_str().unwrap()).collect::<Vec<_>>(), ["user", "assistant"]);
     assert_eq!(said(&w, from), ["You said: again"]);
-    assert_eq!(w.get("session_id"), json!(sid));
+    assert_eq!(w.rec().session_id, sid);
     let prompts: Vec<Value> = std::fs::read_to_string(fake.join("log.jsonl"))
         .unwrap()
         .lines()
@@ -372,13 +369,13 @@ async fn acp_shikigami() {
     std::fs::remove_file(fake.join(format!("sessions/{sid}.json"))).unwrap();
     let e = w.send("hello?", None, vec![]).await.err().unwrap();
     assert!(e.contains("no session"), "{e}");
-    assert_eq!(w.get("session_id"), json!(sid));
+    assert_eq!(w.rec().session_id, sid);
 
     // 13. An agent that dies mid-turn: failed.
     let w = pool.summon(Summon { name: "crashy".into(), task: "!crash".into(), ..summon("acp:fake") }).await.unwrap();
     let w2 = w.clone();
     assert!(until(20, || w2.state() == "failed").await, "{}", w.state());
-    assert_eq!(w.get("summary"), json!("Failed: the agent exited"));
+    assert_eq!(w.rec().summary, "Failed: the agent exited");
 
     let _ = std::fs::remove_dir_all(&base);
 }

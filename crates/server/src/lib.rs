@@ -1126,7 +1126,7 @@ async fn workers_all(State(app): Shared) -> Response {
             let rec = w.rec();
             let mut row = app.pool.info(&rec);
             // The task too, trimmed: the Archived list searches it.
-            row["task"] = json!(seimei_core::util::chars(rec["task"].as_str().unwrap_or(""), 400));
+            row["task"] = json!(seimei_core::util::chars(&rec.task, 400));
             row
         })
         .collect();
@@ -1155,8 +1155,7 @@ async fn worker_history(
     }
     let rec = w.rec();
     let mut row = app.pool.info(&rec);
-    row["task"] = rec["task"].clone();
-    row["question"] = rec["question"].clone();
+    row["task"] = json!(rec.task);
     let events: Vec<&Value> = events.iter().map(|e| &**e).collect();
     ok(json!({"worker": row, "events": events, "reset": reset}))
 }

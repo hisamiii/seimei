@@ -428,7 +428,7 @@ impl Adopter {
         if state == "released" {
             return Ok(format!("{name} is the user's session already."));
         }
-        if w.get("started") != true {
+        if !w.rec().started {
             return Ok(format!("{name} has no session yet; nothing to hand over."));
         }
         w.claude_only("be handed to you as a session")?;
@@ -441,7 +441,7 @@ impl Adopter {
                 "{first}t opens in a terminal window on the server ({shown}, in {}) as your session named {name}. It \
                  stops reporting to seimei and is never resumed by it; tap Hand off on its session page to give \
                  it back.",
-                as_text(&w.get("cwd"))
+                w.rec().cwd
             );
             let what = json!({"action": "command", "target": format!("give shikigami {name} to you as your own session"),
                 "detail": detail});

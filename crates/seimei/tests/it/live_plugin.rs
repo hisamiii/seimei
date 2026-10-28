@@ -68,12 +68,11 @@ async fn queue_plugin_live() {
         .await
         .unwrap();
     until(240, || ["done", "failed", "stopped"].contains(&w.state().as_str())).await;
-    println!("report: {}", w.get("summary").as_str().unwrap_or("").chars().take(800).collect::<String>());
+    println!("report: {}", w.rec().summary.chars().take(800).collect::<String>());
 
     let ops: Vec<Value> = seen.lock().unwrap().clone();
     c.check("the plugin read the fake cqd", ops.iter().any(|r| r["op"] == "status"), &ops);
-    let said =
-        std::fs::read_to_string(transcript(&work, w.get("session_id").as_str().unwrap_or(""))).unwrap_or_default();
+    let said = std::fs::read_to_string(transcript(&work, &w.rec().session_id)).unwrap_or_default();
     c.check("queue's text reached the session", said.contains("GRANTS CLOSED: cqd saw a GPU/NPU fault"), "");
     let all = cards.lock().unwrap().clone();
     let kill = all.iter().find(|c| c["action"] == "desktop");

@@ -13,7 +13,7 @@ use seimei_core::plugins::Plugins;
 use seimei_core::tasks::Board;
 use seimei_core::usage::Usage;
 use seimei_core::workers::{Parts, Pool, Summon, Worker};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
@@ -126,7 +126,7 @@ async fn codex_shikigami() {
     let w = pool.summon(summon).await.unwrap();
     let w2 = w.clone();
     assert!(until(20, || w2.state() == "done").await, "{}", w.state());
-    let sid = w.get("session_id").as_str().unwrap().to_string();
+    let sid = w.rec().session_id;
     assert!(fake.join(format!("threads/{sid}.json")).exists(), "the record has the thread id");
     let first = said(&w, 0);
     assert!(first[0].starts_with("You said: # You are a shikigami") && first[0].contains("hello there"), "{first:?}");
@@ -179,7 +179,7 @@ async fn codex_shikigami() {
     let (from, ok) = turn(&w, "again", "done").await;
     assert!(ok);
     assert_eq!(said(&w, from), ["You said: again"]);
-    assert_eq!(w.get("session_id"), json!(sid));
+    assert_eq!(w.rec().session_id, sid);
     let methods = sent(&fake);
     assert_eq!(methods.iter().filter(|m| *m == "thread/resume").count(), 1);
     assert_eq!(methods.iter().filter(|m| *m == "thread/start").count(), 1);
