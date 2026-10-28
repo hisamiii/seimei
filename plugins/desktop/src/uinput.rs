@@ -1,5 +1,5 @@
-//! seimei's own input devices through uinput. The pointer is absolute, like a VM's tablet mouse: it lands exactly
-//! where asked, where ydotool's relative moves go through pointer acceleration and miss.
+//! seimei's own input devices through uinput.
+//! The pointer is absolute, like a VM's tablet mouse: it lands exactly where asked, where ydotool's relative moves go through pointer acceleration and miss.
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -59,8 +59,7 @@ pub static CHARS: LazyLock<HashMap<char, (u16, bool)>> = LazyLock::new(|| {
     out
 });
 
-/// The named keys of press_keys: their names, evdev code and keysym (0 for a modifier, which vinput takes as a
-/// modifier bit).
+/// The named keys of press_keys: their names, evdev code and keysym (0 for a modifier, which vinput takes as a modifier bit).
 pub const NAMED_KEYS: [(&[&str], u16, u32); 23] = [
     (&["esc", "escape"], 1, 0xff1b),
     (&["backspace"], 14, 0xff08),

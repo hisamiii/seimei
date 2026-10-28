@@ -44,7 +44,7 @@ fn session_socket_skips_nested() {
     let _restarted = listen(&run, "niri.wayland-4.400.sock");
     assert_eq!(name(session_socket(&ctx, "niri.", ".sock")).as_deref(), Some("niri.wayland-4.400.sock"));
 
-    // Only nested ones left: the newest of them, as before.
+    // Only nested ones left: the newest of them.
     drop(_restarted);
     assert_eq!(name(session_socket(&ctx, "niri.", ".sock")).as_deref(), Some("niri.wayland-3.300.sock"));
     let _ = std::fs::remove_dir_all(&root);

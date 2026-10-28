@@ -1,6 +1,5 @@
-//! A small D-Bus client on the plain wire protocol: the session bus, method calls with arguments and file
-//! descriptors, replies read back as JSON. kde.rs takes KWin's screenshots with it, gnome.rs talks to seimei's shell
-//! extension.
+//! A small D-Bus client on the plain wire protocol: the session bus, method calls with arguments and file descriptors, replies read back as JSON.
+//! kde.rs takes KWin's screenshots with it, gnome.rs talks to seimei's shell extension.
 
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;

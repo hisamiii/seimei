@@ -1,9 +1,7 @@
-//! The desktop's MCP spec, one per window manager, in `$OUT_DIR/tools.json`: built from tools.json, which holds one
-//! tool list and what each window manager adds to it.
+//! The desktop's MCP spec, one per window manager, in `$OUT_DIR/tools.json`: built from tools.json, which holds one tool list and what each window manager adds to it.
 //!
-//! In tools.json, a WM's string fields fill `{field}` in descriptions; its tools take the "wm" slot of the list or
-//! replace the tool of their name. A tool's "on" lists the WMs that have it; its "agent" text ends its description,
-//! and it takes the display property, on the WMs with the agent display (the ones with an "agent" field).
+//! In tools.json, a WM's string fields fill `{field}` in descriptions; its tools take the "wm" slot of the list or replace the tool of their name.
+//! A tool's "on" lists the WMs that have it; its "agent" text ends its description, and it takes the display property, on the WMs with the agent display (the ones with an "agent" field).
 use std::path::PathBuf;
 
 use serde_json::{Map, Value, json};

@@ -1,4 +1,4 @@
-# The desktop plugin, built into seimei: Claude Code starts `seimei plugin desktop` for each session that has it.
+# The desktop plugin, built into seimei: the harness starts `seimei plugin desktop` for each session that has it.
 # Its tools run inside seimei, which follows the window manager's events; the process forwards each call.
 name = "desktop"
 command = "seimei"

@@ -1,5 +1,4 @@
-//! The desktop layout, remembered so a new desktop session (a WM restart or a reboot) can be brought back: apps on
-//! their workspaces, kitty windows in their folders, and Claude sessions resumed.
+//! The desktop layout, remembered so a new desktop session (a WM restart or a reboot) can be brought back: apps on their workspaces, terminal windows in their folders, and agent sessions resumed.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -55,8 +54,8 @@ fn base(p: &str) -> &str {
     p.rsplit('/').next().unwrap_or(p)
 }
 
-/// A kitty window's shell folder and the Claude session running in it, if any.
-fn kitty(proc: &Path, sessions: &Path, pid: i64, kids: &HashMap<i64, Vec<i64>>) -> Map<String, Value> {
+/// A terminal window's shell folder and the agent session running in it, if any.
+fn terminal(proc: &Path, sessions: &Path, pid: i64, kids: &HashMap<i64, Vec<i64>>) -> Map<String, Value> {
     let mut out = Map::new();
     let mut queue: VecDeque<i64> = kids.get(&pid).cloned().unwrap_or_default().into();
     while let Some(c) = queue.pop_front() {
@@ -85,7 +84,7 @@ fn kitty(proc: &Path, sessions: &Path, pid: i64, kids: &HashMap<i64, Vec<i64>>) 
     out
 }
 
-/// Which WM session a snapshot is from (layouts saved before the backends called it "niri").
+/// Which WM session a snapshot is from; older layouts keep it under "niri".
 fn session_of(snap: &Value) -> Value {
     match snap.get("session") {
         Some(s) => s.clone(),
@@ -100,15 +99,15 @@ pub fn command(rec: &Value, shell: &str, home: &Path) -> Option<String> {
         let dir =
             [&c["cwd"], &rec["cwd"]].into_iter().find(|v| truthy(v)).map_or(home.to_string_lossy().into(), as_text);
         if truthy(c) {
-            // Through the user's shell, so their `claude` function (claude-queue here) wraps it as before.
+            // Through the user's shell, so a shell function that wraps the agent's CLI still applies.
             let mut words = vec!["claude".to_string()];
             words.extend(c["args"].as_array().into_iter().flatten().map(as_text));
             words.extend(["--resume".into(), as_text(&c["session_id"])]);
-            let claude = words.iter().map(|w| sh_quote(w)).collect::<Vec<_>>().join(" ");
+            let resume = words.iter().map(|w| sh_quote(w)).collect::<Vec<_>>().join(" ");
             return Some(format!(
                 "kitty -d {} {shell} -c {}",
                 sh_quote(&dir),
-                sh_quote(&format!("{claude}; exec {shell}"))
+                sh_quote(&format!("{resume}; exec {shell}"))
             ));
         }
         return Some(format!("kitty -d {}", sh_quote(&dir)));
@@ -189,7 +188,7 @@ impl Desktop {
                                  "pos": w["pos"], "floating": w["is_floating"],
                                  "argv": argv(&ctx.proc, pid), "cwd": cwd(&ctx.proc, pid)});
             if app == "kitty" {
-                rec.as_object_mut().unwrap().extend(kitty(&ctx.proc, &sessions, pid, &kids));
+                rec.as_object_mut().unwrap().extend(terminal(&ctx.proc, &sessions, pid, &kids));
             }
             out.push(rec);
         }
@@ -263,7 +262,7 @@ impl Desktop {
         Ok(out)
     }
 
-    /// One card for the whole layout: it resumes the user's Claude sessions, which always needs their OK.
+    /// One card for the whole layout: it resumes the user's agent sessions, which always needs their OK.
     async fn offer(self: Arc<Self>) {
         tokio::time::sleep(Duration::from_secs(15)).await;
         let Ok(plan) = self.blocking(|d| d.plan()).await else { return };

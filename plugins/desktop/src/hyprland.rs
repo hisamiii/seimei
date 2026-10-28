@@ -1,5 +1,5 @@
-//! Hyprland, through its sockets: requests on .socket.sock (what hyprctl sends), events on .socket2.sock. Window ids
-//! are Hyprland's addresses as numbers.
+//! Hyprland, through its sockets: requests on .socket.sock (what hyprctl sends), events on .socket2.sock.
+//! Window ids are Hyprland's addresses as numbers.
 
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Read, Write};

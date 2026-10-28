@@ -1,7 +1,7 @@
-//! GNOME on Wayland: the shell hands its window list, workspaces and screenshots only to code inside it, so seimei
-//! ships a small GNOME Shell extension (gnome/) and asks it over the session bus (dbus.rs): one method, JSON in and
-//! out. `seimei setup` installs it; GNOME on Wayland loads it at the next login. Input on the user's display is
-//! uinput, as on the other compositors; the extension's virtual devices drive a headless shell.
+//! GNOME on Wayland hands its window list, workspaces and screenshots only to code inside the shell.
+//! So seimei ships a small GNOME Shell extension (gnome/) and asks it over the session bus (dbus.rs): one method, JSON in and out.
+//! `seimei setup` installs it; GNOME on Wayland loads it at the next login.
+//! Input on the user's display is uinput, as on the other compositors; the extension's virtual devices drive a headless shell.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -114,8 +114,7 @@ impl Backend for Gnome {
         &self.ctx
     }
 
-    /// Input through the extension's virtual devices (the agent display; the user's display uses uinput). x, y of
-    /// clicks are logical pixels of the whole layout.
+    /// Input through the extension's virtual devices (the agent display; the user's display uses uinput). x, y of clicks are logical pixels of the whole layout.
     fn input(&self, ops: &[Op]) -> Result<(), String> {
         let mut events = vec![];
         for op in ops {

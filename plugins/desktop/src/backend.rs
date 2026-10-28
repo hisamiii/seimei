@@ -1,10 +1,7 @@
 //! What the desktop plugin needs from a window manager, one implementation per WM, and what they share.
-//!
 //! Windows and workspaces are plain JSON objects, the same for every backend:
-//!   window     {id, app_id, title, pid, workspace_id, is_focused, is_urgent, is_floating, pos}
-//!   workspace  {id, idx, name, output, is_active, active_window_id}
-//!   outputs    name to {x, y, width, height, scale}, in logical pixels
-//!   layouts    {names, current_idx}, or None when the backend cannot switch layouts
+//! window {id, app_id, title, pid, workspace_id, is_focused, is_urgent, is_floating, pos}; workspace {id, idx, name, output, is_active, active_window_id}.
+//! Outputs: name to {x, y, width, height, scale}, in logical pixels. Layouts: {names, current_idx}, or None when the backend cannot switch layouts.
 
 use std::collections::HashSet;
 use std::io::{Read, Write};
@@ -61,8 +58,7 @@ impl Ctx {
 pub type Env = Vec<(String, String)>;
 /// Windows seimei opened: closing them needs no card.
 pub type Ours = HashSet<i64>;
-/// What the event stream sends: ("windows", [window]), ("opened", window), ("closed", id), ("urgent", [id, bool]),
-/// and ("up", null) once it is connected.
+/// What the event stream sends: ("windows", [window]), ("opened", window), ("closed", id), ("urgent", [id, bool]), and ("up", null) once it is connected.
 pub type Emit<'a> = &'a mut dyn FnMut(&str, Value);
 
 /// A window manager's names, for the prompt, errors and cards.
@@ -114,8 +110,8 @@ pub trait Backend: Send + Sync {
     fn layouts(&self) -> Result<Option<Value>, String> {
         Ok(None)
     }
-    /// Input through the compositor's own devices, for a display seimei runs itself (the user's display gets uinput):
-    /// the Wayland virtual keyboard and pointer unless the backend has its own way.
+    /// Input through the compositor's own devices, for a display seimei runs itself (the user's display gets uinput).
+    /// The Wayland virtual keyboard and pointer, unless the backend has its own way.
     fn input(&self, ops: &[Op]) -> Result<(), String> {
         let env = self.env()?;
         let wl =
@@ -366,8 +362,8 @@ pub fn listening(path: &Path) -> bool {
     std::os::unix::net::UnixStream::connect(path).is_ok()
 }
 
-/// Whether the compositor behind a socket named <...>.<pid>.sock runs inside another session: nested in a window
-/// or headless. Its start environment names a display or a wlroots backend; the user's own compositor has neither.
+/// Whether the compositor behind a socket named <...>.<pid>.sock runs inside another session: nested in a window or headless.
+/// Its start environment names a display or a wlroots backend; the user's own compositor has neither.
 pub fn nested(ctx: &Ctx, sock: &Path) -> bool {
     let name = sock.file_name().and_then(|n| n.to_str()).unwrap_or("");
     let Some(pid) = name.strip_suffix(".sock").and_then(|n| n.rsplit('.').next()).filter(|p| p.parse::<u32>().is_ok())
@@ -380,8 +376,7 @@ pub fn nested(ctx: &Ctx, sock: &Path) -> bool {
     })
 }
 
-/// The user's compositor socket among prefix*suffix in the runtime dir: the newest listening one that is not nested
-/// (seimei's own displays or a test instance), else the newest listening one.
+/// The user's compositor socket among prefix*suffix in the runtime dir: the newest listening one that is not nested (seimei's own displays or a test instance), else the newest listening one.
 pub fn session_socket(ctx: &Ctx, prefix: &str, suffix: &str) -> Option<PathBuf> {
     let socks: Vec<PathBuf> = newest(&ctx.run, prefix, suffix).into_iter().filter(|p| listening(p)).collect();
     socks.iter().find(|p| !nested(ctx, p)).or(socks.first()).cloned()
@@ -418,8 +413,7 @@ pub fn var(env: &Env, k: &str) -> Option<String> {
     env.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone())
 }
 
-/// How KDE and GNOME reach their session: a compositor seimei runs itself (pinned), or the user's, looked up again
-/// once its Wayland socket stops listening.
+/// How KDE and GNOME reach their session: a compositor seimei runs itself (pinned), or the user's, looked up again once its Wayland socket stops listening.
 pub struct Reach {
     /// The name in XDG_CURRENT_DESKTOP, and how errors name the desktop.
     desk: &'static str,
@@ -455,8 +449,7 @@ impl Reach {
     }
 }
 
-/// The environment of the user's session on a desktop that names itself in XDG_CURRENT_DESKTOP (KDE, GNOME): seimei's
-/// own when it runs inside that session, else that of one of the session's processes (seimei may run as a service).
+/// The environment of the user's session on a desktop that names itself in XDG_CURRENT_DESKTOP (KDE, GNOME): seimei's own when it runs inside that session, else that of one of the session's processes (seimei may run as a service).
 /// Its Wayland socket has to listen.
 fn desktop_env(ctx: &Ctx, desk: &str) -> Option<Env> {
     const KEYS: [&str; 6] = [
@@ -529,8 +522,7 @@ pub fn make(name: &str, ctx: Ctx) -> Result<Box<dyn Backend>, String> {
     })
 }
 
-/// The running desktop: its socket variables first (seimei may start before them, so the sockets themselves too),
-/// then a KDE or GNOME Wayland session, then any X display.
+/// The running desktop: its socket variables first (seimei may start before them, so the sockets themselves too), then a KDE or GNOME Wayland session, then any X display.
 pub fn detect(ctx: &Ctx, env: &dyn Fn(&str) -> String) -> Option<&'static str> {
     let desk = env("XDG_CURRENT_DESKTOP").to_lowercase();
     if !env("NIRI_SOCKET").is_empty() || !newest(&ctx.run, "niri.", ".sock").is_empty() || desk == "niri" {

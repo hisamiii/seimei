@@ -1,5 +1,5 @@
-//! What the desktop plugin tells the guard about a call: closing a window seimei did not open, ending the desktop
-//! session or editing the WM's config, from a desktop tool or from Bash and the file tools. Rules decide what follows.
+//! What the desktop plugin tells the guard about a call: closing a window seimei did not open, ending the desktop session or editing the WM's config, from a desktop tool or from Bash and the file tools.
+//! Rules decide what follows.
 
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
@@ -124,8 +124,7 @@ pub fn writes_config(cmd: &str, conf: &Path, home: &Path) -> bool {
     false
 }
 
-/// What a hit on the desktop is, as the fact rules match: quit (ends the session), config (an edit of the WM's
-/// config) or close (a window seimei did not open).
+/// What a hit on the desktop is, as the fact rules match: quit (ends the session), config (an edit of the WM's config) or close (a window seimei did not open).
 fn kind(what: &str) -> &'static str {
     if what.contains("ends the desktop session") { "quit" } else { "close" }
 }

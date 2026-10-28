@@ -1,14 +1,7 @@
-//! The desktop plugin: drive the user's graphical session (windows, screenshots, keys, clicks, accessibility trees,
-//! notifications, the lock screen), remember its layout across restarts, and open released or lent sessions in
-//! windows there. The window manager is a backend: niri, sway, Hyprland, KDE Plasma, GNOME or any X11 WM. Its tools
-//! run inside seimei, which follows the WM's events and knows which windows seimei opened; `seimei plugin desktop`
-//! forwards each call.
-//!
-//! ```toml
-//! [plugins.desktop]
-//! backend = "niri"      # niri, sway, hyprland, kde, gnome or x11; found from the running session when left out
-//! shell = "fish"        # the shell a restored Claude session runs in; $SHELL when left out
-//! ```
+//! The desktop plugin: drive the user's graphical session (windows, screenshots, keys, clicks, accessibility trees, notifications, the lock screen).
+//! It also remembers the layout across restarts and opens released or lent sessions in windows there.
+//! The window manager is a backend: niri, sway, Hyprland, KDE Plasma, GNOME or any X11 WM.
+//! Its tools run inside seimei, which follows the WM's events and knows which windows seimei opened; `seimei plugin desktop` forwards each call.
 
 pub mod agent;
 pub mod backend;
@@ -105,8 +98,7 @@ impl Builtin for DesktopPlugin {
         Some(self)
     }
 
-    /// Follows the WM's events and keeps the layout; its cards and notes go to seimei, and the guard asks it whose
-    /// a window is.
+    /// Follows the WM's events and keeps the layout; its cards and notes go to seimei, and the guard asks it whose a window is.
     fn start(self: Arc<Self>, host: Arc<Host>) {
         let d = self.0.clone();
         let h = host.clone();
@@ -523,8 +515,8 @@ impl Desktop {
         }
     }
 
-    /// Part of the screen at full resolution: a box of x, y, w, h in pixels of the whole-screen screenshot (like
-    /// click), or a named target. Returns the image, its type and the logical geometry taken.
+    /// Part of the screen at full resolution: a box of x, y, w, h in pixels of the whole-screen screenshot (like click), or a named target.
+    /// Returns the image, its type and the logical geometry taken.
     pub fn region(&self, area: Option<&[f64]>, target: Option<&str>) -> Result<(Vec<u8>, String, String), String> {
         let outs = self.b.outputs()?;
         let o = &outs.first().ok_or("no outputs")?.1;
@@ -575,8 +567,7 @@ impl Desktop {
 
     // ---------- launching ----------
 
-    /// Start a command in the desktop session (not under seimei, so a seimei restart leaves it running) and return
-    /// the window it opens, which counts as seimei's; None when no window of its own showed up in time.
+    /// Start a command in the desktop session (not under seimei, so a seimei restart leaves it running) and return the window it opens, which counts as seimei's; None when no window of its own showed up in time.
     pub async fn spawn(self: &Arc<Self>, command: &str, own_workspace: bool) -> Result<Option<Value>, String> {
         let wait = Duration::from_secs(15);
         let (me, cmd) = (self.clone(), command.to_string());
@@ -788,8 +779,8 @@ impl Desktop {
         })
     }
 
-    /// x, y are pixels of the latest full-screen screenshot. A window id only guards that the screen still shows what
-    /// the screenshot showed (niri reports no positions for tiled windows).
+    /// x, y are pixels of the latest full-screen screenshot.
+    /// A window id only guards that the screen still shows what the screenshot showed (niri reports no positions for tiled windows).
     pub fn click(&self, x: f64, y: f64, window: &Value, button: &str, count: i64, scroll: i64) -> Result<(), String> {
         let mut input = self.input.lock().unwrap();
         if self.b.locked() {

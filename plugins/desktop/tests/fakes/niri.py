@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""A fake niri IPC socket for tests: `niri.py SOCK STATE` answers Windows, Workspaces, Outputs, FocusedWindow and
-KeyboardLayouts from the STATE file (keys windows, workspaces, outputs, focused, keyboard-layouts) as niri does, and
-streams WindowsChanged then holds an EventStream open. The test kills it when done."""
+"""A fake niri IPC socket for tests: `niri.py SOCK STATE` answers Windows, Workspaces, Outputs, FocusedWindow and KeyboardLayouts as niri does.
+The answers come from the STATE file (keys windows, workspaces, outputs, focused, keyboard-layouts); an EventStream gets WindowsChanged and stays open.
+The test kills it when done."""
 import json
 import os
 import socket

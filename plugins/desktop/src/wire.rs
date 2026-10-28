@@ -1,5 +1,4 @@
-//! A small Wayland client on the plain wire protocol: one socket, requests by object id and opcode, events read back
-//! until a round trip ends. vinput.rs (the agent display's input) and kde.rs (KWin's Plasma protocols) speak it.
+//! A small Wayland client on the plain wire protocol: one socket, requests by object id and opcode, events read back until a round trip ends. vinput.rs (the agent display's input) and kde.rs (KWin's Plasma protocols) speak it.
 
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;

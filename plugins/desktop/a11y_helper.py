@@ -1,9 +1,5 @@
 """AT-SPI access for seimei, run with the system Python (python3 -I), which has PyGObject.
-
-  a11y_helper.py tree <pid> [depth] [filter]
-  a11y_helper.py act <pid> <path> <action name or index>
-  a11y_helper.py set-text <pid> <path> <text>
-
+Usage: a11y_helper.py tree <pid> [depth] [filter] | act <pid> <path> <action name or index> | set-text <pid> <path> <text>
 A path is the child indexes from the app down, like 0/2/5. Output is JSON on stdout."""
 
 import json

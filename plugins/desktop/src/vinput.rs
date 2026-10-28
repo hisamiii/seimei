@@ -1,6 +1,6 @@
-//! Keyboard and pointer input for a Wayland display seimei runs itself (the agent display), through the virtual
-//! keyboard and virtual pointer protocols on the display's own socket. That display has its own seat, so nothing
-//! here touches the user's focus or pointer. Plain Wayland wire protocol (wire.rs), one connection per call.
+//! Keyboard and pointer input for a Wayland display seimei runs itself (the agent display), through the virtual keyboard and virtual pointer protocols on the display's own socket.
+//! That display has its own seat, so nothing here touches the user's focus or pointer.
+//! Plain Wayland wire protocol (wire.rs), one connection per call.
 //!
 //! Each call uploads a keymap with one key per keysym it needs, so any character types without a layout switch.
 

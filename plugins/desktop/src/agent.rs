@@ -1,8 +1,7 @@
-//! The agent display: a nested niri that seimei runs in a window of the user's niri, parked on the "seimei"
-//! workspace; on KDE Plasma and GNOME a headless KWin or GNOME Shell on a bus of its own, seen through screenshots
-//! only. Agent apps live there and get input through its own seat, so the user's focus, pointer and clipboard stay
-//! theirs. Started on demand, stopped after a stretch without use, adopted again after a seimei restart. It isolates
-//! input and screen, not permissions: its apps run as the user.
+//! The agent display: a nested niri in a window of the user's niri on the "seimei" workspace, or on KDE Plasma and GNOME a headless KWin or GNOME Shell on a bus of its own.
+//! Agent apps get input through its own seat, so the user's focus, pointer and clipboard stay theirs.
+//! Started on demand, stopped after a stretch without use, adopted again after a seimei restart.
+//! It isolates input and screen, not permissions: its apps run as the user.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -136,8 +135,7 @@ impl Agent {
         self.dir.join("browser")
     }
 
-    /// The agent display among the running compositors: the nested niri started with seimei's config, or the headless
-    /// one.
+    /// The agent display among the running compositors: the nested niri started with seimei's config, or the headless one.
     fn find(&self) -> Option<Up> {
         self.find_nested().or_else(|| self.find_headless())
     }
@@ -240,8 +238,8 @@ impl Agent {
         }
     }
 
-    /// A headless KWin or GNOME Shell ("kde", "gnome") on a session bus of its own, so its D-Bus names do not meet
-    /// the user's. GNOME Shell gets seimei's extension and a settings database of its own.
+    /// A headless KWin or GNOME Shell ("kde", "gnome") on a session bus of its own, so its D-Bus names do not meet the user's.
+    /// GNOME Shell gets seimei's extension and a settings database of its own.
     pub fn start_headless(&self, desk: &str) -> Result<Up, String> {
         std::fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
         let state = self.dir.join("headless");
@@ -387,8 +385,7 @@ impl Agent {
         members(&self.ctx, up).into_iter().skip(1).find(|p| cmdline(&self.ctx, &p.to_string()).contains(&mark))
     }
 
-    /// Start the agent browser in the agent display unless it runs: a logged-out Firefox profile of its own with the
-    /// seimei extension, whose host connects to sock.
+    /// Start the agent browser in the agent display unless it runs: a logged-out Firefox profile of its own with the seimei extension, whose host connects to sock.
     pub fn browser(&self, up: &Up, xpi: &Path, sock: &Path) -> Result<bool, String> {
         if self.browser_pid(up).is_some() {
             return Ok(false);

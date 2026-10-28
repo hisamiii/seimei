@@ -1,7 +1,6 @@
-//! KDE Plasma on Wayland: KWin's window list, focus and virtual desktops through the Plasma window management and
-//! virtual desktop protocols (wire.rs), screenshots through KWin's ScreenShot2 D-Bus interface (dbus.rs). KWin
-//! refuses these only to sandboxed clients, so nothing needs installing. Input on the user's display is uinput, as on
-//! the other compositors.
+//! KDE Plasma on Wayland: KWin's window list, focus and virtual desktops through the Plasma window management and virtual desktop protocols (wire.rs), screenshots through KWin's ScreenShot2 D-Bus interface (dbus.rs).
+//! KWin refuses these only to sandboxed clients, so nothing needs installing.
+//! Input on the user's display is uinput, as on the other compositors.
 //!
 //! KWin names windows by uuid; seimei gives each uuid a small number while it runs.
 
@@ -320,8 +319,7 @@ impl Kde {
     }
 }
 
-/// ScreenShot2's raw pixels (QImage formats RGB32, ARGB32, RGBX8888, RGBA8888 and their premultiplied forms) as an
-/// image.
+/// ScreenShot2's raw pixels (QImage formats RGB32, ARGB32, RGBX8888, RGBA8888 and their premultiplied forms) as an image.
 fn raw_image(meta: &Value, data: Vec<u8>) -> Result<image::DynamicImage, String> {
     let u = |k: &str| meta[k].as_u64().unwrap_or(0) as usize;
     let (w, h, stride, format) = (u("width"), u("height"), u("stride"), u("format"));
@@ -361,8 +359,7 @@ impl Backend for Kde {
         &self.ctx
     }
 
-    /// Input through KWin's fake input protocol (the agent display; the user's display uses uinput). x, y of clicks
-    /// are logical pixels of the whole layout.
+    /// Input through KWin's fake input protocol (the agent display; the user's display uses uinput). x, y of clicks are logical pixels of the whole layout.
     fn input(&self, ops: &[Op]) -> Result<(), String> {
         let mut held = self.fake.lock().unwrap();
         let r = match held.as_mut() {

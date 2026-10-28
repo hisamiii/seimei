@@ -1,6 +1,6 @@
-// seimei's GNOME Shell extension: what the seimei desktop plugin cannot get from outside the shell on Wayland (the
-// window list, focus, workspaces, screenshots, input), as one D-Bus method on the session bus. Call(s) -> s takes and
-// returns JSON: {"op": ...} in, the answer or {"error": ...} out. Nothing runs until a call comes.
+// seimei's GNOME Shell extension: what the seimei desktop plugin cannot get from outside the shell on Wayland (the window list, focus, workspaces, screenshots, input), as one D-Bus method on the session bus.
+// Call(s) -> s takes and returns JSON: {"op": ...} in, the answer or {"error": ...} out.
+// Nothing runs until a call comes.
 
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
@@ -117,8 +117,7 @@ function outputs() {
     return out;
 }
 
-/** Move a window to the workspace with this number, or with this name: the empty last one (GNOME keeps one) or a
- * new one gets the name when none has it. */
+/** Move a window to the workspace with this number, or with this name: the empty last one (GNOME keeps one) or a new one gets the name when none has it. */
 function toWorkspace(w, which) {
     const wm = global.workspace_manager;
     const idx = Number(which) - 1;
@@ -241,8 +240,8 @@ class Input {
         const seat = backend.get_default_seat();
         this.kb = seat.create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
         this.ptr = seat.create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
-        // A seat without devices (a headless shell) gains its keyboard and pointer now; clients pick them up a moment
-        // later, and the focused window gets its keyboard only when focus comes again.
+        // A seat without devices (a headless shell) gains its keyboard and pointer here; clients pick them up a moment later.
+        // The focused window gets its keyboard only when focus comes again.
         this.ready = sleep(300).then(() => {
             const w = global.display.get_focus_window();
             if (w) {
@@ -258,8 +257,8 @@ class Input {
             down ? Clutter.KeyState.PRESSED : Clutter.KeyState.RELEASED);
     }
 
-    /** Put the pointer at x, y. A new device's first motion can land with y at 0 (headless GNOME 51), so look and
-     * move again when it missed. */
+    /** Put the pointer at x, y.
+     * A new device's first motion can land with y at 0 (headless GNOME 51), so look and move again when it missed. */
     async move(x, y) {
         for (let i = 0; i < 3; i++) {
             this.ptr.notify_absolute_motion(GLib.get_monotonic_time(), x, y);
@@ -270,8 +269,8 @@ class Input {
         }
     }
 
-    /** Events in order: ["key", keysym, [modifier names]], ["text", s], ["click", x, y, button, count], ["scroll",
-     * x, y, amount]. Text goes through the input method when a text field has it, as keysyms otherwise. */
+    /** Events in order: ["key", keysym, [modifier names]], ["text", s], ["click", x, y, button, count], ["scroll", x, y, amount].
+     * Text goes through the input method when a text field has it, as keysyms otherwise. */
     async run(events) {
         await this.ready;
         const t = () => GLib.get_monotonic_time();

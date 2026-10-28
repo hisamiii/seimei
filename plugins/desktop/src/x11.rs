@@ -1,6 +1,5 @@
-//! Any X11 window manager that speaks EWMH (most do), through xprop and xdotool; screenshots with ImageMagick's
-//! import. Workspaces are the EWMH desktops; a desktop cannot be named from outside, so seimei's apps go to a desktop
-//! already called "seimei" or else to the last one.
+//! Any X11 window manager that speaks EWMH (most do), through xprop and xdotool; screenshots with ImageMagick's import.
+//! Workspaces are the EWMH desktops; a desktop cannot be named from outside, so seimei's apps go to a desktop already called "seimei" or else to the last one.
 
 use std::collections::{BTreeMap, HashSet};
 use std::io::BufRead;
