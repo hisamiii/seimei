@@ -443,7 +443,6 @@ struct State {
     shown_approvals: Vec<String>,
     /// The dispatcher's latest message, for "reply ready".
     last_reply: Option<i64>,
-    sent: Vec<(String, Data)>,
     /// Unkeyed pings per level since the user last had the app open; a new one shows them all.
     pings: HashMap<String, Vec<(String, String)>>,
     /// Collapse key -> pings on it since the app was last open.
@@ -577,11 +576,6 @@ impl Push {
         }
     }
 
-    /// The last few pushes, for tests and a look from the server.
-    pub fn sent(&self) -> Vec<(String, Data)> {
-        self.st.lock().unwrap().sent.clone()
-    }
-
     async fn send(self: Arc<Self>, data: Data, ttl: u64, phones: Vec<(String, Value)>) {
         if let Some(auth) = &self.auth {
             // A phone unpaired from the CLI (`seimei devices --revoke`) still holds its stream: close it (audit I2).
@@ -608,14 +602,6 @@ impl Push {
             phones.len()
         );
         for (dev, rec) in phones {
-            {
-                let mut s = self.st.lock().unwrap();
-                s.sent.push((dev.clone(), data.clone()));
-                let n = s.sent.len();
-                if n > 50 {
-                    s.sent.drain(..n - 50);
-                }
-            }
             // A browser shows every push it gets: taking one back would show an empty one.
             if !self.can_send(&rec) || (dev.starts_with("b:") && data.contains_key("cancel")) {
                 continue;

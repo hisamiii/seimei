@@ -110,7 +110,6 @@ fn args() -> Args {
         match x.as_str() {
             "--dev" => a.dev = true,
             "--no-login" => a.no_login = true,
-            "--login" => {} // the default now; kept for old scripts
             "--keep-sessions" => a.keep_sessions = true,
             "--clear" => a.clear = true,
             "--check" => a.check = true,

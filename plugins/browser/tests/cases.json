@@ -336,8 +336,7 @@
        "op": "open",
        "args": {
         "url": "https://x.org/new",
-        "front": true,
-        "background": false
+        "front": true
        }
       }
      ]
@@ -482,8 +481,7 @@
        "op": "open",
        "args": {
         "url": "https://x.org/two",
-        "front": false,
-        "background": true
+        "front": false
        }
       }
      ]
@@ -927,8 +925,7 @@
        "op": "open",
        "args": {
         "url": "https://x.org/new",
-        "front": false,
-        "background": true
+        "front": false
        }
       }
      ]

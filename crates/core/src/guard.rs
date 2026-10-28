@@ -1146,10 +1146,6 @@ impl Guard {
         Guard { events, approvals, path: state.join("audit.jsonl"), tell: OnceLock::new(), fails: Mutex::default() }
     }
 
-    pub fn audit_path(&self) -> &Path {
-        &self.path
-    }
-
     fn tell(&self, worker: Option<&str>, line: &str, urgent: bool, key: Option<&str>) {
         if let (Some(w), Some(tell)) = (worker, self.tell.get()) {
             tell(w, line, urgent, key);

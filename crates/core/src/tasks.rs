@@ -93,7 +93,7 @@ pub struct Task {
     /// The shikigami's own todo list, mirrored.
     #[serde(default)]
     pub steps: Vec<Step>,
-    /// Its place in its owner's queue; 0 on boards from before #58 until loaded.
+    /// Its place in its owner's queue.
     #[serde(default)]
     pub pos: u64,
     /// When its state last changed.
@@ -182,15 +182,6 @@ impl Board {
             .and_then(|v| serde_json::from_value(v).ok())
             .unwrap_or_default();
         let mut b = Board { path: path.into(), events, data, archive };
-        // Boards from before #58: each owner's queue in the order the tasks were added.
-        let mut last: std::collections::HashMap<String, u64> = Default::default();
-        for t in &mut b.data.tasks {
-            let l = last.entry(t.owner.clone()).or_default();
-            if t.pos == 0 {
-                t.pos = *l + 1;
-            }
-            *l = (*l).max(t.pos);
-        }
         if !path.exists() || b.sweep(now()) {
             b.save();
         }

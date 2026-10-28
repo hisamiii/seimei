@@ -66,15 +66,10 @@ const RESULT_CHARS: usize = 4000;
 /// What a reply quotes to seimei: the first this many chars of the message, or a card's first line.
 const QUOTE: usize = 200;
 
-/// Idle this long after a turn (the 1 h prompt cache still warm) with at least this much context: compact now, at a
-/// natural break, instead of mid-task at the window's edge.
-fn idle_compact() -> (Duration, i64) {
-    let env = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<f64>().ok());
-    (
-        Duration::from_secs_f64(env("SEIMEI_IDLE_COMPACT").unwrap_or(40.0 * 60.0)),
-        env("SEIMEI_IDLE_COMPACT_MIN").map_or(150_000, |v| v as i64),
-    )
-}
+/// Idle this long after a turn (the 1 h prompt cache still warm) with at least IDLE_COMPACT_MIN tokens of context:
+/// compact now, at a natural break, instead of mid-task at the window's edge.
+const IDLE_COMPACT: Duration = Duration::from_secs(40 * 60);
+const IDLE_COMPACT_MIN: i64 = 150_000;
 
 const PROMPT: &str = include_str!("dispatcher.md");
 
@@ -866,7 +861,7 @@ impl Turns {
                     None => return "Claude Code exited".into(),
                     Some(m) => match self.handle(m) {
                         After::Nothing => {}
-                        After::Idle => self.idle_due = Some(Instant::now() + idle_compact().0),
+                        After::Idle => self.idle_due = Some(Instant::now() + IDLE_COMPACT),
                     },
                 },
                 _ = sleep_until(notes_due.unwrap_or_else(far)), if notes_due.is_some() => {
@@ -993,7 +988,7 @@ impl Turns {
                 return;
             }
         };
-        if used < idle_compact().1 || self.busy {
+        if used < IDLE_COMPACT_MIN || self.busy {
             return;
         }
         let text = format!("Compacting older context while idle ({}k tokens).", used / 1000);

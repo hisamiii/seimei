@@ -227,7 +227,6 @@ impl App {
         ev
     }
 
-    /// The dispatcher's state until it is ported (phase 3): never connected, never busy.
     fn state(&self) -> Value {
         self.dispatcher.state()
     }
@@ -326,7 +325,6 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/send", post(send))
         .route("/api/interrupt", post(interrupt))
         .route("/api/approvals/{aid}", post(decide))
-        .route("/api/usage", get(usage))
         .route("/api/cost", get(cost_view))
         .route("/api/metrics", get(metrics_view))
         .route("/api/audit", get(audit))
@@ -1113,10 +1111,6 @@ async fn uploaded(State(app): Shared, UrlPath(id): UrlPath<String>) -> Response 
         data,
     )
         .into_response()
-}
-
-async fn usage(State(app): Shared) -> Response {
-    ok(app.usage.snapshot())
 }
 
 async fn cost_view(State(app): Shared) -> Response {

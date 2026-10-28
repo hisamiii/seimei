@@ -17,14 +17,14 @@ pub fn last(state: &Path) -> Option<Value> {
 }
 
 fn num(v: &Value) -> f64 {
-    v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok())).unwrap_or(0.0)
+    v.as_f64().unwrap_or(0.0)
 }
 
-/// Python's str() of a JSON value: a string as it is, null as None.
+/// A field of the deploy record for the note: a string as it is, a missing one as "unknown".
 fn show(v: &Value) -> String {
     match v {
         Value::String(s) => s.clone(),
-        Value::Null => "None".into(),
+        Value::Null => "unknown".into(),
         v => v.to_string(),
     }
 }

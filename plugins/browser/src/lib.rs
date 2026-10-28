@@ -18,7 +18,7 @@ use serde_json::{Value, json};
 use seimei_core::plugins::link::{Link, runtime_path};
 use seimei_core::plugins::{Builtin, Factory, Fut, Host, Session, ask_guard, int, py, shot_file, size, strip};
 use seimei_core::tools::text;
-use seimei_core::util::{b64_decode, now, truthy};
+use seimei_core::util::{b64_decode, flag, now, truthy};
 
 const READ_LIMIT: i64 = 20000;
 /// A read is kept this long so paging through a page does not reload it.
@@ -536,10 +536,9 @@ impl Browser {
                 ok(out)
             }
             "browser_open" => {
-                // background is what extension 1.0 reads; a newer one reads front.
                 // In the agent browser tabs open in front: its window is seimei's, and the agent display shows it.
-                let front = self.mine() || truthy(&a["front"]);
-                let args = json!({"url": py(&a["url"]), "front": front, "background": !front});
+                let front = self.mine() || flag(&a["front"]);
+                let args = json!({"url": py(&a["url"]), "front": front});
                 let t = self.link.call("open", 30, args).await?;
                 if let Some(id) = t["id"].as_i64() {
                     self.opened.lock().unwrap().insert(id);
