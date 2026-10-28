@@ -4,15 +4,13 @@
 //! uinput, as on the other compositors; the extension's virtual devices drive a headless shell.
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::time::Duration;
 
 use serde_json::{Value, json};
 
-use super::backend::{Backend, Ctx, Emit, Env, Meta, Ours, desktop_env, encode, listening};
+use super::backend::{Backend, Ctx, Emit, Env, Meta, Ours, Reach, encode};
 use super::dbus::{Arg, Bus};
 use super::vinput::{MOD_KEYS, Op, char_sym, combo};
-use super::wire::socket_path;
 use seimei_core::util::py_json_compact;
 
 const QUERIES: [&str; 3] = ["windows", "workspaces", "outputs"];
@@ -28,10 +26,6 @@ fn missing() -> String {
     )
 }
 
-fn down() -> String {
-    "no desktop session (GNOME on Wayland is not running)".into()
-}
-
 /// Write the extension into home's GNOME Shell extensions folder; returns where.
 pub fn install_extension(home: &Path) -> Result<PathBuf, String> {
     let dir = home.join(".local/share/gnome-shell/extensions").join(UUID);
@@ -44,23 +38,18 @@ pub fn install_extension(home: &Path) -> Result<PathBuf, String> {
 
 pub struct Gnome {
     ctx: Ctx,
-    /// A shell seimei runs itself (the agent display): its environment, instead of the user's session.
-    pinned: Option<Env>,
-    found: Mutex<Option<Env>>,
+    /// The user's session, or a shell seimei runs itself (the agent display).
+    reach: Reach,
 }
 
 impl Gnome {
     pub fn new(ctx: Ctx) -> Gnome {
-        Gnome { ctx, pinned: None, found: Mutex::default() }
+        Gnome { ctx, reach: Reach::new("GNOME", META.label, None) }
     }
 
     /// A headless shell seimei runs itself, reached through env.
     pub fn pinned(ctx: Ctx, env: Env) -> Gnome {
-        Gnome { ctx, pinned: Some(env), found: Mutex::default() }
-    }
-
-    fn var(env: &Env, k: &str) -> Option<String> {
-        env.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone())
+        Gnome { ctx, reach: Reach::new("GNOME", META.label, Some(env)) }
     }
 
     /// One request to the extension.
@@ -181,22 +170,11 @@ impl Backend for Gnome {
     }
 
     fn env(&self) -> Result<Env, String> {
-        if let Some(e) = &self.pinned {
-            let wl = Self::var(e, "WAYLAND_DISPLAY").unwrap_or_default();
-            return if listening(&socket_path(&self.ctx.run, &wl)) { Ok(e.clone()) } else { Err(down()) };
-        }
-        let mut found = self.found.lock().unwrap();
-        let alive =
-            |e: &Env| Self::var(e, "WAYLAND_DISPLAY").is_some_and(|wl| listening(&socket_path(&self.ctx.run, &wl)));
-        if !found.as_ref().is_some_and(alive) {
-            *found = desktop_env(&self.ctx, "GNOME");
-        }
-        found.clone().ok_or_else(down)
+        self.reach.env(&self.ctx)
     }
 
     fn session(&self) -> Option<String> {
-        let env = self.env().ok()?;
-        Some(format!("gnome/{}", Self::var(&env, "WAYLAND_DISPLAY")?))
+        Some(format!("gnome/{}", self.reach.wayland(&self.ctx).ok()?))
     }
 
     fn locked(&self) -> bool {

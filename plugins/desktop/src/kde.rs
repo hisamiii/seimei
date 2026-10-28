@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
-use super::backend::{Backend, Ctx, Emit, Env, Meta, Ours, desktop_env, encode, listening};
+use super::backend::{Backend, Ctx, Emit, Env, Meta, Ours, Reach, encode};
 use super::dbus::{Arg, Bus};
 use super::text_of;
 use super::vinput::{MOD_KEYS, Op, char_sym, combo};
@@ -55,36 +55,26 @@ struct Desk {
 
 pub struct Kde {
     ctx: Ctx,
-    /// A KWin of seimei's own (the agent display): its environment, instead of the user's session.
-    pinned: Option<Env>,
-    found: Mutex<Option<Env>>,
+    /// The user's session, or a KWin of seimei's own (the agent display).
+    reach: Reach,
     /// Window uuids in the order seimei first saw them: a window's id is its index plus one.
     uuids: Mutex<Vec<String>>,
     /// The fake input connection and its object, kept between calls.
     fake: Mutex<Option<(Conn, u32)>>,
 }
 
-fn down() -> String {
-    "no desktop session (KDE Plasma on Wayland is not running)".into()
-}
-
 impl Kde {
     pub fn new(ctx: Ctx) -> Kde {
-        Kde { ctx, pinned: None, found: Mutex::default(), uuids: Mutex::default(), fake: Mutex::default() }
+        Kde { ctx, reach: Reach::new("KDE", META.label, None), uuids: Mutex::default(), fake: Mutex::default() }
     }
 
     /// A KWin seimei runs itself, reached through env (WAYLAND_DISPLAY and DBUS_SESSION_BUS_ADDRESS).
     pub fn pinned(ctx: Ctx, env: Env) -> Kde {
-        Kde { ctx, pinned: Some(env), found: Mutex::default(), uuids: Mutex::default(), fake: Mutex::default() }
-    }
-
-    fn var(env: &Env, k: &str) -> Option<String> {
-        env.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone())
+        Kde { ctx, reach: Reach::new("KDE", META.label, Some(env)), uuids: Mutex::default(), fake: Mutex::default() }
     }
 
     fn socket(&self) -> Result<PathBuf, String> {
-        let env = self.env()?;
-        Ok(socket_path(&self.ctx.run, &Self::var(&env, "WAYLAND_DISPLAY").ok_or_else(down)?))
+        Ok(socket_path(&self.ctx.run, &self.reach.wayland(&self.ctx)?))
     }
 
     fn conn(&self) -> Result<Conn, String> {
@@ -429,22 +419,11 @@ impl Backend for Kde {
     }
 
     fn env(&self) -> Result<Env, String> {
-        if let Some(e) = &self.pinned {
-            let wl = Self::var(e, "WAYLAND_DISPLAY").unwrap_or_default();
-            return if listening(&socket_path(&self.ctx.run, &wl)) { Ok(e.clone()) } else { Err(down()) };
-        }
-        let mut found = self.found.lock().unwrap();
-        let alive =
-            |e: &Env| Self::var(e, "WAYLAND_DISPLAY").is_some_and(|wl| listening(&socket_path(&self.ctx.run, &wl)));
-        if !found.as_ref().is_some_and(alive) {
-            *found = desktop_env(&self.ctx, "KDE");
-        }
-        found.clone().ok_or_else(down)
+        self.reach.env(&self.ctx)
     }
 
     fn session(&self) -> Option<String> {
-        let env = self.env().ok()?;
-        Some(format!("kde/{}", Self::var(&env, "WAYLAND_DISPLAY")?))
+        Some(format!("kde/{}", self.reach.wayland(&self.ctx).ok()?))
     }
 
     fn locked(&self) -> bool {

@@ -331,10 +331,52 @@ pub fn digits(s: &str) -> bool {
     !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
 }
 
+/// One variable of env.
+pub fn var(env: &Env, k: &str) -> Option<String> {
+    env.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone())
+}
+
+/// How KDE and GNOME reach their session: a compositor seimei runs itself (pinned), or the user's, looked up again
+/// once its Wayland socket stops listening.
+pub struct Reach {
+    /// The name in XDG_CURRENT_DESKTOP, and how errors name the desktop.
+    desk: &'static str,
+    label: &'static str,
+    pinned: Option<Env>,
+    found: std::sync::Mutex<Option<Env>>,
+}
+
+impl Reach {
+    pub fn new(desk: &'static str, label: &'static str, pinned: Option<Env>) -> Reach {
+        Reach { desk, label, pinned, found: Default::default() }
+    }
+
+    pub fn down(&self) -> String {
+        format!("no desktop session ({} on Wayland is not running)", self.label)
+    }
+
+    pub fn env(&self, ctx: &Ctx) -> Result<Env, String> {
+        let alive = |e: &Env| var(e, "WAYLAND_DISPLAY").is_some_and(|wl| listening(&socket_path(&ctx.run, &wl)));
+        if let Some(e) = &self.pinned {
+            return if alive(e) { Ok(e.clone()) } else { Err(self.down()) };
+        }
+        let mut found = self.found.lock().unwrap();
+        if !found.as_ref().is_some_and(alive) {
+            *found = desktop_env(ctx, self.desk);
+        }
+        found.clone().ok_or_else(|| self.down())
+    }
+
+    /// The session's WAYLAND_DISPLAY.
+    pub fn wayland(&self, ctx: &Ctx) -> Result<String, String> {
+        var(&self.env(ctx)?, "WAYLAND_DISPLAY").ok_or_else(|| self.down())
+    }
+}
+
 /// The environment of the user's session on a desktop that names itself in XDG_CURRENT_DESKTOP (KDE, GNOME): seimei's
 /// own when it runs inside that session, else that of one of the session's processes (seimei may run as a service).
 /// Its Wayland socket has to listen.
-pub fn desktop_env(ctx: &Ctx, desk: &str) -> Option<Env> {
+fn desktop_env(ctx: &Ctx, desk: &str) -> Option<Env> {
     const KEYS: [&str; 6] = [
         "WAYLAND_DISPLAY",
         "DBUS_SESSION_BUS_ADDRESS",
