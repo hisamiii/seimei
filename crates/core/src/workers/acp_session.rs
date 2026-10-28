@@ -125,7 +125,7 @@ impl Session {
     /// A call the agent ran without asking: the guard sees it only after the fact.
     /// One it would have blocked, or held for a card, stops the turn; the agent hears why with its next message.
     pub(super) async fn unasked(&mut self, t: acp::ToolCall) {
-        let (tool, input) = claude_shaped(&t);
+        let (tool, input) = guard_shaped(&t);
         let r = self.w.rec();
         let hook = json!({"tool_name": tool, "tool_input": input, "cwd": r.cwd, "session_id": r.session_id});
         let Some(why) = self.pool.guard.unasked(&r.name, Some(&self.w.id), &hook, Some(&t.id)).await else { return };
@@ -213,10 +213,10 @@ fn acp_servers(servers: Map<String, Value>) -> Vec<acp::McpServer> {
         .collect()
 }
 
-/// An ACP tool call as the Claude Code call the guard and the cards know: a command is Bash, a file edit Write, a
-/// read Read, a fetch WebFetch. An agent that calls everything kind other (dsh) is read by its tool's name. What has
-/// no such shape keeps its name and its raw input (the guard passes it, and a card shows it).
-pub fn claude_shaped(t: &acp::ToolCall) -> (String, Value) {
+/// An ACP tool call in the shape the guard and the cards know: a command is Bash, a file edit Write, a read Read, a fetch WebFetch.
+/// An agent that calls everything kind other (dsh) is read by its tool's name.
+/// What has no such shape keeps its name and its raw input (the guard passes it, and a card shows it).
+pub fn guard_shaped(t: &acp::ToolCall) -> (String, Value) {
     let raw = t.input.clone().unwrap_or(json!({}));
     let named = matches!(t.kind.as_str(), "other" | "");
     let kind = match t.title.to_lowercase().as_str() {
@@ -267,7 +267,7 @@ fn tool_line(t: &acp::ToolCall) -> (String, String) {
     if !matches!(t.kind.as_str(), "other" | "") {
         return (t.kind.clone(), t.title.clone());
     }
-    let (name, input) = claude_shaped(t);
+    let (name, input) = guard_shaped(t);
     let on = ["command", "file_path", "url", "pattern", "query"].iter().find_map(|k| input[k].as_str());
     let name = if name.is_empty() { "tool".into() } else { name };
     (name, on.map_or_else(|| t.title.clone(), |v| first_line(v, 160)))
@@ -288,7 +288,7 @@ impl acp::Handler for AcpSide {
             let pick = |kind: &str| req.options.iter().find(|o| o.kind == kind).map(|o| o.id.clone());
             let reject = pick("reject_once").map_or(acp::Outcome::Cancelled, acp::Outcome::Selected);
             let Some(allow) = pick("allow_once") else { return reject };
-            let (tool, input) = claude_shaped(&req.tool);
+            let (tool, input) = guard_shaped(&req.tool);
             let r = w.rec();
             let hook = json!({"tool_name": tool, "tool_input": input, "cwd": r.cwd, "session_id": r.session_id});
             let said = pool.guard.pre(&r.name, Some(&w.id), &hook, Some(&req.tool.id)).await;

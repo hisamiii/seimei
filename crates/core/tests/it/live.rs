@@ -32,8 +32,8 @@ impl Listener for Heard {
     fn rate_limit(&self, _info: &Value, _from: &str, _session: &str) {}
 }
 
-/// The test's Claude config dir, which tests/live.sh sets; the user's own is never used.
-pub fn claude_dir() -> PathBuf {
+/// The test's harness config dir, which tests/live.sh sets; the user's own is never used.
+pub fn config_dir() -> PathBuf {
     let dir = std::env::var("CLAUDE_CONFIG_DIR").expect("run through tests/live.sh: CLAUDE_CONFIG_DIR is not set");
     let home = std::env::var("HOME").unwrap_or_default();
     assert!(dir != format!("{home}/.claude"), "CLAUDE_CONFIG_DIR is the user's own");
@@ -61,7 +61,7 @@ pub fn state(name: &str) -> PathBuf {
 /// A shikigami's transcript in the test config dir.
 pub fn transcript(cwd: &Path, session_id: &str) -> PathBuf {
     let folder = cwd.display().to_string().replace('/', "-");
-    claude_dir().join("projects").join(folder).join(format!("{session_id}.jsonl"))
+    config_dir().join("projects").join(folder).join(format!("{session_id}.jsonl"))
 }
 
 /// A pool on a state folder of its own, wired like the server's: the guard tells it, it tells `heard`.

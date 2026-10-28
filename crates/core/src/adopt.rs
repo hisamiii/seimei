@@ -6,18 +6,17 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, LazyLock, Mutex, Weak};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
-use regex::Regex;
 use serde_json::{Map, Value, json};
 
 use crate::approvals::Approvals;
 use crate::kitty;
 use crate::sessions;
-use crate::transcripts::{brief, transcript};
+use crate::transcripts::brief;
 use crate::util::{as_text, chars, children, now, read_json, save_json, stat_field};
-use crate::workers::{Adoption, Pool, Worker};
+use crate::workers::{Adoption, Pool, Worker, harness};
 
 const SHELLS: [&str; 5] = ["bash", "zsh", "fish", "sh", "dash"];
 /// An approved adoption waits this long for its idle.
@@ -27,29 +26,6 @@ const SETTLE: u32 = 60;
 /// The registry's status "shell": its turn is over but a background shell still runs, which the harness shows as working.
 /// Adopting at idle waits on it too; past this, seimei hears what holds it.
 const SHELL_NOTE: f64 = 600.0;
-
-/// Claude Code runs each Bash call inside a shell that sources its snapshot; the call's own command sits below it.
-static WRAPPER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\S*\b(ba|z|fi|da)?sh -c .*shell-snapshots/").unwrap());
-static EVAL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)eval '(.*)' < /dev/null").unwrap());
-/// Language servers Claude Code's LSP tool starts: they end with the session too, but are not worth a mention.
-static LSP: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"(^|/)(clangd|pyright|pyright-langserver|pylsp|basedpyright|rust-analyzer|gopls|tsserver|typescript-language-server|jdtls|lua-language-server|\S*-language-server|\S*-lsp)(\s|$)",
-    )
-    .unwrap()
-});
-/// What a Claude Code process started from seimei must not inherit from it.
-const CLEAN_ENV: [&str; 9] = [
-    "CLAUDE_CODE_CHILD_SESSION",
-    "CLAUDECODE",
-    "CLAUDE_PID",
-    "CLAUDE_CODE_SESSION_ID",
-    "CLAUDE_CODE_MESSAGING_SOCKET",
-    "CLAUDE_CODE_BRIDGE_SESSION_ID",
-    "CLAUDE_JOB_DIR",
-    "CLAUDE_CODE_SESSION_ATTENDED",
-    "LD_PRELOAD",
-];
 
 fn comm(pid: i64) -> String {
     std::fs::read_to_string(format!("/proc/{pid}/comm")).map(|s| s.trim().to_string()).unwrap_or_default()
@@ -69,17 +45,12 @@ fn alive(pid: i64) -> bool {
     stat_field(pid, 0).is_some_and(|s| s != "Z")
 }
 
-/// What a background shell runs: the command inside Claude Code's snapshot wrapper.
-pub fn job(cmd: &str) -> String {
-    match EVAL.captures(cmd) {
-        Some(m) if WRAPPER.is_match(cmd) => m[1].replace("'\\''", "'"),
-        _ => cmd.into(),
-    }
-}
-
 /// The background jobs a session runs (its Bash calls and what they started), language servers left out.
 pub fn jobs(pid: i64) -> Vec<String> {
-    children(pid).into_iter().map(cmdline).filter(|c| !c.is_empty() && !LSP.is_match(c)).map(|c| job(&c)).collect()
+    (children(pid).into_iter().map(cmdline))
+        .filter(|c| !c.is_empty() && !harness::is_language_server(c))
+        .map(|c| harness::job_command(&c))
+        .collect()
 }
 
 /// Every process below pid, with its command line, in the order found.
@@ -131,37 +102,13 @@ async fn end_left(kids: &[(i64, String)]) {
     }
 }
 
-/// A background session of Claude Code's daemon: `claude stop <its job id>` ends it and keeps its conversation.
-fn background(s: &Value) -> bool {
-    !s["job"].is_null() && s["job"] != "" && s["job"] != false
-}
-
-/// Claude Code's daemon ends the session cleanly. "" or what went wrong.
-fn stop_job(job: &str) -> String {
-    let mut c = std::process::Command::new(seimei_proto::Options::default().cli_path());
-    c.args(["stop", job]).current_dir("/");
-    for k in CLEAN_ENV {
-        c.env_remove(k);
-    }
-    let out = match c.output() {
-        Ok(o) => o,
-        Err(e) => return e.to_string(),
-    };
-    if out.status.success() {
-        return String::new();
-    }
-    let said = if out.stderr.is_empty() { &out.stdout } else { &out.stderr };
-    let said = chars(String::from_utf8_lossy(said).trim(), 300);
-    if said.is_empty() { format!("exit {}", out.status.code().unwrap_or(-1)) } else { said }
-}
-
 fn find<'a>(rows: &'a [Value], key: &str) -> Option<&'a Value> {
     let key = key.trim();
     let low = key.to_lowercase();
     (rows.iter().find(|s| s["name"] == key))
         .or_else(|| rows.iter().find(|s| s["name"].as_str().is_some_and(|n| n.to_lowercase() == low)))
         .or_else(|| rows.iter().find(|s| as_text(&s["pid"]) == key))
-        .or_else(|| rows.iter().find(|s| background(s) && as_text(&s["job"]) == key))
+        .or_else(|| rows.iter().find(|s| harness::background(s) && as_text(&s["job"]) == key))
 }
 
 fn idle(s: &Value) -> bool {
@@ -291,7 +238,7 @@ impl Adopter {
         }
         let Some(s) = s else { return Ok(format!("No session of the user's is named \"{key}\".")) };
         let (name, pid) = (as_text(&s["name"]), s["pid"].as_i64().unwrap_or(0));
-        let bg = background(&s);
+        let bg = harness::background(&s);
         if s["kind"] != "interactive" && !bg {
             return Ok(format!(
                 "{name} is a {} session; only interactive and background ones can be adopted.",
@@ -420,7 +367,7 @@ impl Adopter {
         if !w.rec().started {
             return Ok(format!("{name} has no session yet; nothing to hand over."));
         }
-        w.claude_only("be handed to you as a session")?;
+        w.default_harness_only("be handed to you as a session")?;
         if card {
             let argv = self.pool.resume_argv(w);
             let shown = argv[..argv.len() - 1].join(" ");
@@ -455,7 +402,7 @@ impl Adopter {
     /// End the session's process and go on with its conversation as a shikigami.
     pub async fn adopt(&self, s: &Value, interrupt: bool, wish: &Wish) -> Result<String, String> {
         let (name, pid) = (as_text(&s["name"]), s["pid"].as_i64().unwrap_or(0));
-        let bg = background(s);
+        let bg = harness::background(s);
         let win = if bg { None } else { kitty::window(pid).ok() };
         let shell = if bg { 0 } else { ppid(pid) };
         let shell = if SHELLS.contains(&comm(shell).as_str()) { shell } else { 0 };
@@ -503,8 +450,8 @@ impl Adopter {
         Ok(said)
     }
 
-    /// Stop the turn in flight. A background session needs nothing here: `claude stop` ends its turn too. Otherwise
-    /// Esc, like the user at the keyboard (SIGINT without the window), then a wait for it to settle.
+    /// Stop the turn in flight: a background session needs nothing, since its stop ends the turn too.
+    /// Otherwise Esc, like the user at the keyboard (SIGINT without the window), then a wait for it to settle.
     async fn interrupt(&self, pid: i64, bg: bool, win: &Option<kitty::Window>) -> Result<bool, String> {
         if bg {
             return Ok(true);
@@ -526,7 +473,7 @@ impl Adopter {
 /// The shikigami a session becomes: the wish's model, effort and context, else the session's own, else the plan's.
 async fn adoption(s: &Value, wish: &Wish) -> Adoption {
     let name = as_text(&s["name"]);
-    let path = transcript(&as_text(&s["session_id"]), &as_text(&s["cwd"]));
+    let path = harness::transcript(&as_text(&s["session_id"]), &as_text(&s["cwd"]));
     let tokens = match path {
         Some(p) => tokio::task::spawn_blocking(move || brief(&p).ok()).await.ok().flatten(),
         None => None,
@@ -561,10 +508,14 @@ async fn adoption(s: &Value, wish: &Wish) -> Adoption {
 fn ended_jobs(kids: &[(i64, String)]) -> Vec<String> {
     let mut died: Vec<String> = vec![];
     for (p, c) in kids {
-        if alive(*p) || c.is_empty() || LSP.is_match(c) || (WRAPPER.is_match(c) && job(c) == *c) {
+        if alive(*p)
+            || c.is_empty()
+            || harness::is_language_server(c)
+            || (harness::is_wrapper(c) && harness::job_command(c) == *c)
+        {
             continue;
         }
-        let j = job(c);
+        let j = harness::job_command(c);
         if !died.contains(&j) {
             died.push(j);
         }
@@ -612,7 +563,7 @@ async fn end(s: &Value, pid: i64, bg: bool) -> Result<(), String> {
     if bg {
         let job = as_text(&s["job"]);
         let j = job.clone();
-        let err = tokio::task::spawn_blocking(move || stop_job(&j)).await.map_err(|e| e.to_string())?;
+        let err = tokio::task::spawn_blocking(move || harness::stop_job(&j)).await.map_err(|e| e.to_string())?;
         if !err.is_empty() {
             return Err(format!("claude stop {job} failed: {err}"));
         }
@@ -648,15 +599,6 @@ mod tests {
         assert_eq!(find(&rows, "41").unwrap()["pid"], 41);
         assert_eq!(find(&rows, "bg7").unwrap()["pid"], 42, "a background session by its job id");
         assert!(find(&rows, "nope").is_none());
-    }
-
-    #[test]
-    fn a_job_is_the_command_inside_the_snapshot_wrapper() {
-        let wrapped = "/bin/bash -c source /home/me/.claude/shell-snapshots/snapshot-bash-1.sh && eval 'cargo test -p x' < /dev/null && pwd -P >| /tmp/cwd";
-        assert_eq!(job(wrapped), "cargo test -p x");
-        let quoted = "bash -c x shell-snapshots/s.sh; eval 'echo '\\''hi'\\''' < /dev/null";
-        assert_eq!(job(quoted), "echo 'hi'");
-        assert_eq!(job("python3 server.py"), "python3 server.py", "a plain command stays");
     }
 
     #[test]

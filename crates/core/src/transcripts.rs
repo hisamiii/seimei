@@ -8,7 +8,7 @@ use regex::Regex;
 use serde_json::{Value, json};
 
 use crate::paths::home;
-use crate::util::{chars, read_from, read_tail};
+use crate::util::{chars, read_from};
 
 /// What a brief reads from the end of a transcript.
 const TAIL: u64 = 512 << 10;
@@ -17,39 +17,7 @@ const CONTEXT: f64 = 1_000_000.0;
 static PATHS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?:~|\$HOME|/home/[a-z_][\w-]*)/[\w.@+-]+(?:/[\w.@+-]+)*").unwrap());
 
-/// Claude Code's config dir: CLAUDE_CONFIG_DIR, else ~/.claude.
-pub fn claude_dir() -> PathBuf {
-    std::env::var_os("CLAUDE_CONFIG_DIR")
-        .filter(|d| !d.is_empty())
-        .map_or_else(|| home().join(".claude"), PathBuf::from)
-}
-
-/// The session's current transcript; a session can continue into a new one.
-pub fn transcript(session: &str, cwd: &str) -> Option<PathBuf> {
-    let projects = claude_dir().join("projects");
-    let folder: String = cwd.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
-    let mut sid = session.to_string();
-    for _ in 0..8 {
-        let mut path = projects.join(&folder).join(format!("{sid}.jsonl"));
-        if !path.exists() {
-            let name = format!("{sid}.jsonl");
-            path = std::fs::read_dir(&projects).ok()?.flatten().map(|d| d.path().join(&name)).find(|p| p.exists())?;
-        }
-        let tail = read_tail(&path, 4096).ok()?;
-        let next = tail.split(|&b| b == b'\n').rev().take(3).find_map(|line| {
-            let row: Value = serde_json::from_slice(line).ok()?;
-            (row["type"] == "continued-in").then(|| row["continuedInSessionId"].as_str().map(String::from)).flatten()
-        });
-        match next {
-            Some(n) => sid = n,
-            None => return Some(path),
-        }
-    }
-    None
-}
-
-/// The project a path belongs to: its folder under ~/Development/Projects, ~/Development/Scratch or ~/.config, else
-/// its top folder under home.
+/// The project a path belongs to: its folder under ~/Development/Projects, ~/Development/Scratch or ~/.config, else its top folder under home.
 pub fn project_of(path: &str) -> Option<String> {
     let path = crate::paths::expand(path);
     let rest = path.strip_prefix(&format!("{}/", home().display()))?;

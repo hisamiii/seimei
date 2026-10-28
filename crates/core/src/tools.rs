@@ -17,11 +17,12 @@ use crate::paths::home;
 use crate::push::Push;
 use crate::sessions;
 use crate::tasks::Board;
-use crate::transcripts::{project_of, transcript};
+use crate::transcripts::project_of;
 use crate::uploads::Uploads;
 use crate::usage::Usage;
 use crate::util::{as_text, chars, flag, now, truthy};
 use crate::watches::{DEFAULT_HOURS, NewRule, TRIGGERS, Watches, mins};
+use crate::workers::harness::transcript;
 use crate::workers::{ACTIVE, EFFORTS, MODELS, Pool, Summon, Worker};
 
 /// data/tools.json: the dispatcher's server, and under "shikigami" the shikigami's own (ask, board).

@@ -152,7 +152,7 @@ impl App {
         let files = Arc::new(Files::new(state));
         let uploads = Arc::new(Uploads::new(state));
         let usage = Arc::new(Usage::new(state, Some(events.clone())));
-        let cost = Arc::new(Cost::new(&seimei_core::transcripts::claude_dir()));
+        let cost = Arc::new(Cost::new(&seimei_core::workers::harness::projects_dir()));
         let approvals = Arc::new(Approvals::new(events.clone()));
         let guard = Arc::new(Guard::new(events.clone(), approvals.clone(), state));
         let parts = workers::Parts {

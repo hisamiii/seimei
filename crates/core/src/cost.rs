@@ -13,36 +13,9 @@ use serde_json::{Map, Value, json};
 
 use crate::util::{now, read_from};
 
-/// USD per million tokens: input, 5-minute cache write, 1-hour cache write, cache read, output.
-/// From https://platform.claude.com/docs/en/about-claude/pricing (checked 2026-10-20). Longest prefix wins.
-pub const PRICES_CHECKED: &str = "2026-10-20";
-pub const PRICES: [(&str, [f64; 5]); 20] = [
-    ("claude-fable-5-1", [10.0, 12.5, 20.0, 0.25, 50.0]),
-    ("claude-mythos-5-1", [10.0, 12.5, 20.0, 0.25, 50.0]),
-    ("claude-fable-5", [10.0, 12.5, 20.0, 1.0, 50.0]),
-    ("claude-mythos-5", [10.0, 12.5, 20.0, 1.0, 50.0]),
-    ("claude-opus-5-5", [4.0, 5.0, 8.0, 0.2, 20.0]),
-    ("claude-opus-5", [5.0, 6.25, 10.0, 0.5, 25.0]),
-    ("claude-opus-4-8", [5.0, 6.25, 10.0, 0.5, 25.0]),
-    ("claude-opus-4-7", [5.0, 6.25, 10.0, 0.5, 25.0]),
-    ("claude-opus-4-6", [5.0, 6.25, 10.0, 0.5, 25.0]),
-    ("claude-opus-4-5", [5.0, 6.25, 10.0, 0.5, 25.0]),
-    ("claude-opus-4-1", [15.0, 18.75, 30.0, 1.5, 75.0]),
-    ("claude-opus-4", [15.0, 18.75, 30.0, 1.5, 75.0]),
-    ("claude-sonnet-5-5", [2.0, 2.5, 4.0, 0.1, 10.0]),
-    ("claude-sonnet-5", [2.0, 2.5, 4.0, 0.2, 10.0]),
-    ("claude-sonnet-4-6", [3.0, 3.75, 6.0, 0.3, 15.0]),
-    ("claude-sonnet-4-5", [3.0, 3.75, 6.0, 0.3, 15.0]),
-    ("claude-sonnet-4", [3.0, 3.75, 6.0, 0.3, 15.0]),
-    ("claude-haiku-5-5", [0.1, 0.125, 0.2, 0.01, 0.5]),
-    ("claude-haiku-4-5", [1.0, 1.25, 2.0, 0.1, 5.0]),
-    ("claude-haiku-3-5", [0.8, 1.0, 1.6, 0.08, 4.0]),
-];
-/// Haiku 5.5 prompts over 100,000 tokens (input + cache reads + cache writes) pay these instead.
-const LONG: (&str, u64, [f64; 5]) = ("claude-haiku-5-5", 100_000, [0.5, 0.625, 1.0, 0.05, 2.5]);
-/// Fast mode replaces input and output prices; the cache multipliers apply on top.
-const FAST: [(&str, f64, f64); 3] =
-    [("claude-opus-5-5", 8.0, 40.0), ("claude-opus-5", 10.0, 50.0), ("claude-opus-4-8", 10.0, 50.0)];
+pub use crate::workers::harness::{PRICES, PRICES_CHECKED};
+use crate::workers::harness::{FAST, LONG};
+
 const US_ONLY: f64 = 1.1;
 const WEB_SEARCH: f64 = 10.0 / 1000.0;
 const RESCAN: f64 = 10.0;
@@ -196,9 +169,9 @@ fn jsonl_files(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 impl Cost {
-    /// Over <claude config dir>/projects.
-    pub fn new(claude_dir: &Path) -> Cost {
-        Cost { root: claude_dir.join("projects"), scan: Mutex::new(Scan::default()) }
+    /// Over the harness's transcripts folder.
+    pub fn new(projects: &Path) -> Cost {
+        Cost { root: projects.to_path_buf(), scan: Mutex::new(Scan::default()) }
     }
 
     /// Read what the transcripts gained since the last scan, at most every few seconds. Blocking: it reads files.

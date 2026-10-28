@@ -13,11 +13,11 @@ use crate::events::EventLog;
 use crate::kitty;
 use crate::paths::home;
 use crate::transcripts::{
-    brief, claude_dir, input_of, project_of, prompt_text, rows_from, summary, text_of, time_of, tool_results,
-    transcript,
+    brief, input_of, project_of, prompt_text, rows_from, summary, text_of, time_of, tool_results,
 };
 use crate::util::{as_text, chars, children, mtime, now, read_tail, stat_field};
 use crate::workers::Pool;
+use crate::workers::harness::{self, transcript, waiting_text};
 
 /// What peek and the timeline read from the end of a transcript.
 const TAIL: u64 = 4 << 20;
@@ -25,8 +25,6 @@ const TAIL: u64 = 4 << 20;
 const TEXT: usize = 1500;
 /// A tool result in the timeline, at most.
 const RESULT: usize = 4000;
-static OUTPUT: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^/tmp/claude-\d+/[^/]+/[0-9a-f-]+/tasks/[\w-]+\.output$").unwrap());
 static ANSI: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\x1b(\[[0-9;:?]*[A-Za-z]|\][^\x07\x1b]*(\x07|\x1b\\)|[()][A-Z0-9])").unwrap());
 static OURS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(seimei(-dev)?|shikigami .+)$").unwrap());
@@ -94,7 +92,7 @@ pub fn transcript_of(rec: &Value) -> Option<PathBuf> {
 /// Running sessions, newest activity first.
 pub fn live(own: &Own) -> Vec<Live> {
     let mut out = vec![];
-    let Ok(dir) = std::fs::read_dir(claude_dir().join("sessions")) else { return out };
+    let Ok(dir) = std::fs::read_dir(harness::registry_dir()) else { return out };
     for f in dir.flatten() {
         let path = f.path();
         if path.extension().is_none_or(|e| e != "json") {
@@ -272,7 +270,7 @@ pub fn running_output(pid: i64, lines: usize) -> Vec<String> {
     let mut best: Option<(f64, PathBuf)> = None;
     for c in children(pid) {
         let Ok(out) = std::fs::read_link(format!("/proc/{c}/fd/1")) else { continue };
-        if OUTPUT.is_match(&out.to_string_lossy()) && out.is_file() {
+        if harness::is_task_output(&out.to_string_lossy()) && out.is_file() {
             let m = mtime(&out);
             if best.as_ref().is_none_or(|b| m > b.0) {
                 best = Some((m, out));
@@ -295,18 +293,6 @@ pub fn running_output(pid: i64, lines: usize) -> Vec<String> {
         .filter(|r| !r.trim().is_empty())
         .collect();
     rows[rows.len().saturating_sub(lines)..].to_vec()
-}
-
-/// What Claude Code writes in waitingFor, as a sentence.
-pub fn waiting_text(w: Option<&str>) -> String {
-    match w.filter(|w| !w.is_empty()) {
-        None => "Waiting on the server".into(),
-        Some("dialog open") => "A dialog is open on the server".into(),
-        Some("input needed") => "Input on the server".into(),
-        Some("sandbox request") => "A sandboxed command wants network access".into(),
-        Some("goal proposal") => "Proposed a session goal".into(),
-        Some(w) => format!("Waiting on the server: {w}"),
-    }
 }
 
 /// A screen question read, by pid: the status time it was read at, and the question.
@@ -406,7 +392,7 @@ impl SessionEvents {
     pub fn scan(&mut self, rows: &[Value]) -> Vec<Line> {
         let mut out = vec![];
         // Sessions working in an agent's scratch folder are test fixtures, not the user's work.
-        let jobs = claude_dir().join("jobs");
+        let jobs = harness::jobs_dir();
         let test = std::env::var_os("SEIMEI_TEST_SESSIONS").is_some_and(|v| !v.is_empty());
         let rows: Vec<&Value> = (rows.iter())
             .filter(|r| {
@@ -496,7 +482,7 @@ impl SessionEvents {
             if Path::new(&format!("/proc/{pid}")).exists() {
                 continue; // still running, only hidden (parked, or renamed out of the list)
             }
-            let line = if claude_dir().join("sessions").join(format!("{pid}.json")).exists() {
+            let line = if harness::registry_dir().join(format!("{pid}.json")).exists() {
                 format!("session \"{}\" (pid {pid}) died without closing: killed or crashed{}", st.name, oomd())
             } else {
                 format!("session \"{}\" (pid {pid}) was closed", st.name)
@@ -686,8 +672,5 @@ mod tests {
         assert_eq!(ago(t - 190.0), "3 min ago");
         assert_eq!(ago(t - 7300.0), "2 h ago");
         assert_eq!(ago(t + 30.0), "0s ago", "a clock ahead reads as now");
-        assert_eq!(waiting_text(Some("dialog open")), "A dialog is open on the server");
-        assert_eq!(waiting_text(Some("")), "Waiting on the server");
-        assert_eq!(waiting_text(Some("something new")), "Waiting on the server: something new");
     }
 }

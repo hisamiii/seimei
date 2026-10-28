@@ -128,7 +128,7 @@ fn setup_first_run_then_again() {
 }
 
 #[test]
-fn setup_defaults_and_no_claude() {
+fn setup_defaults_and_no_agent_cli() {
     let h = Home::new("defaults");
     // Every default (end of input) but the password, no terminal bridge, no guard rules and no start.
     let o = h.run(&["setup"], "\n\n\n\n\n\n\n\n\nlong enough\nlong enough\nn\nn\nn\n");

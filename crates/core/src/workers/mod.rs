@@ -26,20 +26,23 @@ use crate::aliases::Aliases;
 use crate::approvals::Approvals;
 use crate::archive::Archive;
 use crate::cost::Cost;
-use crate::dispatcher::{NO_CONNECTORS, OFF_TOOLS, hook, result_text, summarize};
+use crate::dispatcher::{result_text, summarize};
 use crate::events::EventLog;
-use crate::guard::{Guard, HOOK_TIMEOUT};
+use crate::guard::Guard;
 use crate::metrics::{self, WorkerEvents};
 use crate::paths::{expand, home};
 use crate::plugins::Plugins;
 use crate::sessions::{self, Own};
 use crate::tasks::{Board, Fields};
-use crate::transcripts::{brief, project_of, transcript};
+use crate::transcripts::{brief, project_of};
 use crate::usage::Usage;
 use crate::util::{as_text, chars, far, hex, now, random_bytes, read_json, save_json, sh_quote, uuid4};
 
 mod acp_session;
-pub use acp_session::{Mode, acp_mode, claude_shaped};
+pub mod claude; // lint: allow scoped-name
+pub use acp_session::{Mode, acp_mode, guard_shaped};
+pub use claude as harness; // lint: allow scoped-name
+use harness::transcript;
 
 const PROMPT: &str = "\
 # You are a shikigami
@@ -55,8 +58,6 @@ When you switch to a queued board item, start it (mcp__shikigami__board); when i
 ";
 pub const EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 pub const MODELS: [&str; 3] = ["opus", "sonnet", "haiku"];
-/// What Claude Code's /effort command answers (no model turn): not part of the task.
-const EFFORT_SET: [&str; 2] = ["Set effort level", "Effort level"];
 /// The context a shikigami may fill before it compacts, in tokens: most at 256-400k, 1m only where really needed,
 /// 200k where the plan's models hold no more (crate::plan says which it offers).
 pub const CONTEXTS: [(&str, f64); 4] =
@@ -369,8 +370,8 @@ impl Worker {
         self.rec.lock().unwrap().harness.as_deref().and_then(|h| h.strip_prefix("acp:")).map(String::from)
     }
 
-    /// Claude Code only: what an ACP shikigami cannot do.
-    pub(crate) fn claude_only(&self, what: &str) -> Result<(), String> {
+    /// What only the default harness can do, not an ACP shikigami.
+    pub(crate) fn default_harness_only(&self, what: &str) -> Result<(), String> {
         match self.agent() {
             Some(a) => Err(format!("{} runs on the ACP agent {a}, which cannot {what}", self.name())),
             None => Ok(()),
@@ -460,15 +461,8 @@ impl Worker {
         let r = self.rec();
         let subagents = if r.subagents.is_empty() { &crate::plan::get().quick } else { &r.subagents };
         let mut env = self.pool().plugins.env(&r.name);
-        env.extend([
-            (NO_CONNECTORS.0.to_string(), NO_CONNECTORS.1.to_string()),
-            ("CLAUDE_CODE_DISABLE_AUTO_MEMORY".into(), "1".into()),
-            ("CLAUDE_CODE_SUBAGENT_MODEL".into(), subagents.clone()),
-            ("CLAUDE_CODE_ENABLE_TODO_TOOLS".into(), "1".into()),
-        ]);
-        if let Some(cap) = CONTEXTS.iter().find(|c| r.context_cap == c.0) {
-            env.push(("CLAUDE_CODE_AUTO_COMPACT_WINDOW".into(), format!("{}", cap.1 as i64)));
-        }
+        let cap = CONTEXTS.iter().find(|c| r.context_cap == c.0).map(|c| c.1);
+        env.extend(harness::worker_env(subagents, cap));
         env
     }
 
@@ -485,24 +479,17 @@ impl Worker {
             can_use_tool: true,
             // Its own tools and seimei's plugins carry their own cards; external MCP servers ask like the rest.
             allowed_tools: [vec!["mcp__shikigami".into()], plugins.allowed(Some(&groups))].concat(),
-            setting_sources: Some(vec!["user".into(), "project".into(), "local".into()]),
+            setting_sources: Some(harness::SETTING_SOURCES.map(String::from).to_vec()),
             system_prompt: SystemPrompt::Preset { append: Some(self.prompt()) },
             sdk_mcp_servers: vec!["shikigami".into()],
             mcp_servers: plugins.servers(&r.name, Some(&self.id), Some(&groups)),
             mcp_config_file: Some(plugins.config_file(&self.id)),
-            // Workers talk to the user through their report and ask, never to other sessions directly.
-            disallowed_tools: (OFF_TOOLS.iter().chain(&["AskUserQuestion", "SendMessage", "ListAgents"]))
-                .map(|t| t.to_string())
-                .collect(),
+            disallowed_tools: harness::OFF_TOOLS.iter().chain(&harness::WORKER_OFF).map(|t| t.to_string()).collect(),
             skills: Some(SKILLS.iter().map(|s| s.to_string()).collect()),
             env: self.env(),
             effort: r.effort.clone().filter(|e| !e.is_empty()),
             extra_args: vec![("name".into(), Some(format!("shikigami {}", r.name)))],
-            hooks: vec![
-                ("PreToolUse".into(), vec![hook("pre", Some(HOOK_TIMEOUT))]),
-                ("PostToolUseFailure".into(), vec![hook("failed", None)]),
-                ("PostToolUse".into(), vec![hook("done", None), hook("nudge", None), hook("style", None)]),
-            ],
+            hooks: harness::hooks(&["done", "nudge", "style"]),
             resume,
             session_id,
             ..Options::default()
@@ -646,7 +633,7 @@ impl Worker {
 
     /// Stop it if it works, let go of its process, and resume the session in a terminal on the server.
     async fn to_laptop(self: &Arc<Self>, title: &str, extra: &[&str]) -> Result<Option<Value>, String> {
-        self.claude_only("open in a terminal")?;
+        self.default_harness_only("open in a terminal")?;
         if !self.rec().started {
             return Err("it has no session yet".into());
         }
@@ -683,7 +670,7 @@ impl Worker {
         if self.state() == "released" {
             return Err(format!("{} is the user's own session now", self.name()));
         }
-        self.claude_only("change its effort or model")?;
+        self.default_harness_only("change its effort or model")?;
         let (done, rx) = oneshot::channel();
         let (effort, model) = (effort.map(String::from), model.map(String::from));
         self.cmd(Cmd::Tune { effort, model, by: by.into(), done });
@@ -714,8 +701,7 @@ impl Worker {
         };
         let Some((tid, no_steps)) = task else { return json!({}) };
         let tool = inp["tool_name"].as_str().unwrap_or("");
-        if inp.get("agent_id").is_some_and(|a| !a.is_null()) || !no_steps || matches!(tool, "TaskCreate" | "TaskUpdate")
-        {
+        if inp.get("agent_id").is_some_and(|a| !a.is_null()) || !no_steps || harness::TODO_TOOLS.contains(&tool) {
             return json!({});
         }
         let calls = self.edit(|r| {
@@ -728,7 +714,7 @@ impl Worker {
         if calls != NUDGE_AFTER {
             return json!({});
         }
-        json!({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": NUDGE}})
+        harness::after_tool_context(NUDGE)
     }
 
     /// Its own tools: ask, board.
@@ -1024,7 +1010,7 @@ impl Session {
         let Some(effort) = effort.filter(|e| !e.is_empty()) else { return };
         if let Some(c) = &self.client {
             self.quiet += 1;
-            if let Err(e) = c.query(&format!("/effort {effort}")) {
+            if let Err(e) = c.query(&harness::effort_command(&effort)) {
                 eprintln!("seimei: /effort for {}: {e}", self.w.name());
             }
         }
@@ -1073,7 +1059,9 @@ impl Session {
             Message::Assistant(a) => self.assistant(a),
             Message::User(u) => self.user(u),
             Message::Result(r) => {
-                if self.quiet > 0 && r.result.as_deref().is_some_and(|t| EFFORT_SET.iter().any(|e| t.starts_with(e))) {
+                if self.quiet > 0
+                    && r.result.as_deref().is_some_and(|t| harness::EFFORT_SET.iter().any(|e| t.starts_with(e)))
+                {
                     self.quiet -= 1;
                     return;
                 }
@@ -1098,7 +1086,7 @@ impl Session {
         let blocks = msg.message.content;
         let texts =
             || blocks.iter().filter_map(|b| if let ContentBlock::Text { text } = b { Some(text) } else { None });
-        if self.quiet > 0 && texts().any(|t| EFFORT_SET.iter().any(|e| t.starts_with(e))) {
+        if self.quiet > 0 && texts().any(|t| harness::EFFORT_SET.iter().any(|e| t.starts_with(e))) {
             return;
         }
         let goes_on = blocks.iter().any(|b| match b {
@@ -1854,7 +1842,7 @@ impl Pool {
     /// The command that resumes a shikigami's session in a terminal, as the plugins run it (the queue's wrapper).
     pub fn resume_argv(&self, w: &Worker) -> Vec<String> {
         let r = w.rec();
-        self.plugins.wrap(&r.name, vec!["claude".into(), "--resume".into(), r.session_id])
+        self.plugins.wrap(&r.name, harness::resume_argv(r.session_id))
     }
 
     /// Open its session in a terminal on the server: the window it opened in (its id, when known).

@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::events::Event;
 use crate::util::{chars, local_time, now};
@@ -19,8 +19,7 @@ const USER_ONE: usize = 2000;
 /// The dispatcher's own settings: a compaction hook that prints the checklist, which no shikigami and none of the user's sessions get.
 pub fn settings(path: &Path) -> String {
     let _ = std::fs::write(path, CHECKLIST);
-    let quoted = shlex::try_quote(&path.display().to_string()).map(|q| q.into_owned()).unwrap_or_default();
-    json!({"hooks": {"PreCompact": [{"hooks": [{"type": "command", "command": format!("cat {quoted}")}]}]}}).to_string()
+    crate::workers::harness::compact_settings(path)
 }
 
 fn clip(text: &str, n: usize, more: &str) -> String {

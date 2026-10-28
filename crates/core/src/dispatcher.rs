@@ -10,8 +10,8 @@ use std::time::Duration;
 
 use regex::Regex;
 use seimei_proto::{
-    AssistantMessage, BoxFuture, Client, ContentBlock, Handler, HookMatcher, Message, Options, Permission,
-    PermissionRequest, ResultMessage, StreamEvent, SystemPrompt, UserContent, UserMessage,
+    AssistantMessage, BoxFuture, Client, ContentBlock, Handler, Message, Options, Permission, PermissionRequest,
+    ResultMessage, StreamEvent, SystemPrompt, UserContent, UserMessage,
 };
 use serde_json::{Map, Value, json};
 use tokio::sync::mpsc;
@@ -19,11 +19,12 @@ use tokio::time::{Instant, sleep_until};
 
 use crate::approvals::Approvals;
 use crate::events::EventLog;
-use crate::guard::{Guard, HOOK_TIMEOUT};
+use crate::guard::Guard;
 use crate::paths::expand;
 use crate::tools::Tools;
 use crate::usage::Usage;
 use crate::util::chars;
+use crate::workers::harness;
 
 /// A reply that starts with one of these overrides where its turn's class puts it: chat: moves the rest of an event turn to the chat, trajectory: keeps a reply out of the chat (one that asks something, or answers events that need the user, still goes there).
 /// A first line "re: <words from one of the user's messages>" anchors the reply to that message.
@@ -38,23 +39,6 @@ const RE_SEARCH: usize = 50;
 const HOLD: Duration = Duration::from_secs(30 * 60);
 /// Tokens at which the dispatcher's context compacts; config [dispatcher] compact_window.
 const COMPACT_WINDOW: i64 = 400_000;
-/// Built-in tools no session of seimei's has a use for: scheduling, notebooks, worktree switching, remote triggers,
-/// design sync, and pushes (seimei pings through notify).
-pub const OFF_TOOLS: [&str; 11] = [
-    "Workflow",
-    "NotebookEdit",
-    "CronCreate",
-    "CronDelete",
-    "CronList",
-    "RemoteTrigger",
-    "PushNotification",
-    "DesignSync",
-    "EnterWorktree",
-    "ExitWorktree",
-    "ScheduleWakeup",
-];
-/// Sessions seimei starts leave out the user's claude.ai connectors (Gmail, Drive, Docs).
-pub const NO_CONNECTORS: (&str, &str) = ("ENABLE_CLAUDEAI_MCP_SERVERS", "false");
 /// What a tool result shows at most.
 const RESULT_CHARS: usize = 4000;
 /// What a reply quotes to seimei: the first this many chars of the message, or a card's first line.
@@ -117,7 +101,7 @@ mod tests {
     }
 
     #[test]
-    fn claude_codes_own_inputs_are_named() {
+    fn the_harness_inputs_are_named() {
         let bg = "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>";
         assert_eq!(own_input(bg).as_deref(), Some("a background task ended"));
         let peer = "<cross-session-message from=\"cleanup\">hi</cross-session-message>";
@@ -207,10 +191,6 @@ fn flat_case(text: &str) -> String {
 }
 
 /// A hook on every tool call, answered by seimei's handler under this callback id.
-pub(crate) fn hook(id: &str, timeout: Option<f64>) -> HookMatcher {
-    HookMatcher { matcher: None, callbacks: vec![id.into()], timeout }
-}
-
 pub fn human(n: u64) -> String {
     if n >= 1 << 20 {
         format!("{:.1} MB", n as f64 / (1 << 20) as f64)
@@ -589,7 +569,7 @@ impl Dispatcher {
         let saved = std::fs::read_to_string(&file).map(|s| s.trim().to_string()).unwrap_or_default();
         let cwd = &self.cfg.cwd;
         let (resume, session_id) =
-            if !saved.is_empty() && crate::transcripts::transcript(&saved, &cwd.display().to_string()).is_some() {
+            if !saved.is_empty() && harness::transcript(&saved, &cwd.display().to_string()).is_some() {
                 (Some(saved), None)
             } else {
                 // The transcript only exists after the first message, so a fresh id is kept until then.
@@ -600,11 +580,7 @@ impl Dispatcher {
         let checklist = self.state.join("compact-checklist.md");
         let plugins = &self.tools.pool.plugins;
         let mut env = plugins.env("seimei");
-        env.extend([
-            (NO_CONNECTORS.0.into(), NO_CONNECTORS.1.into()),
-            // It compacts at this many tokens, whatever the model's window is.
-            ("CLAUDE_CODE_AUTO_COMPACT_WINDOW".into(), self.cfg.compact_window.to_string()),
-        ]);
+        env.extend(harness::dispatcher_env(self.cfg.compact_window));
         Options {
             cwd: Some(cwd.clone()),
             model: Some(self.cfg.model.clone()),
@@ -614,21 +590,20 @@ impl Dispatcher {
             // seimei's tools and its plugins carry their own cards; external MCP servers ask like the rest.
             allowed_tools: [vec!["mcp__seimei".into()], plugins.allowed(None)].concat(),
             include_partial_messages: true,
-            setting_sources: Some(vec!["user".into(), "project".into(), "local".into()]),
+            setting_sources: Some(harness::SETTING_SOURCES.map(String::from).to_vec()),
             system_prompt: SystemPrompt::Preset { append: Some(self.prompt()) },
             env,
-            // It delegates through summon: subagents would be invisible to the user. Agent is still Task in some CLIs.
-            disallowed_tools: OFF_TOOLS.iter().chain(&["Agent", "LSP"]).map(|t| t.to_string()).collect(),
+            disallowed_tools: harness::OFF_TOOLS
+                .iter()
+                .chain(&harness::DISPATCHER_OFF)
+                .map(|t| t.to_string())
+                .collect(),
             skills: Some(vec![]),
             sdk_mcp_servers: vec!["seimei".into()],
             mcp_servers: plugins.servers("seimei", None, None),
             mcp_config_file: Some(plugins.config_file("seimei")),
-            hooks: vec![
-                ("PreToolUse".into(), vec![hook("pre", Some(HOOK_TIMEOUT))]),
-                ("PostToolUseFailure".into(), vec![hook("failed", None)]),
-                ("PostToolUse".into(), vec![hook("style", None)]),
-            ],
-            // Only the dispatcher's compactions get the checklist: a --settings layer, not ~/.claude.
+            hooks: harness::hooks(&["style"]),
+            // Only the dispatcher's compactions get the checklist.
             settings: Some(crate::recall::settings(&checklist)),
             // A fixed name is a fixed address: peers reply to "seimei" across restarts.
             extra_args: vec![("name".into(), Some(self.cfg.name.clone()))],

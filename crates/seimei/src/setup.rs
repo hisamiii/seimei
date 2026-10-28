@@ -10,11 +10,9 @@ use std::process::Command;
 
 use seimei_core::auth::{Auth, password_problem};
 use seimei_core::util::{config_file, config_home, data_dir};
+use seimei_core::workers::harness;
 
 const EXAMPLE: &str = include_str!("../../../config.example.toml");
-
-/// The agent CLI version seimei's protocol client was built against; older ones may lack parts of it.
-const TESTED_CLAUDE: (u32, u32) = (2, 1);
 
 /// Terminals setup knows, each with how it opens in a folder under a title (the command follows).
 const TERMINALS: [(&str, &str); 8] = [
@@ -100,14 +98,6 @@ pub fn reach_origin(answer: &str, port: u16, tailnet: Option<&str>) -> Result<St
 }
 
 pub use seimei_core::util::on_path;
-
-/// The agent CLI's version, from its `--version` (the executable the environment names, else the default on PATH).
-fn claude_version() -> Option<String> {
-    let exe = std::env::var("SEIMEI_CLAUDE").ok().filter(|p| !p.is_empty()).unwrap_or("claude".into());
-    let out = Command::new(exe).arg("--version").output().ok().filter(|o| o.status.success())?;
-    let text = String::from_utf8_lossy(&out.stdout);
-    text.split_whitespace().next().map(String::from)
-}
 
 fn older(version: &str, than: (u32, u32)) -> bool {
     let mut n = version.split('.').map(|p| p.parse::<u32>().unwrap_or(0));
@@ -489,7 +479,7 @@ pub fn run(read_secret: impl Fn(&str) -> String, builtins: &[seimei_core::plugin
     println!("seimei setup: what is already set up stays as it is.\n");
 
     // The agent's CLI: seimei drives the user's own, on its own login.
-    match claude_version() {
+    match harness::version() {
         None => {
             println!(
                 "Claude Code was not found: install it (https://claude.com/claude-code), log in with `claude`, then run \
@@ -497,9 +487,10 @@ pub fn run(read_secret: impl Fn(&str) -> String, builtins: &[seimei_core::plugin
             );
             std::process::exit(1);
         }
-        Some(v) if older(&v, TESTED_CLAUDE) => println!(
+        Some(v) if older(&v, harness::TESTED) => println!(
             "Claude Code {v} found; seimei is tested on {}.{} and later, so update it if something fails.",
-            TESTED_CLAUDE.0, TESTED_CLAUDE.1
+            harness::TESTED.0,
+            harness::TESTED.1
         ),
         Some(v) => println!("Claude Code {v} found. seimei uses its login: log in with `claude` if you have not."),
     }

@@ -36,7 +36,7 @@ pub fn reminder(calls: u64, state: &Path) -> Value {
     if style.is_empty() {
         return json!({});
     }
-    json!({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": format!("[style]\n{style}")}})
+    crate::workers::harness::after_tool_context(&format!("[style]\n{style}"))
 }
 
 #[cfg(test)]

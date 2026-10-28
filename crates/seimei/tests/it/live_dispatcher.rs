@@ -48,7 +48,7 @@ fn browser_op(op: &str) -> Value {
 #[test]
 #[ignore = "starts a headless claude session; run by tests/live.sh dispatcher"]
 fn dispatcher_live() {
-    live::claude_dir();
+    live::config_dir();
     let work = work("t82p4d");
     let state = live::state("dispatchertest");
     let (ql_sock, bin) = (state.join("ql.sock"), state.join("bin"));

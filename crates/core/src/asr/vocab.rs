@@ -347,50 +347,6 @@ pub fn repo_names(root: &Path) -> Vec<String> {
     out
 }
 
-/// Your own turns in Claude Code transcripts: typed text only (no tool results, meta or compaction summaries).
-fn claude_messages(projects: &Path, out: &mut Vec<String>) {
-    let Ok(dirs) = std::fs::read_dir(projects) else { return };
-    for d in dirs.flatten() {
-        let Ok(files) = std::fs::read_dir(d.path()) else { continue };
-        for f in files.flatten() {
-            let p = f.path();
-            if p.extension().is_none_or(|e| e != "jsonl") {
-                continue;
-            }
-            let Ok(text) = std::fs::read(&p) else { continue };
-            for line in String::from_utf8_lossy(&text).lines() {
-                // Cheap rejects first: assistant turns and tool results are most of it.
-                if !line.contains("\"type\":\"user\"")
-                    || line.contains("\"toolUseResult\"")
-                    || line.contains("\"tool_result\"")
-                {
-                    continue;
-                }
-                let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
-                if v["type"] != "user"
-                    || v["isMeta"] == true
-                    || v["isSidechain"] == true
-                    || v["isCompactSummary"] == true
-                {
-                    continue;
-                }
-                match &v["message"]["content"] {
-                    serde_json::Value::String(s) => out.push(s.clone()),
-                    serde_json::Value::Array(blocks) => out.push(
-                        blocks
-                            .iter()
-                            .filter(|b| b["type"] == "text")
-                            .filter_map(|b| b["text"].as_str())
-                            .collect::<Vec<_>>()
-                            .join("\n"),
-                    ),
-                    _ => {}
-                }
-            }
-        }
-    }
-}
-
 fn fish_commands(history: &Path, out: &mut Vec<String>) {
     let Ok(text) = std::fs::read(history) else { return };
     for line in String::from_utf8_lossy(&text).lines() {
@@ -409,7 +365,7 @@ fn fish_commands(history: &Path, out: &mut Vec<String>) {
 /// Returns (words, messages).
 pub fn build_auto(dict: &Dict, home: &Path) -> (Vec<String>, usize) {
     let mut texts = vec![];
-    claude_messages(&home.join(".claude/projects"), &mut texts);
+    crate::workers::harness::typed_turns(home, &mut texts);
     fish_commands(&home.join(".local/share/fish/fish_history"), &mut texts);
     let (df, forms) = tally(&texts, |_| 1.0);
     let mut out = vec![];
