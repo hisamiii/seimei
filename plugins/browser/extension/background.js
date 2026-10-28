@@ -1,5 +1,10 @@
 // The seimei connector: a native-messaging port to `seimei browser-host`, which relays to the seimei server on this computer.
 // Requests come as {id, op, args}; each gets {id, ok, result} or {id, ok: false, error}.
+// One script for Firefox (manifest.json, MV2) and Chromium browsers (chromium.json, MV3): FIREFOX picks the few calls
+// that differ (injecting page.js, page dialogs, screenshots, the browser's name).
+// Newer Chromium has a `browser` namespace too: Firefox is told apart by getBrowserInfo, which only it has.
+const api = globalThis.browser ?? chrome;
+const FIREFOX = typeof api.runtime.getBrowserInfo === 'function';
 const HOST = 'seimei';
 // The tab group seimei's own background tabs go into.
 const GROUP = 'seimei';
@@ -9,7 +14,8 @@ const SHOT_MAX = 1100000;
 let port = null;
 
 function connect() {
-  port = browser.runtime.connectNative(HOST);
+  if (port) return;
+  port = api.runtime.connectNative(HOST);
   port.onMessage.addListener(handle);
   port.onDisconnect.addListener(() => {
     port = null;
@@ -33,15 +39,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Private windows stay out of reach (and the extension is not allowed there anyway).
 async function tab(id) {
-  const t = await browser.tabs.get(Number(id));
+  const t = await api.tabs.get(Number(id));
   if (t.incognito) throw new Error('that tab is in a private window');
   return t;
 }
 
 // The ids of seimei's tab groups, by title (tab groups need Firefox 139 or later).
 async function ourGroups() {
-  if (!browser.tabGroups) return new Set();
-  return new Set((await browser.tabGroups.query({ title: GROUP })).map((g) => g.id));
+  if (!api.tabGroups) return new Set();
+  return new Set((await api.tabGroups.query({ title: GROUP })).map((g) => g.id));
 }
 
 const info = (t, groups) => ({
@@ -60,21 +66,21 @@ const web = (url) => {
 function loaded(id, ms) {
   return new Promise((resolve) => {
     const done = () => {
-      browser.tabs.onUpdated.removeListener(on);
+      api.tabs.onUpdated.removeListener(on);
       clearTimeout(cap);
       resolve();
     };
     const on = (tid, change) => { if (tid === id && change.status === 'complete') done(); };
-    browser.tabs.onUpdated.addListener(on);
+    api.tabs.onUpdated.addListener(on);
     const cap = setTimeout(done, ms);
-    browser.tabs.get(id).then((t) => { if (t.status === 'complete') done(); }, done);
+    api.tabs.get(id).then((t) => { if (t.status === 'complete') done(); }, done);
   });
 }
 
 // A tab to work in: a discarded one is loaded first, and one still loading gets to finish.
 async function ready(t) {
   if (t.discarded) {
-    await browser.tabs.reload(t.id);
+    await api.tabs.reload(t.id);
     await sleep(100);
   } else if (t.status !== 'loading') {
     return t;
@@ -85,9 +91,73 @@ async function ready(t) {
 
 // Runs page.js's fn(args) in one frame of the tab.
 async function call(id, frame, fn, args) {
-  await browser.tabs.executeScript(id, { file: '/page.js', frameId: frame, runAt: 'document_idle' });
-  const [r] = await browser.tabs.executeScript(id, { code: `seimeiPage.${fn}(${JSON.stringify(args)})`, frameId: frame });
-  return r;
+  if (FIREFOX) {
+    await api.tabs.executeScript(id, { file: '/page.js', frameId: frame, runAt: 'document_idle' });
+    const [r] = await api.tabs.executeScript(id, { code: `seimeiPage.${fn}(${JSON.stringify(args)})`, frameId: frame });
+    return r;
+  }
+  const target = { tabId: id, frameIds: [frame] };
+  await chrome.scripting.executeScript({ target, files: ['page.js'] });
+  // Chromium drops an injected function's exception: it comes back as a value and is thrown here.
+  const [r] = await chrome.scripting.executeScript({
+    target,
+    args: [fn, args],
+    func: async (f, a) => {
+      try {
+        return { value: await globalThis.seimeiPage[f](a) };
+      } catch (e) {
+        return { error: String((e && e.message) || e) };
+      }
+    },
+  });
+  if (r.result.error) throw new Error(r.result.error);
+  return r.result.value;
+}
+
+// Chromium: a content script cannot replace the page's alert, confirm and prompt, so they are swapped in the page's
+// own world while acting, and report to page.js (quietDialogs) through a DOM event. Returns the undo.
+async function pageDialogs(id, frame, accept) {
+  if (FIREFOX) return async () => {};
+  const target = { tabId: id, frameIds: [frame] };
+  await chrome.scripting.executeScript({
+    target,
+    world: 'MAIN',
+    args: [accept],
+    func: (ok) => {
+      const say = (text) => window.dispatchEvent(new CustomEvent('seimei-dialog', { detail: String(text) }));
+      window.__seimeiDialogs = window.__seimeiDialogs || { alert: window.alert, confirm: window.confirm, prompt: window.prompt };
+      window.alert = (m) => say(`alert: ${m}`);
+      window.confirm = (m) => { say(`confirm: ${m} (${ok ? 'accepted' : 'cancelled'})`); return ok; };
+      window.prompt = (m) => { say(`prompt: ${m} (cancelled)`); return null; };
+    },
+  });
+  return () => chrome.scripting.executeScript({
+    target,
+    world: 'MAIN',
+    func: () => {
+      if (window.__seimeiDialogs) Object.assign(window, window.__seimeiDialogs);
+      delete window.__seimeiDialogs;
+    },
+  }).catch(() => {});
+}
+
+// A screenshot of rect (page pixels) as a data URL. Chromium has no captureTab: its debugger protocol can take one of
+// a background tab too (the browser shows "seimei started debugging this browser" meanwhile).
+async function capture(id, opts) {
+  if (FIREFOX) return api.tabs.captureTab(id, opts);
+  const { format, quality, rect, scale } = opts;
+  const target = { tabId: id };
+  await chrome.debugger.attach(target, '1.3');
+  try {
+    const shot = chrome.debugger.sendCommand(target, 'Page.captureScreenshot', {
+      format, quality: format === 'jpeg' ? quality : undefined, captureBeyondViewport: true,
+      clip: { x: rect.x, y: rect.y, width: rect.width, height: rect.height, scale },
+    });
+    const r = await Promise.race([shot, sleep(15000).then(() => { throw new Error('the screenshot took too long'); })]);
+    return `data:image/${format};base64,${r.data}`;
+  } finally {
+    await chrome.debugger.detach(target).catch(() => {});
+  }
 }
 
 // The frames of each tab's last read with elements: f1 is frames.get(tab)[0].
@@ -109,28 +179,28 @@ function navigation(id) {
   let on;
   const started = new Promise((resolve) => {
     on = (tid, change) => { if (tid === id && change.status === 'loading') resolve(true); };
-    browser.tabs.onUpdated.addListener(on);
+    api.tabs.onUpdated.addListener(on);
   });
-  return { started, stop: () => browser.tabs.onUpdated.removeListener(on) };
+  return { started, stop: () => api.tabs.onUpdated.removeListener(on) };
 }
 
 // Put a tab into seimei's collapsed group in its window, made on first use.
 async function group(t) {
-  if (!browser.tabGroups) return;
-  const [g] = await browser.tabGroups.query({ title: GROUP, windowId: t.windowId });
+  if (!api.tabGroups) return;
+  const [g] = await api.tabGroups.query({ title: GROUP, windowId: t.windowId });
   if (g) {
-    await browser.tabs.group({ groupId: g.id, tabIds: [t.id] });
+    await api.tabs.group({ groupId: g.id, tabIds: [t.id] });
     return;
   }
-  const id = await browser.tabs.group({ tabIds: [t.id], createProperties: { windowId: t.windowId } });
-  await browser.tabGroups.update(id, { title: GROUP, collapsed: true, color: 'purple' });
+  const id = await api.tabs.group({ tabIds: [t.id], createProperties: { windowId: t.windowId } });
+  await api.tabGroups.update(id, { title: GROUP, collapsed: true, color: 'purple' });
 }
 
 async function open(url, front, opener) {
   const href = web(url);
   const props = { url: href, active: Boolean(front) };
   if (opener) props.openerTabId = opener;
-  let t = await browser.tabs.create(props);
+  let t = await api.tabs.create(props);
   if (!front) {
     await group(t);
     t = await tab(t.id);
@@ -154,10 +224,10 @@ function netEnd(d) {
   inflight.get(d.tabId).delete(d.requestId);
   lastNet.set(d.tabId, Date.now());
 }
-browser.webRequest.onBeforeRequest.addListener(netStart, { urls: ['<all_urls>'] });
-browser.webRequest.onCompleted.addListener(netEnd, { urls: ['<all_urls>'] });
-browser.webRequest.onErrorOccurred.addListener(netEnd, { urls: ['<all_urls>'] });
-browser.tabs.onRemoved.addListener((id) => { inflight.delete(id); lastNet.delete(id); frames.delete(id); });
+api.webRequest.onBeforeRequest.addListener(netStart, { urls: ['<all_urls>'] });
+api.webRequest.onCompleted.addListener(netEnd, { urls: ['<all_urls>'] });
+api.webRequest.onErrorOccurred.addListener(netEnd, { urls: ['<all_urls>'] });
+api.tabs.onRemoved.addListener((id) => { inflight.delete(id); lastNet.delete(id); frames.delete(id); });
 
 function busy(id) {
   const now = Date.now();
@@ -166,11 +236,17 @@ function busy(id) {
 
 const OPS = {
   async about() {
-    const b = await browser.runtime.getBrowserInfo();
-    return { name: b.name, version: b.version };
+    if (FIREFOX) {
+      const b = await api.runtime.getBrowserInfo();
+      return { name: b.name, version: b.version };
+    }
+    // Brands like "Not_A Brand" are noise; "Chromium" is listed by every Chromium browser, so it comes last.
+    const brands = (navigator.userAgentData?.brands || []).filter((b) => !/not.a.brand/i.test(b.brand));
+    const b = brands.find((x) => x.brand !== 'Chromium') || brands[0] || { brand: 'Chromium', version: '' };
+    return { name: b.brand, version: b.version };
   },
   async tabs() {
-    const [tabs, focused, groups] = await Promise.all([browser.tabs.query({}), browser.windows.getLastFocused(), ourGroups()]);
+    const [tabs, focused, groups] = await Promise.all([api.tabs.query({}), api.windows.getLastFocused(), ourGroups()]);
     return { focused: focused.id, tabs: tabs.filter((t) => !t.incognito).map((t) => info(t, groups)) };
   },
   async info({ tabs }) {
@@ -182,7 +258,7 @@ const OPS = {
     const r = await call(t.id, 0, 'read', { elements: Boolean(elements) });
     if (!elements) return r;
     // Elements in frames, after the top frame's, with the frame in their ref.
-    const all = (await browser.webNavigation.getAllFrames({ tabId: t.id })) || [];
+    const all = (await api.webNavigation.getAllFrames({ tabId: t.id })) || [];
     const seen = [];
     for (const f of all) {
       if (f.frameId === 0 || r.elements.length >= 300) continue;
@@ -208,13 +284,15 @@ const OPS = {
     let r = null;
     let moved = false;
     try {
+      const undo = await pageDialogs(t.id, frame, Boolean(args.confirm));
       const run = call(t.id, frame, 'act', { ...args, ref });
       run.catch(() => {});
+      run.finally(undo).catch(() => {});
       // A click that loads a new page ends the page's script: the navigation is the answer then.
       r = await Promise.race([run, nav.started.then(() => null)]);
       if (r === null) moved = true;
     } catch (e) {
-      const now = await browser.tabs.get(t.id);
+      const now = await api.tabs.get(t.id);
       if (now.status !== 'loading' && now.url === before) throw e;
       moved = true;
     } finally {
@@ -240,7 +318,7 @@ const OPS = {
       return { ms: Date.now() - t0, url: now.url, title: now.title || '' };
     };
     if (args.for === 'navigation') {
-      const now = await browser.tabs.get(t.id);
+      const now = await api.tabs.get(t.id);
       if (now.status !== 'loading') {
         const nav = navigation(t.id);
         const went = await Promise.race([nav.started, sleep(end - Date.now()).then(() => false)]);
@@ -249,11 +327,11 @@ const OPS = {
       }
       await loaded(t.id, Math.max(end - Date.now(), 0));
       const s = await status();
-      return { ...s, timedOut: (await browser.tabs.get(t.id)).status !== 'complete' };
+      return { ...s, timedOut: (await api.tabs.get(t.id)).status !== 'complete' };
     }
     if (args.for === 'idle') {
       while (Date.now() < end) {
-        const now = await browser.tabs.get(t.id);
+        const now = await api.tabs.get(t.id);
         const quiet = Date.now() - (lastNet.get(t.id) || 0);
         if (now.status === 'complete' && busy(t.id) === 0 && quiet >= 500) return status();
         await sleep(100);
@@ -296,7 +374,7 @@ const OPS = {
     let used = ladder[0];
     for (const step of ladder) {
       const [format, quality, scale] = step;
-      data = await browser.tabs.captureTab(t.id, { format, quality, rect, scale });
+      data = await capture(t.id, { format, quality, rect, scale });
       used = step;
       if (data.length <= SHOT_MAX) break;
     }
@@ -310,10 +388,10 @@ const OPS = {
   },
   async navigate({ tab: id, url, go }) {
     const t = await tab(id);
-    if (url) await browser.tabs.update(t.id, { url: web(url) });
-    else if (go === 'back') await browser.tabs.goBack(t.id);
-    else if (go === 'forward') await browser.tabs.goForward(t.id);
-    else if (go === 'reload') await browser.tabs.reload(t.id);
+    if (url) await api.tabs.update(t.id, { url: web(url) });
+    else if (go === 'back') await api.tabs.goBack(t.id);
+    else if (go === 'forward') await api.tabs.goForward(t.id);
+    else if (go === 'reload') await api.tabs.reload(t.id);
     else throw new Error('give a url or go: back, forward or reload');
     await sleep(100);
     await loaded(t.id, 30000);
@@ -321,22 +399,22 @@ const OPS = {
   },
   async switch({ tab: id }) {
     const t = await tab(id);
-    await browser.tabs.update(t.id, { active: true });
-    await browser.windows.update(t.windowId, { focused: true });
+    await api.tabs.update(t.id, { active: true });
+    await api.windows.update(t.windowId, { focused: true });
     return info(await tab(t.id), await ourGroups());
   },
   async close({ tabs }) {
     const ts = await Promise.all(tabs.map(tab));
-    await browser.tabs.remove(ts.map((t) => t.id));
+    await api.tabs.remove(ts.map((t) => t.id));
     return ts.length;
   },
   async download({ url, filename }) {
     const opts = { url: web(url), conflictAction: 'uniquify', saveAs: false };
     if (filename) opts.filename = filename;
-    return { id: await browser.downloads.download(opts) };
+    return { id: await api.downloads.download(opts) };
   },
   async downloads({ limit }) {
-    const items = await browser.downloads.search({ orderBy: ['-startTime'], limit: Math.min(Number(limit) || 10, 50) });
+    const items = await api.downloads.search({ orderBy: ['-startTime'], limit: Math.min(Number(limit) || 10, 50) });
     return items.map((d) => ({
       id: d.id, url: d.url, path: d.filename, state: d.state, error: d.error || '', bytes: d.bytesReceived,
       total: d.totalBytes, started: d.startTime, mime: d.mime || '', exists: d.exists,
@@ -345,3 +423,8 @@ const OPS = {
 };
 
 connect();
+// Chromium may stop the background worker while seimei is down; an alarm wakes it to try the host again.
+if (!FIREFOX) {
+  chrome.alarms.create('connect', { periodInMinutes: 1 });
+  chrome.alarms.onAlarm.addListener(connect);
+}

@@ -307,12 +307,12 @@ fn openrc_service(exe: &Path) {
     }
 }
 
-/// The page types into the user's own Claude sessions through kitty remote control, when they run in kitty.
 /// The release's signed extension; [plugins.browser] extension_id overrides it for one packed from source.
 const EXTENSION_ID: &str = "seimei@hisamiowo.xyz";
 
-/// The browser plugin's native-messaging host for the Firefox family: a small script that runs this binary, and its
-/// manifest where Firefox and its forks (~/.mozilla, LibreWolf's own) look. A manifest that points elsewhere stays.
+/// The browser plugin's native-messaging host: a small script that runs this binary, and its manifest where Firefox
+/// and its forks (~/.mozilla, LibreWolf's own) and the Chromium browsers with a profile here look. A manifest that
+/// points elsewhere stays. For Chromium it also writes the extension to load unpacked.
 fn browser_host(state: &Path, exe: &Path) {
     let Some(own) = plugin_on("browser") else { return };
     let id = own.get("extension_id").and_then(|i| i.as_str()).unwrap_or(EXTENSION_ID);
@@ -320,20 +320,38 @@ fn browser_host(state: &Path, exe: &Path) {
     let script = state.join("browser-host");
     let text = format!("#!/bin/sh\nexec {} browser-host\n", seimei_core::util::sh_quote(&exe.to_string_lossy()));
     write_file(&script, &text, 0o700);
-    let manifest = serde_json::json!({"name": "seimei", "description": "seimei connector", "type": "stdio",
-        "path": script, "allowed_extensions": [id]});
-    let manifest = format!("{manifest}\n");
-    let mut dirs = vec![home.join(".mozilla/native-messaging-hosts")];
+    let host =
+        serde_json::json!({"name": "seimei", "description": "seimei connector", "type": "stdio", "path": script});
+    let mut firefox = host.clone();
+    firefox["allowed_extensions"] = serde_json::json!([id]);
+    let mut chromium = host;
+    chromium["allowed_origins"] =
+        serde_json::json!([format!("chrome-extension://{}/", seimei_plugin_browser::CHROMIUM_ID)]);
+    let mut dirs = vec![(home.join(".mozilla/native-messaging-hosts"), &firefox)];
     for (profile, hosts) in [
         (".librewolf", ".librewolf/native-messaging-hosts"),
         (".config/mozilla", ".config/mozilla/native-messaging-hosts"),
     ] {
         if home.join(profile).is_dir() {
-            dirs.push(home.join(hosts));
+            dirs.push((home.join(hosts), &firefox));
+        }
+    }
+    let mut chromes = false;
+    for profile in [
+        ".config/google-chrome",
+        ".config/chromium",
+        ".config/BraveSoftware/Brave-Browser",
+        ".config/vivaldi",
+        ".config/microsoft-edge",
+    ] {
+        if home.join(profile).is_dir() {
+            dirs.push((home.join(profile).join("NativeMessagingHosts"), &chromium));
+            chromes = true;
         }
     }
     println!();
-    for dir in dirs {
+    for (dir, manifest) in dirs {
+        let manifest = format!("{manifest}\n");
         let file = dir.join("seimei.json");
         match std::fs::read_to_string(&file) {
             Ok(t) if t == manifest => println!("{} is set up.", file.display()),
@@ -346,9 +364,21 @@ fn browser_host(state: &Path, exe: &Path) {
         }
     }
     println!(
-        "The browser plugin needs the seimei extension: seimei.xpi from the release page, in about:addons, Install \
-         Add-on From File. Chromium-based browsers are not supported: the extension is a Firefox one."
+        "The browser plugin needs the seimei extension. Firefox: seimei.xpi from the release page, in about:addons, \
+         Install Add-on From File."
     );
+    if chromes {
+        let ext = state.join("chromium-extension");
+        std::fs::create_dir_all(&ext).unwrap_or_else(|e| fail(&format!("{}: {e}", ext.display())));
+        for (name, text) in seimei_plugin_browser::CHROMIUM_EXTENSION {
+            write_file(&ext.join(name), text, 0o644);
+        }
+        println!(
+            "Chromium browsers: in chrome://extensions turn on Developer mode, then Load unpacked and pick {}. \
+             Run setup again after an update to refresh it, then reload the extension there.",
+            ext.display()
+        );
+    }
 }
 
 /// The plugin's own [plugins.<name>] table (empty when there is none) when config.toml enables it.
@@ -408,6 +438,7 @@ fn write_file(path: &Path, text: &str, mode: u32) {
     }
 }
 
+/// The page types into the user's own Claude sessions through kitty remote control, when they run in kitty.
 fn kitty_bridge(state: &Path) {
     let rc = state.join("kitty-rc.conf");
     if rc.exists() {

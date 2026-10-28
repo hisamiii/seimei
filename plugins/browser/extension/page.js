@@ -94,7 +94,8 @@ if (!globalThis.seimeiPage) {
     for (const el of root.querySelectorAll('*')) {
       if (out.length >= MAX_ELEMENTS) return out;
       if (el.matches(PICK) && visible(el)) out.push(el);
-      const shadow = el.openOrClosedShadowRoot;
+      // Firefox gives closed roots through the element; Chromium through chrome.dom.
+      const shadow = 'openOrClosedShadowRoot' in el ? el.openOrClosedShadowRoot : globalThis.chrome?.dom?.openOrClosedShadowRoot(el);
       if (shadow) collect(shadow, out);
     }
     return out;
@@ -182,6 +183,12 @@ if (!globalThis.seimeiPage) {
     // confirm() answers what the agent asked for (default: cancel), prompt() always cancels.
     quietDialogs(accept, seen) {
       const w = window.wrappedJSObject;
+      if (!w) {
+        // Chromium: background.js swapped them in the page's world; they report here.
+        const on = (e) => seen.push(clean(e.detail, 320));
+        window.addEventListener('seimei-dialog', on);
+        return () => window.removeEventListener('seimei-dialog', on);
+      }
       const saved = { alert: w.alert, confirm: w.confirm, prompt: w.prompt };
       exportFunction((m) => { seen.push(`alert: ${clean(m, 300)}`); }, window, { defineAs: 'alert' });
       exportFunction((m) => { seen.push(`confirm: ${clean(m, 300)} (${accept ? 'accepted' : 'cancelled'})`); return accept; }, window, { defineAs: 'confirm' });

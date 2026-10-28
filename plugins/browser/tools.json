@@ -16,7 +16,7 @@
    "_meta": {
     "anthropic/alwaysLoad": true
    },
-   "description": "List the tabs open in the browser (Firefox) on the server, by window: id, title, URL, and whether active, pinned, playing sound, asleep or in seimei's tab group. Private windows are not visible. With browser: \"agent\": the agent browser's tabs.",
+   "description": "List the tabs open in the browser (Firefox or a Chromium browser) on the server, by window: id, title, URL, and whether active, pinned, playing sound, asleep or in seimei's tab group. Private windows are not visible. With browser: \"agent\": the agent browser's tabs.",
    "inputSchema": {
     "properties": {
      "browser": {

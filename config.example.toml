@@ -39,7 +39,7 @@ enabled = []
 # Built in:
 #   desktop  the desktop (niri, sway, Hyprland, KDE Plasma, GNOME or X11): windows, workspaces, screenshots, input (uinput), AT-SPI
 #   discord  Discord through the Vesktop plugin in discord/
-#   browser  Firefox through the extension in plugins/browser/extension/
+#   browser  Firefox or a Chromium browser through the extension in plugins/browser/extension/
 #   music    Quod Libet and the session's media players (MPRIS)
 #   queue    claude-queue / cqd: every session's commands take GPU turns through it
 

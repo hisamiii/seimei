@@ -218,6 +218,7 @@ fn help_lists_the_commands() {
 fn setup_browser_host() {
     let h = Home::new("browser");
     std::fs::create_dir_all(h.base.join(".librewolf")).unwrap();
+    std::fs::create_dir_all(h.base.join(".config/chromium")).unwrap();
     // port, reach, about, plan, terminal; plugins: only the browser; the password twice, no bridge, no guard rules, no start.
     let answers = "\n\n\n\n\nn\ny\nn\nn\nn\nlong enough\nlong enough\nn\nn\nn\n";
     let o = h.run(&["setup"], answers);
@@ -233,6 +234,17 @@ fn setup_browser_host() {
         assert_eq!(m["allowed_extensions"][0].as_str(), Some("seimei@hisamiowo.xyz"));
     }
     assert!(!h.exists(".config/mozilla/native-messaging-hosts"), "only where a profile is");
+    let m: serde_json::Value =
+        serde_json::from_str(&h.read(".config/chromium/NativeMessagingHosts/seimei.json")).unwrap();
+    assert_eq!(m["path"].as_str(), Some(script.to_str().unwrap()));
+    assert_eq!(m["allowed_origins"][0].as_str(), Some("chrome-extension://kcccbpncfdoejafmognmlmhhpolcndif/"));
+    assert!(!h.exists(".config/google-chrome/NativeMessagingHosts"), "only where a profile is");
+    let ext: serde_json::Value = serde_json::from_str(&h.read("data/seimei/chromium-extension/manifest.json")).unwrap();
+    assert_eq!(ext["manifest_version"].as_i64(), Some(3));
+    assert!(
+        h.exists("data/seimei/chromium-extension/background.js") && h.exists("data/seimei/chromium-extension/page.js")
+    );
+    assert!(out.contains("Load unpacked"), "{out}");
     assert!(out.contains("seimei.xpi"), "{out}");
 
     // A manifest of another install stays as it is.

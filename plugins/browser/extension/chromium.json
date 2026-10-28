@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "seimei",
+  "version": "1.1.0",
+  "description": "Lets seimei on this computer list, read, open, switch and close tabs, act on pages, take tab screenshots and start downloads.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAr/DarXpE/M0MS7ClIYoJmREU1T9MV768jGeGiz9zeWEnJ9gY5ee5icXbCgRTfMhyNMe6/06cxY8IBKfHGpt8Jm+fzWfV8a2BeqjoA0n5lwle5A38kOWqXTj0IpFcN7mJkKngo3sgHGIIECWSbWgEU5udyaA8J4l5dv1oNmt70GJRKrmLb580hK/S17oq7EmY9hTAZRVoIq72G6Knea6mwO8qRA0UeVz2KPsmhYcft0sfuwEtFsVJFRS7kYGWN2x9LoAAfcpiPbJlNdE8Y3jebZlOOn3BwpQS5y8DzDoumWkB++Y0ZEx5YJdUFI768TCUIJAZIYd+ZxCZRPpZtAI8ywIDAQAB",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "tabs",
+    "tabGroups",
+    "webNavigation",
+    "webRequest",
+    "nativeMessaging",
+    "downloads",
+    "scripting",
+    "debugger",
+    "alarms"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}

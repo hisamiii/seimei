@@ -1,4 +1,4 @@
-//! The browser plugin: the user's Firefox tabs through the seimei extension (extension/ here), whose
+//! The browser plugin: the user's Firefox or Chromium tabs through the seimei extension (extension/ here), whose
 //! native-messaging host connects to seimei's link socket. Its tools run inside seimei, which holds the link and knows
 //! which tabs seimei opened; `seimei plugin browser` forwards each call. Page text and downloads are untrusted data.
 //! Acting in a tab the user opened needs their Approve card once per tab and site; closing one goes by guard.toml.
@@ -38,7 +38,7 @@ pub struct Browser {
     /// The user's tabs they let seimei act in, with the site (scheme://host) the OK holds for.
     approved: Mutex<HashMap<i64, String>>,
     reads: tokio::sync::Mutex<HashMap<i64, (f64, Value)>>,
-    /// The browser's name from the extension ("Firefox"), asked for once it is needed.
+    /// The browser's name from the extension ("Firefox", "Brave"), asked for once it is needed.
     name: Mutex<Option<String>>,
     /// Where tab screenshots go: the desktop's shot folder.
     shots: PathBuf,
@@ -228,9 +228,18 @@ pub fn filename(name: &str) -> Result<String, String> {
     Ok(parts.join("/"))
 }
 
+/// The extension for Chromium browsers, which setup writes out to load unpacked: (file, text).
+pub const CHROMIUM_EXTENSION: [(&str, &str); 3] = [
+    ("manifest.json", include_str!("../extension/chromium.json")),
+    ("background.js", include_str!("../extension/background.js")),
+    ("page.js", include_str!("../extension/page.js")),
+];
+/// Its id, fixed by the key in chromium.json.
+pub const CHROMIUM_ID: &str = "kcccbpncfdoejafmognmlmhhpolcndif";
+
 pub const PLUGIN: Factory = Factory {
     name: "browser",
-    what: "Firefox, through the seimei extension",
+    what: "the browser, through the seimei extension",
     needs: "seimei.xpi from the release page",
     found: || false,
     manifest: include_str!("../plugin.toml"),
