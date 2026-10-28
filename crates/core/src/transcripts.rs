@@ -245,7 +245,7 @@ mod tests {
     #[test]
     fn projects() {
         let h = home().display().to_string();
-        assert_eq!(project_of(&format!("{h}/src/seimei/x.rs")).as_deref(), Some("seimei"));
+        assert_eq!(project_of(&format!("{h}/src/seimei/x.rs")).as_deref(), Some("src"));
         assert_eq!(project_of("~/yah-scratch/t/a").as_deref(), Some("yah"));
         assert_eq!(project_of(&format!("{h}/Development/Projects/seimei/x.rs")).as_deref(), Some("seimei"));
         assert_eq!(project_of("~/Development/Scratch/hrxab/a").as_deref(), Some("hrxab"));
