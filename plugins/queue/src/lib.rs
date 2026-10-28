@@ -1,6 +1,6 @@
-//! The queue plugin: GPU and NPU turns for every session. seimei serve runs the gate (gate.rs) on claude-queue's
-//! socket; claude-queue's shim and command prefix put each queued command under it. The tools show and stop the
-//! holder, [seimei] lines tell about long waits, and watch rules can ping when the queue frees or a wait drags on.
+//! The queue plugin: GPU and NPU turns for every session.
+//! seimei serve runs the gate (gate.rs) on claude-queue's socket; claude-queue's shim and command prefix put each queued command under it.
+//! The tools show and stop the holder, [seimei] lines tell about long waits, and watch rules can ping when the queue frees or a wait drags on.
 
 pub mod gate;
 
@@ -62,8 +62,8 @@ impl Builtin for Queue {
         Box::pin(Queue::watch(self, watches, state))
     }
 
-    /// The gate on claude-queue's socket, and a [seimei] line for each wait past WAIT_NEWS. A dev server leaves the
-    /// socket to the real one.
+    /// The gate on claude-queue's socket, and a [seimei] line for each wait past WAIT_NEWS.
+    /// A dev server leaves the socket to the real one.
     fn start(self: Arc<Self>, host: Arc<Host>) {
         if host.dev {
             return;

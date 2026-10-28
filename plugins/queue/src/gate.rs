@@ -1,7 +1,6 @@
-//! The GPU turn. claude-queue's shim (devgate.so, in every queued command) asks here before it opens a GPU or NPU
-//! device and waits for "grant"; one command holds the turn at a time, first come first served. The turn ends when
-//! the command's processes close their connections (they keep one open for their life). The socket and its line
-//! protocol are cqd's, so shims already loaded in running sessions talk to seimei unchanged.
+//! The GPU turn. claude-queue's shim (devgate.so, in every queued command) asks here before it opens a GPU or NPU device and waits for "grant".
+//! One command holds the turn at a time, first come first served; it ends when the command's processes close their connections (they keep one open for their life).
+//! The socket and its line protocol are cqd's, so shims already loaded in running sessions talk to seimei unchanged.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};

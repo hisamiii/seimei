@@ -1,4 +1,4 @@
-# The queue plugin, built into seimei: Claude Code starts `seimei plugin queue` for each session that has it.
+# The queue plugin, built into seimei: the harness starts `seimei plugin queue` for each session that has it.
 name = "queue"
 command = "seimei"
 args = ["plugin", "queue"]
