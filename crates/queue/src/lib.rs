@@ -19,7 +19,9 @@ fn home() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| "/".into())
 }
 
-pub fn default_runtime() -> PathBuf {
+/// cqd's runtime folder (socket, state.json, waits): $CLAUDE_QUEUE_DIR, else $XDG_RUNTIME_DIR/claude-queue, else
+/// /tmp/claude-queue-UID/claude-queue. The plugin, the shadow and `seimei queue scheduler` all use this one.
+pub fn runtime_dir() -> PathBuf {
     if let Some(d) = std::env::var_os("CLAUDE_QUEUE_DIR").filter(|d| !d.is_empty()) {
         return d.into();
     }
@@ -33,7 +35,8 @@ pub fn default_runtime() -> PathBuf {
 const USAGE: &str = "\
 usage: seimei queue scheduler [OPTIONS]   the queue alone, as cqd.py (same flags, same socket)
 
-  --runtime-dir DIR      socket, state.json, events, wait records (default $XDG_RUNTIME_DIR/claude-queue)
+  --runtime-dir DIR      socket, state.json, events, wait records (default $CLAUDE_QUEUE_DIR, else
+                         $XDG_RUNTIME_DIR/claude-queue)
   --waits-dir DIR        devgate wait records (default RUNTIME/waits)
   --state-dir DIR        history (default ~/.local/state/claude-queue)
   --config-dir DIR       policy.json (default ~/.config/claude-queue)
@@ -56,7 +59,7 @@ pub fn scheduler_main(argv: &[String]) -> ! {
         std::process::exit(2)
     };
     let mut a = Args {
-        runtime_dir: default_runtime(),
+        runtime_dir: runtime_dir(),
         waits_dir: None,
         state_dir: home().join(".local/state/claude-queue"),
         config_dir: home().join(".config/claude-queue"),

@@ -39,16 +39,9 @@ impl Host {
     }
 }
 
-fn runtime_dir() -> PathBuf {
-    std::env::var_os("XDG_RUNTIME_DIR")
-        .filter(|d| !d.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| format!("/tmp/seimei-{}", unsafe { libc::getuid() }).into())
-}
-
 /// cqd's socket answers: the old queue runs.
 pub fn cqd_running() -> bool {
-    let sock = runtime_dir().join("claude-queue/cqd.sock");
+    let sock = crate::runtime_dir().join("cqd.sock");
     std::os::unix::net::UnixStream::connect(sock).is_ok()
 }
 
@@ -76,12 +69,13 @@ fn take_lock(dir: &Path) -> Option<std::fs::File> {
 /// cqd's history (so ETAs and learned needs match), and nothing it may change.
 fn shadow_args(state: &Path) -> Args {
     let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-    let cq_run = runtime_dir().join("claude-queue");
+    let cq_run = crate::runtime_dir();
     let state_dir = state.join("queue-shadow");
     let _ = std::fs::create_dir_all(&state_dir);
     let _ = std::fs::copy(home.join(".local/state/claude-queue/history.jsonl"), state_dir.join("history.jsonl"));
     Args {
-        runtime_dir: runtime_dir().join("seimei/queue-shadow"),
+        // Beside cqd's folder: $XDG_RUNTIME_DIR/seimei/queue-shadow in the usual case.
+        runtime_dir: cq_run.parent().unwrap_or(&cq_run).join("seimei/queue-shadow"),
         waits_dir: Some(cq_run.join("waits")),
         state_dir,
         config_dir: home.join(".config/claude-queue"),

@@ -24,6 +24,7 @@ use seimei_core::sessions::{self, Own};
 use seimei_core::tools::text;
 use seimei_core::util::{self, chars, now, read_json, truthy};
 use seimei_core::watches::{Watches, mins};
+use seimei_queue::runtime_dir;
 
 pub const PLUGIN: Factory = Factory {
     name: "queue",
@@ -106,24 +107,11 @@ pub fn queue_name(name: &str) -> String {
     name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect()
 }
 
-fn runtime_dir() -> PathBuf {
-    std::env::var_os("XDG_RUNTIME_DIR")
-        .filter(|d| !d.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(format!("/tmp/claude-queue-{}", unsafe { libc::getuid() })))
-        .join("claude-queue")
-}
-
-/// Where claude-queue keeps its state: $SEIMEI_QUEUE_DIR, else its runtime folder.
-pub fn queue_dir() -> PathBuf {
-    std::env::var_os("SEIMEI_QUEUE_DIR").filter(|d| !d.is_empty()).map(PathBuf::from).unwrap_or_else(runtime_dir)
-}
-
 fn cqd_sock() -> PathBuf {
     std::env::var_os("SEIMEI_CQD_SOCK")
         .filter(|d| !d.is_empty())
         .map(PathBuf::from)
-        .unwrap_or(queue_dir().join("cqd.sock"))
+        .unwrap_or(runtime_dir().join("cqd.sock"))
 }
 
 /// One request to cqd, or None when it does not run. Blocking.
@@ -358,7 +346,7 @@ pub fn proc_snapshot(names: &HashMap<String, String>) -> Value {
             "age": age, "gui": graphics(&devs, &env), "ended": ended, "stuck": ended && age >= STUCK}));
     }
     let mut waits = vec![];
-    for e in std::fs::read_dir(queue_dir().join("waits")).into_iter().flatten().flatten() {
+    for e in std::fs::read_dir(runtime_dir().join("waits")).into_iter().flatten().flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
         let parts: Vec<String> = read(&e.path().display().to_string()).split_whitespace().map(String::from).collect();
         if parts.len() < 5 || !name.bytes().all(|b| b.is_ascii_digit()) {
@@ -378,7 +366,7 @@ pub fn proc_snapshot(names: &HashMap<String, String>) -> Value {
     static MEM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^MemAvailable:\s+(\d+) kB").unwrap());
     let mem = MEM.captures(&read("/proc/meminfo")).and_then(|m| m[1].parse::<u64>().ok()).map_or(0, |k| k << 10);
     json!({"cqd": false, "holders": holders, "waits": waits, "outside": outside,
-        "bench": bench_running(&queue_dir().join("bench.lock")), "mem_free": mem})
+        "bench": bench_running(&runtime_dir().join("bench.lock")), "mem_free": mem})
 }
 
 /// The biggest processes by RSS: who a memory wait is waiting on.
@@ -763,7 +751,7 @@ impl Watcher {
 
     /// Waits past their time, from devgate's records (cqd is down): (line, key) for each one not told yet. Blocking.
     pub fn check(&self) -> Vec<(String, String)> {
-        let wdir = queue_dir().join("waits");
+        let wdir = runtime_dir().join("waits");
         let at = now();
         let mut due = HashSet::new();
         for e in std::fs::read_dir(&wdir).into_iter().flatten().flatten() {

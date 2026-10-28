@@ -2030,6 +2030,7 @@ dependencies = [
  "libc",
  "regex",
  "seimei-core",
+ "seimei-queue",
  "serde_json",
  "tokio",
  "toml",
