@@ -6,7 +6,6 @@ mod approvals;
 mod cases;
 mod codex_worker;
 mod env;
-mod guard;
 mod markers;
 mod password;
 mod screens;

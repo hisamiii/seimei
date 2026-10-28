@@ -217,14 +217,6 @@ impl Backend for Niri {
         }
     }
 
-    fn bash_hit(&self, argv: &[String], ours: &Ours) -> Option<String> {
-        if argv.first()? == "niri" {
-            let at = argv.iter().position(|a| a == "action")?;
-            return self.action_hit(&argv[at + 1..], ours);
-        }
-        None
-    }
-
     fn focus(&self, wid: i64) -> Result<(), String> {
         self.act(&["focus-window", "--id", &wid.to_string()]).map(drop)
     }

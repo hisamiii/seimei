@@ -226,18 +226,6 @@ impl Backend for Hyprland {
         None
     }
 
-    fn bash_hit(&self, argv: &[String], ours: &Ours) -> Option<String> {
-        if argv.first()?.rsplit('/').next() != Some("hyprctl") {
-            return None;
-        }
-        let words: Vec<String> = argv[1..].iter().filter(|a| !a.starts_with('-')).cloned().collect();
-        match words.first().map(String::as_str) {
-            Some("kill") => Some("kill a window (hyprctl kill: the next one clicked)".into()),
-            Some("dispatch") => self.action_hit(&words[1..], ours),
-            _ => None,
-        }
-    }
-
     fn focus(&self, wid: i64) -> Result<(), String> {
         self.dispatch(&["focuswindow", &addr(wid)]).map(drop)
     }

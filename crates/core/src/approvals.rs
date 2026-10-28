@@ -1,4 +1,4 @@
-//! Approve/Deny cards: a call the user's guard rules hold for a card, a plugin's own cards, and the permission cards of the harnesses wait here for the user's tap.
+//! Approve/Deny cards: the cards of seimei's own tools and plugins, and the permission cards of the harnesses, wait here for the user's tap.
 //! Unanswered, a card is denied after WAIT.
 
 use std::collections::{HashMap, HashSet};

@@ -396,7 +396,7 @@ fn request(
             if paths.is_empty() {
                 vec![tool]
             } else {
-                // One request per file: the guard and the cards judge a write by its path.
+                // One request per file: a card judges a write by its path.
                 (paths.iter())
                     .map(|path| ToolCall { title: path.clone(), input: Some(json!({"path": path})), ..tool.clone() })
                     .collect()

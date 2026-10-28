@@ -25,10 +25,10 @@ use tokio::time::{Instant, sleep_until};
 use crate::aliases::Aliases;
 use crate::approvals::Approvals;
 use crate::archive::Archive;
+use crate::audit::{Audit, Call};
 use crate::cost::Cost;
 use crate::dispatcher::{result_text, summarize};
 use crate::events::EventLog;
-use crate::guard::Guard;
 use crate::metrics::{self, WorkerEvents};
 use crate::paths::{expand, home};
 use crate::plugins::Plugins;
@@ -40,7 +40,7 @@ use crate::util::{as_text, chars, far, hex, now, random_bytes, read_json, save_j
 
 mod acp_session;
 pub mod claude; // lint: allow scoped-name
-pub use acp_session::{Mode, acp_mode, guard_shaped};
+pub use acp_session::{Mode, acp_mode, shaped};
 pub use claude as harness; // lint: allow scoped-name
 use harness::transcript;
 
@@ -765,8 +765,6 @@ struct Session {
     message: String,
     /// A new ACP session: its first prompt carries the shikigami prompt.
     fresh: bool,
-    /// Why the guard stopped its last turn: its next prompt starts with it.
-    guard_note: Option<String>,
     stopping: bool,
     last_text: String,
     turn_text: bool,
@@ -805,7 +803,6 @@ impl Session {
             chunk_until: None,
             message: String::new(),
             fresh: false,
-            guard_note: None,
             stopping: false,
             last_text: String::new(),
             turn_text: false,
@@ -832,7 +829,7 @@ impl Session {
                     None => self.ended().await,
                 },
                 ev = next(self.acp.as_mut().map(acp::Client::recv)) => match ev {
-                    Some(e) => self.acp_event(e).await,
+                    Some(e) => self.acp_event(e),
                     None => self.ended().await,
                 },
                 _ = sleep_until(grace.unwrap_or_else(far)), if grace.is_some() => self.settle(),
@@ -1080,6 +1077,14 @@ impl Session {
     }
 
     fn assistant(&mut self, msg: AssistantMessage) {
+        let r = self.w.rec();
+        for b in &msg.message.content {
+            if let ContentBlock::ToolUse { id, name, input } = b {
+                let (who, worker, session, agent) =
+                    (&r.name, Some(self.w.id.as_str()), &r.session_id, msg.parent_tool_use_id.as_deref());
+                self.pool.audit.call(Call { who, worker, session, agent, id, tool: name, input });
+            }
+        }
         if msg.parent_tool_use_id.is_some() {
             return;
         }
@@ -1251,7 +1256,7 @@ impl Session {
     }
 }
 
-/// What a shikigami's harness asks of seimei: permission cards, the guard's hooks, its own tools.
+/// What a shikigami's harness asks of seimei: permission cards, the audit's hooks, its own tools.
 struct Side {
     w: Arc<Worker>,
 }
@@ -1284,11 +1289,10 @@ impl Handler for Side {
     fn hook(&self, callback_id: String, input: Value, tool_use_id: Option<String>) -> BoxFuture<Value> {
         let w = self.w.clone();
         Box::pin(async move {
-            let guard = w.pool().guard.clone();
+            let audit = w.pool().audit.clone();
             match callback_id.as_str() {
-                "pre" => guard.pre(&w.name(), Some(&w.id), &input, tool_use_id.as_deref()).await,
-                "failed" => guard.failed(Some(&w.id), &input, tool_use_id.as_deref()),
-                "done" => guard.done(Some(&w.id), &input),
+                "failed" => audit.failed(Some(&w.id), &input, tool_use_id.as_deref()),
+                "done" => audit.done(Some(&w.id), &input),
                 "nudge" => w.nudge(&input),
                 "style" if input.get("agent_id").is_none_or(|a| a.is_null()) => {
                     crate::style::reminder(w.calls.fetch_add(1, Ordering::Relaxed) + 1, w.pool().state())
@@ -1390,7 +1394,7 @@ pub struct Parts {
     pub board: Arc<Mutex<Board>>,
     pub usage: Arc<Usage>,
     pub approvals: Arc<Approvals>,
-    pub guard: Arc<Guard>,
+    pub audit: Arc<Audit>,
     /// A released or lent session opens in this terminal ({cwd} and {title} filled in, quoted); config [sessions].
     pub terminal: String,
     /// The plugins enabled in config.
@@ -1467,7 +1471,7 @@ pub struct Pool {
     pub board: Arc<Mutex<Board>>,
     usage: Arc<Usage>,
     approvals: Arc<Approvals>,
-    guard: Arc<Guard>,
+    pub audit: Arc<Audit>,
     pub dispatcher: OnceLock<Arc<dyn Listener>>,
     terminal: String,
     /// The enabled plugins: their env, the groups summon grants, and how a session opens in a terminal.
@@ -1517,7 +1521,7 @@ impl Pool {
                 board: parts.board,
                 usage: parts.usage,
                 approvals: parts.approvals,
-                guard: parts.guard,
+                audit: parts.audit,
                 dispatcher: OnceLock::new(),
                 terminal: parts.terminal,
                 plugins: parts.plugins,

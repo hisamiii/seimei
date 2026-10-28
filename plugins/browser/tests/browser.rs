@@ -1,9 +1,6 @@
 //! tests/cases.json: each scenario's tool calls on one browser, with a fake connector at its link that answers each op with the step's replies (or fails with its fails).
 //! The user decides each card as the step says; the test checks the text, the card and what the connector got.
 
-#[path = "../../../crates/core/tests/it/env.rs"]
-mod env;
-
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -64,8 +61,6 @@ async fn browser_cases() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/cases.json");
     let doc: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     let dir = std::env::temp_dir().join(format!("seimei-browser-{}", std::process::id()));
-    let mut env = crate::env::Env::lock();
-    env.example_rules(&dir.join("config"));
     let mut fails = vec![];
     let mut n = 0;
     for (k, sc) in doc["scenarios"].as_array().unwrap().iter().enumerate() {

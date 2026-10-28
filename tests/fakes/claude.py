@@ -189,7 +189,7 @@ class Fake:
         return {}
 
     async def tool(self, name: str, inp: dict, result: str = "ok", hang: bool = False) -> tuple[bool, str]:
-        """One model step that calls a tool: the guard's hooks, then the tool (seimei's own over MCP), then its result.
+        """One model step that calls a tool: its hooks, then the tool (seimei's own over MCP), then its result.
         Returns (error, text)."""
         tid = f"toolu_{uuid.uuid4().hex[:20]}"
         self.stream({"type": "message_start", "message": {"id": "m", "model": MODEL}})
@@ -366,11 +366,11 @@ async def dispatcher(self: Fake, text: str, images: int):
         await self.say("Sent.")
     elif t == "tool":
         await self.tool("Bash", {"command": "ls ~/src"}, "seimei\nyah\nhrx")
-        await self.tool("Read", {"file_path": f"{HOME}/.gnupg/private-keys-v1.d/qa.key"})  # the guard blocks it
+        await self.tool("Read", {"file_path": f"{HOME}/src/yah/README.md"}, "# yah")
         await self.say("Listed it.")
     elif t == "approve":
-        error, _ = await self.tool("Bash", {"command": "claude stop kv-gate"}, "stopped")
-        await self.say(f"The card came back {'denied' if error else 'approved'}.")
+        out = await self.permission("Bash", {"command": "claude stop kv-gate"}, [], "Stop the kv-gate session")
+        await self.say(f"The card came back {out}.")
     elif t == "askq":
         # AskUserQuestion: seimei shows it as a card and answers with updatedInput.answers.
         q = {"questions": [{"question": "Which build should go out with the release?", "header": "Flavor", "multiSelect": False,

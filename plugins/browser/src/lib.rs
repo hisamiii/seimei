@@ -1,6 +1,6 @@
 //! The browser plugin: the user's Firefox or Chromium tabs through the seimei extension (extension/ here), whose native-messaging host connects to seimei's link socket.
 //! Its tools run inside seimei, which holds the link and knows which tabs seimei opened; `seimei plugin browser` forwards each call.
-//! Page text and downloads are untrusted data. Acting in a tab the user opened needs their Approve card once per tab and site; closing one goes by guard.toml.
+//! Page text and downloads are untrusted data. Acting in a tab the user opened needs their Approve card once per tab and site, and closing one needs a card each time.
 //! The agent browser (browser: "agent") is a logged-out Firefox of seimei's own in the agent display: every tab there is seimei's, so nothing in it asks.
 
 pub mod host;
@@ -14,7 +14,7 @@ use std::time::Duration;
 use serde_json::{Value, json};
 
 use seimei_core::plugins::link::{Link, runtime_path};
-use seimei_core::plugins::{Builtin, Factory, Fut, Host, Session, ask_guard, int, shot_file, size, strip};
+use seimei_core::plugins::{Builtin, Factory, Fut, Host, Session, int, shot_file, size, strip};
 use seimei_core::tools::text;
 use seimei_core::util::{as_text, b64_decode, flag, now, truthy};
 
@@ -488,9 +488,7 @@ impl Browser {
             let opened = self.opened.lock().unwrap();
             ids.iter().filter(|i| !self.mine() && !opened.contains(i)).copied().collect()
         };
-        // Facts for the guard's rules: tabs = theirs when any of them seimei did not open.
-        let mut about = seimei_core::guard::About::default();
-        about.facts.insert("tabs".into(), json!(if theirs.is_empty() { "mine" } else { "theirs" }));
+        // Closing tabs seimei did not open needs the user's card.
         if !theirs.is_empty() {
             let ts = self.link.call("info", 30, json!({"tabs": theirs})).await?;
             let ts = ts.as_array().cloned().unwrap_or_default();
@@ -509,10 +507,11 @@ impl Browser {
                     format!("{title}\n{}", as_text(&t["url"]))
                 })
                 .collect();
-            (about.what, about.detail) = (target, detail.join("\n"));
-        }
-        if let Some(no) = ask_guard(session, "browser", "browser_close", a, Some(about), &[], "desktop").await {
-            return Ok(no);
+            let card = json!({"action": "desktop", "target": target, "detail": detail.join("\n")});
+            match session.card(card).await? {
+                o if o == "approved" => {}
+                o => return Ok(text(&format!("The user {o} it; no tabs closed."), true)),
+            }
         }
         let n = self.link.call("close", 30, json!({"tabs": ids})).await?;
         self.opened.lock().unwrap().retain(|i| !ids.contains(i));
@@ -588,12 +587,6 @@ impl Browser {
 
     /// One tool call, for the session that makes it.
     pub async fn call(&self, tool: &str, a: &Value, session: &dyn Session) -> Value {
-        // browser_close asks the guard itself, with which tabs are whose.
-        if tool != "browser_close"
-            && let Some(no) = ask_guard(session, "browser", tool, a, None, &[], "desktop").await
-        {
-            return no;
-        }
         if a["browser"] == "agent" {
             return match self.agent_ready().await {
                 Ok(b) => b.run(tool, a, session).await.unwrap_or_else(|e| text(&e, true)),

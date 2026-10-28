@@ -1,4 +1,4 @@
-//! tests/cases.json: the music tool's text, and the card a call raises with the request a fake Quod Libet bridge then gets.
+//! tests/cases.json: the music tool's text, and the request a fake Quod Libet bridge gets for a call.
 
 #[path = "../../../crates/core/tests/it/env.rs"]
 mod env;
@@ -8,25 +8,8 @@ use std::os::unix::net::UnixListener;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use seimei_core::plugins::{Fut, Session};
 use seimei_plugin_music as music;
 use serde_json::{Value, json};
-
-/// The user, approving every card and keeping it.
-#[derive(Default)]
-struct User(Mutex<Vec<Value>>);
-
-impl Session for User {
-    fn state(&self) -> &std::path::Path {
-        std::path::Path::new("/nonexistent")
-    }
-    fn card(&self, what: Value) -> Fut<'_, Result<String, String>> {
-        Box::pin(async move {
-            self.0.lock().unwrap().push(what);
-            Ok("approved".into())
-        })
-    }
-}
 
 #[tokio::test]
 async fn music_cases() {
@@ -46,7 +29,6 @@ async fn music_cases() {
     let listener = UnixListener::bind(&sock).unwrap();
     let mut env = crate::env::Env::lock();
     env.set("SEIMEI_QL_SOCK", &sock);
-    env.example_rules(&std::env::temp_dir().join(format!("seimei-ql-rules-{}", std::process::id())));
     let found = Arc::new(Mutex::new(json!([])));
     let sent = Arc::new(Mutex::new(vec![]));
     let (f, s) = (found.clone(), sent.clone());
@@ -64,17 +46,14 @@ async fn music_cases() {
             (&conn).write_all(format!("{reply}\n").as_bytes()).unwrap();
         }
     });
-    let total = doc["describe"].as_array().unwrap().len() + doc["cards"].as_array().unwrap().len();
-    for c in doc["cards"].as_array().unwrap() {
+    let total = doc["describe"].as_array().unwrap().len() + doc["calls"].as_array().unwrap().len();
+    for c in doc["calls"].as_array().unwrap() {
         *found.lock().unwrap() = c["found"].clone();
         sent.lock().unwrap().clear();
-        let user = User::default();
-        music::call("music", &json!({"command": c["command"], "args": c["args"]}), &user).await;
-        let cards = user.0.lock().unwrap().clone();
-        let target = cards.first().map_or(Value::Null, |c| c["target"].clone());
+        music::call("music", &json!({"command": c["command"], "args": c["args"]})).await;
         let got = sent.lock().unwrap().clone();
-        if target != c["target"] || cards.len() > 1 || got != [c["sent"].clone()] {
-            fails.push(format!("{}: cards {cards:?}, sent {got:?}", c["command"]));
+        if got != [c["sent"].clone()] {
+            fails.push(format!("{}: sent {got:?}", c["command"]));
         }
     }
     let _ = std::fs::remove_file(&sock);

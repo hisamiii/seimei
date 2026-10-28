@@ -9,10 +9,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use seimei_core::approvals::Approvals;
-use seimei_core::guard::{self, About};
 use seimei_core::events::EventLog;
-use seimei_plugin_desktop::{Ctx, Desktop, DesktopPlugin, checks, layout, uinput::Device};
 use seimei_core::plugins::{Fut, Plugins, Session};
+use seimei_plugin_desktop::{Ctx, Desktop, DesktopPlugin, layout, uinput::Device};
 use serde_json::{Value, json};
 
 const TOOLS: [&str; 13] = [
@@ -172,7 +171,7 @@ fn main() {
     for (i, c) in cases["checks"].as_array().unwrap().iter().enumerate() {
         let d = t.desktop(c["backend"].as_str().unwrap(), &c["ours"]);
         let (tool, inp) = (c["tool"].as_str().unwrap(), t.home(&c["input"]));
-        let got = as_card(tool, &inp, checks::check(tool, &inp, &d));
+        let got = json!(d.native_card(tool.trim_start_matches("mcp__desktop__"), &inp));
         t.compare(&format!("check {i} {} {}", c["backend"], c["input"]), &c["want"], got);
     }
     t.log();
@@ -217,7 +216,7 @@ fn main() {
     let desk = Arc::new(t.desktop("niri", &g["ours"]));
     for (i, c) in g["checks"].as_array().unwrap().iter().enumerate() {
         let tool = c["tool"].as_str().unwrap();
-        let got = as_card(tool, &c["input"], checks::check(tool, &c["input"], &desk));
+        let got = json!(desk.native_card(tool.trim_start_matches("mcp__desktop__"), &c["input"]));
         t.compare(&format!("niri check {i} {}", c["input"]), &c["want"], got);
     }
     t.log();
@@ -239,7 +238,7 @@ fn main() {
     }
 }
 
-/// `seimei plugin desktop` as the agent's CLI starts it: the spec for seimei's backend, a call seimei runs on the fake niri, and the facts the guard sees for closing a window seimei did not open.
+/// `seimei plugin desktop` as the agent's CLI starts it: the spec for seimei's backend, a call seimei runs on the fake niri, and the card for closing a window seimei did not open.
 async fn end_to_end(t: &mut T, g: &Value) {
     let state = t.root.join("e2e");
     std::fs::create_dir_all(&state).unwrap();
@@ -316,28 +315,10 @@ async fn end_to_end(t: &mut T, g: &Value) {
         &json!(null),
     );
 
-    // The facts the guard's rules see: closing the user's window is desktop = close, closing seimei's is nothing.
-    let check = desk.clone();
-    guard::add_facts(Arc::new(move |tool, inp| checks::check(tool, inp, &check)));
-    let close = |id: &str| guard::about("mcp__desktop__niri", &json!({"action": "close-window", "args": ["--id", id]}));
-    let about = close("4");
-    t.check(
-        "close fact for the user's window",
-        about.as_ref().is_some_and(|a| a.what == "close kitty \"~\"" && a.facts["desktop"] == "close"),
-        &json!(about.map(|a| a.what)),
-    );
+    // Closing the user's window needs a card, closing seimei's does not.
+    let close = json!({"action": "close-window", "args": ["--id", "4"]});
+    let card = desk.native_card("niri", &close);
+    t.check("a card for the user's window", card.as_ref().is_some_and(|c| c["target"] == "close kitty \"~\""), &json!(card));
     desk.own_window(4, json!({"command": "kitty"}));
-    t.check("no fact for seimei's window", close("4").is_none(), &json!(null));
-    let quit = guard::about("Bash", &json!({"command": "niri msg action quit"}));
-    t.check("quit fact", quit.as_ref().is_some_and(|a| a.facts["desktop"] == "quit"), &json!(null));
-}
-
-/// A desktop check as the card it gives: the guard's card with the plugin's title, "desktop" for its own tools.
-fn as_card(tool: &str, inp: &Value, about: Option<About>) -> Value {
-    let Some(a) = about else { return Value::Null };
-    let mut card = guard::card(tool, inp, "", Some(&a));
-    if tool.starts_with("mcp__") {
-        card["action"] = "desktop".into();
-    }
-    card
+    t.check("no card for seimei's window", desk.native_card("niri", &close).is_none(), &json!(null));
 }

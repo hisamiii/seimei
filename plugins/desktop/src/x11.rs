@@ -37,7 +37,6 @@ static ESCAPE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\\(.)").unwrap())
 static LINE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\w+)(?: = |: window id # |: )(.*)$").unwrap());
 static IDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"0x[0-9a-fA-F]+").unwrap());
 static WORD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\w+").unwrap());
-static NUMBER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(?:0x[0-9a-fA-F]+|\d+)$").unwrap());
 
 pub struct X11 {
     ctx: Ctx,
@@ -219,39 +218,6 @@ impl Backend for X11 {
             None => self.close_hit(None, ours),
             Some(_) => Some("close windows (xdotool, a window stack)".into()),
         }
-    }
-
-    fn bash_hit(&self, argv: &[String], ours: &Ours) -> Option<String> {
-        let prog = argv.first()?.rsplit('/').next().unwrap_or("");
-        if prog == "xdotool" {
-            // Chained commands: each one counts.
-            for (i, a) in argv.iter().enumerate().skip(1) {
-                if ["windowclose", "windowkill", "windowquit"].contains(&a.as_str()) {
-                    return self.action_hit(&argv[i..(i + 2).min(argv.len())], ours);
-                }
-            }
-        }
-        if prog == "wmctrl" {
-            let has = |f: &str| argv.iter().any(|a| a == f);
-            if has("-c") || has("-k") {
-                if has("-i") && has("-c") {
-                    let at = argv.iter().position(|a| a == "-c").unwrap() + 1;
-                    let target = argv.get(at).map_or("", |s| s.as_str());
-                    if NUMBER.is_match(target) {
-                        let wid = match target.strip_prefix("0x") {
-                            Some(h) => i64::from_str_radix(h, 16).ok(),
-                            None => target.parse().ok(),
-                        };
-                        return self.close_hit(wid, ours);
-                    }
-                }
-                return has("-c").then(|| "close windows (wmctrl)".into());
-            }
-        }
-        if prog == "xkill" {
-            return Some("kill a window (xkill)".into());
-        }
-        None
     }
 
     fn focus(&self, wid: i64) -> Result<(), String> {

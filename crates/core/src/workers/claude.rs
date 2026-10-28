@@ -9,7 +9,6 @@ use regex::Regex;
 use seimei_proto::HookMatcher;
 use serde_json::{Value, json};
 
-use crate::guard::HOOK_TIMEOUT;
 use crate::paths::home;
 use crate::util::{chars, read_tail};
 
@@ -287,16 +286,15 @@ pub fn dispatcher_env(compact_window: i64) -> Vec<(String, String)> {
     ]
 }
 
-fn hook(id: &str, timeout: Option<f64>) -> HookMatcher {
-    HookMatcher { matcher: None, callbacks: vec![id.into()], timeout }
+fn hook(id: &str) -> HookMatcher {
+    HookMatcher { matcher: None, callbacks: vec![id.into()], timeout: None }
 }
 
-/// The hooks a session calls back: the guard before each tool call, "failed" after a failed one, and `after` after each one that ran.
+/// The hooks a session calls back: "failed" after a failed tool call, and `after` after each one that ran.
 pub fn hooks(after: &[&str]) -> Vec<(String, Vec<HookMatcher>)> {
     vec![
-        ("PreToolUse".into(), vec![hook("pre", Some(HOOK_TIMEOUT))]),
-        ("PostToolUseFailure".into(), vec![hook("failed", None)]),
-        ("PostToolUse".into(), after.iter().map(|id| hook(id, None)).collect()),
+        ("PostToolUseFailure".into(), vec![hook("failed")]),
+        ("PostToolUse".into(), after.iter().map(|id| hook(id)).collect()),
     ]
 }
 

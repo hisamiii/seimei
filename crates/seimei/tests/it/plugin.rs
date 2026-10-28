@@ -81,10 +81,7 @@ impl Drop for Server {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn queue_plugin_over_stdio() {
-    // The example's rules: the cards these tools raise are guard.toml's now. Children inherit it.
-    let mut rules = crate::env::Env::lock();
-    rules.example_rules(&std::env::temp_dir().join(format!("seimei-queue_plugin_over_stdio-rules-{}", std::process::id())));
-    let (d, events, approvals, plugins) = host("queue", "queue").await;
+    let (d, _, _, plugins) = host("queue", "queue").await;
     let cases_queue = cases("plugins/queue/tests/cases.json");
     let qdir = d.join("queue");
     std::fs::create_dir_all(&qdir).unwrap();
@@ -116,66 +113,13 @@ async fn queue_plugin_over_stdio() {
     .await
     .unwrap();
 
-    // queue_stop raises a card naming seimei; only an approval sends the gate the stop.
-    for (id, approve) in [(4, true), (5, false)] {
-        let mut sub = events.subscribe();
-        let call = tokio::task::spawn_blocking(move || {
-            let r = srv.call(id, "queue_stop", json!({}));
-            (srv, r)
-        });
-        let card = loop {
-            let ev = tokio::time::timeout(Duration::from_secs(10), sub.recv()).await.unwrap().unwrap();
-            if ev["type"] == "approval" {
-                break ev;
-            }
-        };
-        assert_eq!(card["who"], "seimei");
-        assert_eq!(card["action"], "desktop");
-        assert_eq!(card["target"], "stop the GPU/NPU job npu_dma python bench.py --long");
-        assert!(approvals.decide(card["aid"].as_str().unwrap(), approve, None, None));
-        let (s, (t, err)) = call.await.unwrap();
-        srv = s;
-        let kills = seen.lock().unwrap().iter().filter(|r| r["op"] == "stop").count();
-        if approve {
-            assert_eq!((t.as_str(), err), ("Sent SIGTERM to 1 processes of L3.", false));
-            assert_eq!(kills, 1);
-        } else {
-            assert_eq!((t.as_str(), err), ("The user denied it; nothing changed.", true));
-            assert_eq!(kills, 1, "a denied card sends nothing");
-        }
-    }
+    // queue_stop sends the gate the stop.
+    let (t, err) = tokio::task::spawn_blocking(move || srv.call(4, "queue_stop", json!({}))).await.unwrap();
+    assert_eq!((t.as_str(), err), ("Sent SIGTERM to 1 processes of L3.", false));
 
-    // A card whose call goes away ends as cancelled: the agent's CLI cancels the request, or the plugin process ends.
-    let kill = json!({"name": "queue_stop", "arguments": {}});
-    for id in [6, 7] {
-        let mut sub = events.subscribe();
-        srv.send(json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": kill}));
-        let next = async |sub: &mut tokio::sync::mpsc::Receiver<_>, kind: &str| loop {
-            let ev: seimei_core::events::Event =
-                tokio::time::timeout(Duration::from_secs(10), sub.recv()).await.unwrap().unwrap();
-            if ev["type"] == kind {
-                break ev;
-            }
-        };
-        let card = next(&mut sub, "approval").await;
-        if id == 6 {
-            srv.send(json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 6}}));
-        } else {
-            srv.child.kill().unwrap();
-        }
-        let done = next(&mut sub, "approval_done").await;
-        assert_eq!((&done["aid"], &done["outcome"]), (&card["aid"], &json!("cancelled")), "call {id}");
-    }
-    drop(srv);
-
-    // A token seimei does not know (it restarted) and a queue that is not running.
-    let mut bad = env.clone();
-    bad.insert("SEIMEI_TOKEN".into(), json!("not-a-session"));
+    // A queue that is not running.
     let gone = d.join("no-queue");
     tokio::task::spawn_blocking(move || {
-        let mut srv = Server::queue(&bad, &qdir);
-        let (t, err) = srv.call(1, "queue_stop", json!({}));
-        assert_eq!((t.as_str(), err), ("seimei restarted, ask again", true));
         let mut srv = Server::queue(&env, &gone);
         let (t, err) = srv.call(1, "queue", json!({}));
         assert!(err && t.starts_with("The queue is not running"), "{t}");
@@ -210,10 +154,7 @@ async fn host(name: &str, enabled: &str) -> (std::path::PathBuf, Arc<EventLog>, 
 
 #[tokio::test(flavor = "multi_thread")]
 async fn music_plugin_over_stdio() {
-    // The example's rules: the cards these tools raise are guard.toml's now. Children inherit it.
-    let mut rules = crate::env::Env::lock();
-    rules.example_rules(&std::env::temp_dir().join(format!("seimei-music_plugin_over_stdio-rules-{}", std::process::id())));
-    let (d, events, approvals, plugins) = host("music", "music").await;
+    let (d, _, _, plugins) = host("music", "music").await;
     let env = plugins.servers("seimei", None, None)["music"]["env"].as_object().unwrap().clone();
     // A Quod Libet bridge that answers status and keeps the rest, and a playerctl that logs its args.
     let status = cases("plugins/music/tests/cases.json")["describe"][3].clone();
@@ -267,24 +208,16 @@ async fn music_plugin_over_stdio() {
     let ran = std::fs::read_to_string(&args_log).unwrap();
     assert!(ran.ends_with("-p spotify volume 0.30\n"), "{ran}");
 
-    // Deleting a playlist asks first; denied, the bridge never hears of it.
-    let mut sub = events.subscribe();
-    let call = tokio::task::spawn_blocking(move || {
+    // Deleting a playlist goes to the bridge.
+    let (srv, r) = tokio::task::spawn_blocking(move || {
         let r = srv.call(6, "music", json!({"command": "playlist_delete", "args": {"name": "Faves"}}));
         (srv, r)
-    });
-    let card = loop {
-        let ev = tokio::time::timeout(Duration::from_secs(10), sub.recv()).await.unwrap().unwrap();
-        if ev["type"] == "approval" {
-            break ev;
-        }
-    };
-    assert_eq!((&card["who"], &card["target"]), (&json!("seimei"), &json!("delete the playlist \"Faves\"")));
-    approvals.decide(card["aid"].as_str().unwrap(), false, None, None);
-    let (srv, r) = call.await.unwrap();
-    assert_eq!(r, ("The user denied it; nothing changed.".into(), true));
+    })
+    .await
+    .unwrap();
+    assert!(!r.1, "{r:?}");
     let cmds: Vec<Value> = sent.lock().unwrap().iter().map(|r| r["cmd"].clone()).collect();
-    assert_eq!(cmds, [json!("status")]);
+    assert_eq!(cmds, [json!("status"), json!("playlist_delete")]);
     drop(srv);
     let _ = std::fs::remove_dir_all(&d);
 }
@@ -331,9 +264,6 @@ fn browser_op(op: &str, a: &Value) -> Value {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn browser_plugin_forwards_to_seimei() {
-    // The example's rules: the cards these tools raise are guard.toml's now. Children inherit it.
-    let mut rules = crate::env::Env::lock();
-    rules.example_rules(&std::env::temp_dir().join(format!("seimei-browser_plugin_forwards_to_seimei-rules-{}", std::process::id())));
     let (d, events, approvals, plugins) = host("browser", "browser").await;
     let link = d.join("run/seimei/browser.sock");
     tokio::spawn(plugins.get::<seimei_plugin_browser::Browser>("browser").unwrap().link.clone().run(link.clone()));
@@ -377,9 +307,32 @@ async fn browser_plugin_forwards_to_seimei() {
     };
     assert_eq!((&card["who"], &card["target"]), (&json!("seimei"), &json!("close the tab \"Mine\"")));
     approvals.decide(card["aid"].as_str().unwrap(), false, None, None);
-    let (srv, r) = call.await.unwrap();
+    let (mut srv, r) = call.await.unwrap();
     assert_eq!(r, ("The user denied it; no tabs closed.".into(), true));
+
+    // A card whose call goes away ends as cancelled: the agent's CLI cancels the request, or the plugin process ends.
+    let kill = json!({"name": "browser_close", "arguments": {"tabs": [5]}});
+    for id in [6, 7] {
+        let mut sub = events.subscribe();
+        srv.send(json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": kill}));
+        let next = async |sub: &mut tokio::sync::mpsc::Receiver<_>, kind: &str| loop {
+            let ev: seimei_core::events::Event =
+                tokio::time::timeout(Duration::from_secs(10), sub.recv()).await.unwrap().unwrap();
+            if ev["type"] == kind {
+                break ev;
+            }
+        };
+        let card = next(&mut sub, "approval").await;
+        if id == 6 {
+            srv.send(json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 6}}));
+        } else {
+            srv.child.kill().unwrap();
+        }
+        let done = next(&mut sub, "approval_done").await;
+        assert_eq!((&done["aid"], &done["outcome"]), (&card["aid"], &json!("cancelled")), "call {id}");
+    }
     drop(srv);
+
     let closes: Vec<Value> =
         seen.lock().unwrap().iter().filter(|r| r["op"] == "close").map(|r| r["args"].clone()).collect();
     assert_eq!(closes, [json!({"tabs": [9]})]);
@@ -443,7 +396,12 @@ async fn template_plugin_as_a_user_installs_it() {
         let mut srv = Server::spawn(Command::new(server["command"].as_str().unwrap()), &senv, &more);
         let init = srv.ask(1, "initialize", json!({"protocolVersion": "2025-06-18", "capabilities": {}}));
         assert_eq!(init["serverInfo"]["name"], "template");
-        let names: Vec<Value> = srv.ask(2, "tools/list", json!({}))["tools"].as_array().unwrap().iter().map(|t| t["name"].clone()).collect();
+        let names: Vec<Value> = srv.ask(2, "tools/list", json!({}))["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].clone())
+            .collect();
         assert_eq!(names, [json!("notes_add"), json!("notes_list"), json!("notes_clear")]);
         assert_eq!(srv.call(3, "notes_add", json!({"text": "buy  milk"})), ("Added. 1 notes.".into(), false));
         assert_eq!(srv.call(4, "notes_add", json!({"text": "call the plumber"})), ("Added. 2 notes.".into(), false));

@@ -60,7 +60,7 @@
   {"calls": [["notify", "x happened", false, null], ["notify", "x happened", false, null], ["notify", "y", false, null]], "dispatcher": [["note", "x happened (×2)", "w:x happened"], ["note", "y", "w:y"]]},
   {"calls": [["tell", "w1", "waits on a permission card: run", false, "perm:w1"], ["tell", "w1", "waits on a permission card: edit", false, "perm:w1"]], "dispatcher": [["note", "shikigami runner (w1) waits on a permission card: edit", "w:perm:w1"]]},
   {"calls": [["notify", "info", false, null], ["tell", "w2", "asks: what?", true, "report:w2"], ["notify", "info", false, null]], "dispatcher": [["wake", "Events:\n- shikigami app-tester (w2) asks: what?\n- info (×2)", null]]},
-  {"calls": [["tell", "nope", "the guard blocked x", false, null]], "dispatcher": [["note", "the guard blocked x", "w:the guard blocked x"]]},
+  {"calls": [["tell", "nope", "Bash failed 3 times in a row, last: x", false, null]], "dispatcher": [["note", "Bash failed 3 times in a row, last: x", "w:Bash failed 3 times in a row, last: x"]]},
   {"calls": [["notify", "dup", false, "k"], ["notify", "dup", true, "k"]], "dispatcher": [["wake", "dup", null]]},
   {"calls": [["note", "claude-queue: q1's command ended but pid 5 still holds npu", false, "cqd:detached:q1"], ["note", "claude-queue: q1's command ended but pid 6 still holds npu", false, "cqd:detached:q1"], ["note", "", false, "cqd:detached:q1"]], "dispatcher": [["note", "", "w:cqd:detached:q1"]]},
   {"calls": [["note", "", false, "cqd:detached:q2"], ["tell", "w1", "finished: done it", true, "report:w1"]], "dispatcher": [["note", "", "w:cqd:detached:q2"], ["wake", "shikigami runner (w1) finished: done it", null]]}

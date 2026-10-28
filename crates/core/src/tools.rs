@@ -233,7 +233,7 @@ pub fn summon_spec(groups: &[String], agents: &[String]) -> Value {
     props["subagent_model"]["default"] = json!(plan.quick);
     if !groups.is_empty() {
         props["tools"] = json!({"type": "array", "items": {"type": "string", "enum": groups},
-                "description": "plugin tool groups to grant it, with the same cards, guard and rules as yours (their \
+                "description": "plugin tool groups to grant it, with the same cards and rules as yours (their \
                                 prompt sections come along); default none. Grant only what the task needs."});
     }
     if !agents.is_empty() {

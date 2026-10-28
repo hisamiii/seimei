@@ -9,7 +9,7 @@ pub mod link;
 use std::any::Any;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use serde_json::{Map, Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
@@ -18,14 +18,6 @@ use crate::approvals::Approvals;
 use crate::events::EventLog;
 use crate::util::{config_file, token_urlsafe};
 use crate::watches::Watches;
-
-/// The names of the built-ins the binary has: their own tools ask the guard themselves.
-static BUILTIN_NAMES: RwLock<Vec<&'static str>> = RwLock::new(Vec::new());
-
-/// Whether a plugin of this name is built into the binary (its risky tools carry their own cards).
-pub fn is_builtin(name: &str) -> bool {
-    BUILTIN_NAMES.read().unwrap().contains(&name)
-}
 
 /// A plugin built into the binary, from its crate under plugins/: what it ships and how it is made.
 #[derive(Clone, Copy)]
@@ -221,11 +213,6 @@ impl Plugins {
 
     /// The same, with the built-ins run by exe (a test runs the built seimei, not itself).
     pub fn load_at(cfg: &toml::Table, state: &Path, exe: &str, builtins: &[Factory]) -> Plugins {
-        {
-            let mut names = BUILTIN_NAMES.write().unwrap();
-            names.clear();
-            names.extend(builtins.iter().map(|f| f.name));
-        }
         let dir = config_file().with_file_name("plugins");
         let mut out = Plugins {
             list: vec![],
@@ -543,7 +530,12 @@ impl Plugins {
                                 None => json!({"error": "this session has no shikigami tools"}),
                             }
                         } else {
-                            let session = Local { state: &me.state, approvals: &approvals, who: &g.who, worker: g.worker.as_deref() };
+                            let session = Local {
+                                state: &me.state,
+                                approvals: &approvals,
+                                who: &g.who,
+                                worker: g.worker.as_deref(),
+                            };
                             let (tool, args) = (req["tool"].as_str().unwrap_or(""), &req["args"]);
                             // The call went away (cancelled, or its session ended): drop it, cards and all.
                             tokio::select! {
@@ -567,44 +559,6 @@ impl Plugins {
                 };
                 let _ = wr.write_all(format!("{reply}\n").as_bytes()).await;
             });
-        }
-    }
-}
-
-/// guard.toml's rules for a built-in's own tool call: None to go on, or the reply that ends it. about: what the plugin knows (facts for the rules, and the card's title and detail); reads: files the call reads; kind: the card's action.
-pub async fn ask_guard(
-    session: &dyn Session,
-    plugin: &str,
-    tool: &str,
-    args: &Value,
-    about: Option<crate::guard::About>,
-    reads: &[PathBuf],
-    kind: &str,
-) -> Option<Value> {
-    let full = format!("mcp__{plugin}__{tool}");
-    let home = crate::paths::home().display().to_string();
-    let facts = about.as_ref().map_or(Value::Null, |a| Value::Object(a.facts.clone()));
-    let v = crate::guard::decide(&full, args, &home, &facts, reads)?;
-    match v.action {
-        crate::guard::Action::Allow => None,
-        crate::guard::Action::Deny => Some(crate::tools::text(
-            &format!("seimei's guard blocks {}. This is the user's rule; if they want it, they do it themselves.", v.message),
-            true,
-        )),
-        crate::guard::Action::Card => {
-            let mut card = crate::guard::card(&full, args, &v.message, about.as_ref());
-            card["action"] = json!(kind);
-            match session.card(card).await {
-                Ok(o) if o == "approved" => None,
-                Ok(o) => {
-                    let undone = match plugin {
-                        "browser" => "no tabs closed",
-                        _ => "nothing changed",
-                    };
-                    Some(crate::tools::text(&format!("The user {o} it; {undone}."), true))
-                }
-                Err(e) => Some(crate::tools::text(&e, true)),
-            }
         }
     }
 }

@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use seimei_core::approvals::Approvals;
+use seimei_core::audit::Audit;
 use seimei_core::events::EventLog;
-use seimei_core::guard::Guard;
 use seimei_core::plugins::Plugins;
 use seimei_core::tasks::Board;
 use seimei_core::usage::Usage;
@@ -64,7 +64,7 @@ pub fn transcript(cwd: &Path, session_id: &str) -> PathBuf {
     config_dir().join("projects").join(folder).join(format!("{session_id}.jsonl"))
 }
 
-/// A pool on a state folder of its own, wired like the server's: the guard tells it, it tells `heard`.
+/// A pool on a state folder of its own, wired like the server's: the audit tells it, it tells `heard`.
 pub fn pool(state: &Path, mode: &str, events: &Arc<EventLog>, approvals: &Arc<Approvals>) -> (Arc<Pool>, Arc<Heard>) {
     let plugins = Arc::new(Plugins::load(&Default::default(), state, &[]));
     pool_with(state, mode, events, approvals, plugins)
@@ -79,19 +79,19 @@ pub fn pool_with(
     plugins: Arc<Plugins>,
 ) -> (Arc<Pool>, Arc<Heard>) {
     std::fs::create_dir_all(state).unwrap();
-    let guard = Arc::new(Guard::new(events.clone(), approvals.clone(), state));
+    let audit = Arc::new(Audit::new(state));
     let parts = Parts {
         events: events.clone(),
         board: Arc::new(Mutex::new(Board::open(&state.join("tasks.json"), Some(events.clone())))),
         usage: Arc::new(Usage::new(state, Some(events.clone()))),
         approvals: approvals.clone(),
-        guard: guard.clone(),
+        audit: audit.clone(),
         terminal: String::new(),
         plugins,
     };
     let pool = Pool::new(state, mode, "test machine", parts).unwrap();
     let p = pool.clone();
-    let _ = guard.tell.set(Box::new(move |w, line, urgent, key| p.tell(w, line, urgent, key)));
+    let _ = audit.tell.set(Box::new(move |w, line, urgent, key| p.tell(w, line, urgent, key)));
     let heard = Arc::new(Heard::default());
     let _ = pool.dispatcher.set(heard.clone());
     (pool, heard)

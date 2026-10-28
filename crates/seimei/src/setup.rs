@@ -601,28 +601,6 @@ pub fn run(read_secret: impl Fn(&str) -> String, builtins: &[seimei_core::plugin
     browser_host(&state, &exe);
     gnome_extension();
 
-    // The guard: the example's rules are a sound start (secrets, wiping home, piped installs, the desktop).
-    let guard = seimei_core::util::guard_file();
-    if !guard.exists() {
-        println!(
-            "\nThe guard has no rules of yours: beyond seimei's own secrets, agents may do what Claude Code lets them. \
-             contrib/guard.example.toml in seimei's source has a starting set: keys and tokens, wiping your home, \
-             piped installs, your own sessions, the desktop."
-        );
-        if yes("Start with those rules on? You can edit or remove them later", true) {
-            let head = "# From seimei setup: contrib/guard.example.toml with every rule on. Delete or comment out what you don't want.\n";
-            if let Some(dir) = guard.parent() {
-                let _ = std::fs::create_dir_all(dir);
-            }
-            match std::fs::write(&guard, format!("{head}{}\n", seimei_core::guard::example_rules())) {
-                Ok(()) => println!("Wrote {}.", guard.display()),
-                Err(e) => println!("Couldn't write {}: {e}", guard.display()),
-            }
-        } else {
-            println!("Rules go in {}, when you want some.", guard.display());
-        }
-    }
-
     if seimei_core::util::systemd() {
         systemd_service(&exe);
     } else if on_path("rc-service") {

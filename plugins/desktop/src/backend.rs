@@ -131,10 +131,6 @@ pub trait Backend: Send + Sync {
         }
         self.close_hit(args.get(1).and_then(|n| n.parse().ok()), ours)
     }
-    /// The same for one command of a Bash line.
-    fn bash_hit(&self, _argv: &[String], _ours: &Ours) -> Option<String> {
-        None
-    }
     /// Closing a window (None: the focused one) needs a card unless seimei opened it.
     fn close_hit(&self, wid: Option<i64>, ours: &Ours) -> Option<String> {
         let wid = wid.or_else(|| self.focused_id());

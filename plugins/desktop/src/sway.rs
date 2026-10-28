@@ -293,28 +293,6 @@ impl Backend for Sway {
         None
     }
 
-    fn bash_hit(&self, argv: &[String], ours: &Ours) -> Option<String> {
-        if argv.first()?.rsplit('/').next() != Some("swaymsg") {
-            return None;
-        }
-        let (mut args, mut i) = (vec![], 1);
-        while i < argv.len() {
-            let a = &argv[i];
-            if a == "-t" || a == "--type" {
-                if argv.get(i + 1).is_some_and(|t| t != "command") {
-                    return None;
-                }
-                i += 2;
-                continue;
-            }
-            if !a.starts_with('-') {
-                args.push(a.clone());
-            }
-            i += 1;
-        }
-        self.action_hit(&args, ours)
-    }
-
     fn focus(&self, wid: i64) -> Result<(), String> {
         self.command(&format!("[con_id={wid}] focus")).map(drop)
     }

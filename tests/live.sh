@@ -2,7 +2,7 @@
 # tests/live.sh NAME...: run the ignored live tests (headless sessions on haiku or dsh) in a scrubbed environment.
 # No desktop, no job variables of the calling session, auto-memory off, and the test Claude config dir, so test sessions stay out of the user's list.
 # Log it in once: `CLAUDE_CONFIG_DIR=<dir> claude /login`.
-# NAME: dispatcher (the dispatcher with its tools and plugins), acp (a shikigami on dsh under the guard).
+# NAME: dispatcher (the dispatcher with its tools and plugins), acp (a shikigami on dsh).
 set -eu
 root=$(dirname "$(dirname "$(readlink -f "$0")")")
 cd "$root"
@@ -19,10 +19,8 @@ for name in "$@"; do
     case $name in
     dispatcher) run seimei live_dispatcher:: ;;
     acp)
-        # dsh runs in a temp HOME whose only key is a decoy, so a read the guard failed to stop would leak nothing.
+        # dsh runs in a temp HOME: the commands it is asked to run touch nothing of the user's.
         home=$(mktemp -d /tmp/seimei-acphome-XXXXXX)
-        mkdir -m 700 "$home/.ssh"
-        echo "DECOY-$(head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \n')" > "$home/.ssh/id_ed25519"
         real=$HOME rc=0
         HOME=$home DSH_HOME=${DSH_HOME:-$real/.dsh} CARGO_HOME=${CARGO_HOME:-$real/.cargo} \
             RUSTUP_HOME=${RUSTUP_HOME:-$real/.rustup} run seimei live_acp:: || rc=$?

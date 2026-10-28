@@ -1,6 +1,6 @@
 //! Typing into the user's own agent sessions, on their tap in the app: kitty remote control, one window at a time.
 //!
-//! kitty.conf allows remote control only with seimei's password (in kitty-rc.conf, mode 600, a guard secret), and that password only for ls, send-text, send-key and get-text.
+//! kitty.conf allows remote control only with seimei's password (in kitty-rc.conf, mode 600, one of seimei's secrets), and that password only for ls, send-text, send-key and get-text.
 //! The window, its kitty's socket and public key come from the session process's own environment, so text goes to exactly that session's window.
 //! Before typing, the screen is read: nothing is sent into a prompt or dialog it was not meant for.
 

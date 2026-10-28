@@ -1,7 +1,7 @@
 //! The permanent dispatcher session: one agent conversation that survives restarts.
 //!
 //! One task owns the session and everything about its turns (`Turns`); the server and the rest reach it through a command channel.
-//! Permission prompts, the guard's hooks and seimei's own tools come in on the client's handler, on tasks of their own.
+//! Permission prompts, the harness's hooks and seimei's own tools come in on the client's handler, on tasks of their own.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -18,8 +18,8 @@ use tokio::sync::mpsc;
 use tokio::time::{Instant, sleep_until};
 
 use crate::approvals::Approvals;
+use crate::audit::{Audit, Call};
 use crate::events::EventLog;
-use crate::guard::Guard;
 use crate::paths::expand;
 use crate::tools::Tools;
 use crate::usage::Usage;
@@ -341,7 +341,7 @@ pub struct Dispatcher {
     events: Arc<EventLog>,
     usage: Arc<Usage>,
     approvals: Arc<Approvals>,
-    guard: Arc<Guard>,
+    audit: Arc<Audit>,
     tools: Arc<Tools>,
     state: PathBuf,
     connected: AtomicBool,
@@ -376,7 +376,7 @@ impl Dispatcher {
         state: &Path,
         usage: Arc<Usage>,
         approvals: Arc<Approvals>,
-        guard: Arc<Guard>,
+        audit: Arc<Audit>,
         tools: Arc<Tools>,
     ) -> Arc<Dispatcher> {
         let (tx, rx) = mpsc::unbounded_channel();
@@ -385,7 +385,7 @@ impl Dispatcher {
             events,
             usage,
             approvals,
-            guard,
+            audit,
             tools,
             state: state.into(),
             connected: AtomicBool::new(false),
@@ -418,7 +418,7 @@ impl Dispatcher {
         } else {
             format!(
                 "- summon's tools option grants a shikigami plugin tool groups ({}); it gets none unless you grant \
-                 them, and they come with the same cards, guard and rules as yours.\n",
+                 them, and they come with the same cards and rules as yours.\n",
                 groups.join(", ")
             )
         };
@@ -438,7 +438,6 @@ impl Dispatcher {
             .replace("{about}", &self.cfg.about)
             .replace("{grants}", &grants)
             .replace("{plugins}", &plugins.prompt(None))
-            .replace("{guard}", &crate::guard::prompt_section())
     }
 
     /// A resumed session keeps the system prompt it had until its next compaction: when a deploy changed the prompt, the new and changed lines go to the dispatcher once as a note.
@@ -623,7 +622,7 @@ impl Dispatcher {
         loop {
             let handler: Arc<dyn Handler> = Arc::new(Seimei {
                 approvals: self.approvals.clone(),
-                guard: self.guard.clone(),
+                audit: self.audit.clone(),
                 tools: self.tools.clone(),
                 mode: self.cfg.mode.clone(),
                 state: self.state.clone(),
@@ -668,10 +667,10 @@ impl Dispatcher {
     }
 }
 
-/// What the harness asks of seimei's session: permission cards, the guard's hooks, seimei's own tools.
+/// What the harness asks of seimei's session: permission cards, the audit's hooks, seimei's own tools.
 struct Seimei {
     approvals: Arc<Approvals>,
-    guard: Arc<Guard>,
+    audit: Arc<Audit>,
     tools: Arc<Tools>,
     mode: String,
     state: PathBuf,
@@ -688,11 +687,10 @@ impl Handler for Seimei {
     }
 
     fn hook(&self, callback_id: String, input: Value, tool_use_id: Option<String>) -> BoxFuture<Value> {
-        let (guard, state, calls) = (self.guard.clone(), self.state.clone(), self.calls.clone());
+        let (audit, state, calls) = (self.audit.clone(), self.state.clone(), self.calls.clone());
         Box::pin(async move {
             match callback_id.as_str() {
-                "pre" => guard.pre("seimei", None, &input, tool_use_id.as_deref()).await,
-                "failed" => guard.failed(None, &input, tool_use_id.as_deref()),
+                "failed" => audit.failed(None, &input, tool_use_id.as_deref()),
                 "style" if input.get("agent_id").is_none_or(|a| a.is_null()) => {
                     crate::style::reminder(calls.fetch_add(1, Ordering::Relaxed) + 1, &state)
                 }
@@ -1024,6 +1022,14 @@ impl Turns {
 
     fn assistant(&mut self, msg: AssistantMessage) {
         self.head = None;
+        let session = self.d.session_id().unwrap_or_default();
+        for b in &msg.message.content {
+            if let ContentBlock::ToolUse { id, name, input } = b {
+                let agent = msg.parent_tool_use_id.as_deref();
+                let call = Call { who: "seimei", worker: None, session: &session, agent, id, tool: name, input };
+                self.d.audit.call(call);
+            }
+        }
         if msg.parent_tool_use_id.is_some() {
             return;
         }

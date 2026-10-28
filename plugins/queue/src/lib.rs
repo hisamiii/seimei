@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
-use seimei_core::plugins::{Builtin, Factory, Fut, Host, Session, ask_guard, strip};
+use seimei_core::plugins::{Builtin, Factory, Fut, Host, Session, strip};
 use seimei_core::sessions::{self, Own};
 use seimei_core::tools::text;
 use seimei_core::util::{self, as_text, chars, now, read_json};
@@ -34,8 +34,8 @@ pub const PLUGIN: Factory = Factory {
 };
 
 impl Builtin for Queue {
-    fn call<'a>(&'a self, tool: &'a str, args: &'a Value, session: &'a dyn Session) -> Fut<'a, Value> {
-        Box::pin(call(tool, args, session))
+    fn call<'a>(&'a self, tool: &'a str, _args: &'a Value, session: &'a dyn Session) -> Fut<'a, Value> {
+        Box::pin(call(tool, session))
     }
 
     fn worker_note(&self, note: &str) -> String {
@@ -186,15 +186,12 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
 }
 
 /// One tool call.
-pub async fn call(tool: &str, a: &Value, session: &dyn Session) -> Value {
+pub async fn call(tool: &str, session: &dyn Session) -> Value {
     let Some(snap) = blocking(|| ask(&json!({"op": "status"}))).await else {
         return text("The queue is not running (seimei serve is down, or the queue plugin is off).", true);
     };
     match tool {
         "queue" => {
-            if let Some(no) = ask_guard(session, "queue", tool, a, None, &[], "desktop").await {
-                return no;
-            }
             let names = names(session.state());
             text(&describe(&snap, &names), false)
         }
@@ -202,14 +199,6 @@ pub async fn call(tool: &str, a: &Value, session: &dyn Session) -> Value {
             let h = &snap["holder"];
             if h.is_null() {
                 return text("Nobody holds the turn.", true);
-            }
-            let about = seimei_core::guard::About {
-                what: format!("stop the GPU/NPU job {} {}", as_text(&h["agent"]), chars(&as_text(&h["cmd"]), 80)),
-                detail: "SIGTERM to the whole command (its scope)".into(),
-                ..Default::default()
-            };
-            if let Some(no) = ask_guard(session, "queue", tool, a, Some(about), &[], "desktop").await {
-                return no;
             }
             let req = json!({"op": "stop", "id": h["id"]});
             match blocking(move || ask(&req)).await {

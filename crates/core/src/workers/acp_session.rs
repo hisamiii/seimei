@@ -62,10 +62,6 @@ impl Session {
         self.last_text.clear();
         self.message.clear();
         self.w.set("running", |r| r.question = None);
-        let text = match self.guard_note.take() {
-            Some(note) => format!("{note}\n\n{text}"),
-            None => text,
-        };
         let text = if std::mem::take(&mut self.fresh) { format!("{}\n{text}", self.w.prompt()) } else { text };
         self.acp.as_ref().expect("a session").prompt_text(&text).map_err(|e| e.to_string())?;
         self.turn = true;
@@ -85,7 +81,7 @@ impl Session {
         self.last_text = self.message.clone();
     }
 
-    pub(super) async fn acp_event(&mut self, ev: acp::Event) {
+    pub(super) fn acp_event(&mut self, ev: acp::Event) {
         use acp::{Event, Update};
         match ev {
             Event::Update(Update::Text(t)) => {
@@ -99,6 +95,11 @@ impl Session {
                 self.message.clear();
                 match u {
                     Update::ToolCall(t) => {
+                        let (tool, input) = shaped(&t);
+                        let r = self.w.rec();
+                        let (who, worker, session) = (&r.name, Some(self.w.id.as_str()), &r.session_id);
+                        let call = Call { who, worker, session, agent: None, id: &t.id, tool: &tool, input: &input };
+                        self.pool.audit.call(call);
                         let (name, summary) = tool_line(&t);
                         self.w.add(json!({"type": "tool", "tool_id": t.id, "name": name, "summary": summary}));
                         self.w.doing(json!({"name": name, "summary": summary}));
@@ -118,26 +119,7 @@ impl Session {
                 self.turn_ended(end);
             }
             Event::Unreadable(line) => eprintln!("seimei: {} wrote: {}", self.w.name(), chars(&line, 200)),
-            Event::Unasked(t) => self.unasked(t).await,
-        }
-    }
-
-    /// A call the agent ran without asking: the guard sees it only after the fact.
-    /// One it would have blocked, or held for a card, stops the turn; the agent hears why with its next message.
-    pub(super) async fn unasked(&mut self, t: acp::ToolCall) {
-        let (tool, input) = guard_shaped(&t);
-        let r = self.w.rec();
-        let hook = json!({"tool_name": tool, "tool_input": input, "cwd": r.cwd, "session_id": r.session_id});
-        let Some(why) = self.pool.guard.unasked(&r.name, Some(&self.w.id), &hook, Some(&t.id)).await else { return };
-        let said = format!("The guard stopped this turn: the agent ran a call without asking, and {why}.");
-        self.w.add(json!({"type": "system", "text": said}));
-        self.guard_note = Some(format!(
-            "[seimei] The guard stopped your last turn: you ran a call without asking for permission, and {why}. \
-             Ask before every call that changes or reads outside the project; seimei blocks some outright and puts \
-             the rest on the user's phone."
-        ));
-        if self.turn {
-            self.stop().await;
+            Event::Unasked(_) => {}
         }
     }
 
@@ -213,10 +195,10 @@ fn acp_servers(servers: Map<String, Value>) -> Vec<acp::McpServer> {
         .collect()
 }
 
-/// An ACP tool call in the shape the guard and the cards know: a command is Bash, a file edit Write, a read Read, a fetch WebFetch.
+/// An ACP tool call in the shape the cards and the audit log know: a command is Bash, a file edit Write, a read Read, a fetch WebFetch.
 /// An agent that calls everything kind other (dsh) is read by its tool's name.
-/// What has no such shape keeps its name and its raw input (the guard passes it, and a card shows it).
-pub fn guard_shaped(t: &acp::ToolCall) -> (String, Value) {
+/// What has no such shape keeps its name and its raw input, which a card shows.
+pub fn shaped(t: &acp::ToolCall) -> (String, Value) {
     let raw = t.input.clone().unwrap_or(json!({}));
     let named = matches!(t.kind.as_str(), "other" | "");
     let kind = match t.title.to_lowercase().as_str() {
@@ -267,13 +249,13 @@ fn tool_line(t: &acp::ToolCall) -> (String, String) {
     if !matches!(t.kind.as_str(), "other" | "") {
         return (t.kind.clone(), t.title.clone());
     }
-    let (name, input) = guard_shaped(t);
+    let (name, input) = shaped(t);
     let on = ["command", "file_path", "url", "pattern", "query"].iter().find_map(|k| input[k].as_str());
     let name = if name.is_empty() { "tool".into() } else { name };
     (name, on.map_or_else(|| t.title.clone(), |v| first_line(v, 160)))
 }
 
-/// What a shikigami's ACP agent asks of seimei: permission, through the guard and then a card.
+/// What a shikigami's ACP agent asks of seimei: permission, through its mode and then a card.
 /// Only the once options are ever picked: an agent's always rules would be rules seimei cannot see.
 struct AcpSide {
     w: Arc<Worker>,
@@ -288,16 +270,8 @@ impl acp::Handler for AcpSide {
             let pick = |kind: &str| req.options.iter().find(|o| o.kind == kind).map(|o| o.id.clone());
             let reject = pick("reject_once").map_or(acp::Outcome::Cancelled, acp::Outcome::Selected);
             let Some(allow) = pick("allow_once") else { return reject };
-            let (tool, input) = guard_shaped(&req.tool);
+            let (tool, input) = shaped(&req.tool);
             let r = w.rec();
-            let hook = json!({"tool_name": tool, "tool_input": input, "cwd": r.cwd, "session_id": r.session_id});
-            let said = pool.guard.pre(&r.name, Some(&w.id), &hook, Some(&req.tool.id)).await;
-            match said["hookSpecificOutput"]["permissionDecision"].as_str() {
-                Some("deny") => return reject,
-                // Its own card was approved.
-                Some("allow") => return acp::Outcome::Selected(allow),
-                _ => {}
-            }
             let mode = w.mode();
             let own = [vec!["mcp__shikigami".into()], pool.plugins.allowed(Some(&w.granted()))].concat();
             match acp_mode(&mode, &tool, &own) {
@@ -339,7 +313,7 @@ impl acp::Handler for AcpSide {
     }
 }
 
-/// What a shikigami's mode makes of an ACP request the guard let through.
+/// What a shikigami's mode makes of an ACP request.
 #[derive(Debug, PartialEq)]
 pub enum Mode {
     Allow,
@@ -348,7 +322,7 @@ pub enum Mode {
 }
 
 /// An ACP agent's request under a shikigami's mode, as the default harness would treat the call: its own tools and reads go on, bypass allows the rest, acceptEdits file edits, and what is left is a card (dontAsk and plan refuse it instead).
-/// A command or file call that came without its command or path is a card even in bypass: the guard had nothing to check. own: tool name prefixes that never ask (mcp__shikigami, granted plugins).
+/// A command or file call that came without its command or path is a card even in bypass: nothing says what it runs or touches. own: tool name prefixes that never ask (mcp__shikigami, granted plugins).
 pub fn acp_mode(mode: &str, tool: &str, own: &[String]) -> Mode {
     if own.iter().any(|p| tool == p || tool.starts_with(&format!("{p}__"))) {
         return Mode::Allow;

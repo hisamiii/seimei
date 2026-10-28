@@ -7,8 +7,7 @@ use std::time::Duration;
 use serde_json::{Map, Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
-use seimei_core::guard::About;
-use seimei_core::plugins::{Builtin, Factory, Fut, Session, ask_guard};
+use seimei_core::plugins::{Builtin, Factory, Fut, Session};
 use seimei_core::tools::text;
 use seimei_core::util::{as_text, on_path, truthy};
 
@@ -27,8 +26,8 @@ pub const PLUGIN: Factory = Factory {
 struct Music;
 
 impl Builtin for Music {
-    fn call<'a>(&'a self, tool: &'a str, args: &'a Value, session: &'a dyn Session) -> Fut<'a, Value> {
-        Box::pin(call(tool, args, session))
+    fn call<'a>(&'a self, tool: &'a str, args: &'a Value, _session: &'a dyn Session) -> Fut<'a, Value> {
+        Box::pin(call(tool, args))
     }
 }
 
@@ -121,11 +120,19 @@ pub fn describe(cmd: &str, r: &Value) -> String {
             rows.sort_by_key(|p| (!truthy(&p["enabled"]), as_text(&p["name"]).to_lowercase()));
             let line = |p: &&Value| {
                 let on = if truthy(&p["enabled"]) { "[on] " } else { "" };
-                let about =
-                    if truthy(&p["description"]) { format!(" - {}", as_text(&p["description"])) } else { String::new() };
+                let about = if truthy(&p["description"]) {
+                    format!(" - {}", as_text(&p["description"]))
+                } else {
+                    String::new()
+                };
                 // Prefixes its settings carry besides its id, like QLScrobbler's scrobbler_*.
-                let other: Vec<String> =
-                    p["settings"].as_array().into_iter().flatten().map(as_text).filter(|x| *x != as_text(&p["id"])).collect();
+                let other: Vec<String> = p["settings"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(as_text)
+                    .filter(|x| *x != as_text(&p["id"]))
+                    .collect();
                 let settings =
                     if other.is_empty() { String::new() } else { format!(" (settings: {}_*)", other.join("_*, ")) };
                 format!("{on}{}: {}{about}{settings}", as_text(&p["id"]), as_text(&p["name"]))
@@ -142,47 +149,27 @@ pub fn describe(cmd: &str, r: &Value) -> String {
     }
 }
 
-/// What a card would show for a command that changes the library, with the args it then runs with: tag writes and deleting a playlist.
-async fn ask(cmd: &str, mut args: Map<String, Value>) -> Result<Option<(About, Map<String, Value>)>, String> {
-    let card = |what: String, detail: String| About { what, detail, ..Default::default() };
-    match cmd {
-        "tags" => {
-            let mut keys: Vec<Value> = args.get("keys").and_then(|k| k.as_array()).cloned().unwrap_or_default();
-            if keys.is_empty() && args.get("query").is_some_and(truthy) {
-                let q = Map::from_iter([("query".into(), args["query"].clone()), ("limit".into(), json!(500))]);
-                let found = bridge("search", &q).await?;
-                keys = found["songs"].as_array().into_iter().flatten().map(|s| s["key"].clone()).collect();
-            }
-            let tags = args.get("tags").filter(|t| truthy(t)).cloned().unwrap_or(json!({}));
-            let n = keys.len();
-            let target = format!("write tags to {n} music file{}", if n == 1 { "" } else { "s" });
-            let shown: Vec<String> = keys.iter().take(40).map(as_text).collect();
-            let detail = format!("{tags}\n{}", shown.join("\n"));
-            args = Map::from_iter([("keys".into(), json!(keys)), ("tags".into(), tags)]);
-            Ok(Some((card(target, detail), args)))
+/// The args a command runs with: tags given a query write to the songs it finds.
+async fn resolve(cmd: &str, mut args: Map<String, Value>) -> Result<Map<String, Value>, String> {
+    if cmd == "tags" {
+        let mut keys: Vec<Value> = args.get("keys").and_then(|k| k.as_array()).cloned().unwrap_or_default();
+        if keys.is_empty() && args.get("query").is_some_and(truthy) {
+            let q = Map::from_iter([("query".into(), args["query"].clone()), ("limit".into(), json!(500))]);
+            let found = bridge("search", &q).await?;
+            keys = found["songs"].as_array().into_iter().flatten().map(|s| s["key"].clone()).collect();
         }
-        "playlist_delete" => {
-            let name = as_text(args.get("name").unwrap_or(&Value::Null));
-            Ok(Some((card(format!("delete the playlist \"{name}\""), "Quod Libet playlist".into()), args)))
-        }
-        _ => Ok(None),
+        let tags = args.get("tags").filter(|t| truthy(t)).cloned().unwrap_or(json!({}));
+        args = Map::from_iter([("keys".into(), json!(keys)), ("tags".into(), tags)]);
     }
+    Ok(args)
 }
 
-async fn music(a: &Value, session: &dyn Session) -> Value {
+async fn music(a: &Value) -> Value {
     let cmd = a["command"].as_str().unwrap_or("");
-    let mut args = a["args"].as_object().cloned().unwrap_or_default();
-    let about = match ask(cmd, args.clone()).await {
+    let args = match resolve(cmd, a["args"].as_object().cloned().unwrap_or_default()).await {
+        Ok(args) => args,
         Err(e) => return text(&e, true),
-        Ok(Some((about, then))) => {
-            args = then;
-            Some(about)
-        }
-        Ok(None) => None,
     };
-    if let Some(no) = ask_guard(session, "music", "music", a, about, &[], "desktop").await {
-        return no;
-    }
     match bridge(cmd, &args).await {
         Ok(r) => text(&describe(cmd, &r), false),
         Err(e) => text(&e, true),
@@ -226,13 +213,10 @@ async fn media(a: &Value) -> Value {
 }
 
 /// One tool call.
-pub async fn call(tool: &str, a: &Value, session: &dyn Session) -> Value {
+pub async fn call(tool: &str, a: &Value) -> Value {
     match tool {
-        "music" => music(a, session).await,
-        "media" => match ask_guard(session, "music", "media", a, None, &[], "desktop").await {
-            Some(no) => no,
-            None => media(a).await,
-        },
+        "music" => music(a).await,
+        "media" => media(a).await,
         _ => text(&format!("no such tool: {tool}"), true),
     }
 }

@@ -1,4 +1,4 @@
-//! A shikigami on an ACP agent (harness acp:<agent>), against tests/fakes/acp.py: its turns, permission cards and the guard, plan steps, MCP servers, stop, queued messages, resume and failures.
+//! A shikigami on an ACP agent (harness acp:<agent>), against tests/fakes/acp.py: its turns, permission cards and the audit log, plan steps, MCP servers, stop, queued messages, resume and failures.
 //! No harness CLI and no model.
 
 use std::collections::BTreeMap;
@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use seimei_core::approvals::Approvals;
+use seimei_core::audit::Audit;
 use seimei_core::events::EventLog;
-use seimei_core::guard::Guard;
 use seimei_core::plugins::Plugins;
 use seimei_core::tasks::Board;
 use seimei_core::usage::Usage;
@@ -15,10 +15,6 @@ use seimei_core::workers::{Agent, Parts, Pool, Summon};
 use serde_json::{Value, json};
 
 use crate::shikigami::{log, root, said, turn, until};
-
-/// A command the test's guard.toml refuses: the fake agent asks to run it.
-const BLOCKED: &str = "guard-test-refused now";
-const RULES: &str = "[[rule]]\nargv = [\"guard-test-refused\"]\naction = \"deny\"\nmessage = \"the test's rule\"\n";
 
 #[tokio::test(flavor = "multi_thread")]
 async fn acp_shikigami() {
@@ -30,7 +26,6 @@ async fn acp_shikigami() {
     let work = work.canonicalize().unwrap();
     let config = base.join("config");
     std::fs::create_dir_all(config.join("seimei")).unwrap();
-    std::fs::write(config.join("seimei/guard.toml"), RULES).unwrap();
     let mut env = crate::env::Env::lock();
     env.set("XDG_CONFIG_HOME", &config);
     let events = Arc::new(EventLog::open(&state.join("events.jsonl")).unwrap());
@@ -47,7 +42,7 @@ async fn acp_shikigami() {
         board: Arc::new(Mutex::new(Board::open(&state.join("tasks.json"), Some(events.clone())))),
         usage: Arc::new(Usage::new(&state, Some(events.clone()))),
         approvals: approvals.clone(),
-        guard: Arc::new(Guard::new(events.clone(), approvals.clone(), &state)),
+        audit: Arc::new(Audit::new(&state)),
         terminal: String::new(),
         plugins,
     };
@@ -159,54 +154,24 @@ async fn acp_shikigami() {
     assert_eq!(said(&w, from), ["Ran it (allow-once)."]);
     let evs = log(&w)[from..].to_vec();
     assert!(evs.iter().any(|e| e["type"] == "tool" && e["name"] == "Bash" && e["summary"] == "echo dsh"), "{evs:?}");
-    let (from, ok) = turn(&w, &format!("!dsh {}", BLOCKED), "done").await;
-    assert!(ok);
-    assert_eq!(said(&w, from), ["Did not run it (reject-once)."]);
-    assert_eq!(cards.lock().unwrap().len(), 3, "the guard reads dsh's command too");
 
-    // 5. What the guard blocks gets no card.
-    let (from, ok) = turn(&w, &format!("!tool {}", BLOCKED), "done").await;
-    assert!(ok);
-    assert_eq!(said(&w, from), ["Did not run it (reject-once)."]);
-    assert_eq!(cards.lock().unwrap().len(), 3, "no card for a blocked command");
-    let blocked = events
-        .after(0)
-        .iter()
-        .any(|e| e["type"] == "system" && e["text"].as_str().unwrap_or("").starts_with("Blocked fakey"));
-    assert!(blocked);
-
-    // A call the agent runs without asking: the guard looks at it once it ended. A harmless one is only audited.
+    // A call the agent runs without asking runs on: seimei only writes it to the audit log.
     let (from, ok) = turn(&w, "!unasked echo fine", "done").await;
     assert!(ok);
     assert_eq!(said(&w, from), ["Ran it unasked.", "Went on."]);
-    // One it would have blocked stops the turn, and the agent hears why with its next message.
-    let (from, ok) = turn(&w, &format!("!unasked {}", BLOCKED), "stopped").await;
-    assert!(ok, "{}", w.state());
-    assert_eq!(said(&w, from), ["Ran it unasked."]);
-    let note = log(&w)[from..].iter().find(|e| e["type"] == "system").cloned().unwrap_or_default();
-    assert!(note["text"].as_str().unwrap_or("").starts_with("The guard stopped this turn"), "{note}");
-    assert!(
-        events.after(0).iter().any(|e| e["text"].as_str().unwrap_or("").starts_with("Stopped fakey: it ran a call"))
-    );
-    let (from, ok) = turn(&w, "carry on", "done").await;
-    assert!(ok);
-    let next = said(&w, from);
-    assert!(
-        next[0].starts_with("You said: [seimei] The guard stopped your last turn") && next[0].ends_with("carry on"),
-        "{next:?}"
-    );
-    let (from, ok) = turn(&w, "and again", "done").await;
-    assert!(ok);
-    assert_eq!(said(&w, from), ["You said: and again"], "the note goes once");
-    let audit = std::fs::read_to_string(state.join("audit.jsonl")).unwrap();
-    let unasked: Vec<Value> = (audit.lines().map(|l| serde_json::from_str::<Value>(l).unwrap()))
-        .filter(|r| r["event"] == "unasked")
-        .collect();
-    let decisions: Vec<&str> = unasked.iter().map(|r| r["decision"].as_str().unwrap()).collect();
-    assert_eq!(decisions, ["allowed", "stopped"], "{unasked:?}");
-    // Calls it asked for are not seen again.
-    assert_eq!(unasked.iter().filter(|r| r["id"] == "call_1").count(), 0);
     assert_eq!(cards.lock().unwrap().len(), 3, "no card for an unasked call");
+    let audit = std::fs::read_to_string(state.join("audit.jsonl")).unwrap();
+    let calls: Vec<Value> = (audit.lines().map(|l| serde_json::from_str::<Value>(l).unwrap()))
+        .filter(|r| r["event"] == "call" && r["who"] == "fakey")
+        .collect();
+    assert!(
+        calls.iter().any(|r| r["tool"] == "Bash" && r["input"].as_str().unwrap().contains("echo fine")),
+        "{calls:?}"
+    );
+    assert!(
+        calls.iter().any(|r| r["tool"] == "Bash" && r["input"].as_str().unwrap().contains("echo dsh")),
+        "{calls:?}"
+    );
 
     // 6. Its plan is its task's steps, the whole list each time.
     let (_, ok) = turn(&w, "!plan", "done").await;
@@ -256,7 +221,7 @@ async fn acp_shikigami() {
         assert!(e.as_deref().is_some_and(|e| e.contains("runs on the ACP agent fake")), "{e:?}");
     }
 
-    // Its mode meets each request after the guard, as the default harness's would: a card only where the mode asks for one.
+    // Its mode meets each request as the default harness's would: a card only where the mode asks for one.
     let n = || cards.lock().unwrap().len();
     let ran = |from| said(&w, from) == ["Ran it (allow-once)."];
     w.set_mode("bypassPermissions").await.unwrap();
@@ -264,10 +229,8 @@ async fn acp_shikigami() {
     let before = n();
     let (from, _) = turn(&w, "!dsh echo bypass", "done").await;
     assert!(ran(from), "{:?}", said(&w, from));
-    let (from, _) = turn(&w, &format!("!dsh {}", BLOCKED), "done").await;
-    assert_eq!(said(&w, from), ["Did not run it (reject-once)."], "bypass does not pass the guard");
     assert_eq!(n(), before, "bypass: no cards");
-    // A command call without its command: the guard had nothing to read, so a card even in bypass.
+    // A command call without its command: nothing says what it runs, so a card even in bypass.
     let (from, _) = turn(&w, "!dshcall bash {}", "done").await;
     assert_eq!((said(&w, from), n()), (vec!["Did not run it (reject-once).".to_string()], before + 1));
 

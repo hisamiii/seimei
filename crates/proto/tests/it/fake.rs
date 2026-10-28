@@ -66,7 +66,7 @@ impl Handler for Rec {
         Box::pin(async move {
             if id == "pre" && input["tool_name"] == "Read" {
                 json!({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                                              "permissionDecisionReason": "the guard says no"}})
+                                              "permissionDecisionReason": "the hook says no"}})
             } else {
                 json!({})
             }
@@ -169,7 +169,7 @@ async fn hooks_decide_tool_calls() {
     assert!(!r.unwrap().is_error);
     let res = tool_results(&ms);
     assert_eq!(res[0], (json!("seimei\nyah\nhrx"), false));
-    assert_eq!(res[1], (json!("the guard says no"), true));
+    assert_eq!(res[1], (json!("the hook says no"), true));
     let hooks = rec.hooks.lock().unwrap().clone();
     assert_eq!(hooks.iter().filter(|(id, _)| id == "pre").count(), 2);
     assert!(hooks.iter().any(|(id, i)| id == "failed" && i["tool_name"] == "Read"));

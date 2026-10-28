@@ -26,8 +26,7 @@ SendMessage needs no approval, but it does not arrive while a session sits in an
 Stopping, attaching to, deleting or resuming one (claude stop/kill/attach/rm/respawn, --resume) shows the user an Approve/Deny card and waits up to 10 minutes. Run such a command once; if it is denied, do not retry it another way.
 mcp__seimei__adopt turns one of their sessions into a shikigami (same conversation), mcp__seimei__release gives a shikigami to the user as one of their own sessions (it stops reporting; adopting it again brings it back); both show a card first, and the user can do either with one tap (Take over, Hand off). A shikigami open in a terminal on the server cannot be messaged until that window closes.
 
-## Guard
-{guard}
+## Audit
 Every tool call is written to an audit log the user can read on the page.
 
 ## Images and files

@@ -21,17 +21,17 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use seimei_core::adopt::{Adopter, Wish};
 use seimei_core::approvals::Approvals;
+use seimei_core::audit::Audit;
 use seimei_core::auth::Auth;
 use seimei_core::cost::Cost;
 use seimei_core::dispatcher::{self, Dispatcher};
 use seimei_core::events::{Event, EventLog};
 use seimei_core::files::{Files, MAX_MODEL_BYTES};
-use seimei_core::guard::Guard;
-use seimei_core::terminal;
 use seimei_core::metrics::WorkerEvents;
 use seimei_core::push::{self as push_mod, Push};
 use seimei_core::sessions::{self, Live, Watcher};
 use seimei_core::tasks::{self, Board};
+use seimei_core::terminal;
 use seimei_core::tools::Tools;
 use seimei_core::transcripts::brief;
 use seimei_core::uploads::Uploads;
@@ -137,7 +137,8 @@ pub struct Setup {
 
 impl App {
     pub fn new(setup: Setup) -> std::io::Result<App> {
-        let Setup { events, auth, origins, web, state, push, dispatcher: disp, shikigami, terminal, plugins, asr } = setup;
+        let Setup { events, auth, origins, web, state, push, dispatcher: disp, shikigami, terminal, plugins, asr } =
+            setup;
         let state = state.as_path();
         // Only these Host headers are served: a page using DNS rebinding cannot read the API from the browser.
         let mut hosts: HashSet<String> = ["localhost", "127.0.0.1", "::1"].map(String::from).into();
@@ -154,19 +155,23 @@ impl App {
         let usage = Arc::new(Usage::new(state, Some(events.clone())));
         let cost = Arc::new(Cost::new(&seimei_core::workers::harness::projects_dir()));
         let approvals = Arc::new(Approvals::new(events.clone()));
-        let guard = Arc::new(Guard::new(events.clone(), approvals.clone(), state));
+        let audit = Arc::new(Audit::new(state));
+        let old = seimei_core::util::config_home().join("seimei/guard.toml");
+        if old.exists() {
+            eprintln!("seimei: {} is no longer read: seimei has no guard any more", old.display());
+        }
         let parts = workers::Parts {
             events: events.clone(),
             board: board.clone(),
             usage: usage.clone(),
             approvals: approvals.clone(),
-            guard: guard.clone(),
+            audit: audit.clone(),
             terminal,
             plugins,
         };
         let pool = Pool::new(state, &shikigami, &disp.about, parts)?;
         let p = pool.clone();
-        let _ = guard.tell.set(Box::new(move |w, line, urgent, key| p.tell(w, line, urgent, key)));
+        let _ = audit.tell.set(Box::new(move |w, line, urgent, key| p.tell(w, line, urgent, key)));
         let worker_events = Arc::new(WorkerEvents::new(events.clone()));
         let adopter = Adopter::new(pool.clone(), approvals.clone(), state);
         let p = pool.clone();
@@ -187,7 +192,7 @@ impl App {
             push: push.clone(),
         });
         let dispatcher =
-            Dispatcher::new(disp, events.clone(), state, usage.clone(), approvals.clone(), guard.clone(), tools);
+            Dispatcher::new(disp, events.clone(), state, usage.clone(), approvals.clone(), audit.clone(), tools);
         let _ = pool.dispatcher.set(dispatcher.clone());
         let watcher = Arc::new(Watcher::new(events.clone(), pool.clone()));
         Ok(App {
@@ -380,7 +385,7 @@ pub fn router(app: Arc<App>) -> Router {
             .route("/api/push/ws", get(push_ws))
             .route("/api/push/web", get(web_push_info).post(web_push_set));
     }
-    r.fallback(not_found).layer(middleware::from_fn_with_state(app.clone(), guard)).with_state(app)
+    r.fallback(not_found).layer(middleware::from_fn_with_state(app.clone(), gate)).with_state(app)
 }
 
 fn text(status: StatusCode, body: &str) -> Response {
@@ -412,7 +417,7 @@ fn content_type(headers: &HeaderMap) -> String {
     ct.split(';').next().unwrap_or("").trim().to_ascii_lowercase()
 }
 
-async fn guard(State(app): Shared, req: Request, next: Next) -> Response {
+async fn gate(State(app): Shared, req: Request, next: Next) -> Response {
     if !app.hosts.contains(&host_of(req.headers())) {
         return text(StatusCode::MISDIRECTED_REQUEST, "unknown host");
     }
@@ -519,8 +524,9 @@ async fn static_file(State(app): Shared, UrlPath((_version, path)): UrlPath<(Str
 /// The service worker, from the site's root so it can show notifications for the whole page.
 async fn service_worker(State(app): Shared) -> Response {
     match app.assets.get("sw.js") {
-        Some(data) => ([(header::CONTENT_TYPE, mime("sw.js")), (header::CACHE_CONTROL, "no-cache")], data.clone())
-            .into_response(),
+        Some(data) => {
+            ([(header::CONTENT_TYPE, mime("sw.js")), (header::CACHE_CONTROL, "no-cache")], data.clone()).into_response()
+        }
         None => not_found().await,
     }
 }
@@ -568,10 +574,7 @@ fn fresh_login(app: &App, headers: &HeaderMap) -> Result<(), Response> {
     if auth(app).recent(headers) {
         return Ok(());
     }
-    Err(json_status(
-        StatusCode::FORBIDDEN,
-        json!({"error": "Log out and in again first"}),
-    ))
+    Err(json_status(StatusCode::FORBIDDEN, json!({"error": "Log out and in again first"})))
 }
 
 async fn register_options(State(app): Shared, headers: HeaderMap) -> Response {
@@ -654,7 +657,12 @@ async fn device_challenge(State(app): Shared, bytes: Bytes) -> Response {
 
 async fn device_login(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> Response {
     let b = attempt!(body(&bytes));
-    match auth(&app).device_login(&as_text(&b["device"]), &as_text(&b["nonce"]), &as_text(&b["signature"]), &agent(&headers)) {
+    match auth(&app).device_login(
+        &as_text(&b["device"]),
+        &as_text(&b["nonce"]),
+        &as_text(&b["signature"]),
+        &agent(&headers),
+    ) {
         Ok(token) => ok(json!({"token": token})),
         Err(_) => json_status(StatusCode::UNAUTHORIZED, json!({"error": "login failed"})),
     }
@@ -1109,8 +1117,7 @@ async fn worker_metrics(State(app): Shared, UrlPath(id): UrlPath<String>) -> Res
 async fn audit(State(app): Shared, Query(q): Query<HashMap<String, String>>) -> Response {
     let limit = q.get("limit").and_then(|l| l.parse::<usize>().ok()).unwrap_or(200).clamp(1, 1000);
     let path = app.audit.clone();
-    let calls =
-        tokio::task::spawn_blocking(move || seimei_core::guard::audit_tail(&path, limit)).await.unwrap_or_default();
+    let calls = tokio::task::spawn_blocking(move || seimei_core::audit::tail(&path, limit)).await.unwrap_or_default();
     ok(json!({"calls": calls}))
 }
 
@@ -1224,7 +1231,8 @@ async fn decide(State(app): Shared, UrlPath(aid): UrlPath<String>, bytes: Bytes)
         Some("deny") => false,
         _ => return bad_request(),
     };
-    let option = Some(seimei_core::util::chars(&as_text(&b["option"]), 40)).filter(|o| !o.is_empty() && b["option"] != false);
+    let option =
+        Some(seimei_core::util::chars(&as_text(&b["option"]), 40)).filter(|o| !o.is_empty() && b["option"] != false);
     let note = Some(seimei_core::util::chars(as_text(&b["note"]).trim(), 2000)).filter(|n| !n.is_empty());
     if !app.approvals.decide(&aid, approve, option, note) {
         return text(StatusCode::CONFLICT, "already answered or expired");

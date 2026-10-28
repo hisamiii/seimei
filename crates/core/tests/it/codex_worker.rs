@@ -1,4 +1,4 @@
-//! A shikigami on `codex app-server` (an [agents] entry with protocol = "codex"), against tests/fakes/codex.py: its first turn with the prompt, a command through the guard and a card, a file change, the granted plugins in the thread's config, stop, and a resumed thread.
+//! A shikigami on `codex app-server` (an [agents] entry with protocol = "codex"), against tests/fakes/codex.py: its first turn with the prompt, a command through a card, a file change, the granted plugins in the thread's config, stop, and a resumed thread.
 //! No Codex and no model.
 
 use std::path::Path;
@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use seimei_core::approvals::Approvals;
+use seimei_core::audit::Audit;
 use seimei_core::events::EventLog;
-use seimei_core::guard::Guard;
 use seimei_core::plugins::Plugins;
 use seimei_core::tasks::Board;
 use seimei_core::usage::Usage;
@@ -42,7 +42,7 @@ async fn codex_shikigami() {
         board: Arc::new(Mutex::new(Board::open(&state.join("tasks.json"), Some(events.clone())))),
         usage: Arc::new(Usage::new(&state, Some(events.clone()))),
         approvals: approvals.clone(),
-        guard: Arc::new(Guard::new(events.clone(), approvals.clone(), &state)),
+        audit: Arc::new(Audit::new(&state)),
         terminal: String::new(),
         plugins,
     };
@@ -98,7 +98,7 @@ async fn codex_shikigami() {
     let first = said(&w, 0);
     assert!(first[0].starts_with("You said: # You are a shikigami") && first[0].contains("hello there"), "{first:?}");
 
-    // 2. A command asks: the guard, then a card for it as Bash.
+    // 2. A command asks: a card for it as Bash.
     answers.lock().unwrap().push(true);
     let (from, ok) = turn(&w, "!tool echo hi", "done").await;
     assert!(ok);

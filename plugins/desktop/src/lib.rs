@@ -5,7 +5,6 @@
 
 pub mod agent;
 pub mod backend;
-pub mod checks;
 pub mod dbus;
 pub mod gnome;
 pub mod hyprland;
@@ -29,7 +28,7 @@ use tokio::sync::oneshot;
 pub use backend::{Backend, Ctx};
 use seimei_core::approvals::Approvals;
 use seimei_core::events::EventLog;
-use seimei_core::plugins::{Builtin, Factory, Fut, Host, Session, Windows, ask_guard, int, shot_file, strip};
+use seimei_core::plugins::{Builtin, Factory, Fut, Host, Session, Windows, int, shot_file, strip};
 use seimei_core::tools::text;
 use seimei_core::util::{as_text, b64, chars, now, truthy};
 use uinput::Device;
@@ -98,7 +97,7 @@ impl Builtin for DesktopPlugin {
         Some(self)
     }
 
-    /// Follows the WM's events and keeps the layout; its cards and notes go to seimei, and the guard asks it whose a window is.
+    /// Follows the WM's events and keeps the layout; its cards and notes go to seimei.
     fn start(self: Arc<Self>, host: Arc<Host>) {
         let d = self.0.clone();
         let h = host.clone();
@@ -107,8 +106,6 @@ impl Builtin for DesktopPlugin {
             note: Box::new(move |t| (h.note)(t)),
             approvals: host.approvals.clone(),
         });
-        let desk = d.clone();
-        seimei_core::guard::add_facts(Arc::new(move |tool, inp| checks::check(tool, inp, &desk)));
         tokio::spawn(d.clone().run());
         tokio::spawn(d.layout());
     }
@@ -149,7 +146,7 @@ struct Times {
 pub struct Desktop {
     pub b: Box<dyn Backend>,
     state: PathBuf,
-    /// The user's screen password, set with `seimei screen-password`; the guard blocks reading it.
+    /// The user's screen password, set with `seimei screen-password`; config deny_paths keeps agents from reading it.
     secret: PathBuf,
     /// For the bar's "seimei is driving" indicator.
     driving: PathBuf,
@@ -294,6 +291,27 @@ impl Desktop {
     /// The windows seimei opened.
     pub fn ours(&self) -> backend::Ours {
         self.ours.lock().unwrap().keys().copied().collect()
+    }
+
+    /// The card a native WM command on the user's display needs: closing a window seimei did not open, or ending the session.
+    pub fn native_card(&self, tool: &str, inp: &Value) -> Option<Value> {
+        let b = &self.b;
+        if tool != b.meta().name || inp["display"] == "agent" {
+            return None;
+        }
+        let mut args = vec![inp.get("action").map(as_text).unwrap_or_default()];
+        if inp.get("args").is_some_and(truthy) {
+            match &inp["args"] {
+                Value::Array(a) => args.extend(a.iter().map(as_text)),
+                Value::String(s) => args.extend(s.chars().map(String::from)),
+                Value::Object(o) => args.extend(o.keys().cloned()),
+                v => args.push(as_text(v)),
+            }
+        }
+        let hit = b.action_hit(&args, &self.ours())?;
+        Some(
+            json!({"action": "desktop", "target": hit, "detail": format!("{} {}", b.meta().action_cmd, args.join(" "))}),
+        )
     }
 
     /// A window counts as seimei's: closing it needs no card.
@@ -780,7 +798,7 @@ impl Desktop {
     }
 
     /// x, y are pixels of the latest full-screen screenshot.
-    /// A window id only guards that the screen still shows what the screenshot showed (niri reports no positions for tiled windows).
+    /// A window id only checks that the screen still shows what the screenshot showed (niri reports no positions for tiled windows).
     pub fn click(&self, x: f64, y: f64, window: &Value, button: &str, count: i64, scroll: i64) -> Result<(), String> {
         let mut input = self.input.lock().unwrap();
         if self.b.locked() {
@@ -818,11 +836,13 @@ impl Desktop {
 
     /// One of the desktop tools, for the session the call came from.
     pub async fn call(self: &Arc<Self>, tool: &str, args: &Value, session: &dyn Session) -> Value {
-        let full = format!("mcp__desktop__{tool}");
-        let a = args.clone();
-        let about = self.blocking(move |d| checks::check(&full, &a, d)).await;
-        if let Some(no) = ask_guard(session, "desktop", tool, args, about, &[], "desktop").await {
-            return no;
+        let (t, a) = (tool.to_string(), args.clone());
+        if let Some(card) = self.blocking(move |d| d.native_card(&t, &a)).await {
+            match session.card(card).await {
+                Ok(o) if o == "approved" => {}
+                Ok(o) => return text(&format!("The user {o} it; nothing changed."), true),
+                Err(e) => return text(&e, true),
+            }
         }
         if tool == "agent_display" || args["display"] == "agent" {
             return self.agent_tool(tool, args, session).await;

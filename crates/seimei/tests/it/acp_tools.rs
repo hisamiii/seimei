@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use seimei_core::approvals::Approvals;
+use seimei_core::audit::Audit;
 use seimei_core::events::EventLog;
-use seimei_core::guard::Guard;
 use seimei_core::plugins::Plugins;
 use seimei_core::tasks::Board;
 use seimei_core::usage::Usage;
@@ -41,13 +41,14 @@ async fn acp_own_tools() {
     }
     let events = Arc::new(EventLog::open(&state.join("events.jsonl")).unwrap());
     let approvals = Arc::new(Approvals::new(events.clone()));
-    let plugins = Arc::new(Plugins::load_at(&toml::Table::new(), &state, env!("CARGO_BIN_EXE_seimei"), &seimei::BUILTINS));
+    let plugins =
+        Arc::new(Plugins::load_at(&toml::Table::new(), &state, env!("CARGO_BIN_EXE_seimei"), &seimei::BUILTINS));
     let parts = Parts {
         events: events.clone(),
         board: Arc::new(Mutex::new(Board::open(&state.join("tasks.json"), Some(events.clone())))),
         usage: Arc::new(Usage::new(&state, Some(events.clone()))),
         approvals: approvals.clone(),
-        guard: Arc::new(Guard::new(events.clone(), approvals.clone(), &state)),
+        audit: Arc::new(Audit::new(&state)),
         terminal: String::new(),
         plugins,
     };

@@ -31,10 +31,6 @@ def seed():
     RUN.mkdir(exist_ok=True)
     KITTY_SOCK.touch()
     (STATE_ROOT / "kitty-rc.conf").write_text(f'remote_control_password "{KITTY_PASSWORD}" ls send-text send-key get-text\n')
-    # The guard's rules: the example's, all on (the Rust server reads them; the Python one has its rules built in).
-    example = (QA.parent.parent / "contrib/guard.example.toml").read_text().splitlines()
-    on = [ln[1:] if ln.startswith("#") and ln[1:2] not in ("", " ") else ln for ln in example]
-    (QA / "cfg/seimei/guard.toml").write_text("\n".join(on) + "\n")
     if EMPTY:
         return
     now = time.time()

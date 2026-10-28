@@ -19,11 +19,6 @@ pub fn config_file() -> PathBuf {
     xdg("XDG_CONFIG_HOME", ".config").join("seimei/config.toml")
 }
 
-/// The user's guard rules: only the user edits this file.
-pub fn guard_file() -> PathBuf {
-    xdg("XDG_CONFIG_HOME", ".config").join("seimei/guard.toml")
-}
-
 /// XDG_CONFIG_HOME, or ~/.config.
 pub fn config_home() -> PathBuf {
     xdg("XDG_CONFIG_HOME", ".config")
@@ -73,12 +68,7 @@ pub fn read_json(path: &Path) -> Option<Value> {
 pub fn write_json(path: &Path, data: &impl Serialize) -> std::io::Result<()> {
     let tmp = path.with_extension("tmp");
     let buf = serde_json::to_vec_pretty(data)?;
-    let mut f = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(&tmp)?;
+    let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
     f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
     f.write_all(&buf)?;
     drop(f);
