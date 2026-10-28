@@ -9,7 +9,7 @@ use std::time::Duration;
 use regex::Regex;
 use serde_json::{Value, json};
 
-use super::backend::{Backend, Ctx, Emit, Env, Meta, Ours, exec, grim_region, grim_screen, listening, session_socket};
+use super::backend::{Backend, Ctx, Emit, Env, Meta, Ours, digits, exec, listening, session_socket};
 use seimei_core::util::{py_json_compact, sh_quote, token_urlsafe, truthy};
 
 const QUERIES: [&str; 8] =
@@ -32,7 +32,6 @@ pub fn close_target(args: &[String]) -> Option<Option<i64>> {
     if args.first().map(String::as_str) != Some("close-window") {
         return None;
     }
-    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
     for (i, a) in args.iter().enumerate() {
         if a == "--id" && args.get(i + 1).is_some_and(|n| digits(n)) {
             return Some(args[i + 1].parse().ok());
@@ -280,14 +279,6 @@ impl Backend for Niri {
 
     fn spawn_sh(&self, script: &str) -> Result<(), String> {
         self.act(&["spawn-sh", "--", script]).map(drop)
-    }
-
-    fn screen(&self, scale: f64, quality: i64) -> Result<Vec<u8>, String> {
-        grim_screen(&self.env()?, scale, quality)
-    }
-
-    fn region(&self, geo: &str, scale: f64, kind: &str, quality: i64) -> Result<Vec<u8>, String> {
-        grim_region(&self.env()?, geo, scale, kind, quality)
     }
 
     /// niri's window capture also takes over the clipboard, so the clipboard is put back afterwards.

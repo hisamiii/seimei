@@ -11,7 +11,7 @@ use std::time::Duration;
 use regex::Regex;
 use serde_json::{Value, json};
 
-use super::backend::{Backend, Ctx, Emit, Env, Meta, Ours, exec, run};
+use super::backend::{Backend, Ctx, Emit, Env, Meta, Ours, digits, exec, run};
 use seimei_core::util::py_json_compact;
 
 const QUERIES: [&str; 4] = ["windows", "workspaces", "outputs", "root"];
@@ -51,10 +51,6 @@ fn env() -> Env {
 
 fn strings(v: &str) -> Vec<String> {
     STRING.captures_iter(v).map(|m| ESCAPE.replace_all(&m[1], "$1").into_owned()).collect()
-}
-
-fn digits(s: &str) -> bool {
-    !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// xprop's answer as property to raw value; missing ones are left out.

@@ -178,10 +178,21 @@ pub trait Backend: Send + Sync {
         Ok(())
     }
 
-    /// The whole screen as JPEG, scaled.
-    fn screen(&self, scale: f64, quality: i64) -> Result<Vec<u8>, String>;
+    /// The whole screen as JPEG, scaled. grim serves every wlroots-style compositor (niri, sway, Hyprland).
+    fn screen(&self, scale: f64, quality: i64) -> Result<Vec<u8>, String> {
+        let (s, q) = (format!("{scale:.3}"), quality.to_string());
+        run(&["grim", "-s", &s, "-t", "jpeg", "-q", &q, "-"], &self.env()?, None, 20.0)
+    }
     /// Part of the screen ("x,y wxh" in logical pixels) as PNG or JPEG.
-    fn region(&self, geo: &str, scale: f64, kind: &str, quality: i64) -> Result<Vec<u8>, String>;
+    fn region(&self, geo: &str, scale: f64, kind: &str, quality: i64) -> Result<Vec<u8>, String> {
+        let (s, q) = (format!("{scale:.3}"), quality.to_string());
+        let mut argv = vec!["grim", "-g", geo, "-s", &s, "-t", kind];
+        if kind == "jpeg" {
+            argv.extend(["-q", &q]);
+        }
+        argv.push("-");
+        run(&argv, &self.env()?, None, 20.0)
+    }
     /// One window as PNG.
     fn window_shot(&self, wid: i64) -> Result<Vec<u8>, String>;
 
@@ -294,32 +305,30 @@ pub fn session_socket(ctx: &Ctx, prefix: &str, suffix: &str) -> Option<PathBuf> 
     socks.iter().find(|p| !nested(ctx, p)).or(socks.first()).cloned()
 }
 
-/// Screenshots with grim, which every wlroots-style compositor (niri, sway, Hyprland) serves.
-pub fn grim_screen(env: &Env, scale: f64, quality: i64) -> Result<Vec<u8>, String> {
-    let (s, q) = (format!("{scale:.3}"), quality.to_string());
-    run(&["grim", "-s", &s, "-t", "jpeg", "-q", &q, "-"], env, None, 20.0)
-}
-
-pub fn grim_region(env: &Env, geo: &str, scale: f64, kind: &str, quality: i64) -> Result<Vec<u8>, String> {
-    let (s, q) = (format!("{scale:.3}"), quality.to_string());
-    let mut argv = vec!["grim", "-g", geo, "-s", &s, "-t", kind];
-    if kind == "jpeg" {
-        argv.extend(["-q", &q]);
+/// A window of sway or Hyprland by its on-screen rectangle: it has to be visible (on a shown workspace, not covered).
+pub fn rect_shot(b: &dyn Backend, wid: i64) -> Result<Vec<u8>, String> {
+    let w = b.window(wid)?.ok_or_else(|| format!("no window {wid}"))?;
+    if !b.workspaces()?.iter().any(|s| s["id"] == w["workspace_id"] && s["is_active"] == true) {
+        return Err(format!(
+            "window {wid} is on a workspace that is not shown; {} can only capture what is on screen (focus it first)",
+            b.meta().label
+        ));
     }
-    argv.push("-");
-    run(&argv, env, None, 20.0)
-}
-
-/// A window by its on-screen rectangle: it has to be visible (on a shown workspace, not covered).
-pub fn rect_shot(env: &Env, rect: &Value) -> Result<Vec<u8>, String> {
-    let n = |k: &str| super::text_of(&rect[k]);
+    let n = |k: &str| super::text_of(&w["rect"][k]);
     let geo = format!("{},{} {}x{}", n("x"), n("y"), n("width"), n("height"));
-    let r = exec(&["grim", "-g", &geo, "-t", "png", "-"], env, None, 20.0)?;
-    if r.code != 0 {
-        let e = r.err();
-        return Err(if e.trim().is_empty() { "grim failed".into() } else { e.trim().into() });
-    }
-    Ok(r.stdout)
+    run(&["grim", "-g", &geo, "-t", "png", "-"], &b.env()?, None, 20.0)
+}
+
+/// A shell line as a script file that removes itself, for a WM's exec (sway splits a command line at ; and ,).
+pub fn script_file(script: &str) -> Result<PathBuf, String> {
+    let path = std::env::temp_dir().join(format!("seimei-exec-{}.sh", seimei_core::util::token_urlsafe(6)));
+    std::fs::write(&path, format!("rm -f {}\n{script}\n", path.display())).map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
+/// A workspace or window number, not a name.
+pub fn digits(s: &str) -> bool {
+    !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// The environment of the user's session on a desktop that names itself in XDG_CURRENT_DESKTOP (KDE, GNOME): seimei's
