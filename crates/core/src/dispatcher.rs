@@ -212,6 +212,11 @@ fn flat_case(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// A hook on every tool call, answered by seimei's handler under this callback id.
+pub(crate) fn hook(id: &str, timeout: Option<f64>) -> HookMatcher {
+    HookMatcher { matcher: None, callbacks: vec![id.into()], timeout }
+}
+
 pub fn human(n: u64) -> String {
     if n >= 1 << 20 {
         format!("{:.1} MB", n as f64 / (1 << 20) as f64)
@@ -627,18 +632,9 @@ impl Dispatcher {
             mcp_servers: plugins.servers("seimei", None, None),
             mcp_config_file: Some(plugins.config_file("seimei")),
             hooks: vec![
-                (
-                    "PreToolUse".into(),
-                    vec![HookMatcher { matcher: None, callbacks: vec!["pre".into()], timeout: Some(HOOK_TIMEOUT) }],
-                ),
-                (
-                    "PostToolUseFailure".into(),
-                    vec![HookMatcher { matcher: None, callbacks: vec!["failed".into()], timeout: None }],
-                ),
-                (
-                    "PostToolUse".into(),
-                    vec![HookMatcher { matcher: None, callbacks: vec!["style".into()], timeout: None }],
-                ),
+                ("PreToolUse".into(), vec![hook("pre", Some(HOOK_TIMEOUT))]),
+                ("PostToolUseFailure".into(), vec![hook("failed", None)]),
+                ("PostToolUse".into(), vec![hook("style", None)]),
             ],
             // Only the dispatcher's compactions get the checklist: a --settings layer, not ~/.claude.
             settings: Some(crate::recall::settings(&checklist)),
@@ -1098,21 +1094,16 @@ impl Turns {
                     let turn = self.events.turn();
                     let text = text.trim().to_string();
                     let event_turn = turn.get("lane").is_some_and(|l| l == "t") && turn.contains_key("turn");
+                    let mut ev = Map::from_iter([("type".into(), json!("assistant")), ("text".into(), json!(text))]);
                     if !text.is_empty() && event_turn && (lanes.is_empty() || asking) {
                         // In an event turn: to the chat if it asks or ends the turn; held until that shows.
-                        let mut held = Map::new();
-                        held.insert("type".into(), json!("assistant"));
-                        held.insert("text".into(), json!(text));
-                        held.extend(turn);
-                        held.extend(place);
-                        self.held = Some(held);
+                        ev.extend(turn);
+                        ev.extend(place);
+                        self.held = Some(ev);
                         if asking {
                             self.route_held(true);
                         }
                     } else if !text.is_empty() {
-                        let mut ev = Map::new();
-                        ev.insert("type".into(), json!("assistant"));
-                        ev.insert("text".into(), json!(text));
                         ev.extend(place);
                         self.events.add(Value::Object(ev));
                     }

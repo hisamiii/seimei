@@ -16,8 +16,8 @@ use std::time::Duration;
 
 use regex::Regex;
 use seimei_proto::{
-    AssistantMessage, BoxFuture, Client, ContentBlock, Handler, HookMatcher, Message, Options, Permission,
-    PermissionRequest, ResultMessage, SystemPrompt, UserContent, UserMessage, acp, codex,
+    AssistantMessage, BoxFuture, Client, ContentBlock, Handler, Message, Options, Permission, PermissionRequest,
+    ResultMessage, SystemPrompt, UserContent, UserMessage, acp, codex,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -28,7 +28,7 @@ use crate::aliases::Aliases;
 use crate::approvals::Approvals;
 use crate::archive::Archive;
 use crate::cost::Cost;
-use crate::dispatcher::{NO_CONNECTORS, result_text, summarize};
+use crate::dispatcher::{NO_CONNECTORS, hook, result_text, summarize};
 use crate::events::EventLog;
 use crate::guard::{Guard, HOOK_TIMEOUT};
 use crate::metrics::{self, WorkerEvents};
@@ -504,7 +504,6 @@ impl Worker {
         let r = self.rec();
         let sid = r.session_id.clone();
         let (resume, session_id) = if r.started { (Some(sid), None) } else { (None, Some(sid)) };
-        let hook = |id: &str, timeout| HookMatcher { matcher: None, callbacks: vec![id.into()], timeout };
         let (plugins, groups) = (&self.pool().plugins, self.granted());
         Options {
             cwd: Some(PathBuf::from(&r.cwd)),
