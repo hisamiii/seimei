@@ -177,7 +177,7 @@
 /* ===== offline-after ===== */
 /* M5, offline on an empty chat: the away card replaces the empty-state hello instead of drawing over it.
    The real fix is this one rule in web/style.css (or hiding #hello where app.js shows #away). */
-body.offline .hello { display: none; }
+body.offline .hello, body.offline #fp-card { display: none; }
 
 /* ===== tasks-after ===== */
 /* Tasks tab, both directions (tasks-a-now.html, tasks-b-quiet.html, tasks-swipe.html): contained segmented groups,

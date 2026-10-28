@@ -1,6 +1,6 @@
 // The conversation with seimei: rendering events, live text, approval cards, and the composer.
 import { md } from './md.js';
-import { $, S, hooks, el, svg, clock, dayKey, dayLabel, home, plural, post, view, snack, finePointer, toLogin, ICON, wearShape, say, enter } from './util.js';
+import { $, S, hooks, el, svg, clock, dayKey, dayLabel, home, plural, post, view, snack, finePointer, toLogin, ICON, wearShape, say, enter, leave } from './util.js';
 import { openWorker } from './agents.js';
 import { renderTasks } from './tasks.js';
 import { sentDictated } from './mic.js';
@@ -318,22 +318,25 @@ function workerCard(ev) {
   return card;
 }
 
-// Long card bodies get "Show more". Measured when the body has a size: a card drawn on a hidden tab has none yet.
+// Long card bodies get "Show more", right under the text (above a question's buttons). Watched for as long as the
+// card lives: a card drawn on a hidden tab has no size yet, and a new text size can clip a body or free it.
 const clipWatch = new ResizeObserver((entries) => {
   for (const { target: body } of entries) {
-    if (!body.clientHeight) continue;
-    clipWatch.unobserve(body);
     const card = body.parentElement;
-    if (body.scrollHeight <= body.clientHeight + 4 || card.querySelector('.more')) continue;
-    card.classList.add('clipped');
-    const more = el('button', 'more sl', 'Show more');
-    more.type = 'button';
-    more.type = 'button';
-    more.addEventListener('click', () => {
-      card.classList.toggle('open');
-      more.textContent = card.classList.contains('open') ? 'Show less' : 'Show more';
-    });
-    card.append(more);
+    if (!body.clientHeight || card.classList.contains('open')) continue;
+    const clipped = body.scrollHeight > body.clientHeight + 4;
+    card.classList.toggle('clipped', clipped);
+    let more = card.querySelector(':scope > .more');
+    if (clipped && !more) {
+      more = el('button', 'more sl', 'Show more');
+      more.type = 'button';
+      more.addEventListener('click', () => {
+        card.classList.toggle('open');
+        more.textContent = card.classList.contains('open') ? 'Show less' : 'Show more';
+      });
+      body.after(more);
+    }
+    if (more) more.hidden = !clipped;
   }
 });
 
@@ -985,10 +988,30 @@ function badge() {
 }
 
 const LANES = ['c', 't', 'k'];
+// The lane being left, as a still copy over the log: the switch itself stays at once (callers append right after).
+function slideOut(node, was, dir) {
+  const frame = el('div', 'lane-ghost');
+  frame.setAttribute('aria-hidden', 'true');
+  frame.style.top = `${log.scrollTop}px`;
+  frame.style.height = `${log.clientHeight}px`;
+  const copy = node.cloneNode(true);
+  copy.hidden = false;
+  copy.removeAttribute('id');
+  for (const n of copy.querySelectorAll('[id]')) n.removeAttribute('id');
+  copy.style.top = `${was.top}px`;
+  frame.append(copy);
+  log.append(frame);
+  leave(frame, `translateX(${-dir * 25}%)`).finished.finally(() => frame.remove());
+  // Shared axis: the old lane is gone in the first third, the new one fades in after it, so the two never mix.
+  frame.animate([{ opacity: 1 }, { opacity: 0, offset: 0.35 }, { opacity: 0 }], { duration: 200, fill: 'forwards' });
+}
+
 export function showLane(lane, goto = null) {
   if (lane !== S.lane) {
-    // Lateral: the incoming lane slides in from the side of its tab
+    // Lateral: the outgoing lane slides out to one side while the incoming one slides in from the other
     const dir = LANES.indexOf(lane) > LANES.indexOf(S.lane) ? 1 : -1;
+    const out = { c: thread, t: traj, k: $('tasks') }[S.lane];
+    const was = { top: out.offsetTop - log.scrollTop, height: out.offsetHeight };
     scrolls[S.lane] = pinned ? null : log.scrollTop;
     S.lane = lane;
     thread.hidden = lane !== 'c';
@@ -1010,7 +1033,10 @@ export function showLane(lane, goto = null) {
       pinned = nearBottom();
     }
     jumpState();
-    enter({ c: thread, t: traj, k: $('tasks') }[lane], `translateX(${dir * 25}%)`);
+    slideOut(out, was, dir);
+    const into = { c: thread, t: traj, k: $('tasks') }[lane];
+    enter(into, `translateX(${dir * 25}%)`);
+    into.animate([{ opacity: 0 }, { opacity: 0, offset: 0.25 }, { opacity: 1 }], { duration: 300 });
   }
   if (lane === 't') markSeen();
   const node = goto && (lane === 't' ? traj : thread).querySelector(`[data-id="${goto}"]`);

@@ -807,7 +807,8 @@ fun NavBar(vm: Seimei) {
                         }
                     }
                 }
-                Text(label, color = if (on) x.text else x.text3, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium,
+                Text(label, color = if (on) x.text else x.text3, fontSize = 12.sp, lineHeight = 16.sp,
+                    fontWeight = if (on) FontWeight.Bold else FontWeight.Medium,
                     letterSpacing = .24.sp, maxLines = 1)
             }
         }

@@ -653,7 +653,7 @@ body.typing .composer { padding-bottom: 10px; }
 .nav-item .ind::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: currentColor; opacity: 0; transition: opacity .15s; }
 .nav-item:hover .ind::after { opacity: .08; }
 .nav-item:active .ind::after { opacity: .14; }
-.nav-item.on { color: var(--text); }
+.nav-item.on { color: var(--text); font-weight: 700; }
 .nav-item.on .ind { background: var(--primary-container); color: var(--on-primary-container); }
 .nbadge {
   position: absolute; left: 34px; top: -1px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px;
@@ -955,3 +955,7 @@ mark { background: color-mix(in srgb, var(--primary) 30%, transparent); color: i
 .tdots { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 .tdot { width: 24px; height: 24px; border: 0; border-radius: 50%; padding: 0; cursor: pointer; }
 .tdot.on { box-shadow: 0 0 0 2px var(--container), 0 0 0 4px var(--text); }
+/* The lane being left, sliding out over the log while the new one slides in (chat.js slideOut) */
+.lane-ghost { position: absolute; left: 0; right: 0; overflow: hidden; pointer-events: none; }
+.lane-ghost > * { position: absolute; left: 16px; right: 16px; }
+.lane-ghost * { animation: none !important; }

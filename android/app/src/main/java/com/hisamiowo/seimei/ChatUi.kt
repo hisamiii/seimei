@@ -3,6 +3,7 @@ package com.hisamiowo.seimei
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.draw.shadow
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.animation.core.animateDpAsState
@@ -784,7 +785,9 @@ fun CardHead(icon: androidx.compose.ui.graphics.vector.ImageVector, bg: Color, f
         }
         Spacer(Modifier.width(if (big) 12.dp else 10.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, fontWeight = FontWeight.SemiBold, fontSize = if (big) 16.sp else 14.sp, lineHeight = if (big) 21.sp else 18.sp)
+            // A heading, so TalkBack can jump from card to card.
+            Text(title, Modifier.semantics { heading() }, fontWeight = FontWeight.SemiBold, fontSize = if (big) 16.sp else 14.sp,
+                lineHeight = if (big) 21.sp else 18.sp)
             if (!sub.isNullOrEmpty()) Text(sub, fontSize = 12.sp, color = LocalExtra.current.text3, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 fontFamily = if (mono) FontFamily.Monospace else null)
         }
