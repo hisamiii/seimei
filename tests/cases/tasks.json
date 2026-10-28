@@ -12,7 +12,7 @@
    {"do": "add", "args": {"title": "Finished now", "project": "seimei", "owner": "dev", "state": "done"}, "expect": {"tasks": {"#56": {"state": "done"}}}},
    {"do": "tool", "args": {"action": "list"}, "expect": {"text_has": ["  done today: #56 Finished now"]}},
    {"do": "age", "args": {"id": "#56", "done_ago": 90000}, "expect": {"tasks": {"#56": null}}},
-   {"do": "add", "args": {"title": "x", "project": "seimei", "owner": "dev", "tid": "#47"}, "expect": {"error": "#47 is on the board already"}},
+   {"do": "add", "args": {"title": "x", "project": "seimei", "owner": "dev", "tid": "#47"}, "expect": {"error": "#47 is archived: an update brings it back"}},
    {"do": "update", "args": {"id": "47", "state": "open"}, "expect": {"result": {"id": "#47", "state": "open", "done_at": null}, "tasks": {"#47": {"state": "open"}}}},
    {"do": "archived", "args": {"q": "metrics"}, "expect": {"result": {"n": 0}}},
    {"do": "update", "args": {"id": "#52", "title": "Remove the Screen tab for good"}, "expect": {"tasks": {"#52": null}}},

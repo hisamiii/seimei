@@ -331,8 +331,11 @@ impl Board {
         valid(state)?;
         let id = if let Some(tid) = tid {
             // seimei's own number for it (a summon whose task starts with #NN): the count goes on after it.
-            if self.find(tid).is_some() || self.archive.iter().any(|t| t.id == norm(tid)) {
+            if self.find(tid).is_some() {
                 return Err(Error::Invalid(format!("{tid} is on the board already")));
+            }
+            if self.knows(tid) {
+                return Err(Error::Invalid(format!("{tid} is archived: an update brings it back")));
             }
             let n: u64 = tid.trim_start_matches('#').parse().map_err(|_| Error::Invalid(format!("{tid} is no #NN")))?;
             self.data.next = self.data.next.max(n + 1);
