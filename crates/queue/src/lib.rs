@@ -58,20 +58,7 @@ pub fn scheduler_main(argv: &[String]) -> ! {
         eprintln!("{m}");
         std::process::exit(2)
     };
-    let mut a = Args {
-        runtime_dir: runtime_dir(),
-        waits_dir: None,
-        state_dir: home().join(".local/state/claude-queue"),
-        config_dir: home().join(".config/claude-queue"),
-        cgroup_root: String::new(),
-        act_slices: "queue-*.slice".into(),
-        windows_cmd: "niri msg -j windows".into(),
-        kmsg_cmd: if cgroup::systemd() { "journalctl -k -f -n 0 -o cat" } else { "dmesg -W" }.into(),
-        dry_run: false,
-        test_engine_dir: None,
-        shadow: false,
-        shadow_of: None,
-    };
+    let mut a = Args::default();
     let (mut thaw_all, mut in_queue_ok) = (false, false);
     let mut it = argv.iter();
     while let Some(x) = it.next() {

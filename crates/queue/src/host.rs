@@ -65,25 +65,22 @@ fn take_lock(dir: &Path) -> Option<std::fs::File> {
 /// The shadow's arguments: cqd's policy, wait records and cgroup root, its own runtime and state folders, a copy of
 /// cqd's history (so ETAs and learned needs match), and nothing it may change.
 fn shadow_args(state: &Path) -> Args {
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-    let cq_run = crate::runtime_dir();
+    let cqd = Args::default();
+    let cq_run = cqd.runtime_dir.clone();
     let state_dir = state.join("queue-shadow");
     let _ = std::fs::create_dir_all(&state_dir);
-    let _ = std::fs::copy(home.join(".local/state/claude-queue/history.jsonl"), state_dir.join("history.jsonl"));
+    let _ = std::fs::copy(cqd.state_dir.join("history.jsonl"), state_dir.join("history.jsonl"));
     Args {
         // Beside cqd's folder: $XDG_RUNTIME_DIR/seimei/queue-shadow in the usual case.
         runtime_dir: cq_run.parent().unwrap_or(&cq_run).join("seimei/queue-shadow"),
         waits_dir: Some(cq_run.join("waits")),
         state_dir,
-        config_dir: home.join(".config/claude-queue"),
         cgroup_root: cgroup::user_cgroup(),
-        act_slices: "queue-*.slice".into(),
-        windows_cmd: "niri msg -j windows".into(),
         kmsg_cmd: String::new(),
         dry_run: true,
-        test_engine_dir: None,
         shadow: true,
         shadow_of: Some(cq_run),
+        ..cqd
     }
 }
 
