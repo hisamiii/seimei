@@ -99,6 +99,17 @@ fn descendants(pid: i64) -> Vec<(i64, String)> {
     out
 }
 
+/// Whether the process ends within `tries` half seconds.
+async fn ends(pid: i64, tries: u32) -> bool {
+    for _ in 0..tries {
+        if !alive(pid) {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    false
+}
+
 fn kill(pid: i64, sig: i32) {
     // SAFETY: kill only sends a signal.
     unsafe {
@@ -608,28 +619,12 @@ async fn end(s: &Value, pid: i64, bg: bool) -> Result<(), String> {
         if !err.is_empty() {
             return Err(format!("claude stop {job} failed: {err}"));
         }
-        let mut gone = false;
-        for _ in 0..60 {
-            if !alive(pid) {
-                gone = true;
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(500)).await;
-        }
-        if !gone {
+        if !ends(pid, 60).await {
             return Err(format!("claude stop {job} returned but pid {pid} still runs; nothing adopted"));
         }
     } else {
         kill(pid, libc::SIGTERM);
-        let mut gone = false;
-        for _ in 0..30 {
-            if !alive(pid) {
-                gone = true;
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(500)).await;
-        }
-        if !gone {
+        if !ends(pid, 30).await {
             kill(pid, libc::SIGKILL);
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
