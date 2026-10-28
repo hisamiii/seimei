@@ -139,7 +139,20 @@ pub fn config_text(port: u16, origin: &str, about: &str, plan: &str, terminal: &
     };
     let list = enabled.iter().map(|p| q(p)).collect::<Vec<_>>().join(", ");
     let mut out = String::new();
+    let mut section = "";
     for line in EXAMPLE.lines() {
+        if line.starts_with('[') {
+            section = line;
+        }
+        // The example leaves these commented (their defaults come from the plan and the machine); setup sets them.
+        let set = ["[dispatcher]", "[models]", "[sessions]"].contains(&section);
+        let line = match line.strip_prefix("# ") {
+            // The comment keeps its column.
+            Some(bare) if set && bare.split_once(" = ").is_some_and(|(k, _)| !k.contains(' ')) => {
+                &bare.replacen("  #", "    #", 1)
+            }
+            _ => line,
+        };
         let line = match line {
             l if l.starts_with("# Optional: copy to") => {
                 "# Written by `seimei setup`; the example in the source has every option.".into()

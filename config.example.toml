@@ -1,5 +1,4 @@
-# Optional: copy to ~/.config/seimei/config.toml. Values shown set are the defaults; commented ones show the form, and
-# their defaults come from elsewhere (your plan, the terminal found on this machine).
+# Optional: copy to ~/.config/seimei/config.toml. Set values are the defaults; commented ones come from your plan and this machine.
 
 [server]
 port = 8417                         # --dev uses port + 1
