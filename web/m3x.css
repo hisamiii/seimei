@@ -57,8 +57,8 @@
 .status .dot { display: none; }
 .status[data-s="working"] { color: var(--primary); }
 .status[data-s="starting"] { color: var(--warn); }
-.trig::before, .working::before, .li .trail.fresh::before, .agent time.fresh::before { content: none; }
-.li .trail.fresh, .agent time.fresh { color: var(--primary); font-weight: 500; }
+.trig::before, .working::before, .agent time.fresh::before { content: none; }
+.agent time.fresh { color: var(--primary); font-weight: 500; }
 
 /* ===== approval-after ===== */
 /* M1, approval card: decisions in thumb reach, 48px targets, risk you can see before you tap. */

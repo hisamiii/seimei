@@ -5,9 +5,9 @@ import { openWorker } from './agents.js';
 import { renderTasks } from './tasks.js';
 import { sentDictated } from './mic.js';
 
-export const log = $('log');
-export const thread = $('thread');
-export const traj = $('traj');
+const log = $('log');
+const thread = $('thread');
+const traj = $('traj');
 const older = $('older'), olderT = $('older-t'), working = $('working');
 const input = $('input'), sendBtn = $('send'), stopBtn = $('stop');
 
@@ -74,7 +74,7 @@ const ICONS = {
 // The built-in plugins' tools (mcp__browser__browser_tabs) read like seimei's own, as they were named before them.
 const ours = name => name.replace(/^mcp__(desktop|discord|browser|music|queue)__/, 'mcp__seimei__');
 
-export function phrase(name, n) {
+function phrase(name, n) {
   name = ours(name);
   if (name === 'Bash') return `ran ${plural(n, 'a command', 'commands')}`;
   if (name === 'Read') return `read ${plural(n, 'a file', 'files')}`;
@@ -328,7 +328,6 @@ const clipWatch = new ResizeObserver((entries) => {
     card.classList.add('clipped');
     const more = el('button', 'more sl', 'Show more');
     more.type = 'button';
-    more.type = 'button';
     more.addEventListener('click', () => {
       card.classList.toggle('open');
       more.textContent = card.classList.contains('open') ? 'Show less' : 'Show more';
@@ -347,9 +346,9 @@ const OUTCOME = { approved: 'Allowed', denied: 'Denied', restart: 'Canceled by a
 const ALLOW = 'M5 12.5l4.5 4.5L19 7.5';
 const ASKS = 'M4 5h16v11H9l-5 4zM10 9.2a2 2 0 1 1 2.6 1.9c-.4.2-.6.5-.6.9M12 13.6v.1';
 
-const SUB = { message: 'a session you started', desktop: 'a desktop action', discord: 'a Discord action' };
+const SUB = { desktop: 'a desktop action', discord: 'a Discord action' };
 
-export function approvalSub(ev) {
+function approvalSub(ev) {
   if (ev.options) return ev.sub || (ev.action === 'edit' ? home((ev.detail || '').split('\n')[0]).split('/').pop() : '');
   if (ev.action === 'edit') return home((ev.detail || '').split('\n')[0]);
   if (ev.action !== 'command') return SUB[ev.action] || '';
@@ -394,10 +393,8 @@ function approvalCard(ev) {
   badge.append(svg(ev.action === 'plan' ? PLAN : question ? ASKS : LOCK, 18));
   const head = el('div', 'head');
   const title = el('div', 'title');
-  // Cards from before messages went card-free (2026-10-19) held SendMessage text.
-  const message = ev.action === 'message';
   const who = ev.subagent ? `${ev.who}'s subagent` : ev.who;
-  title.append(el('b', null, question ? `${who} asks you` : `${who} wants to ${message ? `message ${ev.target}` : ev.target}`));
+  title.append(el('b', null, question ? `${who} asks you` : `${who} wants to ${ev.target}`));
   // The subtitle names what it touches, not the title again: the session a command names, the file an edit writes.
   const sub = approvalSub(ev);
   if (sub) title.append(el('span', 'sub', sub));
@@ -407,7 +404,7 @@ function approvalCard(ev) {
   else if (perm && ev.action === 'plan') {
     body = el('div', 'body plan');
     body.innerHTML = md(ev.detail || '');
-  } else body = el('div', `body ${message || question || ev.action === 'discord' ? 'task' : 'cmd'}`, ev.detail);
+  } else body = el('div', `body ${question || ev.action === 'discord' ? 'task' : 'cmd'}`, ev.detail);
   card.append(head, body);
 
   const opts = perm ? ev.options : [{ id: 'deny', label: 'Deny' }, { id: 'once', label: 'Allow' }];
@@ -547,14 +544,14 @@ const FILE_ICON = {
   doc: 'M6 3h9l4 4v14H6zM14 3v5h5M9 13h6M9 17h6',
 };
 const fileIcon = (kind) => FILE_ICON[kind] || FILE_ICON.doc;
-export const size = (n) => (n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+const size = (n) => (n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 const KIND_LABEL = { pdf: 'PDF', archive: 'Zip', audio: 'Audio', video: 'Video', image: 'Image', code: 'Code', text: 'Text', file: 'File' };
 
 // The server deletes files after 30 days (uploads.py KEEP_DAYS); older chips show as expired.
 const KEEP = 30 * 86400;
 
 // A file as a download chip; the server always serves it as an attachment, never rendered.
-export function fileChip(f, t) {
+function fileChip(f, t) {
   const expired = t && Date.now() / 1000 - t > KEEP;
   const a = el(expired ? 'div' : 'a', `fchip${expired ? ' expired' : ' sl'}`);
   if (!expired) {
@@ -577,7 +574,7 @@ function sentFile(ev) {
   return fig;
 }
 
-export function message(ev) {
+function message(ev) {
   const node = el('div', `msg ${ev.type}`);
   if (ev.type === 'assistant') node.innerHTML = md(ev.text);
   else {
@@ -629,7 +626,7 @@ const REPEAT = 900;
 
 // Events in lane "t" happened on their own (see events.py): they render in the trajectory, and the chat folds
 // each run of them into one line.
-export const inTraj = (ev) => ev.lane === 't';
+const inTraj = (ev) => ev.lane === 't';
 
 // Texts of the user's and seimei's messages by event id, for reply anchors and quotes.
 const said = new Map();
@@ -848,7 +845,7 @@ export class Renderer {
 
 const asks = new Map();
 export const main = new Renderer(thread, null, { asks });
-export const trail = new Renderer(traj, null, { lane: 't', asks });
+const trail = new Renderer(traj, null, { lane: 't', asks });
 
 // One event, drawn where it belongs: the trajectory gets it whole, the chat a fold line.
 function route(ev, chat = main, t = trail) {

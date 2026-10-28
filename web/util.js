@@ -5,8 +5,8 @@ export const finePointer = matchMedia('(pointer: fine)').matches;
 const lessMotion = matchMedia('(prefers-reduced-motion: reduce)');
 export const reduced = () => lessMotion.matches;
 // Screen transitions (BEHAVIOR.md 1) use M3's emphasized easings, not springs; reduced motion gets a short fade
-export const EASE_IN = 'cubic-bezier(.05, .7, .1, 1)';
-export const EASE_OUT = 'cubic-bezier(.3, 0, .8, .15)';
+const EASE_IN = 'cubic-bezier(.05, .7, .1, 1)';
+const EASE_OUT = 'cubic-bezier(.3, 0, .8, .15)';
 export function enter(node, from, ms = 300) {
   // A leave holds its end state (fill forwards) until the node is hidden: drop it, or it covers this enter
   node._leave?.cancel();
@@ -104,7 +104,7 @@ function nameHash(name) {
   for (const c of name || '') h = (h * 101 + c.charCodeAt(0)) >>> 0;
   return h;
 }
-export const shapeOf = (name) => SHAPES[nameHash(name) % SHAPES.length];
+const shapeOf = (name) => SHAPES[nameHash(name) % SHAPES.length];
 function phaseOf(name) {
   let x = (nameHash(name) ^ 736562) >>> 0;
   x = (x ^ (x >>> 16)) >>> 0;
@@ -344,13 +344,11 @@ $('viewer-close').addEventListener('click', close);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !viewer.hidden) close(); });
 
 export const ICON = {
-  star: 'M12 2 17.88 20.09 2.49 8.91h19.02L6.12 20.09Z',
   check: 'M5 12.5l4.5 4.5L19 7.5',
   chev: 'M9 6l6 6-6 6',
   send: 'M12 19V5M5.5 11.5 12 5l6.5 6.5',
   laptop: 'M5 6.5A1.5 1.5 0 0 1 6.5 5h11A1.5 1.5 0 0 1 19 6.5V15H5zM3 18h18',
   list: 'M8 7h11M8 12h11M8 17h7M4.5 7h.01M4.5 12h.01M4.5 17h.01',
-  full: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5',
   save: 'M12 4v11M7 10.5l5 5 5-5M5 19.5h14',
   close: 'M6 6l12 12M18 6L6 18',
 };

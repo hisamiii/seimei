@@ -2,7 +2,7 @@
 // Everything is escaped first; only the tags built here can appear, so raw HTML in a reply never runs.
 
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-export const esc = (s) => s.replace(/[&<>"']/g, (c) => ESC[c]);
+const esc = (s) => s.replace(/[&<>"']/g, (c) => ESC[c]);
 
 const link = (href, text) => `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${text}</a>`;
 

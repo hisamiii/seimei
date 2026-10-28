@@ -77,7 +77,7 @@ async function loadMetrics() {
   if (S.tab === 'usage') page.querySelector('.metrics')?.replaceWith(metricsSection());
 }
 
-export const span = (sec) => {
+const span = (sec) => {
   const m = Math.round(sec / 60);
   return sec < 60 ? `${Math.round(sec)} s` : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min`;
 };
@@ -150,8 +150,8 @@ let cost = null;
 let costAt = 0;
 const open = new Set();
 // Cents only below $100: past that they are noise.
-export const usd = (n) => `$${n >= 100 ? Math.round(n).toLocaleString('en-US') : n.toFixed(2)}`;
-export const MODEL = (k) => k.replace(/^claude-/, '').replace(/-(\d+)-(\d+)$/, ' $1.$2').replace(/-(\d+)$/, ' $1')
+const usd = (n) => `$${n >= 100 ? Math.round(n).toLocaleString('en-US') : n.toFixed(2)}`;
+const MODEL = (k) => k.replace(/^claude-/, '').replace(/-(\d+)-(\d+)$/, ' $1.$2').replace(/-(\d+)$/, ' $1')
   .replace(/^./, (c) => c.toUpperCase());
 
 async function loadCost() {

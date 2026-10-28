@@ -973,7 +973,6 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
     var sent by remember(a.aid) { mutableStateOf(false) }
     var noting by remember(a.aid) { mutableStateOf(false) }
     var note by remember(a.aid) { mutableStateOf("") }
-    val message = a.action == "message"
     // seimei's AskUserQuestion: the options are the answers, the note writes one, Skip leaves it
     val question = a.action == "question"
     // A permission card carries Claude Code's choices; a guard card is Approve/Deny.
@@ -986,7 +985,7 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
             vm.sessions.firstOrNull { it.str("name").isNotEmpty() && it.str("name") in words }
                 ?.let { s -> "session ${s.str("name")}" + s.str("project").let { if (it.isEmpty()) "" else " · $it" } }
         }
-        else -> mapOf("message" to "a session you started", "desktop" to "a desktop action", "discord" to "a Discord action")[a.action]
+        else -> mapOf("desktop" to "a desktop action", "discord" to "a Discord action")[a.action]
     }
     val (bg, fg) = when (a.outcome) {
         null -> cs.primaryContainer to cs.onPrimaryContainer
@@ -1026,12 +1025,12 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
     val who = if (a.subagent) "${a.who}'s subagent" else a.who
     Card(highlight = a.outcome == null, corner = 28.dp, pad = 16.dp) {
         CardHead(if (a.action == "plan") PLAN else if (question) Icons.question else Icons.lock, bg, fg,
-            if (question) "$who asks you" else "$who wants to ${if (message) "message ${a.target}" else a.target}", sub, big = true)
+            if (question) "$who asks you" else "$who wants to ${a.target}", sub, big = true)
         val box = Modifier.fillMaxWidth().heightIn(max = if (a.outcome == null) 220.dp else 80.dp)
         if (perm && a.action == "plan") {
             Box(box.verticalScroll(rememberScrollState())) { Md(a.detail, 14, if (a.outcome == null) cs.onSurface else LocalExtra.current.text2) }
         } else {
-            val mono = !(message || question || a.action == "discord")
+            val mono = !(question || a.action == "discord")
             val text = if (perm && a.action == "edit") diffText(a.detail) else androidx.compose.ui.text.AnnotatedString(a.detail)
             Text(
                 text, fontSize = 13.sp, lineHeight = 19.sp,
@@ -1039,7 +1038,7 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
                 color = if (a.outcome == null) cs.onSurface else LocalExtra.current.text2,
                 maxLines = if (a.outcome == null) Int.MAX_VALUE else 3, overflow = TextOverflow.Ellipsis,
                 modifier = box
-                    .then(if (message) Modifier else Modifier.clip(RoundedCornerShape(10.dp)).background(cs.surface).padding(horizontal = 10.dp, vertical = 8.dp))
+                    .clip(RoundedCornerShape(10.dp)).background(cs.surface).padding(horizontal = 10.dp, vertical = 8.dp)
                     .verticalScroll(rememberScrollState()),
             )
         }

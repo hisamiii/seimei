@@ -42,7 +42,7 @@ function rgb(h) {
   return [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
 }
 // t of a, the rest b: the same rule contrib/themes.py and Theme.kt use.
-export function mix(a, b, t) {
+function mix(a, b, t) {
   const x = rgb(a), y = rgb(b);
   return '#' + x.map((v, i) => Math.round(v * t + y[i] * (1 - t)).toString(16).padStart(2, '0')).join('');
 }
@@ -97,7 +97,7 @@ export function setVars(node, t) {
 
 export let current = null;
 
-export async function apply(p = prefs()) {
+async function apply(p = prefs()) {
   const d = isDark(p);
   const t = await tokens(THEMES.includes(p.theme) ? p.theme : 'catppuccin', d, p);
   const root = document.documentElement;
