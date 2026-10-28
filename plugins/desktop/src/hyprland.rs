@@ -93,7 +93,8 @@ impl Hyprland {
     }
 
     fn get(&self, what: &str) -> Result<Value, String> {
-        serde_json::from_str(&self.request(&format!("j/{what}"))?).map_err(|e| format!("JSONDecodeError: {e}"))
+        serde_json::from_str(&self.request(&format!("j/{what}"))?)
+            .map_err(|e| format!("hyprctl {what} is not JSON: {e}"))
     }
 
     fn dispatch(&self, args: &[&str]) -> Result<String, String> {

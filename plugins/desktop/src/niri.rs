@@ -229,7 +229,7 @@ impl Backend for Niri {
             let e = r.err();
             return Err(if e.trim().is_empty() { format!("niri msg {what} failed") } else { e.trim().into() });
         }
-        let v: Value = serde_json::from_str(&r.text()).map_err(|e| format!("JSONDecodeError: {e}"))?;
+        let v: Value = serde_json::from_str(&r.text()).map_err(|e| format!("niri msg {what} is not JSON: {e}"))?;
         Ok(py_json_compact(&v))
     }
 

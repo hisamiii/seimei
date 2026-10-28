@@ -1716,7 +1716,7 @@
      ]
     },
     "want": {
-     "text": "KeyError: 'action'",
+     "text": "action is missing",
      "error": true,
      "log": [],
      "keys": []
@@ -1905,7 +1905,7 @@
      "window": 3
     },
     "want": {
-     "text": "KeyError: 'text'",
+     "text": "text is missing",
      "error": true,
      "log": [],
      "keys": []
@@ -2090,7 +2090,7 @@
      "button": "side"
     },
     "want": {
-     "text": "KeyError: 'side'",
+     "text": "button is left, right or middle",
      "error": true,
      "log": [],
      "keys": [
@@ -2113,7 +2113,20 @@
      "y": 10
     },
     "want": {
-     "text": "KeyError: 'x'",
+     "text": "x is missing",
+     "error": true,
+     "log": [],
+     "keys": []
+    }
+   },
+   {
+    "tool": "click",
+    "args": {
+     "x": "left",
+     "y": 10
+    },
+    "want": {
+     "text": "x must be a number",
      "error": true,
      "log": [],
      "keys": []

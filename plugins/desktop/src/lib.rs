@@ -185,17 +185,18 @@ pub(crate) fn number(v: &Value) -> f64 {
     v.as_f64().unwrap_or(0.0)
 }
 
-/// A required argument, or the KeyError Python gave.
 fn need<'a>(args: &'a Value, k: &str) -> Result<&'a Value, String> {
-    args.get(k).ok_or_else(|| format!("KeyError: {}", py_repr(k)))
+    args.get(k).ok_or_else(|| format!("{k} is missing"))
 }
 
-fn float(v: &Value) -> Result<f64, String> {
-    match v {
-        Value::Number(n) => Ok(n.as_f64().unwrap_or(0.0)),
-        Value::String(s) => strip(s).parse().map_err(|_| format!("could not convert string to float: {}", py_repr(s))),
-        v => Err(format!("float() argument must be a string or a real number, not {v}")),
-    }
+/// A required number; a string that reads as one counts.
+fn float(args: &Value, k: &str) -> Result<f64, String> {
+    let n = match need(args, k)? {
+        Value::Number(n) => n.as_f64(),
+        Value::String(s) => strip(s).parse().ok(),
+        _ => None,
+    };
+    n.ok_or_else(|| format!("{k} must be a number"))
 }
 
 fn sleep(s: f64) {
@@ -832,7 +833,7 @@ impl Desktop {
         if scroll != 0 {
             input.0.scroll(scroll)
         } else if count != 0 {
-            let code = uinput::button(button).ok_or_else(|| format!("KeyError: {}", py_repr(button)))?;
+            let code = uinput::button(button).ok_or("button is left, right or middle")?;
             input.0.click(code, count)
         } else {
             Ok(())
@@ -861,19 +862,18 @@ impl Desktop {
         let r: Result<String, String> = match tool {
             "desktop" => self.blocking(|d| d.overview()).await,
             "screenshot" => return self.screenshot_tool(args).await,
-            t if t == name => {
-                let mut argv = vec![args.get("action").map_or("None".into(), text_of)];
-                argv.extend(args["args"].as_array().into_iter().flatten().map(text_of));
-                if args.get("action").is_none() {
-                    Err("KeyError: 'action'".into())
-                } else {
+            t if t == name => match need(args, "action") {
+                Err(e) => Err(e),
+                Ok(a) => {
+                    let mut argv = vec![text_of(a)];
+                    argv.extend(args["args"].as_array().into_iter().flatten().map(text_of));
                     self.blocking(move |d| d.b.action(&argv))
                         .await
                         .map(|o| if o.is_empty() { "Done.".into() } else { o })
                 }
-            }
+            },
             t if t == format!("{name}_query") => {
-                let what = args.get("what").map_or("None".into(), text_of);
+                let what = args.get("what").map_or(String::new(), text_of);
                 self.blocking(move |d| d.b.query(&what)).await.map(|out| {
                     if out.chars().count() <= 30_000 {
                         out
@@ -977,8 +977,8 @@ impl Desktop {
     }
 
     async fn click_tool(self: &Arc<Self>, tool: &str, args: &Value) -> Result<String, String> {
-        let x = float(need(args, "x")?)?;
-        let y = float(need(args, "y")?)?;
+        let x = float(args, "x")?;
+        let y = float(args, "y")?;
         let window = args.get("window").cloned().unwrap_or(Value::Null);
         if tool == "scroll" {
             let amount = int(need(args, "amount")?)?;
