@@ -717,7 +717,8 @@ async fn theme_set(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> Resp
     let rec = json!({"seed": seed, "from": from, "at": now()});
     if read_json(&app.theme).and_then(|t| t["seed"].as_str().map(String::from)).as_deref() != Some(seed.as_str()) {
         if let Err(e) = write_json(&app.theme, &rec) {
-            return json_status(StatusCode::INTERNAL_SERVER_ERROR, json!({"error": format!("Couldn't save the theme: {e}")}));
+            let error = format!("Couldn't save the theme: {e}");
+            return json_status(StatusCode::INTERNAL_SERVER_ERROR, json!({"error": error}));
         }
         let mut ev = rec.clone();
         ev["type"] = json!("theme");
