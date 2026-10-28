@@ -1,6 +1,6 @@
 #!/bin/bash
-# Start (or restart) the QA server on 8431: own config and state under tests/qa, the fake claude (tests/fakes), a
-# fake kitty and terminal. Nothing reaches a real Claude session, kitty window or phone.
+# Start (or restart) the QA server on 8431: own config and state under tests/qa, the fake agent CLI (tests/fakes), a fake kitty and terminal.
+# Nothing reaches a real agent session, kitty window or phone.
 # SEIMEI_SERVER is the server to run (default: this checkout's debug build); flags go to seed.py.
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(dirname "$(dirname "$here")")

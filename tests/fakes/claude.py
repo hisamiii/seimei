@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
-"""A fake `claude` for the QA server: speaks Claude Code's stream-json protocol (initialize, hooks, can_use_tool,
-in-process MCP tools, interrupt) and plays a script picked by a "!command" line in each message. It never reaches a
-model. Either seimei implementation runs it in place of the real CLI (SEIMEI_CLAUDE).
-
-The shikigami (--name "shikigami <name>") and the dispatcher (any other name: seimei, seimei-dev) have their own
-scripts; what no script takes is echoed. The dispatcher logs each message it gets to $FAKE_CLAUDE_LOG (one JSON string
-per line)."""
+"""A fake `claude` for the QA server: speaks Claude Code's stream-json protocol (initialize, hooks, can_use_tool, in-process MCP tools, interrupt); it never reaches a model.
+Either seimei implementation runs it in place of the real CLI (SEIMEI_CLAUDE). Each message plays the script its "!command" line picks; what no script takes is echoed.
+The shikigami (--name "shikigami <name>") and the dispatcher (any other name: seimei, seimei-dev) have their own scripts.
+The dispatcher logs each message it gets to $FAKE_CLAUDE_LOG (one JSON string per line)."""
 import asyncio
 import json
 import os
@@ -192,8 +189,8 @@ class Fake:
         return {}
 
     async def tool(self, name: str, inp: dict, result: str = "ok", hang: bool = False) -> tuple[bool, str]:
-        """One model step that calls a tool: the guard's hooks, then the tool (seimei's own over MCP), then its
-        result. Returns (error, text)."""
+        """One model step that calls a tool: the guard's hooks, then the tool (seimei's own over MCP), then its result.
+        Returns (error, text)."""
         tid = f"toolu_{uuid.uuid4().hex[:20]}"
         self.stream({"type": "message_start", "message": {"id": "m", "model": MODEL}})
         self.stream({"type": "content_block_start", "index": 0, "content_block": {"type": "tool_use", "id": tid, "name": name, "input": {}}})
@@ -241,8 +238,7 @@ class Fake:
         return bool(res.get("isError")), text
 
     async def permission(self, tool: str, inp: dict, suggestions: list, description: str | None = None) -> str:
-        """Claude Code's permission prompt for one call; what came back, in words: approved (s0), approved (once),
-        denied (deny, <their note>) or denied (<why>)."""
+        """Claude Code's permission prompt for one call; what came back, in words: approved (s0), approved (once), denied (deny, <their note>) or denied (<why>)."""
         req = {"subtype": "can_use_tool", "tool_name": tool, "input": inp, "permission_suggestions": suggestions,
                "tool_use_id": f"toolu_{uuid.uuid4().hex[:20]}", **({"description": description} if description else {})}
         r = await self.ask(req)
@@ -397,7 +393,7 @@ async def dispatcher(self: Fake, text: str, images: int):
     elif t == "error":
         return self.result("overloaded_error", error="error_during_execution")
     elif t == "big":
-        # One stdout line of 3 MB (a big image once ended the Python reader at its 1 MB limit).
+        # One stdout line of 3 MB (a big image can pass a reader's 1 MB line limit).
         self.assistant({"type": "text", "text": "x" * (3 << 20)})
         await self.say("That was big.")
     elif text.startswith("[seimei] mark this reply"):
@@ -485,8 +481,7 @@ def main():
 
 
 def resumed(cfg: Path, sid: str):
-    """For the adopt tests: log to resumes.log whether a user's session on sid still ran as this resume started, and
-    exit before the handshake when sid is listed in fail-resume."""
+    """For the adopt tests: log to resumes.log whether a user's session on sid still ran as this resume started, and exit before the handshake when sid is listed in fail-resume."""
     old = None
     for f in (cfg / "sessions").glob("*.json"):
         try:

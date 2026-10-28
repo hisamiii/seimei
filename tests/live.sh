@@ -1,7 +1,7 @@
 #!/bin/bash
 # tests/live.sh NAME...: run the ignored live tests (headless sessions on haiku or dsh) in a scrubbed environment.
-# No desktop, no job variables of the calling session, auto-memory off, and the test Claude config dir, so test sessions
-# never show up in the user's session list or seimei's events. Log it in once: `CLAUDE_CONFIG_DIR=<dir> claude /login`.
+# No desktop, no job variables of the calling session, auto-memory off, and the test Claude config dir, so test sessions stay out of the user's list.
+# Log it in once: `CLAUDE_CONFIG_DIR=<dir> claude /login`.
 # NAME: dispatcher (the dispatcher with its tools and plugins), acp (a shikigami on dsh under the guard).
 set -eu
 root=$(dirname "$(dirname "$(readlink -f "$0")")")

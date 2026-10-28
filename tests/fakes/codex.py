@@ -1,21 +1,8 @@
 #!/usr/bin/env python3
-"""A fake `codex app-server` (Codex's JSON-RPC over stdio, the v2 thread/turn/item API) for seimei's codex client. It
-never reaches a model: each turn plays the script its "!command" line picks, and what no script takes is echoed back.
-
-  !think          reasoning, then the answer
-  !two            two agent messages, the second one whole (no deltas)
-  !plan           a plan of three steps, then the same plan with the first two done
-  !tool <cmd>     a command that asks for approval first; accepted it runs, declined it is declined
-  !edit <path>    a file change that asks for approval first
-  !unasked <cmd>  a command run without asking
-  !mcp            tells the MCP servers its thread's config got (names, commands, args, env names, approval mode)
-  !wait           a turn that runs until it is interrupted
-  !fail           a turn that fails
-  !crash          exits mid-turn
-  !ask            asks for more permissions and for user input, and tells what came back
-
-Threads live in $FAKE_CODEX_DIR/threads/<id>.json. Every message both ways goes to $FAKE_CODEX_LOG (JSON lines,
-{"dir": "in" or "out", "msg": ...})."""
+"""A fake `codex app-server` (Codex's JSON-RPC over stdio, the v2 thread/turn/item API) for seimei's codex client.
+It never reaches a model: each turn plays the script its "!command" line picks (see play()), and what no script takes is echoed back.
+Threads live in $FAKE_CODEX_DIR/threads/<id>.json.
+Every message both ways goes to $FAKE_CODEX_LOG as JSON lines {"dir": "in" or "out", "msg": ...}."""
 import json
 import os
 import queue

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-"""A fake `kitten @` for the QA server: the user's sessions there "run" in kitty windows that exist only here. It
-shows an idle prompt, logs what would be typed to $FAKE_KITTEN_LOG, and refuses anything but the QA password, so a
-real one can never reach test code."""
+"""A fake `kitten @` for the QA server: the user's sessions there "run" in kitty windows that exist only here.
+It shows an idle prompt, logs what would be typed to $FAKE_KITTEN_LOG, and refuses anything but the QA password, so a real one can never reach test code."""
 import json
 import os
 import sys

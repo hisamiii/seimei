@@ -1,6 +1,5 @@
-"""Seeds the QA server's state before start.sh launches it: workers, chat history, usage,
-the board (--board) and the user's own sessions as `sleep` stand-ins with fake kitty windows.
-Everything lives under tests/qa; nothing here reaches a real Claude session, kitty window or phone."""
+"""Seeds the QA server's state before start.sh launches it: workers, chat history, usage, the board (--board) and the user's own sessions as `sleep` stand-ins with fake kitty windows.
+Everything lives under tests/qa; nothing here reaches a real agent session, kitty window or phone."""
 import json, os, subprocess, sys, time, uuid
 from pathlib import Path
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""A stdio MCP server with one tool, ping, that answers with the code word in $PING_CODE (default pong-7731). For live
-runs that check an agent reaches the MCP servers seimei gives it."""
+"""A stdio MCP server with one tool, ping, that answers with the code word in $PING_CODE (default pong-7731).
+For live runs that check an agent reaches the MCP servers seimei gives it."""
 import json
 import os
 import sys

@@ -1,27 +1,8 @@
 #!/usr/bin/env python3
-"""A fake ACP agent (agent-client-protocol v1, JSON-RPC over stdio) for seimei's ACP client. It never reaches a model:
-each prompt plays the script its "!command" line picks, and what no script takes is echoed back.
-
-  !think          a thought, then the answer
-  !chunks         the answer in three chunks
-  !slow           the answer in two chunks, a second apart
-  !short          a plan of one step, then the answer
-  !plan           a plan of three steps, then the same plan with the first two done
-  !tool <cmd>     an execute tool call that asks permission first; allowed it runs, rejected it fails
-  !dsh <command>  the same, shaped as dsh sends it (kind other, title bash; the request names only the id)
-  !dshcall <title> <json input>
-                  any dsh tool call shaped that way: read, write, mcp__shikigami__ask, ...
-  !wait           a turn that runs until the client cancels it (stop reason cancelled)
-  !crash          exits mid-turn
-  !mcp            tells the MCP servers its session got (names, commands, args, env names)
-  !call <server> <tool> <json args>
-                  starts that MCP server as its session got it, calls the tool and tells the result
-  !fs             asks the client to read a file and tells what came back
-  !mode           tells the session's mode
-
-Sessions live in $FAKE_ACP_DIR/sessions/<id>.json; session/load replays one as updates before it answers.
-$FAKE_ACP_NO_LOAD turns the loadSession capability off; $FAKE_ACP_RESUME turns session/resume on (no replay). Every message both ways goes to $FAKE_ACP_LOG (JSON lines,
-{"dir": "in" or "out", "pid": ..., "msg": ...}), so a test can check them against the protocol's types."""
+"""A fake ACP agent (agent-client-protocol v1, JSON-RPC over stdio) for seimei's ACP client.
+It never reaches a model: each prompt plays the script its "!command" line picks (see turn()), and what no script takes is echoed back.
+Sessions live in $FAKE_ACP_DIR/sessions/<id>.json; session/load replays one. $FAKE_ACP_NO_LOAD turns loadSession off, $FAKE_ACP_RESUME turns session/resume on (no replay).
+Every message both ways goes to $FAKE_ACP_LOG as JSON lines {"dir": "in" or "out", "pid": ..., "msg": ...}, so a test can check them against the protocol's types."""
 import json
 import os
 import queue

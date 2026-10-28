@@ -1,5 +1,4 @@
-"""Ends what QA servers left behind: the fake user sessions (sleep 7200 stand-ins writing to this server.log) and any
-fake claude whose server is gone (they exit when their stdin closes; this is the backstop)."""
+"""Ends what QA servers left behind: the fake user sessions (sleep 7200 stand-ins writing to this server.log) and any fake agent CLI whose server is gone (they exit when their stdin closes; this is the backstop)."""
 import os, signal
 from pathlib import Path
 
