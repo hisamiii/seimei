@@ -642,14 +642,9 @@ impl Plugins {
     }
 }
 
-/// A value as Python's str() shows it.
+/// A tool argument or connector value as text: a string as it is, null as nothing, anything else as JSON.
 pub fn py(v: &Value) -> String {
-    match v {
-        Value::String(s) => s.clone(),
-        Value::Null => "None".into(),
-        Value::Bool(b) => if *b { "True" } else { "False" }.into(),
-        v => v.to_string(),
-    }
+    crate::util::as_text(v)
 }
 
 /// An integer argument, as Python's int() reads it.

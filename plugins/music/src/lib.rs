@@ -11,7 +11,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use seimei_core::guard::About;
 use seimei_core::plugins::{Builtin, Factory, Fut, Session, ask_guard};
 use seimei_core::tools::text;
-use seimei_core::util::{on_path, truthy};
+use seimei_core::util::{as_text, on_path, truthy};
 
 pub const PLUGIN: Factory = Factory {
     name: "music",
@@ -71,35 +71,23 @@ async fn bridge(cmd: &str, args: &Map<String, Value>) -> Result<Value, String> {
     Ok(out.get("result").cloned().unwrap_or(out))
 }
 
-/// A value as Python's str() shows it: 1.0 stays 1.0, strings bare.
-fn py(v: &Value) -> String {
-    match v {
-        Value::String(s) => s.clone(),
-        Value::Null => "None".into(),
-        Value::Number(n) if n.is_f64() && n.as_f64().is_some_and(|f| f.fract() == 0.0 && f.abs() < 1e16) => {
-            format!("{:.1}", n.as_f64().unwrap_or(0.0))
-        }
-        v => v.to_string(),
-    }
-}
-
 fn length(v: &Value) -> String {
     let s = v.as_f64().unwrap_or(0.0) as i64;
     format!("{}:{:02}", s.div_euclid(60), s.rem_euclid(60))
 }
 
 fn song_line(s: &Value) -> String {
-    let or_q = |k: &str| if truthy(&s[k]) { py(&s[k]) } else { "?".into() };
+    let or_q = |k: &str| if truthy(&s[k]) { as_text(&s[k]) } else { "?".into() };
     let mut out = format!("{} - {}", or_q("artist"), or_q("title"));
     if truthy(&s["album"]) {
-        let track = if truthy(&s["track"]) { format!(" #{}", py(&s["track"])) } else { String::new() };
-        out += &format!(" ({}{track})", py(&s["album"]));
+        let track = if truthy(&s["track"]) { format!(" #{}", as_text(&s["track"])) } else { String::new() };
+        out += &format!(" ({}{track})", as_text(&s["album"]));
     }
     out += &format!(" {}", length(&s["length"]));
     if let Some(r) = s["rating"].as_f64() {
         out += &format!(" rating {r:.2}");
     }
-    out + &format!("\n    key: {}", py(&s["key"]))
+    out + &format!("\n    key: {}", as_text(&s["key"]))
 }
 
 /// A bridge result as the music tool's text.
@@ -108,7 +96,7 @@ pub fn describe(cmd: &str, r: &Value) -> String {
         let total = r["total"].as_i64().unwrap_or(songs.len() as i64);
         let mut head = format!("{total} songs");
         if truthy(&r["name"]) {
-            head += &format!(" in {}", py(&r["name"]));
+            head += &format!(" in {}", as_text(&r["name"]));
         }
         let mut lines = vec![head];
         lines.extend(songs.iter().map(song_line));
@@ -125,30 +113,30 @@ pub fn describe(cmd: &str, r: &Value) -> String {
                 "{}: {now}\nposition {}, volume {}, {} in the queue",
                 if truthy(&r["paused"]) { "paused" } else { "playing" },
                 length(&r["position"]),
-                py(&r["volume"]),
-                py(&r["queue"])
+                as_text(&r["volume"]),
+                as_text(&r["queue"])
             )
         }
         "plugins" => {
             let mut rows: Vec<&Value> = r["plugins"].as_array().into_iter().flatten().collect();
-            rows.sort_by_key(|p| (!truthy(&p["enabled"]), py(&p["name"]).to_lowercase()));
+            rows.sort_by_key(|p| (!truthy(&p["enabled"]), as_text(&p["name"]).to_lowercase()));
             let line = |p: &&Value| {
                 let on = if truthy(&p["enabled"]) { "[on] " } else { "" };
                 let about =
-                    if truthy(&p["description"]) { format!(" - {}", py(&p["description"])) } else { String::new() };
+                    if truthy(&p["description"]) { format!(" - {}", as_text(&p["description"])) } else { String::new() };
                 // Prefixes its settings carry besides its id, like QLScrobbler's scrobbler_*.
                 let other: Vec<String> =
-                    p["settings"].as_array().into_iter().flatten().map(py).filter(|x| *x != py(&p["id"])).collect();
+                    p["settings"].as_array().into_iter().flatten().map(as_text).filter(|x| *x != as_text(&p["id"])).collect();
                 let settings =
                     if other.is_empty() { String::new() } else { format!(" (settings: {}_*)", other.join("_*, ")) };
-                format!("{on}{}: {}{about}{settings}", py(&p["id"]), py(&p["name"]))
+                format!("{on}{}: {}{about}{settings}", as_text(&p["id"]), as_text(&p["name"]))
             };
             rows.iter().map(line).collect::<Vec<_>>().join("\n")
         }
         "browse" => {
-            let mut lines = vec![format!("{} values", py(&r["total"]))];
+            let mut lines = vec![format!("{} values", as_text(&r["total"]))];
             let values = r["values"].as_array().into_iter().flatten();
-            lines.extend(values.map(|v| format!("{} ({})", py(&v["value"]), py(&v["songs"]))));
+            lines.extend(values.map(|v| format!("{} ({})", as_text(&v["value"]), as_text(&v["songs"]))));
             lines.join("\n")
         }
         _ => r.to_string(),
@@ -170,13 +158,13 @@ async fn ask(cmd: &str, mut args: Map<String, Value>) -> Result<Option<(About, M
             let tags = args.get("tags").filter(|t| truthy(t)).cloned().unwrap_or(json!({}));
             let n = keys.len();
             let target = format!("write tags to {n} music file{}", if n == 1 { "" } else { "s" });
-            let shown: Vec<String> = keys.iter().take(40).map(py).collect();
+            let shown: Vec<String> = keys.iter().take(40).map(as_text).collect();
             let detail = format!("{tags}\n{}", shown.join("\n"));
             args = Map::from_iter([("keys".into(), json!(keys)), ("tags".into(), tags)]);
             Ok(Some((card(target, detail), args)))
         }
         "playlist_delete" => {
-            let name = py(args.get("name").unwrap_or(&Value::Null));
+            let name = as_text(args.get("name").unwrap_or(&Value::Null));
             Ok(Some((card(format!("delete the playlist \"{name}\""), "Quod Libet playlist".into()), args)))
         }
         _ => Ok(None),
@@ -226,7 +214,7 @@ async fn media(a: &Value) -> Value {
     }
     let mut argv = vec![];
     if truthy(&a["player"]) {
-        argv.extend(["-p".to_string(), py(&a["player"])]);
+        argv.extend(["-p".to_string(), as_text(&a["player"])]);
     }
     if act == "volume" {
         argv.extend(["volume".to_string(), format!("{:.2}", a["volume"].as_f64().unwrap_or(0.5))]);
