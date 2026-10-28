@@ -8,8 +8,7 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-/// After stdin closes, the process gets this long to finish (Claude Code writes its transcript) before SIGTERM, and
-/// again before SIGKILL.
+/// After stdin closes, the process gets this long to finish (Claude Code writes its transcript) before SIGTERM, and again before SIGKILL.
 const GRACE: Duration = Duration::from_secs(5);
 
 /// One child process in a process group of its own. Dropping it kills the group.
@@ -43,8 +42,8 @@ impl Proc {
         self.pid
     }
 
-    /// Close stdin and give the process time to finish, then SIGTERM its process group, then SIGKILL. Returns how
-    /// it exited.
+    /// Close stdin and give the process time to finish, then SIGTERM its process group, then SIGKILL.
+    /// Returns how it exited.
     pub(crate) async fn close(&mut self) -> Option<ExitStatus> {
         self.stop.cancel();
         let mut child = self.child.take()?;

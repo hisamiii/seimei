@@ -1,5 +1,4 @@
-//! The client against tests/fakes/claude.py: a turn, hooks, permission prompts, in-process MCP tools, interrupts,
-//! cancelled requests, control requests, long lines and shutdown.
+//! The client against tests/fakes/claude.py: a turn, hooks, permission prompts, in-process MCP tools, interrupts, cancelled requests, control requests, long lines and shutdown.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};

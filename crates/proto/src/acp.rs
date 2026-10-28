@@ -1,9 +1,6 @@
 //! A client for the Agent Client Protocol (ACP v1): JSON-RPC 2.0 over an agent's stdio, the way Zed runs agents.
-//!
-//! [`Client::connect`] starts the agent, sends `initialize`, then opens a session (`session/new`, or `session/load`
-//! to go on with an earlier one, `session/resume` when the agent can only resume: that one replays nothing). What the agent says comes out of [`Client::recv`] as [`Event`]s: the session's
-//! updates in order, and the end of each prompt's turn after its last update. The agent's permission requests go to
-//! a [`Handler`]; seimei advertises no file system or terminal, so any other request from the agent is refused.
+//! A session opens with `session/new`, `session/load`, or `session/resume` when the agent can only resume (that one replays nothing).
+//! The agent's permission requests go to a [`Handler`]; seimei advertises no file system or terminal, so any other request is refused.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -149,14 +146,12 @@ pub enum Update {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
     Update(Update),
-    /// A prompt's turn ended: its stop reason (end_turn, max_tokens, max_turn_requests, refusal, cancelled), or why
-    /// it failed.
+    /// A prompt's turn ended: its stop reason (end_turn, max_tokens, max_turn_requests, refusal, cancelled), or why it failed.
     TurnEnd(Result<String, String>),
     /// A line that is not JSON-RPC.
     Unreadable(String),
-    /// A tool call that ended (completed or failed) with no permission request for it: the agent ran it on its own
-    /// say. The whole call as its updates left it, after the update that ended it. Not sooner: some agents (dsh)
-    /// report a call in progress before they ask for it.
+    /// A tool call that ended with no permission request for it: the agent ran it on its own say.
+    /// Sent after the update that ended it, not sooner: some agents (dsh) report a call in progress before they ask for it.
     Unasked(ToolCall),
 }
 
@@ -168,8 +163,7 @@ pub struct PermissionOption {
     pub kind: String,
 }
 
-/// `session/request_permission`: the tool call (what the request says over what its updates said) and the options
-/// the agent offers.
+/// `session/request_permission`: the tool call (what the request says over what its updates said) and the options the agent offers.
 #[derive(Clone, Debug)]
 pub struct PermissionRequest {
     pub tool: ToolCall,
@@ -183,8 +177,8 @@ pub enum Outcome {
     Cancelled,
 }
 
-/// What the agent asks of the session's owner. Each request runs on its own task; a cancel drops it and answers
-/// cancelled.
+/// What the agent asks of the session's owner.
+/// Each request runs on its own task; a cancel drops it and answers cancelled.
 pub trait Handler: Send + Sync + 'static {
     fn permission(&self, _req: PermissionRequest) -> BoxFuture<Outcome> {
         Box::pin(async { Outcome::Cancelled })
@@ -227,8 +221,7 @@ pub struct Client {
     pub session_id: String,
     /// What `initialize` answered (ACP: agentCapabilities, agentInfo, authMethods).
     pub init: Value,
-    /// What opening the session answered: ACP's modes (currentModeId, availableModes) if the agent has any, Codex's
-    /// thread settings without the thread (model, modelProvider, sandbox, ...).
+    /// What opening the session answered: ACP's modes (currentModeId, availableModes) if the agent has any, Codex's thread settings without the thread (model, modelProvider, sandbox, ...).
     pub session: Value,
 }
 
@@ -336,8 +329,8 @@ impl Client {
         })
     }
 
-    /// Stop the running turn: it ends with stop reason cancelled. Open permission requests are answered cancelled
-    /// first, as the protocol asks.
+    /// Stop the running turn: it ends with stop reason cancelled.
+    /// Open permission requests are answered cancelled first, as the protocol asks.
     pub fn cancel(&self) -> Result<(), Error> {
         let open: Vec<_> = self.rpc.inflight.lock().unwrap().drain().map(|(_, v)| v).collect();
         for (id, task, answer) in open {
@@ -356,7 +349,6 @@ impl Client {
         self.request("session/set_mode", json!({"sessionId": self.session_id, "modeId": mode})).await.map(|_| ())
     }
 
-    /// A request to the agent; its result.
     pub async fn request(&self, method: &str, params: Value) -> Result<Value, Error> {
         let rpc = &self.rpc;
         let n = rpc.id();

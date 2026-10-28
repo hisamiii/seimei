@@ -112,8 +112,8 @@ pub enum Permission {
     },
 }
 
-/// What Claude Code asks of the session's owner. Each request runs on its own task; a control_cancel_request (an
-/// interrupt, the turn ending) drops its future.
+/// What Claude Code asks of the session's owner.
+/// Each request runs on its own task; a control_cancel_request (an interrupt, the turn ending) drops its future.
 pub trait Handler: Send + Sync + 'static {
     fn can_use_tool(&self, _req: PermissionRequest) -> BoxFuture<Permission> {
         Box::pin(async {
@@ -121,8 +121,8 @@ pub trait Handler: Send + Sync + 'static {
         })
     }
 
-    /// A hook registered in Options::hooks under [callback_id]; the returned JSON is the hook's output
-    /// (hookSpecificOutput, decision, continue, ...).
+    /// A hook registered in Options::hooks under [callback_id].
+    /// The returned JSON is the hook's output (hookSpecificOutput, decision, continue, ...).
     fn hook(&self, _callback_id: String, _input: Value, _tool_use_id: Option<String>) -> BoxFuture<Value> {
         Box::pin(async { json!({}) })
     }
@@ -259,8 +259,8 @@ impl Client {
         self.request(json!({"subtype": "get_context_usage"}), REQUEST_TIMEOUT).await
     }
 
-    /// End the session: close stdin and give Claude Code time to write its transcript, then SIGTERM its process
-    /// group, then SIGKILL. Returns how it exited.
+    /// End the session: close stdin and give Claude Code time to write its transcript, then SIGTERM its process group, then SIGKILL.
+    /// Returns how it exited.
     pub async fn close(&mut self) -> Option<ExitStatus> {
         self.proc.close().await
     }

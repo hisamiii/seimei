@@ -1,12 +1,7 @@
-//! A client for `codex app-server`: Codex's own JSON-RPC over stdio, driven through the same [`Client`] as an ACP
-//! agent, so a shikigami runs on either through the same [`Event`]s and [`Handler`].
-//!
-//! [`connect`] starts the server, sends `initialize` (then `initialized`) and opens a thread: `thread/start`, or
-//! `thread/resume` to go on with an earlier one (nothing is replayed). The thread's id is the session id. A prompt
-//! is `turn/start`; the turn's items come out as updates and `turn/completed` ends it. Codex asks before a command or
-//! a file change (approval policy untrusted); those requests go to the handler as permission requests with an accept
-//! and a decline option. The MCP servers seimei grants are added to the thread's config, approved: seimei granted
-//! them already.
+//! A client for `codex app-server` (Codex's JSON-RPC over stdio), driven through the same [`Client`], [`Event`]s and [`Handler`] as an ACP agent.
+//! The thread's id is the session id; `thread/resume` replays nothing.
+//! Command and file change approvals (approval policy untrusted) go to the handler as permission requests with an accept and a decline option.
+//! The MCP servers seimei grants go into the thread's config as approved: seimei granted them already.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -362,9 +357,8 @@ async fn read(
     }
 }
 
-/// A request from Codex. Command and file change approvals go to the handler on a task of their own (a cancel aborts
-/// it and answers cancel); what seimei does not grant through Codex (more permissions, user input, MCP elicitations)
-/// is turned down; anything else is not served.
+/// A request from Codex: approvals go to the handler on a task of their own, which a cancel aborts (and answers).
+/// What seimei does not grant through Codex (more permissions, user input, MCP elicitations) is turned down; anything else is not served.
 fn request(
     method: &str,
     id: Value,

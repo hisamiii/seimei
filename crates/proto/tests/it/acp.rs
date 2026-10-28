@@ -1,7 +1,5 @@
-//! The ACP client against tests/fakes/acp.py: the handshake, turns with text, thoughts, plans and tool calls,
-//! permission requests (allowed, rejected, cancelled while open), cancel, modes, MCP servers, loading a session, a
-//! request the client does not serve, and an agent that dies. Every message both ways must parse as the protocol's
-//! own type (agent-client-protocol-schema).
+//! The ACP client against tests/fakes/acp.py: the handshake, turns with text, thoughts, plans and tool calls, permission requests (allowed, rejected, cancelled while open), cancel, modes, MCP servers, loading a session, a request the client does not serve, and an agent that dies.
+//! Every message both ways must parse as the protocol's own type (agent-client-protocol-schema).
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -98,8 +96,7 @@ fn said(ups: Vec<Update>) -> Value {
     }
 }
 
-/// `parsed` keeps every field of `orig` that it serializes: a field the protocol's type dropped or replaced (it
-/// reads a malformed optional field as its default) shows here.
+/// `parsed` keeps every field of `orig` that it serializes: a field the protocol's type dropped or replaced (it reads a malformed optional field as its default) shows here.
 fn same(orig: &Value, parsed: &Value, at: &str) {
     match (orig, parsed) {
         (Value::Object(o), Value::Object(p)) => {
@@ -124,8 +121,7 @@ fn check<T: DeserializeOwned + serde::Serialize>(v: &Value, what: &str) {
     same(v, &serde_json::to_value(&t).unwrap(), what);
 }
 
-/// Every message in the fake's log as ACP's types: requests and notifications by method, answers by the method of
-/// the request they answer.
+/// Every message in the fake's log as ACP's types: requests and notifications by method, answers by the method of the request they answer.
 fn conform(dir: &Path) {
     let log = std::fs::read_to_string(dir.join("log.jsonl")).unwrap();
     let lines: Vec<Value> = log.lines().map(|l| serde_json::from_str(l).unwrap()).collect();

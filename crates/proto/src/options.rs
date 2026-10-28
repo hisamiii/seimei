@@ -48,8 +48,7 @@ pub struct Options {
     pub sdk_mcp_servers: Vec<String>,
     /// Other MCP servers, passed as they are (command/args/env or url).
     pub mcp_servers: Map<String, Value>,
-    /// Hand the MCP config over in this file (written 0600 at connect) instead of on the command line, where every
-    /// local user can read the plugin tokens in it.
+    /// Hand the MCP config over in this file (written 0600 at connect) instead of on the command line, where every local user can read the plugin tokens in it.
     pub mcp_config_file: Option<PathBuf>,
     /// stream_event messages with the text as it is written.
     pub include_partial_messages: bool,
@@ -67,8 +66,8 @@ pub struct Options {
     pub hooks: Vec<(String, Vec<HookMatcher>)>,
     /// The skills the session sees; None: all of them.
     pub skills: Option<Vec<String>>,
-    /// A stdout line longer than this is dropped (and reported) instead of read: one 2 MB image once killed the
-    /// Python reader at its 1 MB default.
+    /// A stdout line longer than this is dropped (and reported) instead of read.
+    /// One 2 MB image once killed the Python reader at its 1 MB default.
     pub max_line: usize,
 }
 

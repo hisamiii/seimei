@@ -1,7 +1,4 @@
-//! The codex app-server client against tests/fakes/codex.py: the handshake, turns with text, reasoning and plans,
-//! approvals for a command and a file change (accepted, declined, cancelled while open), a command run unasked,
-//! interrupting a turn, the MCP servers in the thread's config, requests it turns down, resuming a thread, a failed
-//! turn and a server that dies.
+//! The codex app-server client against tests/fakes/codex.py: the handshake, turns with text, reasoning and plans, approvals for a command and a file change (accepted, declined, cancelled while open), a command run unasked, interrupting a turn, the MCP servers in the thread's config, requests it turns down, resuming a thread, a failed turn and a server that dies.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};

@@ -1,5 +1,5 @@
-//! The conversation messages Claude Code writes on stdout. Only what seimei reads is typed; the rest stays JSON, so a
-//! field Claude Code adds or drops does not end the session.
+//! The conversation messages Claude Code writes on stdout.
+//! Only what seimei reads is typed; the rest stays JSON, so a field Claude Code adds or drops does not end the session.
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -133,8 +133,8 @@ pub enum Message {
     RateLimit(Value),
     /// A type this client does not know: passed on as it came.
     Other(Value),
-    /// A line that could not be read as a message (bad JSON, a known type with an unexpected shape, or longer than
-    /// Options::max_line). The session goes on.
+    /// A line that could not be read as a message (bad JSON, an unexpected shape, longer than Options::max_line).
+    /// The session goes on.
     Unreadable {
         error: String,
         line: String,
