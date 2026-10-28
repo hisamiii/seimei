@@ -19,8 +19,7 @@ from quodlibet.plugins.events import EventPlugin
 SOCK = os.environ.get("SEIMEI_QL_SOCK") or os.path.join(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}", "seimei-ql.sock")
 MAX_SONGS = 500
 TAGS = ("artist", "album", "albumartist", "genre", "composer", "date", "performer")
-# Plugin settings that hold credentials (QLScrobbler's scrobbler_password, ListenBrainz's listenbrainz_user_token):
-# their values never leave Quod Libet.
+# Plugin settings that hold credentials (QLScrobbler's scrobbler_password, ListenBrainz's listenbrainz_user_token): their values never leave Quod Libet.
 SECRET = re.compile(r"pass|token|secret|key|auth|session|cookie|credential", re.I)
 
 
@@ -54,8 +53,7 @@ def plugin(pid):
 
 
 def prefixes(p):
-    """The prefixes a plugin's settings carry in [plugins]: its id, the prefix PluginConfigMixin gives it (CONFIG_SECTION,
-    else the lowercased id) and those of its module's PluginConfig, like QLScrobbler's scrobbler_*."""
+    """The prefixes a plugin's settings carry in [plugins]: its id, the prefix PluginConfigMixin gives it (CONFIG_SECTION, else the lowercased id) and those of its module's PluginConfig, like QLScrobbler's scrobbler_*."""
     out = [p.id, getattr(p.cls, "CONFIG_SECTION", "") or p.id.lower().replace(" ", "_")]
     mod = sys.modules.get(p.cls.__module__)
     out += [v._prefix for v in vars(mod).values() if isinstance(v, PluginConfig)] if mod else []

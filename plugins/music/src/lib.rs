@@ -1,5 +1,4 @@
-//! The music plugin: Quod Libet's library and player through its seimei bridge plugin (seimei_bridge.py here), and
-//! any MPRIS player through playerctl.
+//! The music plugin: Quod Libet's library and player through its seimei bridge plugin (seimei_bridge.py here), and any MPRIS player through playerctl.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -143,8 +142,7 @@ pub fn describe(cmd: &str, r: &Value) -> String {
     }
 }
 
-/// What a card would show for a command that changes the library, with the args it then runs with: tag writes and
-/// deleting a playlist.
+/// What a card would show for a command that changes the library, with the args it then runs with: tag writes and deleting a playlist.
 async fn ask(cmd: &str, mut args: Map<String, Value>) -> Result<Option<(About, Map<String, Value>)>, String> {
     let card = |what: String, detail: String| About { what, detail, ..Default::default() };
     match cmd {

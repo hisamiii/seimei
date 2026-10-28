@@ -1,4 +1,4 @@
-# The music plugin, built into seimei: Claude Code starts `seimei plugin music` for each session that has it.
+# The music plugin, built into seimei: the harness starts `seimei plugin music` for each session that has it.
 name = "music"
 command = "seimei"
 args = ["plugin", "music"]
