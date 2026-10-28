@@ -12,15 +12,15 @@ use serde_json::{Value, json};
 
 use std::sync::Arc;
 
-use super::backend::{Backend, Ctx, Env, listening, newest};
+use super::backend::{Backend, Ctx, Env, detach, listening, newest};
 use super::gnome::{self, Gnome};
 use super::kde::Kde;
 use super::niri::Niri;
 use super::vinput::Op;
-use super::{Desktop, Session, int, uinput};
+use super::{Desktop, Session, int, label, native, reply, uinput};
 use seimei_core::tools::text;
 use seimei_core::util::as_text;
-use seimei_core::util::{chars, sh_quote, token_urlsafe, truthy};
+use seimei_core::util::{chars, sh_quote, truthy};
 
 /// seimei's own config for the inner niri. repeat-rate 0: a virtual keyboard's keys must not repeat.
 const CONFIG: &str = r#"// seimei's agent display: written by seimei on every start.
@@ -285,13 +285,7 @@ impl Agent {
             .stdin(std::process::Stdio::null())
             .stdout(log.try_clone().map_err(|e| e.to_string())?)
             .stderr(log);
-        // SAFETY: setsid only moves the child into a session of its own; it runs between fork and exec.
-        unsafe {
-            std::os::unix::process::CommandExt::pre_exec(&mut c, || {
-                libc::setsid();
-                Ok(())
-            });
-        }
+        detach(&mut c);
         let mut child = c.spawn().map_err(|e| format!("dbus-run-session: {e}"))?;
         std::thread::spawn(move || child.wait());
         // Up once it lists windows: GNOME Shell's extension answers a moment after the socket appears.
@@ -459,12 +453,7 @@ fn overview(up: &Up) -> Result<String, String> {
     }
     for w in wins {
         let focused = if truthy(&w["is_focused"]) { " [focused]" } else { "" };
-        lines.push(format!(
-            "  window {}: {} \"{}\"{focused}",
-            as_text(&w["id"]),
-            as_text(&w["app_id"]),
-            as_text(&w["title"])
-        ));
+        lines.push(format!("  window {}{focused}", label(&w)));
     }
     Ok(lines.join("\n"))
 }
@@ -506,7 +495,7 @@ impl Desktop {
     /// The desktop tools with display "agent", and agent_display.
     pub(super) async fn agent_tool(self: &Arc<Self>, tool: &str, args: &Value, session: &dyn Session) -> Value {
         self.agent.touch();
-        let r: Result<String, String> = match tool {
+        reply(match tool {
             "agent_display" => match args["go"].as_str().unwrap_or("status") {
                 "start" => match self.agent.start(self).await {
                     Ok(_) => Ok(self.blocking(|d| d.agent.status()).await),
@@ -534,11 +523,7 @@ impl Desktop {
                     }
                 }
             }
-        };
-        match r {
-            Ok(t) => text(&t, false),
-            Err(e) => text(&e, true),
-        }
+        })
     }
 
     /// Focus a window of the agent display (each fills it), so input and the next screenshot are about it.
@@ -567,11 +552,7 @@ impl Desktop {
         let need = |k: &str| a.get(k).filter(|v| !v.is_null()).ok_or_else(|| format!("{k} is missing"));
         match tool {
             "desktop" => overview(up),
-            t if t == up.b.meta().name => {
-                let mut argv = vec![as_text(need("action")?)];
-                argv.extend(a["args"].as_array().into_iter().flatten().map(as_text));
-                up.b.action(&argv).map(|o| if o.is_empty() { "Done.".into() } else { o })
-            }
+            t if t == up.b.meta().name => native(&*up.b, need("action")?, &a["args"]),
             t if t.strip_suffix("_query") == Some(up.b.meta().name) => up.b.query(&as_text(need("what")?)),
             "type_text" => {
                 self.agent_drive(up, need("window")?)?;
@@ -617,12 +598,11 @@ impl Desktop {
                 return Err("region is [x, y, w, h] with a positive width and height".into());
             }
             let geo = format!("{},{} {}x{}", v[0], v[1], v[2], v[3]);
-            let png = up.b.region(&geo, 1.0, "png", 0)?;
-            if png.len() <= super::REGION_MAX {
-                return Ok((png, "image/png".into(), format!("Agent display region {geo} at full resolution.")));
+            let mut shot = (up.b.region(&geo, 1.0, "png", 0)?, "image/png");
+            if shot.0.len() > super::REGION_MAX {
+                shot = (up.b.region(&geo, 1.0, "jpeg", 80)?, "image/jpeg");
             }
-            let jpg = up.b.region(&geo, 1.0, "jpeg", 80)?;
-            return Ok((jpg, "image/jpeg".into(), format!("Agent display region {geo} at full resolution.")));
+            return Ok((shot.0, shot.1.into(), format!("Agent display region {geo} at full resolution.")));
         }
         let note = "Agent display; click and scroll with display: \"agent\" take pixels of this image.".to_string();
         Ok((up.b.screen(scale, 80)?, "image/jpeg".into(), note))
@@ -650,18 +630,7 @@ impl Desktop {
     }
 
     fn agent_spawn(&self, up: &Up, command: &str) -> Result<Option<Value>, String> {
-        let pidfile = std::env::temp_dir().join(format!("seimei-agent-{}", token_urlsafe(6)));
-        up.b.spawn_sh(&format!("echo $$ > {}; exec {command}", pidfile.display()))?;
-        let mut pid = None;
-        for _ in 0..40 {
-            if let Ok(p) = std::fs::read_to_string(&pidfile).unwrap_or_default().trim().parse::<i64>() {
-                pid = Some(p);
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        }
-        let _ = std::fs::remove_file(&pidfile);
-        let pid = pid.ok_or("the command did not start")?;
+        let pid = super::backend::start(&*up.b, command)?;
         for _ in 0..75 {
             let wins = up.b.windows()?;
             let mine =
@@ -685,19 +654,16 @@ impl Desktop {
                 Err(e) => return text(&e, true),
             }
         }
-        let r = self
-            .blocking(move |d| {
+        reply(
+            self.blocking(move |d| {
                 let env = match &inner {
                     Some(up) => up.b.env()?,
                     None => d.b.env()?,
                 };
                 read_clipboard(&env)
             })
-            .await;
-        match r {
-            Ok(t) => text(&t, false),
-            Err(e) => text(&e, true),
-        }
+            .await,
+        )
     }
 }
 

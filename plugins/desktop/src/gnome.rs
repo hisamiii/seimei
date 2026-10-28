@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
-use super::backend::{Backend, Ctx, Emit, Env, Meta, Ours, Reach, encode};
+use super::backend::{Backend, Ctx, Emit, Env, Meta, Reach, encode, geometry, model, one_of};
 use super::dbus::{Arg, Bus};
 use super::vinput::{MOD_KEYS, Op, char_sym, combo};
 
@@ -140,16 +140,7 @@ impl Backend for Gnome {
                 }
                 Op::Combo(spec) => {
                     let (mods, sym) = combo(spec)?;
-                    let names: Vec<&str> = [
-                        (MOD_KEYS[0].0, "shift"),
-                        (MOD_KEYS[1].0, "ctrl"),
-                        (MOD_KEYS[2].0, "alt"),
-                        (MOD_KEYS[3].0, "super"),
-                    ]
-                    .iter()
-                    .filter(|(m, _)| mods & m != 0)
-                    .map(|(_, n)| *n)
-                    .collect();
+                    let names: Vec<&str> = MOD_KEYS.iter().filter(|m| mods & m.0 != 0).map(|m| m.2).collect();
                     json!(["key", sym, names])
                 }
                 // evdev buttons to Clutter's: left 1, middle 2, right 3.
@@ -194,24 +185,11 @@ impl Backend for Gnome {
     }
 
     fn query(&self, what: &str) -> Result<String, String> {
-        let data = match what {
-            "windows" => Value::Array(self.windows()?),
-            "workspaces" => Value::Array(self.workspaces()?),
-            "outputs" => Value::Object(self.outputs()?.into_iter().collect()),
-            _ => return Err(format!("what is one of {}", QUERIES.join(", "))),
-        };
-        Ok(data.to_string())
+        Ok(model(self, what, "workspaces")?.ok_or_else(|| one_of(&QUERIES))?.to_string())
     }
 
     fn action(&self, args: &[String]) -> Result<String, String> {
         self.act(&args.iter().map(String::as_str).collect::<Vec<_>>()).map(|_| String::new())
-    }
-
-    fn action_hit(&self, args: &[String], ours: &Ours) -> Option<String> {
-        if args.first()? != "close" {
-            return None;
-        }
-        self.close_hit(args.get(1).and_then(|n| n.parse().ok()), ours)
     }
 
     fn focus(&self, wid: i64) -> Result<(), String> {
@@ -227,9 +205,8 @@ impl Backend for Gnome {
     }
 
     fn region(&self, geo: &str, scale: f64, kind: &str, quality: i64) -> Result<Vec<u8>, String> {
-        let n: Vec<i64> = geo.split([',', ' ', 'x']).filter_map(|v| v.trim().parse().ok()).collect();
-        let [x, y, width, height] = n[..] else { return Err(format!("not a geometry: {geo}")) };
-        let img = self.image(json!({"area": {"x": x, "y": y, "width": width, "height": height}}))?;
+        let (x, y, w, h) = geometry(geo)?;
+        let img = self.image(json!({"area": {"x": x as i64, "y": y as i64, "width": w as i64, "height": h as i64}}))?;
         encode(img, scale, kind, quality)
     }
 

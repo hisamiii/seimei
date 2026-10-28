@@ -11,7 +11,7 @@ use std::time::Duration;
 use regex::Regex;
 use serde_json::{Value, json};
 
-use super::backend::{Backend, Ctx, Emit, Env, Meta, Ours, digits, listening, rect_shot, script_file};
+use super::backend::{Backend, Ctx, Emit, Env, Meta, Ours, digits, listening, one_of, rect_shot, script_file};
 use seimei_core::util::as_text;
 use seimei_core::util::truthy;
 
@@ -199,7 +199,7 @@ impl Backend for Hyprland {
 
     fn query(&self, what: &str) -> Result<String, String> {
         if !QUERIES.contains(&what) {
-            return Err(format!("what is one of {}", QUERIES.join(", ")));
+            return Err(one_of(&QUERIES));
         }
         Ok(self.get(what)?.to_string())
     }

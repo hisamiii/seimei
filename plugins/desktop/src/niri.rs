@@ -9,7 +9,9 @@ use std::time::Duration;
 use regex::Regex;
 use serde_json::{Value, json};
 
-use super::backend::{Backend, Ctx, Emit, Env, Meta, Ours, digits, exec, listening, session_socket};
+use super::backend::{
+    Backend, Ctx, Emit, Env, Meta, Ours, digits, exec, listening, mako_rows, one_of, private_file, session_socket,
+};
 use seimei_core::util::{sh_quote, token_urlsafe, truthy};
 
 const QUERIES: [&str; 8] =
@@ -25,22 +27,6 @@ pub struct Niri {
 
 fn down() -> String {
     "no desktop session (niri is not running)".into()
-}
-
-/// The window a close-window closes: Some(its --id), Some(None) for the focused one; None when it is not close-window.
-pub fn close_target(args: &[String]) -> Option<Option<i64>> {
-    if args.first().map(String::as_str) != Some("close-window") {
-        return None;
-    }
-    for (i, a) in args.iter().enumerate() {
-        if a == "--id" && args.get(i + 1).is_some_and(|n| digits(n)) {
-            return Some(args[i + 1].parse().ok());
-        }
-        if let Some(n) = a.strip_prefix("--id=").filter(|n| digits(n)) {
-            return Some(n.parse().ok());
-        }
-    }
-    Some(None)
 }
 
 fn window(mut w: Value) -> Value {
@@ -111,11 +97,7 @@ impl Niri {
             None => self.act(&["spawn", "--", "wl-copy", "--clear"]),
             Some((kind, data)) => (|| {
                 let path = std::env::temp_dir().join(format!("seimei-clip-{}", token_urlsafe(6)));
-                {
-                    use std::os::unix::fs::OpenOptionsExt;
-                    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path);
-                    f.as_mut().map_err(|e| e.to_string())?.write_all(&data).map_err(|e| e.to_string())?;
-                }
+                private_file(&path, &data)?;
                 let p = path.display();
                 self.act(&["spawn-sh", "--", &format!("wl-copy -t {} < {p}; rm -f {p}", sh_quote(&kind))])
             })(),
@@ -129,19 +111,7 @@ impl Niri {
     fn dismiss_shot_notice(env: &Env, path: &str) {
         for _ in 0..20 {
             let Ok(r) = exec(&["makoctl", "list", "-j"], env, None, 2.0) else { return };
-            let text = r.text();
-            let Ok(shown) = serde_json::from_str::<Value>(if text.is_empty() { "[]" } else { &text }) else { return };
-            let shown: Vec<Value> = match shown {
-                Value::Object(o) => o
-                    .get("data")
-                    .and_then(|d| d.as_array())
-                    .into_iter()
-                    .flatten()
-                    .flat_map(|g| g.as_array().cloned().unwrap_or_default())
-                    .collect(),
-                Value::Array(a) => a,
-                _ => vec![],
-            };
+            let Some(shown) = mako_rows(&r.text()) else { return };
             let mine: Vec<&Value> = shown.iter().filter(|n| n.to_string().contains(path)).collect();
             if !mine.is_empty() {
                 for n in mine {
@@ -218,13 +188,9 @@ impl Backend for Niri {
 
     fn query(&self, what: &str) -> Result<String, String> {
         if !QUERIES.contains(&what) {
-            return Err(format!("what is one of {}", QUERIES.join(", ")));
+            return Err(one_of(&QUERIES));
         }
-        let r = exec(&["niri", "msg", "--json", what], &self.env()?, None, 10.0)?;
-        if r.code != 0 {
-            let e = r.err();
-            return Err(if e.trim().is_empty() { format!("niri msg {what} failed") } else { e.trim().into() });
-        }
+        let r = exec(&["niri", "msg", "--json", what], &self.env()?, None, 10.0)?.ok(&format!("niri msg {what}"))?;
         let v: Value = serde_json::from_str(&r.text()).map_err(|e| format!("niri msg {what} is not JSON: {e}"))?;
         Ok(v.to_string())
     }
@@ -234,10 +200,21 @@ impl Backend for Niri {
     }
 
     fn action_hit(&self, args: &[String], ours: &Ours) -> Option<String> {
-        if args.first()? == "quit" {
-            return Some("quit niri (ends the desktop session)".into());
+        match args.first()?.as_str() {
+            "quit" => Some("quit niri (ends the desktop session)".into()),
+            "close-window" => {
+                for (i, a) in args.iter().enumerate() {
+                    if a == "--id" && args.get(i + 1).is_some_and(|n| digits(n)) {
+                        return self.close_hit(args[i + 1].parse().ok(), ours);
+                    }
+                    if let Some(n) = a.strip_prefix("--id=").filter(|n| digits(n)) {
+                        return self.close_hit(n.parse().ok(), ours);
+                    }
+                }
+                self.close_hit(None, ours)
+            }
+            _ => None,
         }
-        close_target(args).and_then(|wid| self.close_hit(wid, ours))
     }
 
     fn bash_hit(&self, argv: &[String], ours: &Ours) -> Option<String> {

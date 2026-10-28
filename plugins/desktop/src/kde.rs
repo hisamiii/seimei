@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
-use super::backend::{Backend, Ctx, Emit, Env, Meta, Ours, Reach, encode};
+use super::backend::{Backend, Ctx, Emit, Env, Meta, Reach, encode, geometry, model, one_of, running};
 use super::dbus::{Arg, Bus};
 use super::vinput::{MOD_KEYS, Op, char_sym, combo};
 use super::wire::{Args, Conn, fixed, socket_path, string, words};
@@ -117,19 +117,11 @@ impl Kde {
         })?;
         let mut wins: HashMap<u32, Win> = HashMap::new();
         for uuid in uuids {
-            let id = c.id();
-            let mut args = words(&[id]);
-            args.extend(string(&uuid));
-            c.send(wm, 2, &args)?;
-            wins.insert(id, Win { uuid, ..Win::default() });
+            wins.insert(c.create(wm, 2, &uuid)?, Win { uuid, ..Win::default() });
         }
         let mut desks: HashMap<u32, Desk> = HashMap::new();
         for (did, pos) in desk_ids {
-            let id = c.id();
-            let mut args = words(&[id]);
-            args.extend(string(&did));
-            c.send(vdm, 0, &args)?;
-            desks.insert(id, Desk { id: did, position: pos, ..Desk::default() });
+            desks.insert(c.create(vdm, 0, &did)?, Desk { id: did, position: pos, ..Desk::default() });
         }
         c.sync(|obj, op, body| {
             let mut a = Args::new(body);
@@ -185,10 +177,7 @@ impl Kde {
         let uuid = self.uuid_of(wid)?;
         let mut c = self.conn()?;
         let (wm, _) = c.bind("org_kde_plasma_window_management", 16)?;
-        let w = c.id();
-        let mut args = words(&[w]);
-        args.extend(string(&uuid));
-        c.send(wm, 2, &args)?;
+        let w = c.create(wm, 2, &uuid)?;
         send(&mut c, w)?;
         c.sync(|_, _, _| {})
     }
@@ -209,10 +198,7 @@ impl Kde {
     fn activate_desk(&self, d: &Desk) -> Result<(), String> {
         let mut c = self.conn()?;
         let (vdm, _) = c.bind("org_kde_plasma_virtual_desktop_management", 2)?;
-        let id = c.id();
-        let mut args = words(&[id]);
-        args.extend(string(&d.id));
-        c.send(vdm, 0, &args)?;
+        let id = c.create(vdm, 0, &d.id)?;
         c.send(id, 0, &[])?;
         c.sync(|_, _, _| {})
     }
@@ -235,10 +221,6 @@ impl Kde {
         Err(format!("KWin did not add a desktop {name}"))
     }
 
-    fn bus(&self) -> Result<Bus, String> {
-        Bus::session(&self.env()?, &self.ctx.run)
-    }
-
     /// A ScreenShot2 capture: method, its leading arguments, the options; the image KWin writes into a pipe.
     fn capture(
         &self,
@@ -255,7 +237,7 @@ impl Kde {
         let (read, write) = unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) };
         args.push(Arg::Dict(opts));
         args.push(Arg::H(0));
-        let mut bus = self.bus()?;
+        let mut bus = Bus::session(&self.env()?, &self.ctx.run)?;
         let r = bus.call(
             "org.kde.KWin",
             "/org/kde/KWin/ScreenShot2",
@@ -305,7 +287,7 @@ impl Kde {
                 }
                 Op::Combo(spec) => {
                     let (mods, sym) = combo(spec)?;
-                    let held: Vec<u32> = MOD_KEYS.iter().filter(|(m, _)| mods & m != 0).map(|(_, k)| *k).collect();
+                    let held: Vec<u32> = MOD_KEYS.iter().filter(|m| mods & m.0 != 0).map(|m| m.1).collect();
                     for k in &held {
                         key(c, *k, true)?;
                     }
@@ -360,15 +342,6 @@ fn raw_image(meta: &Value, data: Vec<u8>) -> Result<image::DynamicImage, String>
     }
     let img = image::RgbaImage::from_raw(w as u32, h as u32, px).ok_or("a broken image")?;
     Ok(image::DynamicImage::ImageRgba8(img))
-}
-
-/// "x,y wxh" as numbers.
-fn geometry(geo: &str) -> Result<(f64, f64, f64, f64), String> {
-    let nums: Vec<f64> = geo.split([',', ' ', 'x']).filter_map(|n| n.trim().parse().ok()).collect();
-    match nums[..] {
-        [x, y, w, h] => Ok((x, y, w, h)),
-        _ => Err(format!("not a geometry: {geo}")),
-    }
 }
 
 const META: Meta = Meta {
@@ -426,10 +399,7 @@ impl Backend for Kde {
     }
 
     fn locked(&self) -> bool {
-        let Ok(dir) = std::fs::read_dir(&self.ctx.proc) else { return false };
-        dir.flatten().any(|p| {
-            std::fs::read_to_string(p.path().join("comm")).is_ok_and(|c| c.trim().starts_with("kscreenlocker_g"))
-        })
+        running(&self.ctx, |comm| comm.starts_with("kscreenlocker_g"))
     }
 
     fn config_dir(&self) -> Option<PathBuf> {
@@ -528,13 +498,7 @@ impl Backend for Kde {
     }
 
     fn query(&self, what: &str) -> Result<String, String> {
-        let data = match what {
-            "windows" => Value::Array(self.windows()?),
-            "desktops" => Value::Array(self.workspaces()?),
-            "outputs" => Value::Object(self.outputs()?.into_iter().collect()),
-            _ => return Err(format!("what is one of {}", QUERIES.join(", "))),
-        };
-        Ok(data.to_string())
+        Ok(model(self, what, "desktops")?.ok_or_else(|| one_of(&QUERIES))?.to_string())
     }
 
     fn action(&self, args: &[String]) -> Result<String, String> {
@@ -571,13 +535,6 @@ impl Backend for Kde {
             )),
         }
         .map(|_| String::new())
-    }
-
-    fn action_hit(&self, args: &[String], ours: &Ours) -> Option<String> {
-        if args.first()? != "close" {
-            return None;
-        }
-        self.close_hit(args.get(1).and_then(|n| n.parse().ok()), ours)
     }
 
     fn focus(&self, wid: i64) -> Result<(), String> {
@@ -640,22 +597,13 @@ impl Backend for Kde {
         let mut wins = self.windows()?;
         emit("windows", Value::Array(wins.clone()));
         c.wait_forever();
-        // Window objects of this connection, so their changes (focus, title, desktop) arrive here too.
-        let follow = |c: &mut Conn, uuid: &str| -> Result<(), String> {
-            let id = c.id();
-            let mut args = words(&[id]);
-            args.extend(string(uuid));
-            c.send(wm, 2, &args)
-        };
+        // Window and desktop objects of this connection, so their changes (focus, title, desktop) arrive here too.
         let (now, desks) = self.snapshot()?;
         for w in now {
-            follow(&mut c, &w.uuid)?;
+            c.create(wm, 2, &w.uuid)?;
         }
         for d in desks {
-            let id = c.id();
-            let mut args = words(&[id]);
-            args.extend(string(&d.id));
-            c.send(vdm, 0, &args)?;
+            c.create(vdm, 0, &d.id)?;
         }
         loop {
             // A burst of events (a new window brings a dozen) settles into one look.
@@ -664,7 +612,7 @@ impl Backend for Kde {
                 if obj == wm && op == 4 {
                     let mut a = Args::new(&body);
                     let (_, uuid) = (a.uint(), a.string());
-                    follow(&mut c, &uuid)?;
+                    c.create(wm, 2, &uuid)?;
                 }
                 next = c.event_within(Duration::from_millis(50))?;
             }

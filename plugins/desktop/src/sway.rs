@@ -11,7 +11,8 @@ use regex::Regex;
 use serde_json::{Value, json};
 
 use super::backend::{
-    Backend, Ctx, Emit, Env, Meta, Ours, digits, listening, nested, rect_shot, script_file, session_socket,
+    Backend, Ctx, Emit, Env, Meta, Ours, digits, listening, model, nested, one_of, rect_shot, script_file,
+    session_socket,
 };
 use seimei_core::util::as_text;
 use seimei_core::util::{token_urlsafe, truthy};
@@ -255,17 +256,16 @@ impl Backend for Sway {
         }))
     }
 
+    /// sway's own answer for outputs, inputs, tree and version; the common model for windows and workspaces.
     fn query(&self, what: &str) -> Result<String, String> {
-        let data = match what {
-            "windows" => Value::Array(self.windows()?),
-            "workspaces" => Value::Array(self.workspaces()?),
-            "outputs" => self.ipc(GET_OUTPUTS, "")?,
-            "inputs" => self.ipc(GET_INPUTS, "")?,
-            "tree" => self.ipc(GET_TREE, "")?,
-            "version" => self.ipc(GET_VERSION, "")?,
-            _ => return Err(format!("what is one of {}", QUERIES.join(", "))),
+        let kind = match what {
+            "outputs" => GET_OUTPUTS,
+            "inputs" => GET_INPUTS,
+            "tree" => GET_TREE,
+            "version" => GET_VERSION,
+            _ => return Ok(model(self, what, "workspaces")?.ok_or_else(|| one_of(&QUERIES))?.to_string()),
         };
-        Ok(data.to_string())
+        Ok(self.ipc(kind, "")?.to_string())
     }
 
     fn action(&self, args: &[String]) -> Result<String, String> {
