@@ -36,7 +36,7 @@ use seimei_core::tools::Tools;
 use seimei_core::transcripts::brief;
 use seimei_core::uploads::Uploads;
 use seimei_core::usage::Usage;
-use seimei_core::util::{now, read_json, truthy, write_json};
+use seimei_core::util::{flag, now, read_json, truthy, write_json};
 use seimei_core::watches::Watches;
 use seimei_core::workers::{self, Pool};
 use serde_json::{Value, json};
@@ -716,7 +716,9 @@ async fn theme_set(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> Resp
     };
     let rec = json!({"seed": seed, "from": from, "at": now()});
     if read_json(&app.theme).and_then(|t| t["seed"].as_str().map(String::from)).as_deref() != Some(seed.as_str()) {
-        let _ = write_json(&app.theme, &rec);
+        if let Err(e) = write_json(&app.theme, &rec) {
+            return json_status(StatusCode::INTERNAL_SERVER_ERROR, json!({"error": format!("Couldn't save the theme: {e}")}));
+        }
         let mut ev = rec.clone();
         ev["type"] = json!("theme");
         app.events.flash(ev);
@@ -970,7 +972,7 @@ async fn web_push_set(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> R
         Ok(b) => b,
         Err(r) => return r,
     };
-    if truthy(&b["off"]) {
+    if flag(&b["off"]) {
         auth(&app).set_browser_push(&id, None);
         return ok(json!({"on": false}));
     }
@@ -1378,7 +1380,7 @@ async fn worker_archive(State(app): Shared, UrlPath(id): UrlPath<String>, bytes:
         Ok(b) => b,
         Err(r) => return r,
     };
-    if let Err(e) = app.pool.set_archived(&w, truthy(&b["archived"])) {
+    if let Err(e) = app.pool.set_archived(&w, flag(&b["archived"])) {
         return text(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
     }
     ok(json!({"archived": app.pool.archive.worker(&w.rec())}))
@@ -1501,7 +1503,7 @@ async fn session_archive(State(app): Shared, UrlPath(pid): UrlPath<String>, byte
         Ok(b) => b,
         Err(r) => return r,
     };
-    let on = truthy(&b["archived"]);
+    let on = flag(&b["archived"]);
     if let Err(e) = app.watcher.set_archived(&sess.session_id, on) {
         return text(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
     }

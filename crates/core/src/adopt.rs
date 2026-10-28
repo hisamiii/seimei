@@ -18,7 +18,7 @@ use crate::approvals::Approvals;
 use crate::kitty;
 use crate::sessions;
 use crate::transcripts::{brief, transcript};
-use crate::util::{chars, now, py_repr, read_json, write_json};
+use crate::util::{chars, now, read_json, write_json};
 use crate::workers::{Adoption, Pool, Worker};
 
 const SHELLS: [&str; 5] = ["bash", "zsh", "fish", "sh", "dash"];
@@ -308,7 +308,7 @@ impl Adopter {
             .flatten();
             s = hit.and_then(|pid| rows.iter().find(|r| r["pid"] == json!(pid)).cloned());
         }
-        let Some(s) = s else { return Ok(format!("No session of the user's is named {}.", py_repr(key))) };
+        let Some(s) = s else { return Ok(format!("No session of the user's is named \"{key}\".")) };
         let (name, pid) = (str_of(&s["name"]), s["pid"].as_i64().unwrap_or(0));
         let bg = background(&s);
         if s["kind"] != "interactive" && !bg {

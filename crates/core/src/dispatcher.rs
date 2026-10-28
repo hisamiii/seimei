@@ -232,7 +232,7 @@ pub fn summarize(inp: &Value) -> String {
             return chars(v.trim().lines().next().unwrap_or(""), 200);
         }
     }
-    chars(&crate::util::py_json(inp), 200)
+    chars(&inp.to_string(), 200)
 }
 
 /// A tool result's text, cut at RESULT_CHARS.

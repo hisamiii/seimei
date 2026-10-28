@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use regex::Regex;
 use serde_json::{Value, json};
 
-use crate::util::{chars, data_dir, sha256_hex, splitlines};
+use crate::util::{chars, data_dir, sha256_hex};
 
 const REOPEN: &str = "This session's kitty was started before remote control was on. Close that kitty window (all \
                       its tabs) and resume the session in a new one to reply from here.";
@@ -158,7 +158,7 @@ fn plain(line: &str) -> String {
 
 /// The last n non-blank rows: Claude Code draws inline and leaves blank rows between its blocks.
 fn rows(text: &str, n: usize) -> Vec<&str> {
-    let all: Vec<&str> = splitlines(text).into_iter().filter(|r| !plain(r).trim().is_empty()).collect();
+    let all: Vec<&str> = text.split(['\n', '\r']).filter(|r| !plain(r).trim().is_empty()).collect();
     all[all.len().saturating_sub(n)..].to_vec()
 }
 

@@ -218,6 +218,17 @@ pub fn chars(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
 }
 
+/// A yes or no from a tool call or a page: true, a non-zero number, or "true", "yes" or "1" (models send strings at
+/// times, and "false" must stay false).
+pub fn flag(v: &serde_json::Value) -> bool {
+    match v {
+        serde_json::Value::Bool(b) => *b,
+        serde_json::Value::Number(n) => n.as_f64().is_some_and(|n| n != 0.0),
+        serde_json::Value::String(s) => matches!(s.trim().to_lowercase().as_str(), "true" | "yes" | "1"),
+        _ => false,
+    }
+}
+
 /// Python's truth: false, null, 0, "", [] and {} are false.
 pub fn truthy(v: &serde_json::Value) -> bool {
     use serde_json::Value;

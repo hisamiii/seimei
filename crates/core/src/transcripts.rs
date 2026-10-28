@@ -9,7 +9,7 @@ use regex::Regex;
 use serde_json::{Value, json};
 
 use crate::paths::home;
-use crate::util::read_from;
+use crate::util::{chars, read_from};
 
 /// What a brief reads from the end of a transcript.
 const TAIL: u64 = 512 << 10;
@@ -143,7 +143,7 @@ pub(crate) fn summary(inp: &Value) -> String {
             return first(v);
         }
     }
-    crate::util::py_json(inp).chars().take(200).collect()
+    chars(&inp.to_string(), 200)
 }
 
 pub(crate) fn question(inp: &Value) -> Value {

@@ -107,7 +107,7 @@ impl Watches {
         let triggers = self.triggers();
         if !triggers.iter().any(|(t, _)| *t == r.trigger) {
             let all: Vec<&str> = triggers.iter().map(|(t, _)| *t).collect();
-            return Err(format!("unknown trigger {}; one of {}", crate::util::py_repr(&r.trigger), all.join(", ")));
+            return Err(format!("unknown trigger \"{}\"; one of {}", r.trigger, all.join(", ")));
         }
         if let Some(p) = self.plugins.get() {
             p.check_trigger(&r.trigger, if r.target.trim().is_empty() { "*" } else { r.target.trim() })?;
@@ -158,10 +158,10 @@ impl Watches {
                 if crate::util::truthy(&r["key"]) {
                     line += &format!(" (key {})", s(&r["key"]));
                 }
-                if crate::util::truthy(&r["reply"]) {
+                if crate::util::flag(&r["reply"]) {
                     line += ", reply";
                 }
-                if crate::util::truthy(&r["repeat"]) {
+                if crate::util::flag(&r["repeat"]) {
                     line += ", repeats";
                 }
                 line + &format!(", expires in {}", mins(r["expires"].as_f64().unwrap_or(0.0) - at))
@@ -200,7 +200,7 @@ impl Watches {
         for r in hits {
             let key = r["key"].as_str().filter(|k| !k.is_empty());
             let n = self.push.ping(&fill(&r["title"]), &fill(&r["body"]), &s(&r["level"]), key, r["reply"] == true);
-            let repeat = crate::util::truthy(&r["repeat"]);
+            let repeat = crate::util::flag(&r["repeat"]);
             {
                 let mut rules = self.rules.lock().unwrap();
                 if !repeat {

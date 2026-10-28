@@ -21,7 +21,7 @@ use crate::tasks::Board;
 use crate::transcripts::{project_of, transcript};
 use crate::uploads::Uploads;
 use crate::usage::Usage;
-use crate::util::{chars, now, py_repr, truthy};
+use crate::util::{chars, flag, now, truthy};
 use crate::watches::{DEFAULT_HOURS, NewRule, TRIGGERS, Watches, mins};
 use crate::workers::{ACTIVE, EFFORTS, MODELS, Pool, Summon, Worker};
 
@@ -331,7 +331,7 @@ impl Tools {
                     model: arg(a, "model"),
                     effort: arg(a, "effort"),
                     context: arg(a, "context"),
-                    close_window: truthy(&a["close_window"]),
+                    close_window: flag(&a["close_window"]),
                     project: arg(a, "project"),
                     task_id: arg(a, "task_id"),
                 };
@@ -342,7 +342,7 @@ impl Tools {
             }
             "release" => {
                 let Some(w) = self.pool.find(&arg(a, "worker")) else {
-                    return text(&format!("No shikigami {}.", py_repr(&arg(a, "worker"))), true);
+                    return text(&format!("No shikigami \"{}\".", arg(a, "worker")), true);
                 };
                 match self.adopter.release(&w, true).await {
                     Ok(said) => text(&upper_first(&said), false),
@@ -585,8 +585,7 @@ impl Tools {
                     Value::String(h) if !h.trim().is_empty() => match h.trim().parse::<f64>() {
                         Ok(h) => h,
                         Err(_) => {
-                            let e = format!("could not convert string to float: {}", py_repr(h));
-                            return text(&format!("Could not add: {e}"), true);
+                            return text(&format!("Could not add: hours must be a number, not \"{h}\""), true);
                         }
                     },
                     _ => DEFAULT_HOURS,
@@ -598,9 +597,9 @@ impl Tools {
                     body: or("body", ""),
                     level: or("level", "normal"),
                     key: if truthy(&a["key"]) { a["key"].clone() } else { Value::Null },
-                    reply: truthy(&a["reply"]),
+                    reply: flag(&a["reply"]),
                     hours,
-                    repeat: truthy(&a["repeat"]),
+                    repeat: flag(&a["repeat"]),
                 };
                 // An unknown trigger is the first thing to hear about, then a missing title.
                 if rule.title.is_empty() && self.watches.triggers().iter().any(|(t, _)| *t == rule.trigger) {
@@ -650,7 +649,7 @@ impl Tools {
             return text(&said, false);
         }
         let Some(s) = sessions::find(&key, &own, Some(aliases)) else {
-            return text(&format!("No single running session matches {}.", py_repr(&key)), true);
+            return text(&format!("No single running session matches \"{key}\"."), true);
         };
         if name.is_empty() {
             return match aliases.of(&s) {

@@ -209,7 +209,7 @@ pub fn first_line(text: &str, n: usize) -> String {
     if line.chars().count() <= n { line.into() } else { format!("{}…", chars(line, n.saturating_sub(1))) }
 }
 
-/// "Model opus → sonnet": Python's str.capitalize.
+/// "Model opus → sonnet": the first letter up, the rest down.
 fn capitalize(s: &str) -> String {
     let mut it = s.chars();
     it.next().map(|c| c.to_uppercase().chain(it.flat_map(char::to_lowercase)).collect()).unwrap_or_default()

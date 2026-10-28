@@ -285,7 +285,7 @@
     "hours": 24,
     "repeat": false
    },
-   "error": "unknown trigger 'queue_free'; one of shikigami_done, shikigami_failed, shikigami_asks, shikigami_ends, session_asks, session_idle",
+   "error": "unknown trigger \"queue_free\"; one of shikigami_done, shikigami_failed, shikigami_asks, shikigami_ends, session_asks, session_idle",
    "told": [],
    "rules": [
     {
@@ -357,7 +357,7 @@
     "hours": 24,
     "repeat": false
    },
-   "error": "unknown trigger 'nope'; one of shikigami_done, shikigami_failed, shikigami_asks, shikigami_ends, session_asks, session_idle",
+   "error": "unknown trigger \"nope\"; one of shikigami_done, shikigami_failed, shikigami_asks, shikigami_ends, session_asks, session_idle",
    "told": [],
    "rules": [
     {
