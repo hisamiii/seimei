@@ -1,7 +1,7 @@
 # A seimei plugin: copy this folder to ~/.config/seimei/plugins/<name>/ and add <name> to [plugins] enabled.
 # The folder's name is the plugin's name; its tools show up as mcp__<name>__<tool>.
 
-# Claude Code starts this command as an MCP server on stdio, once for each session that has the plugin.
+# The harness starts this command as an MCP server on stdio, once for each session that has the plugin.
 # A leading ~ is your home; it runs from the session's folder, so give the full path.
 command = "~/.config/seimei/plugins/template/server.py"
 args = []

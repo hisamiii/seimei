@@ -1,16 +1,8 @@
 #!/usr/bin/env python3
 """The template plugin: a notes list, as a seimei plugin. Copy this folder, rename it, and change the tools.
-
-An MCP server on stdio, standard library only. Claude Code writes one JSON-RPC message per line on stdin and reads
-the answers on stdout; anything for a human goes to stderr. seimei gives the process three variables:
-
-  SEIMEI_SOCKET  seimei's plugin socket, where a plugin asks the user with a card
-  SEIMEI_TOKEN   the session this process serves (the card names it); keep it to yourself
-  SEIMEI_STATE   seimei's data folder
-
-A card: connect to SEIMEI_SOCKET, write one line {"token", "op": "card", "card": {"action", "target", "detail"}},
-read one line back: {"outcome": "approved"} or "denied", "cancelled", "expired", or {"error": ...}. Only "approved"
-means go ahead. The card stays up until the user answers it or the tool call goes away."""
+An MCP server on stdio, standard library only: the harness writes one JSON-RPC message per line on stdin and reads the answers on stdout; text for a human goes to stderr.
+seimei sets SEIMEI_SOCKET (its plugin socket, for cards), SEIMEI_TOKEN (the session this process serves, which the card names; keep it to yourself) and SEIMEI_STATE (its data folder).
+A card: write {"token", "op": "card", "card": {"action", "target", "detail"}} as one line to SEIMEI_SOCKET and read one line back: {"outcome": "approved"}, "denied", "cancelled", "expired", or {"error": ...}."""
 import json
 import os
 import socket
@@ -33,7 +25,8 @@ TOOLS = [
 
 
 def card(target, detail):
-    """Ask the user; the outcome, or why it could not ask."""
+    """Ask the user; the outcome, or why it could not ask. Only "approved" means go ahead.
+    The card stays up until the user answers it or the tool call goes away."""
     sock, token = os.environ.get("SEIMEI_SOCKET"), os.environ.get("SEIMEI_TOKEN")
     if not sock or not token:
         return "not run by seimei"
