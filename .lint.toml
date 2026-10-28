@@ -1,7 +1,10 @@
 # The writing rules in AGENTS.md, checked by https://github.com/hisamiii/lint (`lint install`, then `lint --all`).
 
+[commit]
+trailers = ["Co-Authored-By", "Assisted-by"]
+
 [files]
-exclude = ["android/gradlew", "android/gradlew.bat"]
+exclude = ["android/gradlew", "android/gradlew.bat", ".lint.toml"]
 
 # Harness and terminal names live in their own adapter, its fakes and the docs; generic code says agent, harness or terminal.
 [scoped]
@@ -9,6 +12,10 @@ claude = [
     "crates/core/src/workers/claude.rs", "crates/proto", "tests/fakes/claude.py", "tests/live.sh", "tests/qa/start.sh",
     "plugins/queue", "contrib/maintainer", "contrib/guard.example.toml", "config.example.toml",
     "docs/**", "*.md", "CLAUDE.md", ".lint.toml",
+]
+niri = [
+    "plugins/desktop/**", "crates/seimei/tests/desktop.rs", "plugins/queue/plugin.toml", "tests/live.sh",
+    "config.example.toml", "contrib/**", "docs/**", "*.md", ".lint.toml",
 ]
 kitty = [
     "crates/core/src/terminal.rs", "tests/fakes/bin/kitten", "tests/live.sh", "tests/qa", "contrib/guard.example.toml",
@@ -24,3 +31,7 @@ disable = ["doc-sentence-length", "doc-parens", "doc-table-cell", "doc-section-i
 [[override]]
 paths = ["config.example.toml", "contrib/guard.example.toml"]
 disable = ["comment-length"]
+
+# Hardware and machine names the core should never mention.
+[leaks]
+words = ["gfx1151", "Strix Halo"]
