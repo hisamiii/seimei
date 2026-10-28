@@ -9,7 +9,7 @@ use std::time::Duration;
 use regex::Regex;
 use serde_json::{Value, json};
 
-use super::backend::{Backend, Ctx, Emit, Env, Ours, exec, grim_region, grim_screen, listening, session_socket};
+use super::backend::{Backend, Ctx, Emit, Env, Meta, Ours, digits, exec, listening, session_socket};
 use seimei_core::util::{py_json_compact, sh_quote, token_urlsafe, truthy};
 
 const QUERIES: [&str; 8] =
@@ -32,7 +32,6 @@ pub fn close_target(args: &[String]) -> Option<Option<i64>> {
     if args.first().map(String::as_str) != Some("close-window") {
         return None;
     }
-    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
     for (i, a) in args.iter().enumerate() {
         if a == "--id" && args.get(i + 1).is_some_and(|n| digits(n)) {
             return Some(args[i + 1].parse().ok());
@@ -160,24 +159,18 @@ fn png_complete(path: &std::path::Path) -> bool {
     std::fs::read(path).is_ok_and(|d| d.ends_with(b"IEND\xaeB`\x82"))
 }
 
+const META: Meta = Meta {
+    name: "niri",
+    label: "niri",
+    cli: "`niri msg`, grim or ydotool",
+    restarts: "niri",
+    ends: "quitting niri",
+    action_cmd: "niri msg action",
+};
+
 impl Backend for Niri {
-    fn name(&self) -> &'static str {
-        "niri"
-    }
-    fn label(&self) -> &'static str {
-        "niri"
-    }
-    fn cli(&self) -> &'static str {
-        "`niri msg`, grim or ydotool"
-    }
-    fn restarts(&self) -> &'static str {
-        "niri"
-    }
-    fn ends(&self) -> &'static str {
-        "quitting niri"
-    }
-    fn action_cmd(&self) -> &'static str {
-        "niri msg action"
+    fn meta(&self) -> &'static Meta {
+        &META
     }
     fn ctx(&self) -> &Ctx {
         &self.ctx
@@ -236,7 +229,7 @@ impl Backend for Niri {
             let e = r.err();
             return Err(if e.trim().is_empty() { format!("niri msg {what} failed") } else { e.trim().into() });
         }
-        let v: Value = serde_json::from_str(&r.text()).map_err(|e| format!("JSONDecodeError: {e}"))?;
+        let v: Value = serde_json::from_str(&r.text()).map_err(|e| format!("niri msg {what} is not JSON: {e}"))?;
         Ok(py_json_compact(&v))
     }
 
@@ -286,14 +279,6 @@ impl Backend for Niri {
 
     fn spawn_sh(&self, script: &str) -> Result<(), String> {
         self.act(&["spawn-sh", "--", script]).map(drop)
-    }
-
-    fn screen(&self, scale: f64, quality: i64) -> Result<Vec<u8>, String> {
-        grim_screen(&self.env()?, scale, quality)
-    }
-
-    fn region(&self, geo: &str, scale: f64, kind: &str, quality: i64) -> Result<Vec<u8>, String> {
-        grim_region(&self.env()?, geo, scale, kind, quality)
     }
 
     /// niri's window capture also takes over the clipboard, so the clipboard is put back afterwards.

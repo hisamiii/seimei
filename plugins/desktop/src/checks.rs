@@ -143,7 +143,7 @@ pub fn check(tool: &str, inp: &Value, desk: &Desktop) -> Option<About> {
     let b = &desk.b;
     let home = &b.ctx().home;
     let conf = b.config_dir();
-    let edit = format!("edit the {} config", b.label());
+    let edit = format!("edit the {} config", b.meta().label);
     let ours = desk.ours();
     let field = |k: &str| inp.get(k).filter(|v| truthy(v)).map(text_of);
     if tool == "Bash" {
@@ -166,7 +166,7 @@ pub fn check(tool: &str, inp: &Value, desk: &Desktop) -> Option<About> {
                 field("content").or_else(|| field("new_string")).or_else(|| field("new_source")).unwrap_or_default();
             return about("config", edit, format!("{path}\n\n{detail}"));
         }
-    } else if tool == format!("mcp__desktop__{}", b.name()) && inp["display"] != "agent" {
+    } else if tool == format!("mcp__desktop__{}", b.meta().name) && inp["display"] != "agent" {
         let mut args = vec![inp.get("action").map(text_of).unwrap_or_default()];
         if inp.get("args").is_some_and(seimei_core::util::truthy) {
             match &inp["args"] {
@@ -177,7 +177,7 @@ pub fn check(tool: &str, inp: &Value, desk: &Desktop) -> Option<About> {
             }
         }
         if let Some(hit) = b.action_hit(&args, &ours) {
-            return about(kind(&hit), hit, format!("{} {}", b.action_cmd(), args.join(" ")));
+            return about(kind(&hit), hit, format!("{} {}", b.meta().action_cmd, args.join(" ")));
         }
     }
     None

@@ -226,13 +226,16 @@ impl Agent {
         if let Some(up) = self.current() {
             return Ok(up);
         }
-        match desk.b.name() {
+        match desk.b.meta().name {
             "niri" => self.start_nested(desk).await,
             name @ ("kde" | "gnome") => {
                 let me = desk.clone();
                 tokio::task::spawn_blocking(move || me.agent.start_headless(name)).await.map_err(|e| e.to_string())?
             }
-            _ => Err(format!("the agent display needs niri, KDE Plasma or GNOME; this desktop is {}", desk.b.label())),
+            _ => Err(format!(
+                "the agent display needs niri, KDE Plasma or GNOME; this desktop is {}",
+                desk.b.meta().label
+            )),
         }
     }
 
@@ -563,12 +566,12 @@ impl Desktop {
         let need = |k: &str| a.get(k).filter(|v| !v.is_null()).ok_or_else(|| format!("{k} is missing"));
         match tool {
             "desktop" => overview(up),
-            t if t == up.b.name() => {
+            t if t == up.b.meta().name => {
                 let mut argv = vec![text_of(need("action")?)];
                 argv.extend(a["args"].as_array().into_iter().flatten().map(text_of));
                 up.b.action(&argv).map(|o| if o.is_empty() { "Done.".into() } else { o })
             }
-            t if t.strip_suffix("_query") == Some(up.b.name()) => up.b.query(&text_of(need("what")?)),
+            t if t.strip_suffix("_query") == Some(up.b.meta().name) => up.b.query(&text_of(need("what")?)),
             "type_text" => {
                 self.agent_drive(up, need("window")?)?;
                 up.b.input(&[Op::Text(text_of(need("text")?))]).map(|_| "Typed.".into())

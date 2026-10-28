@@ -65,29 +65,26 @@ pub type Ours = HashSet<i64>;
 /// ("workspaces", [workspace]), ("layouts", layouts), ("layout_idx", n), and ("up", null) once it is connected.
 pub type Emit<'a> = &'a mut dyn FnMut(&str, Value);
 
-pub trait Backend: Send + Sync {
-    fn name(&self) -> &'static str;
+/// A window manager's names, for the prompt, errors and cards.
+pub struct Meta {
+    pub name: &'static str,
     /// How the prompt and errors name it.
-    fn label(&self) -> &'static str;
+    pub label: &'static str,
     /// The WM's own command line (the prompt steers away from it), what restarts, and what ends the session.
-    fn cli(&self) -> &'static str {
-        ""
-    }
-    fn restarts(&self) -> &'static str {
-        ""
-    }
-    fn ends(&self) -> &'static str {
-        ""
-    }
+    pub cli: &'static str,
+    pub restarts: &'static str,
+    pub ends: &'static str,
     /// The native tool's command, as a card shows it.
-    fn action_cmd(&self) -> &'static str {
-        ""
-    }
+    pub action_cmd: &'static str,
+}
+
+pub trait Backend: Send + Sync {
+    fn meta(&self) -> &'static Meta;
     fn ctx(&self) -> &Ctx;
 
     /// The environment a command needs to reach this session; Err when it is down.
     fn env(&self) -> Result<Env, String> {
-        Err(format!("no desktop session ({} is not running)", self.label()))
+        Err(format!("no desktop session ({} is not running)", self.meta().label))
     }
     fn up(&self) -> bool {
         self.env().is_ok()
@@ -181,10 +178,21 @@ pub trait Backend: Send + Sync {
         Ok(())
     }
 
-    /// The whole screen as JPEG, scaled.
-    fn screen(&self, scale: f64, quality: i64) -> Result<Vec<u8>, String>;
+    /// The whole screen as JPEG, scaled. grim serves every wlroots-style compositor (niri, sway, Hyprland).
+    fn screen(&self, scale: f64, quality: i64) -> Result<Vec<u8>, String> {
+        let (s, q) = (format!("{scale:.3}"), quality.to_string());
+        run(&["grim", "-s", &s, "-t", "jpeg", "-q", &q, "-"], &self.env()?, None, 20.0)
+    }
     /// Part of the screen ("x,y wxh" in logical pixels) as PNG or JPEG.
-    fn region(&self, geo: &str, scale: f64, kind: &str, quality: i64) -> Result<Vec<u8>, String>;
+    fn region(&self, geo: &str, scale: f64, kind: &str, quality: i64) -> Result<Vec<u8>, String> {
+        let (s, q) = (format!("{scale:.3}"), quality.to_string());
+        let mut argv = vec!["grim", "-g", geo, "-s", &s, "-t", kind];
+        if kind == "jpeg" {
+            argv.extend(["-q", &q]);
+        }
+        argv.push("-");
+        run(&argv, &self.env()?, None, 20.0)
+    }
     /// One window as PNG.
     fn window_shot(&self, wid: i64) -> Result<Vec<u8>, String>;
 
@@ -297,38 +305,78 @@ pub fn session_socket(ctx: &Ctx, prefix: &str, suffix: &str) -> Option<PathBuf> 
     socks.iter().find(|p| !nested(ctx, p)).or(socks.first()).cloned()
 }
 
-/// Screenshots with grim, which every wlroots-style compositor (niri, sway, Hyprland) serves.
-pub fn grim_screen(env: &Env, scale: f64, quality: i64) -> Result<Vec<u8>, String> {
-    let (s, q) = (format!("{scale:.3}"), quality.to_string());
-    run(&["grim", "-s", &s, "-t", "jpeg", "-q", &q, "-"], env, None, 20.0)
-}
-
-pub fn grim_region(env: &Env, geo: &str, scale: f64, kind: &str, quality: i64) -> Result<Vec<u8>, String> {
-    let (s, q) = (format!("{scale:.3}"), quality.to_string());
-    let mut argv = vec!["grim", "-g", geo, "-s", &s, "-t", kind];
-    if kind == "jpeg" {
-        argv.extend(["-q", &q]);
+/// A window of sway or Hyprland by its on-screen rectangle: it has to be visible (on a shown workspace, not covered).
+pub fn rect_shot(b: &dyn Backend, wid: i64) -> Result<Vec<u8>, String> {
+    let w = b.window(wid)?.ok_or_else(|| format!("no window {wid}"))?;
+    if !b.workspaces()?.iter().any(|s| s["id"] == w["workspace_id"] && s["is_active"] == true) {
+        return Err(format!(
+            "window {wid} is on a workspace that is not shown; {} can only capture what is on screen (focus it first)",
+            b.meta().label
+        ));
     }
-    argv.push("-");
-    run(&argv, env, None, 20.0)
-}
-
-/// A window by its on-screen rectangle: it has to be visible (on a shown workspace, not covered).
-pub fn rect_shot(env: &Env, rect: &Value) -> Result<Vec<u8>, String> {
-    let n = |k: &str| super::text_of(&rect[k]);
+    let n = |k: &str| super::text_of(&w["rect"][k]);
     let geo = format!("{},{} {}x{}", n("x"), n("y"), n("width"), n("height"));
-    let r = exec(&["grim", "-g", &geo, "-t", "png", "-"], env, None, 20.0)?;
-    if r.code != 0 {
-        let e = r.err();
-        return Err(if e.trim().is_empty() { "grim failed".into() } else { e.trim().into() });
+    run(&["grim", "-g", &geo, "-t", "png", "-"], &b.env()?, None, 20.0)
+}
+
+/// A shell line as a script file that removes itself, for a WM's exec (sway splits a command line at ; and ,).
+pub fn script_file(script: &str) -> Result<PathBuf, String> {
+    let path = std::env::temp_dir().join(format!("seimei-exec-{}.sh", seimei_core::util::token_urlsafe(6)));
+    std::fs::write(&path, format!("rm -f {}\n{script}\n", path.display())).map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
+/// A workspace or window number, not a name.
+pub fn digits(s: &str) -> bool {
+    !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// One variable of env.
+pub fn var(env: &Env, k: &str) -> Option<String> {
+    env.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone())
+}
+
+/// How KDE and GNOME reach their session: a compositor seimei runs itself (pinned), or the user's, looked up again
+/// once its Wayland socket stops listening.
+pub struct Reach {
+    /// The name in XDG_CURRENT_DESKTOP, and how errors name the desktop.
+    desk: &'static str,
+    label: &'static str,
+    pinned: Option<Env>,
+    found: std::sync::Mutex<Option<Env>>,
+}
+
+impl Reach {
+    pub fn new(desk: &'static str, label: &'static str, pinned: Option<Env>) -> Reach {
+        Reach { desk, label, pinned, found: Default::default() }
     }
-    Ok(r.stdout)
+
+    pub fn down(&self) -> String {
+        format!("no desktop session ({} on Wayland is not running)", self.label)
+    }
+
+    pub fn env(&self, ctx: &Ctx) -> Result<Env, String> {
+        let alive = |e: &Env| var(e, "WAYLAND_DISPLAY").is_some_and(|wl| listening(&socket_path(&ctx.run, &wl)));
+        if let Some(e) = &self.pinned {
+            return if alive(e) { Ok(e.clone()) } else { Err(self.down()) };
+        }
+        let mut found = self.found.lock().unwrap();
+        if !found.as_ref().is_some_and(alive) {
+            *found = desktop_env(ctx, self.desk);
+        }
+        found.clone().ok_or_else(|| self.down())
+    }
+
+    /// The session's WAYLAND_DISPLAY.
+    pub fn wayland(&self, ctx: &Ctx) -> Result<String, String> {
+        var(&self.env(ctx)?, "WAYLAND_DISPLAY").ok_or_else(|| self.down())
+    }
 }
 
 /// The environment of the user's session on a desktop that names itself in XDG_CURRENT_DESKTOP (KDE, GNOME): seimei's
 /// own when it runs inside that session, else that of one of the session's processes (seimei may run as a service).
 /// Its Wayland socket has to listen.
-pub fn desktop_env(ctx: &Ctx, desk: &str) -> Option<Env> {
+fn desktop_env(ctx: &Ctx, desk: &str) -> Option<Env> {
     const KEYS: [&str; 6] = [
         "WAYLAND_DISPLAY",
         "DBUS_SESSION_BUS_ADDRESS",

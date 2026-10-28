@@ -11,9 +11,9 @@ use std::time::Duration;
 use regex::Regex;
 use serde_json::{Value, json};
 
-use super::backend::{Backend, Ctx, Emit, Env, Ours, grim_region, grim_screen, listening, rect_shot};
+use super::backend::{Backend, Ctx, Emit, Env, Meta, Ours, digits, listening, rect_shot, script_file};
 use super::text_of;
-use seimei_core::util::{py_json_compact, token_urlsafe, truthy};
+use seimei_core::util::{py_json_compact, truthy};
 
 const QUERIES: [&str; 7] = ["clients", "workspaces", "monitors", "activewindow", "devices", "layers", "version"];
 const CLOSE: [&str; 5] = ["killactive", "forcekillactive", "closewindow", "killwindow", "forcekillwindow"];
@@ -93,7 +93,8 @@ impl Hyprland {
     }
 
     fn get(&self, what: &str) -> Result<Value, String> {
-        serde_json::from_str(&self.request(&format!("j/{what}"))?).map_err(|e| format!("JSONDecodeError: {e}"))
+        serde_json::from_str(&self.request(&format!("j/{what}"))?)
+            .map_err(|e| format!("hyprctl {what} is not JSON: {e}"))
     }
 
     fn dispatch(&self, args: &[&str]) -> Result<String, String> {
@@ -104,33 +105,20 @@ impl Hyprland {
         }
         Ok(String::new())
     }
-
-    /// An exec through a script file that removes itself.
-    fn spawn_script(&self, script: &str) -> Result<(), String> {
-        let path = std::env::temp_dir().join(format!("seimei-exec-{}.sh", token_urlsafe(6)));
-        std::fs::write(&path, format!("rm -f {}\n{script}\n", path.display())).map_err(|e| e.to_string())?;
-        self.dispatch(&["exec", &format!("sh {}", path.display())]).map(drop)
-    }
 }
 
+const META: Meta = Meta {
+    name: "hyprland",
+    label: "Hyprland",
+    cli: "`hyprctl`, grim or ydotool",
+    restarts: "Hyprland",
+    ends: "exiting Hyprland",
+    action_cmd: "hyprctl dispatch",
+};
+
 impl Backend for Hyprland {
-    fn name(&self) -> &'static str {
-        "hyprland"
-    }
-    fn label(&self) -> &'static str {
-        "Hyprland"
-    }
-    fn cli(&self) -> &'static str {
-        "`hyprctl`, grim or ydotool"
-    }
-    fn restarts(&self) -> &'static str {
-        "Hyprland"
-    }
-    fn ends(&self) -> &'static str {
-        "exiting Hyprland"
-    }
-    fn action_cmd(&self) -> &'static str {
-        "hyprctl dispatch"
+    fn meta(&self) -> &'static Meta {
+        &META
     }
     fn ctx(&self) -> &Ctx {
         &self.ctx
@@ -272,33 +260,16 @@ impl Backend for Hyprland {
     }
 
     fn move_to_workspace(&self, wid: i64, workspace: &str) -> Result<(), String> {
-        let digits = !workspace.is_empty() && workspace.chars().all(|c| c.is_ascii_digit());
-        let ws = if digits { workspace.to_string() } else { format!("name:{workspace}") };
+        let ws = if digits(workspace) { workspace.to_string() } else { format!("name:{workspace}") };
         self.dispatch(&["movetoworkspacesilent", &format!("{ws},{}", addr(wid))]).map(drop)
     }
 
     fn spawn_sh(&self, script: &str) -> Result<(), String> {
-        self.spawn_script(script)
-    }
-
-    fn screen(&self, scale: f64, quality: i64) -> Result<Vec<u8>, String> {
-        grim_screen(&self.env()?, scale, quality)
-    }
-
-    fn region(&self, geo: &str, scale: f64, kind: &str, quality: i64) -> Result<Vec<u8>, String> {
-        grim_region(&self.env()?, geo, scale, kind, quality)
+        self.dispatch(&["exec", &format!("sh {}", script_file(script)?.display())]).map(drop)
     }
 
     fn window_shot(&self, wid: i64) -> Result<Vec<u8>, String> {
-        let w = self.window(wid)?.ok_or_else(|| format!("no window {wid}"))?;
-        let spaces = self.workspaces()?;
-        let ws = spaces.iter().find(|s| s["id"] == w["workspace_id"]);
-        if !ws.is_some_and(|s| s["is_active"] == true) {
-            return Err(format!(
-                "window {wid} is on a workspace that is not shown; Hyprland can only capture what is on screen (focus it first)"
-            ));
-        }
-        rect_shot(&self.env()?, &w["rect"])
+        rect_shot(self, wid)
     }
 
     fn events(&self, emit: Emit) -> Result<(), String> {

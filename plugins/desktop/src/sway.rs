@@ -11,7 +11,7 @@ use regex::Regex;
 use serde_json::{Value, json};
 
 use super::backend::{
-    Backend, Ctx, Emit, Env, Ours, grim_region, grim_screen, listening, nested, rect_shot, session_socket,
+    Backend, Ctx, Emit, Env, Meta, Ours, digits, listening, nested, rect_shot, script_file, session_socket,
 };
 use super::text_of;
 use seimei_core::util::{py_json, py_json_compact, token_urlsafe, truthy};
@@ -139,7 +139,7 @@ impl Sway {
         } else {
             let out = std::env::temp_dir().join(format!("seimei-wl-{}", token_urlsafe(6)));
             std::fs::write(&out, "").map_err(|e| e.to_string())?;
-            self.spawn_script(&format!("echo \"$WAYLAND_DISPLAY\" > {}", out.display()))?;
+            self.spawn_sh(&format!("echo \"$WAYLAND_DISPLAY\" > {}", out.display()))?;
             for _ in 0..40 {
                 d = std::fs::read_to_string(&out).unwrap_or_default().trim().to_string();
                 if !d.is_empty() {
@@ -155,33 +155,20 @@ impl Sway {
         self.displays.lock().unwrap().insert(sock.to_path_buf(), d.clone());
         Ok(d)
     }
-
-    /// sway splits commands at ; and , so the line goes through a script file that removes itself.
-    fn spawn_script(&self, script: &str) -> Result<(), String> {
-        let path = std::env::temp_dir().join(format!("seimei-exec-{}.sh", token_urlsafe(6)));
-        std::fs::write(&path, format!("rm -f {}\n{script}\n", path.display())).map_err(|e| e.to_string())?;
-        self.command(&format!("exec sh {}", path.display())).map(drop)
-    }
 }
 
+const META: Meta = Meta {
+    name: "sway",
+    label: "sway",
+    cli: "`swaymsg`, grim or ydotool",
+    restarts: "sway",
+    ends: "exiting sway",
+    action_cmd: "swaymsg",
+};
+
 impl Backend for Sway {
-    fn name(&self) -> &'static str {
-        "sway"
-    }
-    fn label(&self) -> &'static str {
-        "sway"
-    }
-    fn cli(&self) -> &'static str {
-        "`swaymsg`, grim or ydotool"
-    }
-    fn restarts(&self) -> &'static str {
-        "sway"
-    }
-    fn ends(&self) -> &'static str {
-        "exiting sway"
-    }
-    fn action_cmd(&self) -> &'static str {
-        "swaymsg"
+    fn meta(&self) -> &'static Meta {
+        &META
     }
     fn ctx(&self) -> &Ctx {
         &self.ctx
@@ -339,8 +326,7 @@ impl Backend for Sway {
     }
 
     fn move_to_workspace(&self, wid: i64, workspace: &str) -> Result<(), String> {
-        let digits = !workspace.is_empty() && workspace.chars().all(|c| c.is_ascii_digit());
-        let ws = if digits { format!("number {workspace}") } else { py_json(&json!(workspace)) };
+        let ws = if digits(workspace) { format!("number {workspace}") } else { py_json(&json!(workspace)) };
         self.command(&format!("[con_id={wid}] move container to workspace {ws}")).map(drop)
     }
 
@@ -349,27 +335,11 @@ impl Backend for Sway {
     }
 
     fn spawn_sh(&self, script: &str) -> Result<(), String> {
-        self.spawn_script(script)
-    }
-
-    fn screen(&self, scale: f64, quality: i64) -> Result<Vec<u8>, String> {
-        grim_screen(&self.env()?, scale, quality)
-    }
-
-    fn region(&self, geo: &str, scale: f64, kind: &str, quality: i64) -> Result<Vec<u8>, String> {
-        grim_region(&self.env()?, geo, scale, kind, quality)
+        self.command(&format!("exec sh {}", script_file(script)?.display())).map(drop)
     }
 
     fn window_shot(&self, wid: i64) -> Result<Vec<u8>, String> {
-        let w = self.window(wid)?.ok_or_else(|| format!("no window {wid}"))?;
-        let spaces = self.workspaces()?;
-        let ws = spaces.iter().find(|s| s["id"] == w["workspace_id"]);
-        if !ws.is_some_and(|s| s["is_active"] == true) {
-            return Err(format!(
-                "window {wid} is on a workspace that is not shown; sway can only capture what is on screen (focus it first)"
-            ));
-        }
-        rect_shot(&self.env()?, &w["rect"])
+        rect_shot(self, wid)
     }
 
     fn events(&self, emit: Emit) -> Result<(), String> {

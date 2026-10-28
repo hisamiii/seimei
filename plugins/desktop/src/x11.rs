@@ -11,7 +11,7 @@ use std::time::Duration;
 use regex::Regex;
 use serde_json::{Value, json};
 
-use super::backend::{Backend, Ctx, Emit, Env, Ours, exec, run};
+use super::backend::{Backend, Ctx, Emit, Env, Meta, Ours, digits, exec, run};
 use seimei_core::util::py_json_compact;
 
 const QUERIES: [&str; 4] = ["windows", "workspaces", "outputs", "root"];
@@ -51,10 +51,6 @@ fn env() -> Env {
 
 fn strings(v: &str) -> Vec<String> {
     STRING.captures_iter(v).map(|m| ESCAPE.replace_all(&m[1], "$1").into_owned()).collect()
-}
-
-fn digits(s: &str) -> bool {
-    !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// xprop's answer as property to raw value; missing ones are left out.
@@ -121,21 +117,18 @@ impl X11 {
     }
 }
 
+const META: Meta = Meta {
+    name: "x11",
+    label: "X11",
+    cli: "`xdotool`, `wmctrl`, import or ydotool",
+    restarts: "the window manager",
+    ends: "",
+    action_cmd: "xdotool",
+};
+
 impl Backend for X11 {
-    fn name(&self) -> &'static str {
-        "x11"
-    }
-    fn label(&self) -> &'static str {
-        "X11"
-    }
-    fn cli(&self) -> &'static str {
-        "`xdotool`, `wmctrl`, import or ydotool"
-    }
-    fn restarts(&self) -> &'static str {
-        "the window manager"
-    }
-    fn action_cmd(&self) -> &'static str {
-        "xdotool"
+    fn meta(&self) -> &'static Meta {
+        &META
     }
     fn ctx(&self) -> &Ctx {
         &self.ctx

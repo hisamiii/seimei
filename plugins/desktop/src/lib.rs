@@ -72,8 +72,8 @@ pub const PLUGIN: Factory = Factory {
     manifest: include_str!("../plugin.toml"),
     // It depends on the window manager and the computer: Builtin::prompt makes it.
     prompt: "",
-    // One spec per window manager: variant() says which.
-    spec: include_str!("../tools.json"),
+    // One spec per window manager, which build.rs makes from tools.json: variant() says which.
+    spec: include_str!(concat!(env!("OUT_DIR"), "/tools.json")),
     hosted: true,
     make: |own, state| {
         let s = |k: &str| own.get(k).and_then(|v| v.as_str()).filter(|v| !v.is_empty());
@@ -81,7 +81,7 @@ pub const PLUGIN: Factory = Factory {
         if let Some(m) = own.get("agent_idle_minutes").and_then(|v| v.as_float().or(v.as_integer().map(|i| i as f64))) {
             d.agent.set_idle(m);
         }
-        eprintln!("seimei: desktop backend: {}", d.b.name());
+        eprintln!("seimei: desktop backend: {}", d.b.meta().name);
         Ok(Arc::new(DesktopPlugin(Arc::new(d))))
     },
 };
@@ -99,7 +99,7 @@ impl Builtin for DesktopPlugin {
     }
 
     fn variant(&self) -> Option<String> {
-        Some(self.0.b.name().to_string())
+        Some(self.0.b.meta().name.to_string())
     }
 
     fn halt(&self) -> String {
@@ -185,17 +185,18 @@ pub(crate) fn number(v: &Value) -> f64 {
     v.as_f64().unwrap_or(0.0)
 }
 
-/// A required argument, or the KeyError Python gave.
 fn need<'a>(args: &'a Value, k: &str) -> Result<&'a Value, String> {
-    args.get(k).ok_or_else(|| format!("KeyError: {}", py_repr(k)))
+    args.get(k).ok_or_else(|| format!("{k} is missing"))
 }
 
-fn float(v: &Value) -> Result<f64, String> {
-    match v {
-        Value::Number(n) => Ok(n.as_f64().unwrap_or(0.0)),
-        Value::String(s) => strip(s).parse().map_err(|_| format!("could not convert string to float: {}", py_repr(s))),
-        v => Err(format!("float() argument must be a string or a real number, not {v}")),
-    }
+/// A required number; a string that reads as one counts.
+fn float(args: &Value, k: &str) -> Result<f64, String> {
+    let n = match need(args, k)? {
+        Value::Number(n) => n.as_f64(),
+        Value::String(s) => strip(s).parse().ok(),
+        _ => None,
+    };
+    n.ok_or_else(|| format!("{k} must be a number"))
 }
 
 fn sleep(s: f64) {
@@ -259,17 +260,17 @@ impl Desktop {
 
     /// The prompt section, for the computer called about.
     pub fn prompt(&self, about: &str) -> String {
-        let b = &self.b;
+        let (b, m) = (&self.b, self.b.meta());
         let conf = b.config_dir().map(|c| match c.strip_prefix(&b.ctx().home) {
             Ok(rel) => format!("~/{}", rel.display()),
             Err(_) => c.display().to_string(),
         });
         let ends: Vec<String> =
-            [Some(b.ends().to_string()).filter(|e| !e.is_empty()), conf.map(|c| format!("editing {c}"))]
+            [Some(m.ends.to_string()).filter(|e| !e.is_empty()), conf.map(|c| format!("editing {c}"))]
                 .into_iter()
                 .flatten()
                 .collect();
-        let focus = if matches!(b.name(), "niri" | "kde" | "gnome") {
+        let focus = if matches!(m.name, "niri" | "kde" | "gnome") {
             "- Work in the agent display (display: \"agent\" on the desktop tools, browser: \"agent\" on the browser tools): it has its own screen, keyboard and pointer, so the user's focus and mouse stay theirs. Touch the user's display only when the task is about something there; then focus stealing is fine, and apps you open go to the \"seimei\" workspace (open_app does that)."
         } else {
             "- Focus stealing is fine and you may use the user's workspaces, but apps you open for a task go to the \"seimei\" workspace (open_app does that)."
@@ -277,8 +278,8 @@ impl Desktop {
         PROMPT
             .replace("{focus}", focus)
             .replace("{about}", about.split(" (").next().unwrap_or(about))
-            .replace("{cli}", b.cli())
-            .replace("{restarts}", if b.restarts().is_empty() { b.label() } else { b.restarts() })
+            .replace("{cli}", m.cli)
+            .replace("{restarts}", m.restarts)
             .replace("{ends}", &if ends.is_empty() { String::new() } else { format!(", {}", ends.join(" and ")) })
             .replace("{wait}", if ends.is_empty() { "waits" } else { "wait" })
     }
@@ -309,7 +310,7 @@ impl Desktop {
     pub async fn run(self: Arc<Self>) {
         tokio::spawn(self.clone().agent_idle());
         let mut down_since: Option<Instant> = None;
-        let label = self.b.label();
+        let label = self.b.meta().label;
         loop {
             let me = self.clone();
             if !tokio::task::spawn_blocking(move || me.b.up()).await.unwrap_or(false) {
@@ -349,7 +350,7 @@ impl Desktop {
             "up" => {
                 seen.listed = false;
                 if seen.up == Some(false) {
-                    let label = self.b.label();
+                    let label = self.b.meta().label;
                     self.system(
                         json!({"type": "system", "text": "The desktop is back."}),
                         Some(&format!("The desktop is back: {label} is running again.")),
@@ -832,7 +833,7 @@ impl Desktop {
         if scroll != 0 {
             input.0.scroll(scroll)
         } else if count != 0 {
-            let code = uinput::button(button).ok_or_else(|| format!("KeyError: {}", py_repr(button)))?;
+            let code = uinput::button(button).ok_or("button is left, right or middle")?;
             input.0.click(code, count)
         } else {
             Ok(())
@@ -857,23 +858,22 @@ impl Desktop {
         if tool == "agent_display" || args["display"] == "agent" {
             return self.agent_tool(tool, args, session).await;
         }
-        let name = self.b.name();
+        let name = self.b.meta().name;
         let r: Result<String, String> = match tool {
             "desktop" => self.blocking(|d| d.overview()).await,
             "screenshot" => return self.screenshot_tool(args).await,
-            t if t == name => {
-                let mut argv = vec![args.get("action").map_or("None".into(), text_of)];
-                argv.extend(args["args"].as_array().into_iter().flatten().map(text_of));
-                if args.get("action").is_none() {
-                    Err("KeyError: 'action'".into())
-                } else {
+            t if t == name => match need(args, "action") {
+                Err(e) => Err(e),
+                Ok(a) => {
+                    let mut argv = vec![text_of(a)];
+                    argv.extend(args["args"].as_array().into_iter().flatten().map(text_of));
                     self.blocking(move |d| d.b.action(&argv))
                         .await
                         .map(|o| if o.is_empty() { "Done.".into() } else { o })
                 }
-            }
+            },
             t if t == format!("{name}_query") => {
-                let what = args.get("what").map_or("None".into(), text_of);
+                let what = args.get("what").map_or(String::new(), text_of);
                 self.blocking(move |d| d.b.query(&what)).await.map(|out| {
                     if out.chars().count() <= 30_000 {
                         out
@@ -915,7 +915,8 @@ impl Desktop {
             },
             "click" | "scroll" => self.click_tool(tool, args).await,
             "ui_tree" | "ui_action" => self.a11y_tool(tool, args, None).await,
-            "notifications" => return notifications(args).await,
+            // mako runs beside wlroots compositors and niri only.
+            "notifications" if matches!(name, "niri" | "sway" | "hyprland") => return notifications(args).await,
             "clipboard_read" => return self.clipboard(None, session).await,
             "unlock_screen" => self.blocking(|d| d.unlock()).await,
             "restore_desktop" => return self.restore_tool(args, session).await,
@@ -976,8 +977,8 @@ impl Desktop {
     }
 
     async fn click_tool(self: &Arc<Self>, tool: &str, args: &Value) -> Result<String, String> {
-        let x = float(need(args, "x")?)?;
-        let y = float(need(args, "y")?)?;
+        let x = float(args, "x")?;
+        let y = float(args, "y")?;
         let window = args.get("window").cloned().unwrap_or(Value::Null);
         if tool == "scroll" {
             let amount = int(need(args, "amount")?)?;
