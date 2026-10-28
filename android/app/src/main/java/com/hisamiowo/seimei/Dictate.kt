@@ -294,7 +294,7 @@ fun DraftField(
     )
 }
 
-/** The trailing mic in the field (mockup 1), a spinner while seimei transcribes (3); hidden without a key on the server. */
+/** The trailing mic in the field, a spinner while seimei transcribes; hidden without a key on the server. */
 @Composable
 fun MicSlot(d: Dictation, target: String, enabled: Boolean, hint: () -> JSONObject) {
     val ctx = LocalContext.current
@@ -316,7 +316,7 @@ fun MicSlot(d: Dictation, target: String, enabled: Boolean, hint: () -> JSONObje
     }
 }
 
-/** The field while recording (mockup 2): × to drop, the level, the time, the square to stop. */
+/** The field while recording: × to drop, the level, the time, the square to stop. */
 @Composable
 fun RecordingBar(d: Dictation, modifier: Modifier) {
     val cs = MaterialTheme.colorScheme

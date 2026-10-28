@@ -760,7 +760,7 @@ function details() {
   fact('Subagents', r.subagents);
   fact('Context', r.context != null && `${r.context}% used`);
   fact(P.kind === 'worker' ? 'Started' : 'Last active', cap(atTime(P.kind === 'worker' ? r.created : r.active).replace(/^at /, 'today at ')));
-  // What its run took (see metrics.py): fetched when the sheet opens, since pricing it takes the server a moment.
+  // What its run took (see crates/core/src/metrics.rs): fetched when the sheet opens, since pricing it takes the server a moment.
   if (P.kind === 'worker') {
     const id = P.id;
     getJSON(`api/workers/${encodeURIComponent(id)}/metrics`).then((m) => {
@@ -1053,7 +1053,7 @@ async function openPage(kind, id) {
   }
 }
 
-// Forward and backward (BEHAVIOR.md 1): the page comes in from the end edge and goes back out to it; focus goes to
+// Forward and backward: the page comes in from the end edge and goes back out to it; focus goes to
 // its title, and back to the row that opened it on close
 let closing = null;
 let opener = null;

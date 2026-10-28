@@ -4,7 +4,7 @@ export const $ = (id) => document.getElementById(id);
 export const finePointer = matchMedia('(pointer: fine)').matches;
 const lessMotion = matchMedia('(prefers-reduced-motion: reduce)');
 export const reduced = () => lessMotion.matches;
-// Screen transitions (BEHAVIOR.md 1) use M3's emphasized easings, not springs; reduced motion gets a short fade
+// Screen transitions use M3's emphasized easings, not springs; reduced motion gets a short fade
 const EASE_IN = 'cubic-bezier(.05, .7, .1, 1)';
 const EASE_OUT = 'cubic-bezier(.3, 0, .8, .15)';
 export function enter(node, from, ms = 300) {
@@ -19,7 +19,7 @@ export function leave(node, to, ms = 200) {
   return node._leave;
 }
 
-// The one quiet live region (BEHAVIOR.md 6): a short line when a card arrives, a reply finishes or a card settles
+// The one quiet live region: a short line when a card arrives, a reply finishes or a card settles
 export function say(text) {
   const r = document.getElementById('say');
   if (!r || !text) return;
@@ -97,7 +97,7 @@ export const clock = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: 'n
 export const dayKey = (t) => new Date(t * 1000).toDateString();
 export const home = (p) => (p || '').replace(/^\/home\/[^/]+/, '~');
 // A shikigami's identity: one shape of the M3 Expressive library (m3x.css), the same for a name everywhere, and a
-// phase, so working tiles don't morph in step. The order and the salt put the names of final/ on their shapes.
+// phase, so working tiles don't morph in step. The order and the salt keep each name on its shape.
 const SHAPES = ['cookie4', 'cookie12', 'cookie6', 'sunny', 'cookie9', 'flower', 'clover8', 'clover4', 'puffy-diamond', 'gem', 'pentagon'];
 function nameHash(name) {
   let h = 0;
@@ -204,7 +204,7 @@ function snackPlace() {
   const bottom = document.querySelector('body > .bottom');
   const base = page || (getComputedStyle(bottom).display === 'contents' ? $('composer') : bottom);
   const top = base && base.offsetParent !== null || base === bottom ? base.getBoundingClientRect().top : innerHeight;
-  // final/ 19 and 20: 44 over the composer, 32 over the navigation bar
+  // 44 over the composer, 32 over the navigation bar
   const gap = page || $('composer').offsetParent ? 44 : 32;
   s.style.bottom = `${Math.max(16, innerHeight - top + gap)}px`;
 }

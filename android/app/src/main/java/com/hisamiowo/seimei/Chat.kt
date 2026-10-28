@@ -68,7 +68,7 @@ data class Anchor(val text: String, val goto: String, val lane: String)
 
 fun anchorText(text: String) = text.replace(Regex("\\s+"), " ").trim().let { if (it.length > 60) it.take(60) + "…" else it }
 
-/** Events in lane "t" happened on their own (events.py): the trajectory gets them whole, the chat a fold line. */
+/** Events in lane "t" happened on their own (events.rs): the trajectory gets them whole, the chat a fold line. */
 fun JSONObject.inTraj() = str("lane") == "t"
 
 /** What counts toward the Trajectory badge: reports, notes and seimei's own words, not its tool calls. */
@@ -79,12 +79,12 @@ class Asks : HashMap<String, Pair<Chat, Int>>()
 
 private val ENDED = mapOf("done" to "finished", "failed" to "failed", "stopped" to "was stopped", "interrupted" to "was interrupted")
 
-/** A file stored on the server (uploads.py), downloaded only when tapped. */
+/** A file stored on the server (uploads.rs), downloaded only when tapped. */
 data class FileRef(val id: String, val name: String, val size: Long, val kind: String)
 
 fun JSONObject.fileRef(id: String = str("id")) = FileRef(id, str("name"), optLong("size"), str("kind"))
 
-/** The server deletes files after this long (uploads.py KEEP_DAYS); older chips show as expired. */
+/** The server deletes files after this long (uploads.rs KEEP_DAYS); older chips show as expired. */
 const val KEEP_SECONDS = 30 * 86400.0
 
 fun expired(t: Double, now: Double = System.currentTimeMillis() / 1000.0) = t > 0 && now - t > KEEP_SECONDS
@@ -363,7 +363,7 @@ fun clock(t: Double): String =
 fun plural(n: Int, one: String, many: String) = if (n == 1) one else "$n $many"
 
 /** The built-in plugins' tools (mcp__browser__browser_tabs) read like seimei's own, as they were named before them. */
-private val PLUGIN_TOOL = Regex("^mcp__(desktop|discord|browser|music|queue)__")
+private val PLUGIN_TOOL = Regex("^mcp__(desktop|browser|music|queue)__")
 
 /** "ran 3 commands", "read a file": what a group of tool calls did. */
 fun phrase(tool: String, n: Int): String = phraseOf(PLUGIN_TOOL.replace(tool, "mcp__seimei__"), n)
@@ -392,15 +392,6 @@ private fun phraseOf(name: String, n: Int): String = when {
     name == "mcp__seimei__browser_close" -> "closed tabs"
     name == "mcp__seimei__browser_download" -> if (n == 1) "started a download" else "started $n downloads"
     name == "mcp__seimei__browser_downloads" -> "checked the downloads"
-    name == "mcp__seimei__discord_guilds" -> "looked at your servers"
-    name == "mcp__seimei__discord_dms" -> "looked at your DMs"
-    name == "mcp__seimei__discord_read" -> if (n == 1) "read Discord" else "read Discord $n times"
-    name == "mcp__seimei__discord_search" -> if (n == 1) "searched Discord" else "searched Discord $n times"
-    name == "mcp__seimei__discord_send" -> if (n == 1) "sent a Discord message" else "sent $n Discord messages"
-    name == "mcp__seimei__discord_edit" -> if (n == 1) "edited a Discord message" else "edited $n Discord messages"
-    name == "mcp__seimei__discord_delete" -> if (n == 1) "deleted a Discord message" else "deleted $n Discord messages"
-    name == "mcp__seimei__discord_react" -> if (n == 1) "reacted on Discord" else "reacted $n times on Discord"
-    name == "mcp__seimei__discord_mark_read" -> if (n == 1) "marked a channel read" else "marked $n channels read"
     else -> {
         val short = if (name.startsWith("mcp__")) name.split("__").last().replace('_', ' ') else name
         if (n == 1) "used $short" else "used $short $n times"

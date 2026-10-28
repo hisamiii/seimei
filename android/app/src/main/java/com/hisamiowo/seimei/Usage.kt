@@ -86,7 +86,7 @@ fun UsageTab(vm: Seimei) {
     val cs = MaterialTheme.colorScheme
     val scroll = rememberScrollState()
     LaunchedEffect(scroll) { snapshotFlow { scroll.value > 0 }.collect { vm.lifted = it } }
-    // final/ 12: the page gap is 14, a section's own gap 8, every list one segmented group
+    // The page gap is 14, a section's own gap 8, every list one segmented group
     Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 40.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)) {
         var any = false
@@ -148,7 +148,7 @@ fun Heading(text: String) = Text(text, fontSize = 14.sp, lineHeight = 22.sp, fon
 @Composable
 private fun Note(text: String) = Text(text, fontSize = 14.sp, lineHeight = 20.sp, color = LocalExtra.current.text3)
 
-/** One row of a segmented list (final/ 12's crow): the name, the amount large on the right, a chevron, the facts under the name. */
+/** One row of a segmented list: the name, the amount large on the right, a chevron, the facts under the name. */
 @Composable
 private fun CostRow(shape: Shape, title: String, amount: String, sub: String, open: Boolean, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(shape).background(MaterialTheme.colorScheme.surfaceContainer).clickable(onClick = onClick)
@@ -272,7 +272,7 @@ fun MetricsSection(list: List<JSONObject>?) {
     }
 }
 
-/** The Usage tab's icon: the 5-hour window as a ring (final/: text-2 on an outline-variant track, on-primary on the pill). */
+/** The Usage tab's icon: the 5-hour window as a ring (text-2 on an outline-variant track, on-primary on the pill). */
 @Composable
 fun UsageRing(vm: Seimei, on: Boolean = false) {
     val w = vm.usage?.optJSONObject("windows")?.optJSONObject("five_hour")

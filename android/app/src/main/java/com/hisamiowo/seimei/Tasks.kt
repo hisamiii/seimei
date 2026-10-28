@@ -421,7 +421,7 @@ private fun TaskRow(vm: Seimei, t: Task, shape: Shape, kind: String, parts: List
             Tick(vm, t, if (inset) Modifier.padding(end = 8.dp) else Modifier.padding(end = 16.dp))
         }
         Column(Modifier.weight(1f)) {
-            // What needs the user has emphasized titles (final/ 06)
+            // What needs the user has emphasized titles
             val loud = warm && !inset
             val mark = cs.primary.copy(alpha = .3f)
             val at = if (q.isEmpty()) -1 else t.title.lowercase().indexOf(q)
@@ -452,7 +452,7 @@ private fun SwipeToTick(vm: Seimei, t: Task, shape: Shape, content: @Composable 
     val tk = LocalTokens.current
     val state = rememberSwipeToDismissBoxState()
     val scope = rememberCoroutineScope()
-    // A tick when the swipe crosses the mark where letting go completes it (BEHAVIOR.md 7)
+    // A tick when the swipe crosses the mark where letting go completes it
     val haptic = LocalHapticFeedback.current
     LaunchedEffect(state) {
         snapshotFlow { state.targetValue }.collect { if (it == SwipeToDismissBoxValue.StartToEnd) haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate) }
@@ -480,7 +480,7 @@ private fun SwipeToTick(vm: Seimei, t: Task, shape: Shape, content: @Composable 
 private fun Tick(vm: Seimei, t: Task, modifier: Modifier) {
     val done = t.state == "done"
     val tk = LocalTokens.current
-    // It sits in the 40 spot of the tiles (final/ 06); the 48 touch target spills 4 around it
+    // It sits in the 40 spot of the tiles; the 48 touch target spills 4 around it
     Box(modifier.size(40.dp), contentAlignment = Alignment.Center) {
         Box(
             Modifier.requiredSize(48.dp).clip(CircleShape).clickable { vm.tick(t.id, !done) }.semantics {
@@ -498,7 +498,7 @@ private fun Tick(vm: Seimei, t: Task, modifier: Modifier) {
     }
 }
 
-/** Step progress of a running task (final/ 06): the done part as the wavy indicator (amplitude 3, wavelength 40, 4 thick
+/** Step progress of a running task: the done part as the wavy indicator (amplitude 3, wavelength 40, 4 thick
  *  in a 10 tall box, travelling one wavelength per 1.2 s), a 4dp gap, the flat track, and the count in words. */
 @Composable
 private fun StepBar(t: Task) {
@@ -597,7 +597,7 @@ private fun AllClear(vm: Seimei) {
     val since = remember(vm.board) { vm.board?.let(::board)?.tasks?.maxOfOrNull { it.doneAt }?.takeIf { it > 0 } ?: (System.currentTimeMillis() / 1000.0) }
     Row(Modifier.fillMaxWidth().padding(top = 16.dp).heightIn(min = 68.dp).clip(RoundedCornerShape(28.dp)).background(tk.okContainer)
         .padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        // final/ 23: the very sunny tile arrives on the slow spring, then turns slowly
+        // The very sunny tile arrives on the slow spring, then turns slowly
         val arrive = remember { Animatable(if (reduced) 1f else .4f) }
         LaunchedEffect(Unit) { arrive.animateTo(1f, spring(dampingRatio = .9f, stiffness = 200f)) }
         val turn = if (reduced) 0f else rememberInfiniteTransition(label = "clear")

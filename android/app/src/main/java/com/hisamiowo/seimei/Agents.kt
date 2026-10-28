@@ -324,7 +324,7 @@ fun SwipeToArchive(a: Agent, vm: Seimei, content: @Composable () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val state = rememberSwipeToDismissBoxState()
     val scope = rememberCoroutineScope()
-    // A tick when the swipe crosses the mark where letting go archives (BEHAVIOR.md 7)
+    // A tick when the swipe crosses the mark where letting go archives
     val haptic = LocalHapticFeedback.current
     LaunchedEffect(state) {
         snapshotFlow { state.targetValue }.collect { if (it == SwipeToDismissBoxValue.EndToStart) haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate) }
@@ -511,7 +511,7 @@ fun AgentRow(a: Agent, now: Long, query: String = "", shape: Shape = RoundedCorn
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // Name and tag take the room left of the time, so the time lines up at the right edge.
                 Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                    // Who asks has an emphasized name (final/ 08)
+                    // Who asks has an emphasized name
                     Text(a.name, fontSize = 16.sp, lineHeight = 24.sp, fontWeight = if (ask) FontWeight.Bold else FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         color = if (ask) t.onWarnContainer else if (a.state == "done" || a.archived) LocalExtra.current.text2 else Color.Unspecified, modifier = Modifier.weight(1f, fill = false))
                 }
@@ -522,7 +522,7 @@ fun AgentRow(a: Agent, now: Long, query: String = "", shape: Shape = RoundedCorn
                     fontWeight = if (a.fresh) FontWeight.Medium else null)
             }
             Spacer(Modifier.height(3.dp))
-            // One paragraph, the project inline, so a wrapped question starts its second line at the edge (final/ 08)
+            // One paragraph, the project inline, so a wrapped question starts its second line at the edge
             val (line, at) = searchLine(a, query)
             val mark = MaterialTheme.colorScheme.primary.copy(alpha = .3f)
             Text(buildAnnotatedString {
@@ -590,7 +590,7 @@ fun AgentPage(vm: Seimei, pg: Page) {
             Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 4.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(vm::closePage, Modifier.size(48.dp)) { Icon(Icons.back, "Back to agents", Modifier.size(22.dp)) }
                 Column(Modifier.weight(1f)) {
-                    // final/ 10: the name at 22, then the project (text-2, medium) and the state in its colour, at 12
+                    // The name at 22, then the project (text-2, medium) and the state in its colour, at 12
                     Text(a.name, fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                         if (a.project.isNotEmpty() && a.project != a.name) {
@@ -638,7 +638,7 @@ fun AgentPage(vm: Seimei, pg: Page) {
             }
             LazyColumn(
                 Modifier.weight(1f).fillMaxWidth(), state = list, reverseLayout = true,
-                // A short thread sits on the composer, as a chat does (final/ 09)
+                // A short thread sits on the composer, as a chat does
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.Bottom),
             ) {
                 pg.ask?.let { ask -> item("ask-${ask.str("tool_id")}") { QuestionCard(vm, pg, ask) } }
@@ -670,7 +670,7 @@ fun QuestionCard(vm: Seimei, pg: Page, ask: JSONObject) {
         }
     }
     val tk = LocalTokens.current
-    // The warm card of a decision (final/ 09): the question glyph on a warn tile, the question, the options a segmented list
+    // The warm card of a decision: the question glyph on a warn tile, the question, the options a segmented list
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(tk.warnContainer).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -754,7 +754,7 @@ fun PageComposer(vm: Seimei, pg: Page, a: Agent) {
             val x = LocalTokens.current
             val asking = pg.ask != null || (pg.kind == "worker" && pg.row.str("state") == "asking")
             val d = vm.dictation
-            // final/ 09: the 52 pill of the chat's composer, the attach button inside it
+            // The 52 pill of the chat's composer, the attach button inside it
             if (d.state == Dictation.State.RECORDING && d.target == pg.chatKey) RecordingBar(d, Modifier.weight(1f))
             else Row(Modifier.weight(1f).heightIn(min = 52.dp).clip(RoundedCornerShape(26.dp)).background(cs.surfaceContainerHigh),
                 verticalAlignment = Alignment.Bottom) {
@@ -783,7 +783,7 @@ fun PageComposer(vm: Seimei, pg: Page, a: Agent) {
             val typing = pg.draft.isNotBlank() || pg.files.isNotEmpty()
             // Asking: the answer goes through Send; Stop is in the details sheet.
             if (pg.kind == "worker" && pg.row.str("state") in ACTIVE && pg.row.str("state") != "asking" && !typing) {
-                // The square Stop of final/ 10: 16 corners on primary-container
+                // The square Stop: 16 corners on primary-container
                 Box(Modifier.size(52.dp).clip(RoundedCornerShape(16.dp)).background(cs.primaryContainer)
                     .clickable(onClickLabel = "Stop") { vm.workerStop(pg.id) }.semantics { contentDescription = "Stop" },
                     contentAlignment = Alignment.Center) {
@@ -937,7 +937,7 @@ fun Details(vm: Seimei, pg: Page) {
                 Fact("Context", r.context()?.let { "$it% used" } ?: "")
                 if (pg.kind == "worker") Fact("Started", atTime(r.optDouble("created")).replace(Regex("^at "), "today at ").cap())
                 else Fact("Last active", atTime(r.optDouble("active")).replace(Regex("^at "), "today at ").cap())
-                // What its run took (metrics.py), once the server has priced it.
+                // What its run took (metrics.rs), once the server has priced it.
                 if (pg.kind == "worker") pg.metrics?.let { m -> for ((k, v) in metricFacts(m)) Fact(k, v) }
             }
             val state = r.str("state")

@@ -79,7 +79,7 @@ class Page(val kind: String, val id: String) {
     /** The hint's name for this chat (docs/asr.md): "w:<id>" or "s:<pid>". */
     val chatKey get() = (if (kind == "worker") "w:" else "s:") + id
     var details by mutableStateOf(false)
-    /** A shikigami's run so far (metrics.py), fetched when its details open. */
+    /** A shikigami's run so far (metrics.rs), fetched when its details open. */
     var metrics by mutableStateOf<JSONObject?>(null)
     internal var chat = Chat()
     /** The events as they came (the last Store.PAGE_KEEP), for the copy kept on the phone. */
@@ -146,11 +146,11 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         private set
     /** Which of the two the chat tab shows: "c" (chat) or "t" (trajectory). */
     var lane by mutableStateOf("c")
-    /** The screen has moved off its rest (the chat off its end, a list off its top): the top bar fills (BEHAVIOR.md 8). */
+    /** The screen has moved off its rest (the chat off its end, a list off its top): the top bar fills. */
     var lifted by mutableStateOf(false)
     /** Where each chat lane was left: first row, its offset, and whether the reader was following the end. */
     val laneSpot = HashMap<String, Triple<Int, Int, Boolean>>()
-    /** The task board (tasks.py): {"tasks": [...], "projects": [...]}, the kept copy until the server sends it. */
+    /** The task board (tasks.rs): {"tasks": [...], "projects": [...]}, the kept copy until the server sends it. */
     var board by mutableStateOf<JSONObject?>(null)
     /** Board sections opened or shut by hand (project name -> open); the rest follow their default. */
     var boardOpen by mutableStateOf(try { JSONObject(prefs.boardOpen) } catch (e: JSONException) { JSONObject() })
@@ -402,7 +402,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * The lock screen's other way in (final/ 01): seimei's password, as the web page logs in. That session stands in
+     * The lock screen's other way in: seimei's password, as the web page logs in. That session stands in
      * for the phone's key until the app locks again; the key and the pairing stay as they are.
      */
     fun passwordLogin(password: String) {

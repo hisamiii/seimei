@@ -162,7 +162,7 @@ val Sans = FontFamily(listOf(400, 500, 600, 700).map { w ->
 })
 
 private val Base = Typography()
-// The web's letter spacing: none (M3's 0.1 to 0.5 sp widened every line and broke the wraps of final/)
+// The web's letter spacing: none (M3's 0.1 to 0.5 sp widened every line and broke the design's wraps)
 val SeimeiType = Typography(
     displayLarge = Base.displayLarge.copy(fontFamily = Sans, letterSpacing = 0.sp), displayMedium = Base.displayMedium.copy(fontFamily = Sans, letterSpacing = 0.sp),
     displaySmall = Base.displaySmall.copy(fontFamily = Sans, letterSpacing = 0.sp), headlineLarge = Base.headlineLarge.copy(fontFamily = Sans, letterSpacing = 0.sp),
@@ -207,7 +207,7 @@ fun icon(vararg d: String, stroke: Float = 2f): ImageVector = ImageVector.Builde
 
 object Icons {
     val chat = icon("M6 4.5h12A2.5 2.5 0 0 1 20.5 7v8a2.5 2.5 0 0 1-2.5 2.5h-7L6.5 21v-3.5H6A2.5 2.5 0 0 1 3.5 15V7A2.5 2.5 0 0 1 6 4.5z", stroke = 1.8f)
-    // The grid of final/ (the showcase's Agents tab): four rounded tiles
+    // The grid: four rounded tiles
     val agents = icon("M6 4h3.5A1.5 1.5 0 0 1 11 5.5V9a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 9V5.5A1.5 1.5 0 0 1 6 4zM14.5 4H18a1.5 1.5 0 0 1 " +
         "1.5 1.5V9A1.5 1.5 0 0 1 18 10.5h-3.5A1.5 1.5 0 0 1 13 9V5.5A1.5 1.5 0 0 1 14.5 4zM6 13.5h3.5A1.5 1.5 0 0 1 11 15v3.5A1.5 1.5 0 0 1 9.5 " +
         "20H6a1.5 1.5 0 0 1-1.5-1.5V15A1.5 1.5 0 0 1 6 13.5zM14.5 13.5H18a1.5 1.5 0 0 1 1.5 1.5v3.5A1.5 1.5 0 0 1 18 20h-3.5a1.5 1.5 0 0 " +
@@ -488,7 +488,7 @@ object CodeFormat : VisualTransformation {
 }
 
 /**
- * The lock screen of final/ 01, bottom-aligned: the seiman and "seimei", Use fingerprint, "or", then the password and
+ * The lock screen, bottom-aligned: the seiman and "seimei", Use fingerprint, "or", then the password and
  * Log in (as the web page logs in; the phone's key stays for the next time).
  */
 @Composable
@@ -599,9 +599,9 @@ fun AppScreen(vm: Seimei) {
     if (wide) NavRail(vm)
     Column(Modifier.weight(1f).fillMaxHeight().imePadding()) {
         Header(vm)
-        // The page sheet of final/: surface-low under the header, 28 corners on top
+        // The page sheet: surface-low under the header, 28 corners on top
         Box(Modifier.weight(1f).clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)).background(MaterialTheme.colorScheme.surfaceContainerLow)) {
-            // Top level between nav destinations: the old one fades out, then the new one fades in (BEHAVIOR.md 1)
+            // Top level between nav destinations: the old one fades out, then the new one fades in
             AnimatedContent(vm.tab, transitionSpec = {
                 if (still) EnterTransition.None togetherWith ExitTransition.None
                 else fadeIn(tween(200, delayMillis = 100, easing = LinearOutSlowInEasing)) togetherWith fadeOut(tween(100, easing = FastOutLinearInEasing))
@@ -613,7 +613,7 @@ fun AppScreen(vm: Seimei) {
                 }
             }
         }
-        // The bottom container of final/: composer and navigation bar on surface-container, 24 corners on top
+        // The bottom container: composer and navigation bar on surface-container, 24 corners on top
         // (the sheet shows in its corners)
         Column(Modifier.onSizeChanged { vm.barPx = it.height }.background(MaterialTheme.colorScheme.surfaceContainerLow)
             .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
@@ -625,7 +625,7 @@ fun AppScreen(vm: Seimei) {
         }
     }
     }
-    // Forward and backward (BEHAVIOR.md 1): a page comes in from the right and goes back out to it. Predictive back
+    // Forward and backward: a page comes in from the right and goes back out to it. Predictive back
     // has already taken the page away when it commits, so that exit only finishes it.
     AnimatedContent(vm.page, transitionSpec = {
         if (still) fadeIn(tween(150)) togetherWith fadeOut(tween(150))
@@ -633,9 +633,9 @@ fun AppScreen(vm: Seimei) {
             fadeOut(tween(90))
         else EnterTransition.None togetherWith (slideOutHorizontally(tween(200, easing = EMPHASIZED_ACCEL)) { it / 8 } + fadeOut(tween(200)))
     }, contentKey = { it?.let { p -> p.kind + p.id } }, label = "page") { p -> if (p != null) AgentPage(vm, p) }
-    // The one polite live region TalkBack reads: a card that arrives, a reply, a card that settles (BEHAVIOR.md 6)
+    // The one polite live region TalkBack reads: a card that arrives, a reply, a card that settles
     Text(vm.said, Modifier.size(1.dp).alpha(0f).semantics { liveRegion = LiveRegionMode.Polite })
-    // Above whatever holds the bottom edge, measured: never over the field (final/ 19 and 20: 44 over a composer, 32 over the bar)
+    // Above whatever holds the bottom edge, measured: never over the field (44 over a composer, 32 over the bar)
     val composer = vm.page != null || (vm.tab == "chat" && vm.lane != "k")
     val above = with(LocalDensity.current) { (if (vm.page != null) vm.pageBarPx else vm.barPx).toDp() } + if (composer) 44.dp else 32.dp
     SnackbarHost(snacks, Modifier.align(Alignment.BottomCenter).then(if (vm.page != null) Modifier.navigationBarsPadding() else Modifier)
@@ -683,7 +683,7 @@ private fun Lanes(vm: Seimei, still: Boolean) {
     }
 }
 
-/** Predictive back (BEHAVIOR.md 2) for a screen: while the gesture runs it shrinks toward 90% and leans to the swipe
+/** Predictive back for a screen: while the gesture runs it shrinks toward 90% and leans to the swipe
  *  edge with the 8dp margin and rounded corners; on commit it leaves on emphasized accelerate, on cancel it comes back.
  *  The returned modifier draws that; onBack runs once the gesture commits. */
 @Composable
@@ -769,7 +769,7 @@ fun Header(vm: Seimei) {
                     if (vm.release != null) Box(Modifier.align(Alignment.TopEnd).size(8.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary))
                 }
             }
-            // final/ 13: 220 wide, 16 corners on container-high, 48 rows with a 20 icon in text-3, 14sp
+            // 220 wide, 16 corners on container-high, 48 rows with a 20 icon in text-3, 14sp
             val x = LocalTokens.current
             @Composable
             fun Item(text: String, icon: ImageVector, color: Color = x.text, dot: Boolean = false, onClick: () -> Unit) = DropdownMenuItem(
@@ -811,7 +811,7 @@ fun dotColor(s: String): Color = when (s) {
 }
 
 /**
- * The navigation bar of final/ (06, 08): 64 tall on the bottom container, a 56 x 32 primary pill under the selected
+ * The navigation bar: 64 tall on the bottom container, a 56 x 32 primary pill under the selected
  * icon (on-primary), the label in text, the others in text-3; what needs the user is a warn badge on the pill's corner.
  */
 @Composable
@@ -839,7 +839,7 @@ private fun NavItem(vm: Seimei, tab: String, modifier: Modifier) {
     val on = vm.tab == tab
     val press = remember { MutableInteractionSource() }
     val pressed by press.collectIsPressedAsState()
-    // Under the finger the pill widens inside its item (final/ 8)
+    // Under the finger the pill widens inside its item
     val pill by animateDpAsState(if (pressed) 64.dp else 56.dp, spring(dampingRatio = .9f, stiffness = 1400f), label = "pill")
     val label = if (tab == "chat") "seimei" else TITLES[tab]!!
     Column(

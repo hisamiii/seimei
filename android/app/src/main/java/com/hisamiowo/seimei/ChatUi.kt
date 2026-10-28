@@ -194,7 +194,7 @@ fun ChatTab(vm: Seimei, lane: String) {
         delay(1400)
         flashing = null
     }
-    // Each lane comes back where it was left; at its newest row if the reader was following then (BEHAVIOR.md 8)
+    // Each lane comes back where it was left; at its newest row if the reader was following then
     LaunchedEffect(Unit) {
         if (vm.goto != null) return@LaunchedEffect
         val spot = vm.laneSpot[lane]
@@ -351,7 +351,7 @@ fun SwipeReply(onReply: () -> Unit, content: @Composable () -> Unit) {
     )) {
         Icon(Icons.reply, "Reply", Modifier.align(Alignment.CenterEnd).padding(end = 4.dp).size(22.dp)
             .alpha((dx / mark).coerceIn(0f, 1f)), tint = MaterialTheme.colorScheme.primary)
-        // The swipe has a spoken twin for TalkBack (BEHAVIOR.md 6)
+        // The swipe has a spoken twin for TalkBack
         Box(Modifier.offset { IntOffset(-dx.roundToInt(), 0) }.semantics {
             customActions = listOf(CustomAccessibilityAction("Reply") { onReply(); true })
         }) { content() }
@@ -375,7 +375,7 @@ fun FoldPill(f: Item.Fold, vm: Seimei) {
 
 @Composable
 fun TrigRow(t: Item.Trig) {
-    // final/: the line alone, no dot
+    // The line alone, no dot
     Text(t.text, Modifier.padding(top = 8.dp), fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium, color = LocalExtra.current.text3)
 }
 
@@ -417,7 +417,7 @@ fun dayLabel(t: Double): String {
 
 @Composable
 fun NotePill(text: String, level: String, day: Boolean = false) {
-    // final/: a note is a centred line, no pill; a usage warning reads in text-2, an error in the error colour
+    // A note is a centred line, no pill; a usage warning reads in text-2, an error in the error colour
     val color = when (level) {
         "error" -> MaterialTheme.colorScheme.error
         "warn" -> LocalExtra.current.text2
@@ -442,7 +442,7 @@ fun Working() {
 
 @Composable
 fun Away(vm: Seimei) {
-    // final/ 17: centred, the line at 22, when and what next at 16 in text-2, then Try now on tonal
+    // Centred, the line at 22, when and what next at 16 in text-2, then Try now on tonal
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text("Can't reach the server", fontSize = 22.sp, lineHeight = 34.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center)
@@ -459,7 +459,7 @@ fun Away(vm: Seimei) {
 @Composable
 fun UserMsg(m: Item.Msg, vm: Seimei, onPicture: (String) -> Unit) {
     var time by remember { mutableStateOf(false) }
-    // At most 88% of the lane, as the web's bubbles (final/ 02, 09)
+    // At most 88% of the lane, as the web's bubbles
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) { Box(Modifier.fillMaxWidth(.88f), contentAlignment = Alignment.CenterEnd) {
         Column(
             Modifier
@@ -601,7 +601,7 @@ fun Blocks(blocks: List<Block>, size: Int, color: Color) {
     Column(verticalArrangement = Arrangement.spacedBy((size * 0.6f).dp)) {
         for (b in blocks) when (b) {
             is Block.Para -> Text(b.text, fontSize = size.sp, lineHeight = (size * 1.5f).sp, color = color)
-            // ### and below at the text's own size (final/ 11: "Plan" at 16 / 600 / 24)
+            // ### and below at the text's own size ("Plan" at 16 / 600 / 24)
             is Block.Heading -> Text(b.text, fontSize = (when (b.level) { 1 -> size + 4; 2 -> size + 2; else -> size }).sp,
                 lineHeight = (size * 1.5f).sp, fontWeight = FontWeight.SemiBold, color = color, modifier = Modifier.padding(top = 6.dp))
             is Block.Code -> Text(
@@ -628,7 +628,7 @@ fun Blocks(blocks: List<Block>, size: Int, color: Color) {
             Block.Rule -> Box(Modifier.fillMaxWidth().padding(vertical = 4.dp).size(1.dp).background(MaterialTheme.colorScheme.surfaceContainerHigh))
             is Block.Table -> androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth()) {
                 val scroll = rememberScrollState()
-                // At least the width of the text (final/ 11): the columns share it, 140dp each at the least
+                // At least the width of the text: the columns share it, 140dp each at the least
                 val cols = maxOf(1, b.head.size, b.rows.maxOfOrNull { it.size } ?: 0)
                 val cell = maxOf(140.dp, maxWidth / cols)
                 // A shade at an edge with more columns beyond it, so a cut on a column edge does not look complete.
@@ -686,7 +686,7 @@ fun ActivityChip(a: Item.Activity, live: JSONObject? = null) {
     val failed = a.calls.count { it.error }
     val err = MaterialTheme.colorScheme.error
     Column(Modifier.animateContentSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        // final/ 09: a 48 chip with 12 corners, the tool's icon (the shape loader while it runs), 14sp, a 20 chevron
+        // A 48 chip with 12 corners, the tool's icon (the shape loader while it runs), 14sp, a 20 chevron
         Row(
             Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(12.dp))
                 .background(if (failed > 0) err.copy(alpha = .14f).compositeOver(MaterialTheme.colorScheme.surfaceContainer) else MaterialTheme.colorScheme.surfaceContainer)
@@ -816,7 +816,7 @@ fun EvLine(name: String, rest: String, small: String, failed: Boolean = false, s
                 pushStyle(androidx.compose.ui.text.SpanStyle(fontSize = 12.sp, color = LocalExtra.current.text3)); append("  $small"); pop()
             }
         }
-        // A full-width line (a finished or failed shikigami) keeps its chevron at the end (final/ 05)
+        // A full-width line (a finished or failed shikigami) keeps its chevron at the end
         Column(if (fill) Modifier.weight(1f) else Modifier.weight(1f, fill = false)) {
             Text(line, fontSize = 14.sp, lineHeight = 20.sp, color = fg)
             if (failed && small.isNotEmpty()) Text(small, fontSize = 12.sp, lineHeight = 16.sp, color = fg.copy(alpha = .85f), modifier = Modifier.padding(top = 2.dp))
@@ -987,7 +987,7 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
             vm.sessions.firstOrNull { it.str("name").isNotEmpty() && it.str("name") in words }
                 ?.let { s -> "session ${s.str("name")}" + s.str("project").let { if (it.isEmpty()) "" else " · $it" } }
         }
-        else -> mapOf("desktop" to "a desktop action", "discord" to "a Discord action")[a.action]
+        else -> if (a.action == "desktop") "a desktop action" else null
     }
     val (bg, fg) = when (a.outcome) {
         null -> cs.primaryContainer to cs.onPrimaryContainer
@@ -1008,14 +1008,14 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
         if (sent) return
         sent = true
         tapped = key
-        // Confirm once the server took the answer, Reject when it didn't go through (BEHAVIOR.md 7); nothing on the tap
+        // Confirm once the server took the answer, Reject when it didn't go through; nothing on the tap
         vm.decide(a.aid, approve, option, note, landed = { ok ->
             haptic.performHapticFeedback(if (ok) HapticFeedbackType.Confirm else HapticFeedbackType.Reject)
         }) { sent = false }
     }
     @Composable
     fun Label(key: String, text: String) = BusyLabel(text, slow && tapped == key)
-    // While an answer is on its way the tapped control keeps its colours and the rest are held at .38 (final/ 18)
+    // While an answer is on its way the tapped control keeps its colours and the rest are held at .38
     fun held(key: String) = Modifier.alpha(if (sent && tapped != key) .38f else 1f)
     val who = if (a.subagent) "${a.who}'s subagent" else a.who
     Card(highlight = a.outcome == null, corner = 28.dp, pad = 16.dp) {
@@ -1025,7 +1025,7 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
         if (perm && a.action == "plan") {
             Box(box.verticalScroll(rememberScrollState())) { Md(a.detail, 14, if (a.outcome == null) cs.onSurface else LocalExtra.current.text2) }
         } else {
-            val mono = !(question || a.action == "discord")
+            val mono = !question
             val text = if (perm && a.action == "edit") diffText(a.detail) else androidx.compose.ui.text.AnnotatedString(a.detail)
             Text(
                 text, fontSize = 13.sp, lineHeight = 19.sp,
@@ -1077,7 +1077,7 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
                     Label("note", if (question) "Answer" else if (a.action == "plan") "Keep planning" else "Deny with note")
                 }
             } else {
-                // final/ hides the auto-deny line while the card waits: the buttons say it waits
+                // The auto-deny line is hidden while the card waits: the buttons say it waits
                 // A full-width group: the main action largest and on the thumb side
                 if (perm) FilledTonalIconButton({ if (!sent) noting = true }, Modifier.size(52.dp).then(held("pen"))) {
                     Icon(PEN, if (question) "Write an answer" else "Add a note", Modifier.size(20.dp))
@@ -1238,7 +1238,7 @@ fun Composer(vm: Seimei) {
                 }
             }
         }
-        // final/ 02: a 52 pill on surface-container-high (attach 48 inside it), then the 52 round send
+        // A 52 pill on surface-container-high (attach 48 inside it), then the 52 round send
         Row(verticalAlignment = Alignment.Bottom) {
             val x = LocalTokens.current
             val d = vm.dictation

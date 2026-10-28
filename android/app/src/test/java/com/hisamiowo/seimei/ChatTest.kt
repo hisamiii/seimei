@@ -121,7 +121,7 @@ class ChatTest {
         assertEquals("make · 4m", r.line)
         val asking = JSONObject().put("pid", 8).put("name", "q").put("status", "waiting").put("question", true).put("ask", "Keep 4?")
         assertEquals("ask" to "Keep 4?", fromSession(asking, seen).let { it.state to it.line })
-        // The server words the wait (sessions.py waiting_text); without it the row says only where it waits.
+        // The server words the wait (sessions.rs waiting_text); without it the row says only where it waits.
         val prompt = JSONObject().put("pid", 9).put("name", "p").put("status", "waiting").put("waiting_text", "Waiting for your OK to run Bash")
         assertEquals("Waiting for your OK to run Bash", fromSession(prompt, seen).line)
         assertEquals("Waiting on the server", fromSession(JSONObject().put("pid", 11).put("status", "waiting"), seen).line)
@@ -260,19 +260,8 @@ class MarkdownTest {
         assertTrue(s.spanStyles.size >= 5)
     }
 
-    @Test fun discordPhrases() {
-        val tools = listOf("guilds", "dms", "read", "search", "send", "edit", "delete", "react", "mark_read")
-        val fallback = phrase("mcp__seimei__discord_nope", 1)
-        val one = tools.map { phrase("mcp__seimei__discord_$it", 1) }
-        assertTrue(one.none { it == fallback })
-        assertEquals(9, one.toSet().size)
-        assertEquals("read Discord 3 times", phrase("mcp__seimei__discord_read", 3))
-        assertEquals("sent 3 Discord messages", phrase("mcp__seimei__discord_send", 3))
-    }
-
     @Test fun pluginToolsPhraseLikeBefore() {
         // #61: the built-in plugins' tools have their own servers; old events keep the old names.
-        assertEquals(phrase("mcp__seimei__discord_send", 2), phrase("mcp__discord__discord_send", 2))
         assertEquals(phrase("mcp__seimei__browser_tabs", 1), phrase("mcp__browser__browser_tabs", 1))
         assertEquals("used screenshot", phrase("mcp__desktop__screenshot", 1))
         assertEquals("used x tool", phrase("mcp__mytool__x_tool", 1))

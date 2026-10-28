@@ -704,7 +704,7 @@ impl Push {
             .collect()
     }
 
-    /// One notification per waiting card (BEHAVIOR.md 4), each with its own Allow and Deny: tag approval:<aid> in the
+    /// One notification per waiting card, each with its own Allow and Deny: tag approval:<aid> in the
     /// app's "approvals" group. [only] is the card to (re)send and alert for; the rest stay as they are, and cards
     /// that settled are withdrawn.
     fn approvals(self: &Arc<Self>, only: Option<&str>) {
@@ -804,7 +804,6 @@ fn approval_note(a: &Value) -> Value {
                       "title": format!("{who} asks you"), "body": chars(q, 300), "plain": 1});
     }
     let target = a["target"].as_str().unwrap_or("");
-    let target = if a["action"] == "message" { format!("message {target}") } else { target.to_string() };
     let detail = a["detail"].as_str().unwrap_or("");
     let whole = format!("{who} wants to {target}");
     let (title, lead) = match target.split_once(' ') {

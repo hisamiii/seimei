@@ -34,7 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.json.JSONObject
 
-/** The web's sheet (final/ 14, 15): 28 corners, a 32 x 4 handle, 20 padding, the title at 22, a 14 gap, at most 88% tall. */
+/** The web's sheet: 28 corners, a 32 x 4 handle, 20 padding, the title at 22, a 14 gap, at most 88% tall. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun Sheet(onDismiss: () -> Unit, title: String, content: @Composable ColumnScope.() -> Unit) {
@@ -64,7 +64,7 @@ fun auditWhat(c: JSONObject): String {
     return if (raw == "{}") "" else raw
 }
 
-/** Menu, then Activity log (final/ 15): every tool call the guard saw, newest first, a day at a time, one segmented list a day. */
+/** Menu, then Activity log: every tool call the guard saw, newest first, a day at a time, one segmented list a day. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ActivitySheet(vm: Seimei, done: () -> Unit) {

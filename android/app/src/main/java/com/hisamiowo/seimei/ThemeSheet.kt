@@ -88,13 +88,13 @@ fun ThemeSheet(vm: Seimei, done: () -> Unit) {
                 }
             }
         }
-        // The phone's own extra, after what final/ 14 shows
+        // The phone's own extra, after the shared ones
         var icon by remember { mutableStateOf(appIcon(ctx)) }
         Choice("App icon", APP_ICONS, icon) { setAppIcon(ctx, it); icon = it }
     }
 }
 
-/** A labelled connected button group (final/ 14): 40 tall, 2 apart, 20 outer and 8 inner corners, the pick on primary. */
+/** A labelled connected button group: 40 tall, 2 apart, 20 outer and 8 inner corners, the pick on primary. */
 @Composable
 private fun Choice(title: String, options: List<Pair<String, String>>, current: String, pick: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme

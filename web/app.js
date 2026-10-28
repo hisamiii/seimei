@@ -31,7 +31,7 @@ function show(tab) {
   S.tab = tab;
   for (const t of TABS) pages[t].hidden = t !== tab;
   document.body.dataset.tab = tab;
-  // Top level (BEHAVIOR.md 1): the new destination fades in; no slide between nav destinations
+  // Top level: the new destination fades in; no slide between nav destinations
   if (was && was !== tab && !reduced()) pages[tab].animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: 'cubic-bezier(.2, 0, 0, 1)' });
   for (const b of document.querySelectorAll('.nav-item')) {
     const on = b.dataset.tab === tab;

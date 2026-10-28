@@ -25,7 +25,7 @@ export const toBottom = () => {
 export const following = () => pinned;
 log.addEventListener('scroll', () => { pinned = nearBottom(); jumpState(); }, { passive: true });
 
-// Jump to latest (BEHAVIOR.md 8): while the reader is scrolled up, a small button above the composer says how many
+// Jump to latest: while the reader is scrolled up, a small button above the composer says how many
 // rows came in below; it goes to the newest unanswered card when that sits above the view, else to the end
 let missed = 0;
 const jump = el('button', 'jump sl');
@@ -72,7 +72,7 @@ const ICONS = {
 };
 
 // The built-in plugins' tools (mcp__browser__browser_tabs) read like seimei's own, as they were named before them.
-const ours = name => name.replace(/^mcp__(desktop|discord|browser|music|queue)__/, 'mcp__seimei__');
+const ours = name => name.replace(/^mcp__(desktop|browser|music|queue)__/, 'mcp__seimei__');
 
 function phrase(name, n) {
   name = ours(name);
@@ -99,15 +99,6 @@ function phrase(name, n) {
   if (name === 'mcp__seimei__browser_close') return 'closed tabs';
   if (name === 'mcp__seimei__browser_download') return n === 1 ? 'started a download' : `started ${n} downloads`;
   if (name === 'mcp__seimei__browser_downloads') return 'checked the downloads';
-  if (name === 'mcp__seimei__discord_guilds') return 'looked at your servers';
-  if (name === 'mcp__seimei__discord_dms') return 'looked at your DMs';
-  if (name === 'mcp__seimei__discord_read') return n === 1 ? 'read Discord' : `read Discord ${n} times`;
-  if (name === 'mcp__seimei__discord_search') return n === 1 ? 'searched Discord' : `searched Discord ${n} times`;
-  if (name === 'mcp__seimei__discord_send') return n === 1 ? 'sent a Discord message' : `sent ${n} Discord messages`;
-  if (name === 'mcp__seimei__discord_edit') return n === 1 ? 'edited a Discord message' : `edited ${n} Discord messages`;
-  if (name === 'mcp__seimei__discord_delete') return n === 1 ? 'deleted a Discord message' : `deleted ${n} Discord messages`;
-  if (name === 'mcp__seimei__discord_react') return n === 1 ? 'reacted on Discord' : `reacted ${n} times on Discord`;
-  if (name === 'mcp__seimei__discord_mark_read') return n === 1 ? 'marked a channel read' : `marked ${n} channels read`;
   const short = name.startsWith('mcp__') ? name.split('__').pop().replace(/_/g, ' ') : name;
   return n === 1 ? `used ${short}` : `used ${short} ${n} times`;
 }
@@ -223,7 +214,7 @@ class Activity {
   }
 
   label() {
-    // The call under way reads in the present (final/ 10), live box or not yet
+    // The call under way reads in the present, live box or not yet
     const now = this.live_ ? this.liveName : [...this.rows.values()].reverse().find((r) => r.row.classList.contains('run'))?.name;
     const counts = new Map(this.counts);
     if (now) counts.set(now, counts.get(now) - 1);
@@ -350,7 +341,7 @@ const OUTCOME = { approved: 'Allowed', denied: 'Denied', restart: 'Canceled by a
 const ALLOW = 'M5 12.5l4.5 4.5L19 7.5';
 const ASKS = 'M4 5h16v11H9l-5 4zM10 9.2a2 2 0 1 1 2.6 1.9c-.4.2-.6.5-.6.9M12 13.6v.1';
 
-const SUB = { desktop: 'a desktop action', discord: 'a Discord action' };
+const SUB = { desktop: 'a desktop action' };
 
 function approvalSub(ev) {
   if (ev.options) return ev.sub || (ev.action === 'edit' ? home((ev.detail || '').split('\n')[0]).split('/').pop() : '');
@@ -408,7 +399,7 @@ function approvalCard(ev) {
   else if (perm && ev.action === 'plan') {
     body = el('div', 'body plan');
     body.innerHTML = md(ev.detail || '');
-  } else body = el('div', `body ${question || ev.action === 'discord' ? 'task' : 'cmd'}`, ev.detail);
+  } else body = el('div', `body ${question ? 'task' : 'cmd'}`, ev.detail);
   card.append(head, body);
 
   const opts = perm ? ev.options : [{ id: 'deny', label: 'Deny' }, { id: 'once', label: 'Allow' }];
@@ -551,7 +542,7 @@ const fileIcon = (kind) => FILE_ICON[kind] || FILE_ICON.doc;
 const size = (n) => (n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 const KIND_LABEL = { pdf: 'PDF', archive: 'Zip', audio: 'Audio', video: 'Video', image: 'Image', code: 'Code', text: 'Text', file: 'File' };
 
-// The server deletes files after 30 days (uploads.py KEEP_DAYS); older chips show as expired.
+// The server deletes files after 30 days (uploads.rs KEEP_DAYS); older chips show as expired.
 const KEEP = 30 * 86400;
 
 // A file as a download chip; the server always serves it as an attachment, never rendered.
@@ -628,7 +619,7 @@ function resets(t) {
 // A system line repeated within this many seconds counts up on the first one instead of showing again.
 const REPEAT = 900;
 
-// Events in lane "t" happened on their own (see events.py): they render in the trajectory, and the chat folds
+// Events in lane "t" happened on their own (see crates/core/src/events.rs): they render in the trajectory, and the chat folds
 // each run of them into one line.
 const inTraj = (ev) => ev.lane === 't';
 

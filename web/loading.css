@@ -1,5 +1,5 @@
 /* The M3 loading indicator: a shape that morphs and turns, for short waits.
-   From docs/m3x-review/tools/gen_loading.py: 7 shapes, 48 points each, so clip-path can interpolate them. */
+   7 shapes, 48 points each, so clip-path can interpolate them. */
 .loader {
   flex: none; width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center;
   background: var(--primary-container);
