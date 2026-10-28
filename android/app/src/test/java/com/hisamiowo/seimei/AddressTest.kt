@@ -21,8 +21,8 @@ class AddressTest {
     @Test fun refusals() {
         assertEquals(Address.Bad(HTTPS_ONLY), address("http://192.168.1.20:8417"))
         assertEquals(Address.Bad(HTTPS_ONLY), address("http://seimei.example.org"))
-        assertEquals(Address.Bad("Type the server's address."), address("   "))
-        assertEquals(Address.Bad("That is not a server address."), address("ftp://seimei.example.org"))
-        assertEquals(Address.Bad("That is not a server address."), address("not a host"))
+        assertEquals(Address.Bad("Type the server's address"), address("   "))
+        assertEquals(Address.Bad("That isn't a server address"), address("ftp://seimei.example.org"))
+        assertEquals(Address.Bad("That isn't a server address"), address("not a host"))
     }
 }
