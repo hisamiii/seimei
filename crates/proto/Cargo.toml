@@ -3,6 +3,7 @@ name = "seimei-proto"
 version = "0.1.0"
 description = "Clients for Claude Code's stream-json control protocol (what the Agent SDKs speak) and for ACP agents"
 edition.workspace = true
+license.workspace = true
 rust-version.workspace = true
 
 [dependencies]

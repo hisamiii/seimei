@@ -4,6 +4,7 @@ members = ["crates/proto", "crates/core", "crates/server", "crates/seimei", "cra
 
 [workspace.package]
 edition = "2024"
+license = "MIT"
 rust-version = "1.86"
 
 [workspace.dependencies]
