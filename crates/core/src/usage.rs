@@ -25,7 +25,7 @@ fn today() -> String {
     Local::now().date_naive().to_string()
 }
 
-/// A Unix time in local time, as `fmt` (strftime) writes it.
+/// usage.json: the windows as last read, the warnings given, the 5-hour history and today's tokens per session.
 pub struct Usage {
     path: PathBuf,
     /// rate-limits.jsonl: every reading as it came, with its time and session, so the windows' course can be shown.

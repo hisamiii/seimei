@@ -9,7 +9,7 @@ use std::sync::Mutex;
 
 use serde_json::{Map, Value, json};
 
-use crate::util::{now, read_json, write_json};
+use crate::util::{now, read_json, truthy, write_json};
 use crate::workers::Record;
 
 /// An ended item with no mark hides itself this long after its last activity.
@@ -59,14 +59,7 @@ impl Archive {
     /// Whether one of the user's own sessions is hidden now.
     pub fn session(&self, s: &Value) -> bool {
         // The status time, not the transcript's mtime: Claude touches an idle session's file without a turn.
-        let asking = match &s["question"] {
-            Value::Null | Value::Bool(false) => false,
-            Value::String(q) => !q.is_empty(),
-            Value::Number(n) => n.as_f64() != Some(0.0),
-            Value::Array(a) => !a.is_empty(),
-            _ => true,
-        };
-        let active = s["status"] != "idle" || asking;
+        let active = s["status"] != "idle" || truthy(&s["question"]);
         let key = format!("s:{}", s["session_id"].as_str().unwrap_or(""));
         hidden(&self.mark(&key), s["since"].as_f64().unwrap_or(0.0), active, now())
     }

@@ -5,11 +5,10 @@
 
 use std::path::Path;
 
-use chrono::{Local, TimeZone};
 use serde_json::{Value, json};
 
 use crate::events::Event;
-use crate::util::{chars, now};
+use crate::util::{chars, local_time, now};
 
 /// The PreCompact command hook prints this; Claude Code appends it to the compactor's instructions.
 const CHECKLIST: &str = include_str!("checklist.md");
@@ -41,12 +40,8 @@ fn user_lines(events: &[Event]) -> Vec<String> {
     let (mut out, mut size) = (vec![], 0);
     for e in said.iter().rev().take(USER_LAST) {
         let t = e["t"].as_f64().unwrap_or_else(now);
-        let when = Local.timestamp_opt(t as i64, 0).single().map(|t| t.format("%a %H:%M").to_string());
-        let line = format!(
-            "[{}] {}",
-            when.unwrap_or_default(),
-            clip(e["text"].as_str().unwrap_or("").trim(), USER_ONE, "cut here")
-        );
+        let text = clip(e["text"].as_str().unwrap_or("").trim(), USER_ONE, "cut here");
+        let line = format!("[{}] {text}", local_time(t, "%a %H:%M"));
         if !out.is_empty() && size + line.chars().count() > USER_MAX {
             break;
         }
