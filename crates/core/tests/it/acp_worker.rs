@@ -1,5 +1,5 @@
-//! A shikigami on an ACP agent (harness acp:<agent>), against tests/fakes/acp.py: its turns, permission cards and the
-//! guard, plan steps, MCP servers, stop, queued messages, resume and failures. No Claude Code and no model.
+//! A shikigami on an ACP agent (harness acp:<agent>), against tests/fakes/acp.py: its turns, permission cards and the guard, plan steps, MCP servers, stop, queued messages, resume and failures.
+//! No harness CLI and no model.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -251,12 +251,12 @@ async fn acp_shikigami() {
     w.stop().await;
     assert!(until(10, || w2.state() == "stopped").await, "{}", w.state());
 
-    // 10. What only Claude Code can do.
+    // 10. What only the default harness can do.
     for e in [w.tune(Some("high"), None, "the user").await.err(), w.hand_over().await.err(), w.release().await.err()] {
         assert!(e.as_deref().is_some_and(|e| e.contains("runs on the ACP agent fake")), "{e:?}");
     }
 
-    // Its mode meets each request after the guard, as Claude Code's would: a card only where the mode asks for one.
+    // Its mode meets each request after the guard, as the default harness's would: a card only where the mode asks for one.
     let n = || cards.lock().unwrap().len();
     let ran = |from| said(&w, from) == ["Ran it (allow-once)."];
     w.set_mode("bypassPermissions").await.unwrap();

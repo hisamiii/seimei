@@ -1,6 +1,4 @@
-//! tests/cases/screens.json: what seimei reads from a
-//! session's screen before it types into it (a draft, a dialog, the rating survey, an open question or permission
-//! prompt) and whether an option it is about to press is on screen.
+//! tests/cases/screens.json: what seimei reads from a session's screen before it types into it (a draft, a dialog, the rating survey, an open question or permission prompt) and whether an option it is about to press is on screen.
 
 use seimei_core::kitty::{dialog, draft, permission, question, survey, visible};
 use serde_json::{Value, json};

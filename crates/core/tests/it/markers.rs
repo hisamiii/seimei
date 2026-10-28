@@ -1,5 +1,4 @@
-//! tests/cases/markers.json: the dispatcher's reply markers,
-//! turn labels, event classes and reply quotes.
+//! tests/cases/markers.json: the dispatcher's reply markers, turn labels, event classes and reply quotes.
 
 use seimei_core::dispatcher::{Class, class, head, quoted, why};
 use serde_json::{Value, json};

@@ -1,5 +1,4 @@
-//! Every Claude Code session on the server, read from Claude Code's own session registry and transcripts; the user's
-//! ones for the page, and what they run into for the dispatcher.
+//! Every agent session on the server, read from the harness's session registry and transcripts; the user's ones for the page, and what they run into for the dispatcher.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -53,7 +52,7 @@ pub struct Live {
     pub active: f64,
     pub cwd: String,
     pub kind: String,
-    /// Its record in Claude Code's session registry.
+    /// Its record in the harness's session registry.
     pub rec: Value,
 }
 
@@ -222,8 +221,8 @@ pub fn mode_of(path: &Path) -> Option<String> {
 }
 
 /// The session as the chat log draws it: user and assistant texts, tool calls and their results. From byte start on
-/// (the next poll passes back "next"), or the transcript's last events on the first read. A start too far back (a
-/// page's copy from long ago) reads like a first read, with "reset": the copy is too old to extend.
+/// (the next poll passes back "next"), or the transcript's last events on the first read.
+/// A start too far back (a page's copy from long ago) reads like a first read, with "reset": the copy is too old to extend.
 pub fn timeline(path: &Path, start: Option<u64>, events: usize) -> Value {
     let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
     let mut tail = start.is_none_or(|st| size.saturating_sub(st) > TAIL);
@@ -268,7 +267,7 @@ pub fn timeline(path: &Path, start: Option<u64>, events: usize) -> Value {
     json!({"events": out, "next": next, "reset": tail})
 }
 
-/// The last lines of the command a session runs now: Claude Code sends its shell's output to a tasks file.
+/// The last lines of the command a session runs now: the harness sends its shell's output to a tasks file.
 pub fn running_output(pid: i64, lines: usize) -> Vec<String> {
     let mut best: Option<(f64, PathBuf)> = None;
     for c in children(pid) {
@@ -371,7 +370,7 @@ pub fn listing(own: &Own) -> Vec<Value> {
             "question": ask.is_some(), "ask": first.map(|q| q.get("question").cloned().unwrap_or(json!(""))),
             "project": project, "line": b.get("line").cloned().unwrap_or(json!("")), "context": b["context"],
             "doing": b["doing"], "model": model, "effort": b["effort"], "ask_detail": ask,
-            // A background session's daemon job (claude stop/attach take it), and the process start (pid reuse).
+            // A background session's daemon job (the harness's stop and attach take it), and the process start (pid reuse).
             "job": if rec["kind"] == "bg" { rec["jobId"].clone() } else { Value::Null },
             "proc_start": rec["procStart"], "reach": kitty::reachable(s.pid)}));
     }
@@ -392,9 +391,8 @@ struct Seen {
     fails: HashMap<String, u32>,
 }
 
-/// What the user's own sessions run into, as lines for the dispatcher: finished turns, questions, permission prompts,
-/// blocked calls, a tool failing again and again, a background task done, the session ending. The first sight of a
-/// session only takes its state, so a restart replays nothing.
+/// What the user's own sessions run into, as lines for the dispatcher: finished turns, questions, permission prompts, blocked calls, a tool failing again and again, a background task done, the session ending.
+/// The first sight of a session only takes its state, so a restart replays nothing.
 #[derive(Default)]
 pub struct SessionEvents {
     seen: HashMap<i64, Seen>,
@@ -570,8 +568,7 @@ fn oomd() -> String {
     }
 }
 
-/// Pushes the user's sessions to the page when anything but the clock changes, and tells the dispatcher what they run
-/// into.
+/// Pushes the user's sessions to the page when anything but the clock changes, and tells the dispatcher what they run into.
 pub struct Watcher {
     events: Arc<EventLog>,
     pool: Arc<Pool>,

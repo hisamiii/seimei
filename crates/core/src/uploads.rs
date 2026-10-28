@@ -1,6 +1,6 @@
 //! Files besides pictures, both ways: what the user attaches, and what the dispatcher hands over to download.
-//! Untrusted data. Each file sits alone in <state>/uploads/<id>/<safe name>, mode 600, outside anything that is run or
-//! imported, and is only ever served as a download (application/octet-stream, attachment).
+//! Untrusted data.
+//! Each file sits alone in <state>/uploads/<id>/<safe name>, mode 600, outside anything that is run or imported, and is only ever served as a download (application/octet-stream, attachment).
 
 use std::io::Write;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};

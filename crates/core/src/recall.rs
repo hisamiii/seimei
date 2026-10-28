@@ -1,7 +1,5 @@
-//! What the dispatcher must not lose to a compaction: the checklist its PreCompact hook hands the compactor, and the
-//! block seimei puts back on the first message after one (notes, open board items, running shikigami, the user's last
-//! words). Compaction is lossy and the built-in re-attachment goes by recency, so the must-keep state comes back
-//! deterministically.
+//! What the dispatcher must not lose to a compaction: the checklist its PreCompact hook hands the compactor, and the block seimei puts back on the first message after one (notes, open board items, running shikigami, the user's last words).
+//! Compaction is lossy and the built-in re-attachment goes by recency, so the must-keep state comes back deterministically.
 
 use std::path::Path;
 
@@ -10,7 +8,7 @@ use serde_json::{Value, json};
 use crate::events::Event;
 use crate::util::{chars, local_time, now};
 
-/// The PreCompact command hook prints this; Claude Code appends it to the compactor's instructions.
+/// The compaction hook prints this; the harness appends it to the compactor's instructions.
 const CHECKLIST: &str = include_str!("checklist.md");
 const NOTES_MAX: usize = 8000;
 const USER_LAST: usize = 5;
@@ -18,8 +16,7 @@ const USER_LAST: usize = 5;
 const USER_MAX: usize = 6000;
 const USER_ONE: usize = 2000;
 
-/// The dispatcher's own --settings JSON: a PreCompact hook that prints the checklist. Only the dispatcher loads it;
-/// ~/.claude stays as it is, so no shikigami and none of the user's sessions get it.
+/// The dispatcher's own settings: a compaction hook that prints the checklist, which no shikigami and none of the user's sessions get.
 pub fn settings(path: &Path) -> String {
     let _ = std::fs::write(path, CHECKLIST);
     let quoted = shlex::try_quote(&path.display().to_string()).map(|q| q.into_owned()).unwrap_or_default();

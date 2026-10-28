@@ -1,6 +1,6 @@
-//! What this server's Claude Code use would cost at pay-as-you-go API prices. Reads every transcript under the
-//! Claude config dir (seimei, shikigami and the user's own sessions), counts each API message once by its id (resumed
-//! sessions repeat messages) and prices it with the table below. Other machines on the same account are not included.
+//! What this server's agent use would cost at pay-as-you-go API prices.
+//! Reads every transcript in the harness's folder (seimei, shikigami and the user's own sessions), counts each API message once by its id (resumed sessions repeat messages) and prices it with the harness's table.
+//! Other machines on the same account are not included.
 
 use std::collections::HashMap;
 use std::os::unix::fs::MetadataExt;
@@ -170,8 +170,8 @@ struct Message {
 struct Scan {
     /// Per transcript: (inode, bytes read).
     offsets: HashMap<PathBuf, (u64, u64)>,
-    /// By message id; the line with the most output wins, since streamed messages are written once per content
-    /// block. A subagent's calls count for its parent session.
+    /// By message id; the line with the most output wins, since streamed messages are written once per content block.
+    /// A subagent's calls count for its parent session.
     messages: HashMap<String, Message>,
     /// Session titles (from /rename or the peer name) and folders, for sessions no longer running.
     titles: HashMap<String, String>,

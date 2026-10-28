@@ -1,9 +1,7 @@
 //! Adopting one of the user's sessions as a shikigami: the same conversation goes on in the background.
 //!
-//! At the session's next idle (or now, interrupting it with Esc), its Claude Code process ends and a shikigami resumes
-//! the same session id with a first message saying what happened. The user approves on the stop-a-session card. What
-//! ended with the process (background shells, dev servers) goes into the report; the kitty window closes on request
-//! (kitty's remote control may only type, so the shell left behind gets `exit`).
+//! At its next idle (or now, after Esc) and on the user's OK, the agent's process ends and a shikigami resumes the same session id.
+//! What ended with the process (background shells, dev servers) goes into the report; the terminal window gets `exit` on request, since remote control may only type.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -26,9 +24,8 @@ const SHELLS: [&str; 5] = ["bash", "zsh", "fish", "sh", "dash"];
 const WAIT_IDLE: f64 = 12.0 * 3600.0;
 /// After an interrupt, how long the turn may take to end.
 const SETTLE: u32 = 60;
-/// Claude Code's status "shell": its turn is over but a background shell still runs. Claude Code shows that as
-/// working, and the session may be waiting on the job, so adopting at idle waits too; past this, seimei hears what
-/// holds it.
+/// The registry's status "shell": its turn is over but a background shell still runs, which the harness shows as working.
+/// Adopting at idle waits on it too; past this, seimei hears what holds it.
 const SHELL_NOTE: f64 = 600.0;
 
 /// Claude Code runs each Bash call inside a shell that sources its snapshot; the call's own command sits below it.
@@ -559,8 +556,8 @@ async fn adoption(s: &Value, wish: &Wish) -> Adoption {
     }
 }
 
-/// The jobs that ended with the old session. A background job shows once: its wrapper gives the command, the
-/// processes below it repeat it.
+/// The jobs that ended with the old session.
+/// A background job shows once: its wrapper gives the command, the processes below it repeat it.
 fn ended_jobs(kids: &[(i64, String)]) -> Vec<String> {
     let mut died: Vec<String> = vec![];
     for (p, c) in kids {
@@ -610,7 +607,7 @@ fn first_message(name: &str, bg: bool, interrupted: bool, died: &[String]) -> St
     first + "Carry on with what you were doing; your final message is your report to the user."
 }
 
-/// End the user's Claude Code: a background job through `claude stop`, else SIGTERM (SIGKILL after 15 s).
+/// End the user's agent process: a background job through the harness's stop, else SIGTERM (SIGKILL after 15 s).
 async fn end(s: &Value, pid: i64, bg: bool) -> Result<(), String> {
     if bg {
         let job = as_text(&s["job"]);

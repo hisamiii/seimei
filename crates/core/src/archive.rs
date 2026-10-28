@@ -1,8 +1,7 @@
 //! Which agents the Agents list hides: archiving never stops, kills or deletes anything.
 //!
-//! A shikigami that ended, or one of the user's sessions idle that long, archives itself AUTO seconds after its last
-//! activity. The user archives and unarchives by hand too. Activity of the item's own after a manual archive brings it
-//! back. Marks live in archive.json: {"w:<worker id>" | "s:<session id>": {"at": archived by hand} | {"kept": unarchived}}.
+//! An ended shikigami or an idle user session archives itself AUTO seconds after its last activity; the user can archive and unarchive by hand, and new activity brings an item back.
+//! Marks live in archive.json: {"w:<worker id>" | "s:<session id>": {"at": archived by hand} | {"kept": unarchived}}.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -23,8 +22,7 @@ pub struct Archive {
     marks: Mutex<Map<String, Value>>,
 }
 
-/// Hidden or not, by its mark. last: when the item last did something of its own; active: it works or waits on the
-/// user right now.
+/// Hidden or not, by its mark. last: when the item last did something of its own; active: it works or waits on the user right now.
 pub fn hidden(mark: &Value, last: f64, active: bool, at: f64) -> bool {
     if active {
         return false;
@@ -58,7 +56,7 @@ impl Archive {
 
     /// Whether one of the user's own sessions is hidden now.
     pub fn session(&self, s: &Value) -> bool {
-        // The status time, not the transcript's mtime: Claude touches an idle session's file without a turn.
+        // The status time, not the transcript's mtime: the harness touches an idle session's file without a turn.
         let active = s["status"] != "idle" || truthy(&s["question"]);
         let key = format!("s:{}", s["session_id"].as_str().unwrap_or(""));
         hidden(&self.mark(&key), s["since"].as_f64().unwrap_or(0.0), active, now())

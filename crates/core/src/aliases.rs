@@ -1,7 +1,6 @@
 //! The dispatcher's own names for sessions ("dev", "asr"): they survive /rename and peer renames.
 //!
-//! An alias points at the session id, plus the pid and its start time for a /clear inside the same process (which gives
-//! the session a new id); a resumed session (new pid) keeps its id. aliases.json: {alias: {"sid", "pid", "start"}}.
+//! An alias points at the session id, plus the pid and its start time for a /clear inside the same process (which gives the session a new id); a resumed session (new pid) keeps its id. aliases.json: {alias: {"sid", "pid", "start"}}.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;

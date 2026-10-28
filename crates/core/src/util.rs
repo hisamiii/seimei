@@ -55,7 +55,7 @@ pub fn on_path(name: &str) -> bool {
     std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(name).is_file()))
 }
 
-/// A failed turn's reason for the chat. Claude Code's missing-login error says to run /login, which a phone cannot.
+/// A failed turn's reason for the chat. The harness's missing-login error says to run /login, which a phone cannot.
 pub fn turn_error(why: &str) -> String {
     if why.contains("/login") || why.contains("Not logged in") {
         format!("{why}. Log in on the server: run `claude` there and type /login.")
@@ -241,8 +241,7 @@ pub fn as_text(v: &serde_json::Value) -> String {
     }
 }
 
-/// A yes or no from a tool call or a page: true, a non-zero number, or "true", "yes" or "1" (models send strings at
-/// times, and "false" must stay false).
+/// A yes or no from a tool call or a page: true, a non-zero number, or "true", "yes" or "1" (models send strings at times, and "false" must stay false).
 pub fn flag(v: &serde_json::Value) -> bool {
     match v {
         serde_json::Value::Bool(b) => *b,

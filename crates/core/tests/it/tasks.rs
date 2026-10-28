@@ -1,5 +1,4 @@
-//! tests/cases/tasks.json: the board's store, the tasks tool,
-//! following shikigami, queues and drift.
+//! tests/cases/tasks.json: the board's store, the tasks tool, following shikigami, queues and drift.
 
 use seimei_core::tasks::{Board, Fields, NewTask};
 use seimei_core::util::now;

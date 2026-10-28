@@ -1,4 +1,4 @@
-//! Account usage: the plan's rolling windows as Claude Code reports them, today's tokens per seimei session, and
+//! Account usage: the plan's rolling windows as the harness reports them, today's tokens per seimei session, and
 //! (with cost.rs) what each session spent at API prices and what 1% of the 5-hour window costs, now and before.
 
 use std::collections::HashMap;
@@ -38,8 +38,8 @@ impl Usage {
     pub fn new(state: &Path, events: Option<Arc<EventLog>>) -> Usage {
         let path = state.join("usage.json");
         let mut data = read_json(&path).filter(Value::is_object).unwrap_or_else(|| json!({}));
-        // history: 5-hour windows by their reset time, the highest share used seen in each. seen: the running totals
-        // Claude Code last reported per session, which give each turn's share.
+        // history: the highest share used in each 5-hour window, by its reset time.
+        // seen: the running totals the harness last reported per session, which give each turn's share.
         for k in ["windows", "warned", "history", "seen"] {
             if !data[k].is_object() {
                 data[k] = json!({});
@@ -85,8 +85,8 @@ impl Usage {
         }
     }
 
-    /// From a rate-limit event (from: the dispatcher, "seimei", or a shikigami's name; session: its session id): every
-    /// window's share used and its reset. Each reading is also appended to rate-limits.jsonl.
+    /// From a rate-limit event (from: the dispatcher, "seimei", or a shikigami's name; session: its session id): every window's share used and its reset.
+    /// Each reading is also appended to rate-limits.jsonl.
     pub fn limit(&self, raw: &Value, from: &str, session: &str) {
         let line = json!({"t": (now() * 10.0).round() / 10.0, "from": from, "session": session, "info": raw});
         if let Err(e) = append_line(&self.log, &line.to_string()) {
@@ -143,8 +143,8 @@ impl Usage {
         d["warned"][key] = warned;
     }
 
-    /// Add one finished turn's tokens to today's tally. A session seen for the first time only counts when it is
-    /// fresh; otherwise its totals hold history from before seimei watched it.
+    /// Add one finished turn's tokens to today's tally.
+    /// A session seen for the first time only counts when it is fresh; otherwise its totals hold history from before seimei watched it.
     pub fn turn(&self, label: &str, session: &str, model_usage: Option<&Value>, fresh: bool) {
         let Some(models) = model_usage.and_then(Value::as_object).filter(|m| !m.is_empty()) else { return };
         let fields = [

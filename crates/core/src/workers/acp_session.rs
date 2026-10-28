@@ -3,8 +3,8 @@
 use super::*;
 
 impl Session {
-    /// Start its ACP agent: a new session (its id goes on the record), or the one it had, loaded. The agent gets the
-    /// granted plugins as stdio MCP servers and seimei's env for the shikigami, and runs its own login.
+    /// Start its ACP agent: a new session (its id goes on the record), or the one it had, loaded.
+    /// The agent gets the granted plugins as stdio MCP servers and seimei's env for the shikigami, and runs its own login.
     pub(super) async fn connect_acp(&mut self, agent: &str) -> Result<(), String> {
         if self.acp.is_some() {
             return Ok(());
@@ -92,7 +92,7 @@ impl Session {
                 self.chunk.push_str(&t);
                 self.chunk_until = Some(Instant::now() + CHUNK_PAUSE);
             }
-            // Its thinking stays out of the log, as Claude Code's does.
+            // Its thinking stays out of the log, as the default harness's does.
             Event::Update(Update::Thought(_)) => {}
             Event::Update(u) => {
                 self.said();
@@ -122,8 +122,8 @@ impl Session {
         }
     }
 
-    /// A call the agent ran without asking: the guard sees it only after the fact. One it would have blocked, or held
-    /// for a card, stops the turn; the agent hears why with its next message.
+    /// A call the agent ran without asking: the guard sees it only after the fact.
+    /// One it would have blocked, or held for a card, stops the turn; the agent hears why with its next message.
     pub(super) async fn unasked(&mut self, t: acp::ToolCall) {
         let (tool, input) = claude_shaped(&t);
         let r = self.w.rec();
@@ -262,8 +262,7 @@ pub fn claude_shaped(t: &acp::ToolCall) -> (String, Value) {
     }
 }
 
-/// A tool call as its event shows it: its kind and title, or for an agent that names its tools in the title (dsh),
-/// the Claude Code tool it amounts to and what it works on.
+/// A tool call as its event shows it: its kind and title, or for an agent that names its tools in the title (dsh), the common tool it amounts to and what it works on.
 fn tool_line(t: &acp::ToolCall) -> (String, String) {
     if !matches!(t.kind.as_str(), "other" | "") {
         return (t.kind.clone(), t.title.clone());
@@ -274,8 +273,8 @@ fn tool_line(t: &acp::ToolCall) -> (String, String) {
     (name, on.map_or_else(|| t.title.clone(), |v| first_line(v, 160)))
 }
 
-/// What a shikigami's ACP agent asks of seimei: permission, through the guard and then a card. Only the once options
-/// are ever picked: an agent's always rules would be rules seimei cannot see.
+/// What a shikigami's ACP agent asks of seimei: permission, through the guard and then a card.
+/// Only the once options are ever picked: an agent's always rules would be rules seimei cannot see.
 struct AcpSide {
     w: Arc<Worker>,
 }
@@ -348,10 +347,8 @@ pub enum Mode {
     Card,
 }
 
-/// An ACP agent's request under a shikigami's mode (Claude Code's names), as Claude Code would treat the call: its own
-/// tools and reads go on, bypass allows the rest, acceptEdits file edits, and what is left is a card (dontAsk and plan
-/// refuse it instead). A command or file call that came without its command or path is a card even in bypass: the
-/// guard had nothing to check. own: tool name prefixes that never ask (mcp__shikigami, granted plugins).
+/// An ACP agent's request under a shikigami's mode, as the default harness would treat the call: its own tools and reads go on, bypass allows the rest, acceptEdits file edits, and what is left is a card (dontAsk and plan refuse it instead).
+/// A command or file call that came without its command or path is a card even in bypass: the guard had nothing to check. own: tool name prefixes that never ask (mcp__shikigami, granted plugins).
 pub fn acp_mode(mode: &str, tool: &str, own: &[String]) -> Mode {
     if own.iter().any(|p| tool == p || tool.starts_with(&format!("{p}__"))) {
         return Mode::Allow;

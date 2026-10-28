@@ -1,6 +1,5 @@
-//! The dispatcher's own tools, served in-process as the `seimei` MCP server: Claude Code sends each JSON-RPC message
-//! as an `mcp_message` control request. data/tools.json is the server Claude Code sees (initialize and
-//! tools/list, the descriptions being prompt text).
+//! The dispatcher's own tools, served in-process as the `seimei` MCP server: the harness sends each JSON-RPC message as an `mcp_message` control request.
+//! data/tools.json is the server the harness sees (initialize and tools/list, the descriptions being prompt text).
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -173,8 +172,8 @@ fn repo_of(path: &str) -> String {
     }
 }
 
-/// A heads-up when someone else already works in the new worker's checkout: an active shikigami there, or a busy
-/// session of the user's in that project. Home is no checkout, so a worker in ~ gets none.
+/// A heads-up when someone else already works in the new worker's checkout: an active shikigami there, or a busy session of the user's in that project.
+/// Home is no checkout, so a worker in ~ gets none.
 fn writers(pool: &Pool, w: &Worker) -> Option<String> {
     let home = home().display().to_string();
     let cwd = w.rec().cwd;
@@ -222,8 +221,7 @@ fn upper_first(s: &str) -> String {
     it.next().map(|c| c.to_uppercase().chain(it).collect()).unwrap_or_default()
 }
 
-/// The summon tool as listed: tools.json's with the plan's models and contexts, plus a tools option when plugins can
-/// be granted and a harness option when config has ACP agents.
+/// The summon tool as listed: tools.json's with the plan's models and contexts, plus a tools option when plugins can be granted and a harness option when config has ACP agents.
 pub fn summon_spec(groups: &[String], agents: &[String]) -> Value {
     let mut t = (SERVER["tools"].as_array().into_iter().flatten()).find(|t| t["name"] == "summon").cloned().unwrap();
     let props = &mut t["inputSchema"]["properties"];
@@ -256,8 +254,7 @@ impl Tools {
         serve(&spec, message, |name, args| async move { self.call(&name, &args).await }).await
     }
 
-    /// The server as Claude Code sees it: summon offers the plugins' tool groups and config `[agents]`, and the watch
-    /// tool lists the plugins' triggers too.
+    /// The server as the harness sees it: summon offers the plugins' tool groups and config `[agents]`, and the watch tool lists the plugins' triggers too.
     fn spec(&self) -> Value {
         let mut spec = SERVER.clone();
         let agents: Vec<String> = self.pool.agents.get().into_iter().flatten().map(|(n, _)| n.clone()).collect();

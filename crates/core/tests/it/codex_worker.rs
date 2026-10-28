@@ -1,6 +1,5 @@
-//! A shikigami on `codex app-server` (an [agents] entry with protocol = "codex"), against tests/fakes/codex.py: its
-//! first turn with the prompt, a command through the guard and a card, a file change, the granted plugins in the
-//! thread's config, stop, and a resumed thread. No Codex and no model.
+//! A shikigami on `codex app-server` (an [agents] entry with protocol = "codex"), against tests/fakes/codex.py: its first turn with the prompt, a command through the guard and a card, a file change, the granted plugins in the thread's config, stop, and a resumed thread.
+//! No Codex and no model.
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};

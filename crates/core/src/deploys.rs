@@ -1,5 +1,4 @@
-//! The last deploy's outcome (deploy.sh writes deploy/last.json), told to whoever seimei resumes after a restart: a
-//! deploy ends with a restart that cuts off whoever started it.
+//! The last deploy's outcome (deploy.sh writes deploy/last.json), told to whoever seimei resumes after a restart: a deploy ends with a restart that cuts off whoever started it.
 
 use std::path::Path;
 use std::time::Duration;

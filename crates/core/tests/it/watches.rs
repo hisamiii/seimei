@@ -1,5 +1,4 @@
-//! tests/cases/watches.json: watch rules added, fired by the
-//! worker and session listings on the event stream, expired and removed, and what the dispatcher hears.
+//! tests/cases/watches.json: watch rules added, fired by the worker and session listings on the event stream, expired and removed, and what the dispatcher hears.
 
 use std::sync::{Arc, Mutex};
 

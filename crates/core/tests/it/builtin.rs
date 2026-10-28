@@ -1,5 +1,4 @@
-//! A stand-in built-in plugin for core's tests (the real ones are crates under plugins/, which depend on core): it is
-//! named music and runs as `seimei plugin music`, with no tools.
+//! A stand-in built-in plugin for core's tests (the real ones are crates under plugins/, which depend on core): it is named music and runs as `seimei plugin music`, with no tools.
 
 use std::sync::Arc;
 

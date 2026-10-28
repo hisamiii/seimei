@@ -1,10 +1,7 @@
-//! Phone notifications, following the user's rules. Only two things push:
-//! approval cards waiting (withdrawn once decided) and pings the dispatcher decides to send (a level each, an optional
-//! collapse key, and "reply ready"). Pings and approvals skip a phone with the app open; "reply ready" skips only one
-//! showing the chat. Messages are data-only, so the app builds every notification itself.
+//! Phone notifications: approval cards waiting (withdrawn once decided) and the dispatcher's pings, which skip a phone with the app open.
+//! Messages are data-only, so the app builds every notification itself.
 //!
-//! Three ways to reach a phone, whichever its app registered: Firebase Cloud Messaging (needs the service account key),
-//! UnifiedPush (Web Push, RFC 8291 and VAPID, RFC 8292) and the background connection (a websocket the app keeps open).
+//! A phone is reached the way its app registered: Firebase Cloud Messaging, UnifiedPush (Web Push, RFC 8291 and VAPID) or the background websocket.
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -65,8 +62,8 @@ fn hkdf(salt: &[u8], ikm: &[u8], info: &[u8], len: usize) -> Vec<u8> {
     out
 }
 
-/// A Web Push message body (RFC 8291, aes128gcm, one record) only the phone holding ua_public's key can read. The
-/// server key and salt are fresh each time unless given (tests use RFC 8291's example).
+/// A Web Push message body (RFC 8291, aes128gcm, one record) only the phone holding ua_public's key can read.
+/// The server key and salt are fresh each time unless given (tests use RFC 8291's example).
 pub fn encrypt(
     data: &[u8],
     ua_public: &[u8],
@@ -335,8 +332,8 @@ impl WebPush {
     }
 }
 
-/// The background connection: phones without a push app keep a websocket open (the app's foreground service) and get
-/// the same messages on it. What comes while one is away waits, newest per tag, until its ttl runs out.
+/// The background connection: phones without a push app keep a websocket open (the app's foreground service) and get the same messages on it.
+/// What comes while one is away waits, newest per tag, until its ttl runs out.
 #[derive(Default)]
 pub struct Stream {
     inner: Mutex<StreamInner>,
@@ -680,9 +677,8 @@ impl Push {
             .collect()
     }
 
-    /// One notification per waiting card, each with its own Allow and Deny: tag approval:<aid> in the
-    /// app's "approvals" group. [only] is the card to (re)send and alert for; the rest stay as they are, and cards
-    /// that settled are withdrawn.
+    /// One notification per waiting card, each with its own Allow and Deny: tag approval:<aid> in the app's "approvals" group.
+    /// [only] is the card to (re)send and alert for; the rest stay as they are, and cards that settled are withdrawn.
     fn approvals(self: &Arc<Self>, only: Option<&str>) {
         let (fresh, gone) = {
             let mut s = self.st.lock().unwrap();
@@ -768,8 +764,8 @@ impl Push {
     }
 }
 
-/// A card's notification. The title stays under M3's 29 characters where it can: "{who} wants to {target}" when that
-/// fits, else "{who} wants to {verb}" with the rest of the target leading the body, where Android wraps it.
+/// A card's notification.
+/// The title stays under M3's 29 characters where it can: "{who} wants to {target}" when that fits, else "{who} wants to {verb}" with the rest of the target leading the body, where Android wraps it.
 fn approval_note(a: &Value) -> Value {
     let who = a["who"].as_str().unwrap_or("seimei");
     let aid = a["aid"].as_str().unwrap_or("");

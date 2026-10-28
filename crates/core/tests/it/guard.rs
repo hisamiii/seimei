@@ -1,6 +1,5 @@
-//! tests/cases/guard.json against the Rust guard, in a throwaway home with the kinds of files the example rules protect,
-//! so its globs have something to match. HOME and XDG_CONFIG_HOME point there while the Env lock is held, and the
-//! rules a case asks for are written to its guard.toml.
+//! tests/cases/guard.json against the Rust guard, in a throwaway home with the kinds of files the example rules protect, so its globs have something to match.
+//! HOME and XDG_CONFIG_HOME point there while the Env lock is held, and the rules a case asks for are written to its guard.toml.
 
 use std::path::{Path, PathBuf};
 

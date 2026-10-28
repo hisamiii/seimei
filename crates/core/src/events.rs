@@ -18,8 +18,8 @@ const TURN: [&str; 5] = ["assistant", "tool", "tool_result", "image", "file"];
 /// A stalled client loses its stream past this many queued events; it reconnects and replays from its last id.
 const QUEUE: usize = 2000;
 
-/// The append-only event log (events.jsonl): everything the pages show, with dense ids. They start at 1, or where a
-/// cleared log took over the old one's last id, so clients that resume from that id miss nothing.
+/// The append-only event log (events.jsonl): everything the pages show, with dense ids.
+/// They start at 1, or where a cleared log took over the old one's last id, so clients that resume from that id miss nothing.
 /// The whole log stays in memory; clients replay from it and then follow live events.
 pub struct EventLog {
     inner: Mutex<Inner>,
@@ -177,8 +177,8 @@ impl Inner {
         }
     }
 
-    /// Where an event shows: lane "t" is the trajectory (what happened on its own: shikigami reports, restarts, notes,
-    /// and dispatcher turns an event started); the rest is the chat. Old events have no lane: chat.
+    /// Where an event shows: lane "t" is the trajectory (what happened on its own: shikigami reports, restarts, notes, and dispatcher turns an event started); the rest is the chat.
+    /// Old events have no lane: chat.
     fn lane(&mut self, ev: &Map<String, Value>) -> Map<String, Value> {
         let kind = ev.get("type").and_then(Value::as_str).unwrap_or("");
         let what = ev.get("event").and_then(Value::as_str);

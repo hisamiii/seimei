@@ -1,5 +1,5 @@
-//! tests/cases/views.json: cost, the weekly window, metrics and
-//! the archive. It sets TZ for the local-time cases under the Env lock.
+//! tests/cases/views.json: cost, the weekly window, metrics and the archive.
+//! It sets TZ for the local-time cases under the Env lock.
 
 use seimei_core::cost::{PRICES, Spend, Tokens, cost, week_start};
 use seimei_core::workers::Record;

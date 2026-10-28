@@ -1,9 +1,6 @@
 //! The task board: what seimei has queued, who has each item and where it stands, grouped by project.
-//! seimei keeps it current with its tasks tool; summon and adopt file a task for each new shikigami, and a linked
-//! task's state follows its shikigami (running, asks, review once it reports). The user ticks their own items off on
-//! the phone. Pages read it whole from /api/tasks and follow it live: every change goes out on the event stream as
-//! {"type": "tasks", ...} (not stored). Done items stay a day, then move to tasks-archive.json: the board stays
-//! short, the archive is searchable (/api/tasks/archive, the tool's archive action), and an update brings one back.
+//! A linked task's state follows its shikigami; every change goes out on the event stream as {"type": "tasks", ...}.
+//! Done items stay a day, then move to tasks-archive.json, which stays searchable; an update brings one back.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
@@ -26,9 +23,7 @@ pub const DONE_SHOWN: f64 = 24.0 * 3600.0;
 const ARCHIVE_KEEP: usize = 5000;
 /// A paused item (or one of a paused project) untouched this long may be dead: seimei asks the user, once.
 pub const PAUSED_STALE: f64 = 3.0 * 86400.0;
-/// A linked task's state for each shikigami state: it works, waits on a question, or finished and waits for seimei's
-/// check (failed ones too: seimei looks at those first); a stop or a restart parks it; given to the user, it is
-/// theirs to carry on (release makes them its owner).
+/// A linked task's state for each shikigami state: it works, waits on a question, or finished and waits for seimei's check (failed ones too: seimei looks at those first); a stop or a restart parks it; given to the user, it is theirs to carry on (release makes them its owner).
 const FOLLOW: [(&str, &str); 9] = [
     ("starting", "running"),
     ("running", "running"),
@@ -50,8 +45,7 @@ fn follows(wstate: &str) -> Option<&'static str> {
     FOLLOW.iter().find(|f| f.0 == wstate).map(|f| f.1)
 }
 
-/// How work sorts within a project, as a timeline: what is done, what waits for a check, the current item (working or
-/// asking), what is queued, what is parked.
+/// How work sorts within a project, as a timeline: what is done, what waits for a check, the current item (working or asking), what is queued, what is parked.
 fn rank(state: &str) -> usize {
     match state {
         "done" => 0,
@@ -103,8 +97,7 @@ pub struct Task {
     /// Delivered by its shikigami: it stays in review until seimei checks it.
     #[serde(default, skip_serializing_if = "is_false")]
     pub shipped: bool,
-    /// When seimei asked whether this paused item is dead, or the user kept it (an update with just the id): it is
-    /// not asked about again until it moves.
+    /// When seimei asked whether this paused item is dead, or the user kept it (an update with just the id): it is not asked about again until it moves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asked: Option<f64>,
     #[serde(flatten)]
@@ -486,8 +479,8 @@ impl Board {
         self.current_index(worker).map(|i| &self.data.tasks[i])
     }
 
-    /// A new shikigami's task: the one `link` names, or one of its own. A `task` that starts with seimei's #NN takes
-    /// that item, wherever it is: live, done (it opens again) or archived (it comes back).
+    /// A new shikigami's task: the one `link` names, or one of its own.
+    /// A `task` that starts with seimei's #NN takes that item, wherever it is: live, done (it opens again) or archived (it comes back).
     pub fn attach(
         &mut self,
         worker: &str,
@@ -558,8 +551,7 @@ impl Board {
         Ok(i)
     }
 
-    /// A shikigami moves on to one of its own queued items: that one runs and follows it; what it worked on
-    /// before goes back to the queue, unless it was shipped.
+    /// A shikigami moves on to one of its own queued items: that one runs and follows it; what it worked on before goes back to the queue, unless it was shipped.
     pub fn start(&mut self, worker: &str, name: &str, wstate: &str, tid: &str) -> Result<Task> {
         let i = self.own(name, tid)?;
         let at = now();
@@ -572,9 +564,7 @@ impl Board {
         Ok(t)
     }
 
-    /// seimei sends a shikigami on to `tid` (a message's task_id): it runs and follows the shikigami at once, wherever
-    /// it was (queued, done, archived); what the shikigami worked on before goes back to the queue, unless it is in
-    /// review.
+    /// seimei sends a shikigami on to `tid` (a message's task_id): it runs and follows the shikigami at once, wherever it was (queued, done, archived); what the shikigami worked on before goes back to the queue, unless it is in review.
     pub fn give(&mut self, worker: &str, owner: &str, tid: &str) -> Result<Task> {
         let i = self.live(tid)?;
         let at = now();
@@ -642,8 +632,9 @@ impl Board {
         self.changed();
     }
 
-    /// Where the board and the shikigami disagree, as one line for seimei; None when they agree. An item marked as
-    /// worked on that nobody works on goes back to the queue (one whose shikigami is gone loses it too). `workers`:
+    /// Where the board and the shikigami disagree, as one line for seimei; None when they agree.
+    /// An item marked as worked on that nobody works on goes back to the queue (one whose shikigami is gone loses it too).
+    /// `workers`:
     /// id, name and state of each.
     pub fn drift(&mut self, workers: &[(String, String, String)], at: f64) -> Option<String> {
         let mut out = vec![];
@@ -687,8 +678,7 @@ impl Board {
         Some(format!("[seimei] Board drift: {}{more}.", out[..out.len().min(6)].join("; ")))
     }
 
-    /// Paused items nobody touched for PAUSED_STALE (paused ones, and the live ones of a paused project), as one line
-    /// for seimei to ask the user whether they are dead; each once, and not after the user kept it (both mark it asked).
+    /// Paused items nobody touched for PAUSED_STALE (paused ones, and the live ones of a paused project), as one line for seimei to ask the user whether they are dead; each once, and not after the user kept it (both mark it asked).
     /// None when there are none.
     pub fn stale_note(&mut self, at: f64) -> Option<String> {
         let held: Vec<String> = self.data.projects.iter().filter(|p| p.paused).map(|p| p.name.clone()).collect();
@@ -746,8 +736,7 @@ impl Board {
         out
     }
 
-    /// The board for the dispatcher: per project as a timeline, the few done today first, then live work (review, the
-    /// current item, the queue); what is older sits in the archive, as a count.
+    /// The board for the dispatcher: per project as a timeline, the few done today first, then live work (review, the current item, the queue); what is older sits in the archive, as a count.
     pub fn text(&self, done_too: bool) -> String {
         let nexts = self.nexts();
         let at = now();

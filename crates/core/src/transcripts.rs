@@ -1,5 +1,4 @@
-//! Claude Code's transcripts, read for the lists: where a session's transcript is, and a brief of it (project, last
-//! line, context, the call or question open right now).
+//! Session transcripts, read for the lists: a brief of one (project, last line, context, the call or question open right now).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -76,8 +75,7 @@ fn votes(inp: &Value) -> Vec<String> {
     paths.into_iter().filter_map(project_of).collect()
 }
 
-/// Whole transcript rows (user and assistant, no sidechains or compaction summaries) from byte start on (a start
-/// mid-line skips to the next line), and where they end.
+/// Whole transcript rows (user and assistant, no sidechains or compaction summaries) from byte start on (a start mid-line skips to the next line), and where they end.
 pub(crate) fn rows_from(path: &Path, start: u64) -> (Vec<Value>, u64) {
     let Ok(data) = read_from(path, start) else { return (vec![], start) };
     let end = data.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);

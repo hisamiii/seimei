@@ -1,6 +1,5 @@
-//! Login: a password set on the server, passkeys added after the first login, cookie sessions, and paired phones
-//! running the seimei app, which sign a challenge with a key kept in the phone's keystore. Fields of auth.json this
-//! side does not know survive a save (the `other` maps).
+//! Login: a password set on the server, passkeys added after the first login, cookie sessions, and paired phones running the seimei app, which sign a challenge with a key kept in the phone's keystore.
+//! Fields of auth.json this side does not know survive a save (the `other` maps).
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
@@ -25,8 +24,8 @@ use crate::util::{
 /// How long a browser login lasts; a paired phone's session is shorter and renews by signing a fresh challenge.
 pub const SESSION_DAYS: f64 = 30.0;
 const CHALLENGE_SECONDS: f64 = 120.0;
-/// OWASP's minimum: 128 MiB and a few hundred ms per check, one check at a time. Older hashes keep
-/// their own parameters and are redone at the next good login.
+/// OWASP's minimum: 128 MiB and a few hundred ms per check, one check at a time.
+/// Older hashes keep their own parameters and are redone at the next good login.
 pub const SCRYPT: (u64, u64, u64) = (1 << 17, 8, 1);
 /// The throttle bounds guessing, so 8 characters are enough (tests/cases/password.json).
 pub const MIN_PASSWORD: usize = 8;
@@ -36,8 +35,8 @@ pub fn password_problem(pw: &str) -> Option<String> {
     (pw.chars().count() < MIN_PASSWORD).then(|| format!("use at least {MIN_PASSWORD} characters"))
 }
 
-/// Password throttle: free attempts, then a doubling lockout. Passkeys are not throttled, so someone guessing the
-/// password cannot lock the owner out.
+/// Password throttle: free attempts, then a doubling lockout.
+/// Passkeys are not throttled, so someone guessing the password cannot lock the owner out.
 const FREE_FAILURES: u32 = 5;
 const MAX_LOCK: f64 = 15.0 * 60.0;
 /// Pairing codes: short enough to type, single use, a few minutes. Too many wrong codes void every open code.
@@ -67,8 +66,7 @@ pub struct Auth {
     webauthn: Option<Webauthn>,
     scrypt: (u64, u64, u64),
     inner: Mutex<Inner>,
-    /// One password check at a time: guesses sent in parallel would all pass the lock check before any of them
-    /// counted as a failure.
+    /// One password check at a time: guesses sent in parallel would all pass the lock check before any of them counted as a failure.
     password_lock: tokio::sync::Mutex<()>,
     alarm: Mutex<Option<Alarm>>,
 }
@@ -333,11 +331,9 @@ impl Auth {
         Guard { g: Some(g), auth: self }
     }
 
-    /// auth.json changed on disk, by someone other than this server. Sessions, phones and passkeys only come from the
-    /// login, pair and passkey routes, so any new one there was written by hand (or by an agent: every shikigami runs
-    /// as this user and can write the file). Those are refused and dropped, with an urgent alarm. New pairing codes and
-    /// a new password are only reported: `seimei pair` and `seimei passwd` make them legitimately. Startup trusts the
-    /// file. It is a tripwire against an agent minting its own login, not a boundary (see docs/security.md).
+    /// auth.json changed on disk, by someone other than this server: new sessions, phones and passkeys only come from the routes, so they are dropped with an urgent alarm.
+    /// New pairing codes and a new password are only reported, since `seimei pair` and `seimei passwd` make them; startup trusts the file.
+    /// A tripwire against an agent minting its own login (every shikigami runs as this user), not a boundary: see docs/security.md.
     fn tripwire(&self, g: &mut Inner) {
         let now_ids = g.ids();
         let known = g.known.clone().expect("loaded");
@@ -536,8 +532,8 @@ impl Auth {
         self.save(&mut g);
     }
 
-    /// Lax, not Strict: a link tapped in another app must still arrive logged in. POSTs are guarded by the Origin
-    /// check instead.
+    /// Lax, not Strict: a link tapped in another app must still arrive logged in.
+    /// POSTs are guarded by the Origin check instead.
     pub fn set_cookie(&self, token: &str) -> String {
         let secure = if self.secure { "; Secure" } else { "" };
         format!(

@@ -1,11 +1,7 @@
-//! Per-task metrics for shikigami: what each one was given, what it cost, how it ended, and whether it needed more
-//! than one go. Everything comes from what seimei keeps already: the record, the main event log, the shikigami's own
-//! log and the transcripts (through cost.rs).
-//!
-//! - follow-ups: messages after its first done, from seimei or the user (resume notes after a restart are not).
-//! - reopened: a follow-up within 24 h of a done that asks for more work; a bare thanks or ok is not.
-//! - wall: from summoning to its last end (or now while it works); busy: only the time it was working, from each
-//!   message it got to the next done, ask, failure or stop.
+//! Per-task metrics for shikigami: what each one was given, what it cost, how it ended, and whether it needed more than one go.
+//! Everything comes from what seimei keeps already: the record, the main event log, the shikigami's own log and the transcripts (through cost.rs).
+//! Follow-ups are messages after its first done (not resume notes); reopened is a follow-up within 24 h that asks for more work.
+//! Wall time runs from summoning to its last end; busy time only from each message it got to the next done, ask, failure or stop.
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};

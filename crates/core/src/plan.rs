@@ -1,5 +1,5 @@
-//! What the account's plan affords: config [models], set once at startup. Summon's choices and defaults, adopt and
-//! the dispatcher's compaction point follow it; without the section, a Max plan's (opus, up to 1m of context).
+//! What the account's plan affords: config [models], set once at startup.
+//! Summon's choices and defaults, adopt and the dispatcher's compaction point follow it; without the section, a Max plan's (opus, up to 1m of context).
 
 use std::sync::OnceLock;
 

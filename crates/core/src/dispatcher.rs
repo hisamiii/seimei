@@ -1,8 +1,7 @@
-//! The permanent dispatcher session: one Claude Code conversation that survives restarts.
+//! The permanent dispatcher session: one agent conversation that survives restarts.
 //!
-//! One task owns the session and everything about its turns (`Turns`); the server and the rest reach it through a
-//! command channel. Permission prompts, the guard's hooks and seimei's own tools come in on the client's handler, on
-//! tasks of their own.
+//! One task owns the session and everything about its turns (`Turns`); the server and the rest reach it through a command channel.
+//! Permission prompts, the guard's hooks and seimei's own tools come in on the client's handler, on tasks of their own.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -26,10 +25,9 @@ use crate::tools::Tools;
 use crate::usage::Usage;
 use crate::util::chars;
 
-/// A reply that starts with one of these overrides where its turn's class puts it: chat: moves the rest of an event
-/// turn to the chat, trajectory: keeps a reply out of the chat (one that asks something, or answers events that need
-/// the user, still goes there). A first line "re: <words from one of the user's messages>" anchors the reply to that
-/// message. They combine, in any order.
+/// A reply that starts with one of these overrides where its turn's class puts it: chat: moves the rest of an event turn to the chat, trajectory: keeps a reply out of the chat (one that asks something, or answers events that need the user, still goes there).
+/// A first line "re: <words from one of the user's messages>" anchors the reply to that message.
+/// They combine, in any order.
 const MARKERS: [&str; 2] = ["chat:", "trajectory:"];
 const RE: &str = "re:";
 /// A re: line longer than this, or one that never ends, is text.
@@ -38,8 +36,7 @@ const RE_LINE_MAX: usize = 200;
 const RE_SEARCH: usize = 50;
 /// Info-only notes wait for the next turn; after this long without one, they start a turn of their own.
 const HOLD: Duration = Duration::from_secs(30 * 60);
-/// Tokens at which the dispatcher's context compacts (CLAUDE_CODE_AUTO_COMPACT_WINDOW); config [dispatcher]
-/// compact_window.
+/// Tokens at which the dispatcher's context compacts; config [dispatcher] compact_window.
 const COMPACT_WINDOW: i64 = 400_000;
 /// Built-in tools no session of seimei's has a use for: scheduling, notebooks, worktree switching, remote triggers,
 /// design sync, and pushes (seimei pings through notify).
@@ -152,7 +149,7 @@ pub fn why(text: &str) -> String {
     chars(&parts.join(", "), 80)
 }
 
-/// What Claude Code put in a turn by itself, named for the chat's mention of what started it.
+/// What the harness put in a turn by itself, named for the chat's mention of what started it.
 fn own_input(text: &str) -> Option<String> {
     static FROM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"<cross-session-message from="([^"]*)""#).unwrap());
     if text.contains("<task-notification>") {
@@ -166,8 +163,8 @@ fn own_input(text: &str) -> Option<String> {
     }
 }
 
-/// A message of seimei's or a card the user replies to: (the chip's text, the line seimei gets), or empty strings for
-/// anything else. A card names its shikigami (name and id) and gives its first line.
+/// A message of seimei's or a card the user replies to: (the chip's text, the line seimei gets), or empty strings for anything else.
+/// A card names its shikigami (name and id) and gives its first line.
 pub fn quoted(ev: &Value) -> (String, String) {
     let one = |v: &Value| v.as_str().map_or_else(|| if v.is_null() { String::new() } else { v.to_string() }, flat_case);
     let text = ev["text"].as_str().unwrap_or("");
@@ -263,8 +260,8 @@ pub enum Source {
     Event(String, Class),
 }
 
-/// Where an event turn's closing reply goes, by what started it. The reply's markers override it, except that
-/// trajectory: cannot keep what needs the user out of the chat.
+/// Where an event turn's closing reply goes, by what started it.
+/// The reply's markers override it, except that trajectory: cannot keep what needs the user out of the chat.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Class {
     /// Queue moves and waits, restarts, closed sessions: the trajectory.
@@ -464,8 +461,7 @@ impl Dispatcher {
             .replace("{guard}", &crate::guard::prompt_section())
     }
 
-    /// A resumed session keeps the system prompt it had until its next compaction: when a deploy changed the prompt,
-    /// the new and changed lines go to the dispatcher once as a note.
+    /// A resumed session keeps the system prompt it had until its next compaction: when a deploy changed the prompt, the new and changed lines go to the dispatcher once as a note.
     fn prompt_news(&self) {
         let file = self.state.join("prompt.md");
         let now = self.prompt();
@@ -493,8 +489,7 @@ impl Dispatcher {
         self.note(&text, Some("prompt"));
     }
 
-    /// The user's message from the page: shown at once, delivered with a [re: ...] line when it answers a message
-    /// or a card, and the list of files they attached. images: (media type, base64 data) of photos saved as `names`.
+    /// The user's message from the page: shown at once, delivered with a [re: ...] line when it answers a message or a card, and the list of files they attached. images: (media type, base64 data) of photos saved as `names`.
     pub fn send(
         &self,
         text: &str,
@@ -552,8 +547,8 @@ impl Dispatcher {
         let _ = self.tx.send(Cmd::Deliver { text, images, src: Some(Source::User(id)) });
     }
 
-    /// Something the dispatcher should know, delivered with its next message. A note with a key replaces the
-    /// earlier one with the same key; an empty one takes it back.
+    /// Something the dispatcher should know, delivered with its next message.
+    /// A note with a key replaces the earlier one with the same key; an empty one takes it back.
     pub fn note(&self, text: &str, key: Option<&str>) {
         let _ = self.tx.send(Cmd::Note { text: text.into(), key: key.map(String::from) });
     }
@@ -564,8 +559,7 @@ impl Dispatcher {
         let _ = self.tx.send(Cmd::Deliver { text: format!("[seimei] {text}"), images: vec![], src: Some(src) });
     }
 
-    /// The user's message for one of their sessions that seimei cannot type into (no kitty remote control): the
-    /// dispatcher passes it on with SendMessage, and the reply stays in the trajectory unless it did not arrive.
+    /// The user's message for one of their sessions that seimei cannot type into (no terminal remote control): the dispatcher passes it on with SendMessage, and the reply stays in the trajectory unless it did not arrive.
     pub fn relay(&self, name: &str, to: &str, text: &str) {
         let text = format!(
             "[seimei] The user sent this from the page of their session \"{name}\", which seimei cannot type into. \
@@ -615,7 +609,7 @@ impl Dispatcher {
             cwd: Some(cwd.clone()),
             model: Some(self.cfg.model.clone()),
             permission_mode: Some(self.cfg.mode.clone()),
-            // Whatever Claude Code would ask in a terminal becomes a card, which a chat message also settles.
+            // Whatever the agent would ask in a terminal becomes a card, which a chat message also settles.
             can_use_tool: true,
             // seimei's tools and its plugins carry their own cards; external MCP servers ask like the rest.
             allowed_tools: [vec!["mcp__seimei".into()], plugins.allowed(None)].concat(),
@@ -644,7 +638,7 @@ impl Dispatcher {
         }
     }
 
-    /// The session, for good: it reconnects (1 s, doubling to 60 s) whenever Claude Code exits or fails to start.
+    /// The session, for good: it reconnects (1 s, doubling to 60 s) whenever the agent exits or fails to start.
     pub async fn run(self: Arc<Self>) {
         let Some(mut rx) = self.rx.lock().unwrap().take() else { return };
         self.prompt_news();
@@ -699,7 +693,7 @@ impl Dispatcher {
     }
 }
 
-/// What Claude Code asks of seimei's session: permission cards, the guard's hooks, seimei's own tools.
+/// What the harness asks of seimei's session: permission cards, the guard's hooks, seimei's own tools.
 struct Seimei {
     approvals: Arc<Approvals>,
     guard: Arc<Guard>,
@@ -762,15 +756,13 @@ struct Turns {
     head: Option<String>,
     /// "t" while a reply marked trajectory: streams.
     block_lane: Option<&'static str>,
-    /// An event turn's last reply while it has no marker: held until it shows whether it ends the turn (then it goes
-    /// to the chat) or more of the turn follows (then it stays in the trajectory).
+    /// An event turn's last reply while it has no marker: held until it shows whether it ends the turn (then it goes to the chat) or more of the turn follows (then it stays in the trajectory).
     held: Option<Map<String, Value>>,
     /// What was sent since the last model step; see step().
     inputs: Vec<Source>,
     /// What the events that started this turn (and joined it) are: the closing reply's default place.
     class: Class,
-    /// What Claude Code itself put in since the last model step (a background task ending, a peer's message), named
-    /// for an event turn that has no input of seimei's.
+    /// What the harness itself put in since the last model step (a background task ending, a peer's message), named for an event turn that has no input of seimei's.
     own: Option<String>,
     rate_limits: std::collections::HashMap<String, Value>,
 }
@@ -815,7 +807,7 @@ impl Turns {
         }
     }
 
-    /// A connected session until Claude Code exits; returns why it ended.
+    /// A connected session until the agent exits; returns why it ended.
     async fn session(&mut self, client: &mut Client, rx: &mut mpsc::UnboundedReceiver<Cmd>) -> String {
         for c in std::mem::take(&mut self.pending) {
             if let Err(e) = write(client, c) {
@@ -909,8 +901,8 @@ impl Turns {
         }
     }
 
-    /// What goes to the session with a message: notes first, the board's drift on a new turn, the After compaction
-    /// block once, the style reminder last. Returns the message to write.
+    /// What goes to the session with a message: notes first, the board's drift on a new turn, the After compaction block once, the style reminder last.
+    /// Returns the message to write.
     fn deliver(&mut self, mut text: String, images: Vec<(String, String)>, src: Option<Source>) -> Option<Content> {
         self.idle_due = None;
         if !self.notes.is_empty() {
@@ -962,8 +954,8 @@ impl Turns {
         }
     }
 
-    /// Idle with a big context and a warm cache: compact now. The PreCompact hook adds the checklist, as it does for
-    /// every compaction; the next message gets the After compaction block.
+    /// Idle with a big context and a warm cache: compact now.
+    /// The PreCompact hook adds the checklist, as it does for every compaction; the next message gets the After compaction block.
     async fn idle_compact(&mut self, client: &Client) {
         if self.busy || !self.connected || !self.pending.is_empty() || !self.notes.is_empty() {
             return;
@@ -1068,8 +1060,7 @@ impl Turns {
                         // More of the turn: the held reply did not end it.
                         self.route_held(false);
                     }
-                    // trajectory: is for noise; a reply that asks the user something, or answers what needs them, goes
-                    // to the chat anyway.
+                    // trajectory: is for noise; a reply that asks the user something, or answers what needs them, goes to the chat anyway.
                     let asking = asks(&text);
                     let needs_user =
                         self.class == Class::User && self.events.turn().get("lane").is_some_and(|l| l == "t");
@@ -1140,8 +1131,7 @@ impl Turns {
 
     fn result(&mut self, msg: ResultMessage) -> After {
         self.d.usage.turn("seimei", &msg.session_id, msg.model_usage.as_ref(), false);
-        // The held reply ended the turn: it is what the turn has to say, so it goes to the chat, unless only noise
-        // started the turn.
+        // The held reply ended the turn: it is what the turn has to say, so it goes to the chat, unless only noise started the turn.
         self.route_held(self.class != Class::Noise);
         if msg.is_error {
             let lane = self.events.turn().get("lane").cloned().unwrap_or(json!("c"));
@@ -1162,8 +1152,7 @@ impl Turns {
     }
 
     /// At each model step, the inputs it has now seen decide the turn's lane: any user message makes it the user's
-    /// (from here on); a turn only events started, or one with no input (a background task finishing, a peer's
-    /// message), goes to the trajectory.
+    /// (from here on); a turn only events started, or one with no input (a background task finishing, a peer's message), goes to the trajectory.
     fn step(&mut self) {
         let took = std::mem::take(&mut self.inputs);
         if !took.is_empty() {
@@ -1187,7 +1176,7 @@ impl Turns {
             let why = match took.first() {
                 Some(Source::Event(w, _)) => w.clone(),
                 _ => {
-                    // Claude Code's own input started it: not noise. The chat names it, or says it came from Claude Code.
+                    // The harness's own input started it: not noise. The chat names it, or says it came from the harness.
                     self.class = self.class.max(Class::Other);
                     self.own.take().unwrap_or_else(|| "a notice from Claude Code".into())
                 }

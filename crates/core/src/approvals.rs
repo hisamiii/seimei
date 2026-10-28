@@ -1,5 +1,5 @@
-//! Approve/Deny cards: a call the user's guard rules hold for a card, a plugin's own cards, and the permission cards
-//! of the harnesses wait here for the user's tap. Unanswered, a card is denied after WAIT.
+//! Approve/Deny cards: a call the user's guard rules hold for a card, a plugin's own cards, and the permission cards of the harnesses wait here for the user's tap.
+//! Unanswered, a card is denied after WAIT.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -62,8 +62,8 @@ impl Approvals {
         }
     }
 
-    /// The user wrote in the chat while seimei's own permission card was open: that settles it as denied (seimei
-    /// cannot read the message until its tool call ends). Like typing during a prompt in the terminal.
+    /// The user wrote in the chat while seimei's own permission card was open: that settles it as denied (seimei cannot read the message until its tool call ends).
+    /// Like typing during a prompt in the terminal.
     pub fn chat(&self) {
         let mine: Vec<String> =
             self.open.lock().unwrap().iter().filter(|(_, w)| w.is_none()).map(|(a, _)| a.clone()).collect();
@@ -77,8 +77,9 @@ impl Approvals {
         self.card(what, who, worker, Some(WAIT), None).await.outcome
     }
 
-    /// Show a card and wait for the user. Without a wait it waits until answered (or its session ends), with one
-    /// reminder push after `remind`. Dropping the future (the session cancelled the request) ends it as cancelled.
+    /// Show a card and wait for the user.
+    /// Without a wait it waits until answered (or its session ends), with one reminder push after `remind`.
+    /// Dropping the future (the session cancelled the request) ends it as cancelled.
     pub async fn card(
         &self,
         what: Value,

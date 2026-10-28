@@ -1,11 +1,9 @@
-//! Shikigami: worker Claude sessions that seimei summons, watches and reports on.
+//! Shikigami: worker agent sessions that seimei summons, watches and reports on.
 //!
-//! Each one has a record (workers.json), its own log (workers/<id>.jsonl) and, while it works, a session owned by a
-//! task of its own; the rest reach that task through a command channel. The record is shared: permission cards,
-//! hooks and its tools (on the session's handler tasks) change it too.
+//! Each one has a record (workers.json), its own log (workers/<id>.jsonl) and, while it works, a session owned by a task of its own; the rest reach that task through a command channel.
+//! The record is shared: permission cards, hooks and its tools (on the session's handler tasks) change it too.
 //!
-//! Lock order: the board before the pool and the records, never the other way round (the dispatcher's drift line
-//! reads the pool under the board lock), so nothing here touches the board while it holds a pool or record lock.
+//! Lock order: the board before the pool and the records, never the other way round (the dispatcher's drift line reads the pool under the board lock), so nothing here touches the board while it holds a pool or record lock.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -67,11 +65,10 @@ pub const CONTEXTS: [(&str, f64); 4] =
 pub const ACTIVE: [&str; 2] = ["running", "asking"];
 /// How long a started process must stay up before adopt ends the user's session.
 const START_SETTLE: Duration = Duration::from_secs(1);
-/// A shikigami's process is closed this soon after its turn ends (each idle one holds about 330 MB); the next message
-/// resumes the session, a cold start of about 3 s. The few seconds let the process finish what it writes after its result.
+/// A shikigami's process is closed this soon after its turn ends (each idle one holds about 330 MB); the next message resumes the session, a cold start of about 3 s.
+/// The few seconds let the process finish what it writes after its result.
 const IDLE_DISCONNECT: Duration = Duration::from_secs(5);
-/// A turn with nothing to say (a stale task notification replayed on resume) is no report: wait this long for the
-/// real turn before calling the worker done.
+/// A turn with nothing to say (a stale task notification replayed on resume) is no report: wait this long for the real turn before calling the worker done.
 const TRIVIAL_GRACE: Duration = Duration::from_secs(30);
 const TRIVIAL: [&str; 2] = ["", "No response requested."];
 /// Its last background command ended and no turn started within this: it is asked to read the output and report.
@@ -80,10 +77,9 @@ const SHELLS_DONE: &str = "seimei: your background commands have finished. Check
      with your report.";
 /// An ACP agent's text chunks are one event; this long without another, what came so far is said.
 const CHUNK_PAUSE: Duration = Duration::from_millis(500);
-/// The only skills a shikigami sees (the rest, like the claude.ai document bundle, only fill its context).
+/// The only skills a shikigami sees (the rest, like the vendor's document bundle, only fill its context).
 const SKILLS: [&str; 2] = ["code-review", "simplify"];
-/// A worker cut off by a restart is resumed with this; one resumed this often within the window stays interrupted
-/// instead (a crash loop would otherwise keep poking it).
+/// A worker cut off by a restart is resumed with this; one resumed this often within the window stays interrupted instead (a crash loop would otherwise keep poking it).
 const RESUME: &str = "continue: seimei restarted, check your state first";
 const RESUME_CAP: usize = 3;
 const RESUME_WINDOW: f64 = 3600.0;
@@ -136,8 +132,7 @@ pub fn slug(name: &str) -> String {
     if s.is_empty() { "worker".into() } else { s }
 }
 
-/// A board title for a summoned task: its first sentence without seimei's #NN or a leading aside like "(user OK):",
-/// cut at a word near 60 chars.
+/// A board title for a summoned task: its first sentence without seimei's #NN or a leading aside like "(user OK):", cut at a word near 60 chars.
 pub fn title_of(task: &str, name: &str) -> String {
     static LEAD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*(#\d+\b|\([^)]*\))[\s:,.;-]*").unwrap());
     static ASIDE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*\([^)]*\)[\s:,.;-]*").unwrap());
@@ -164,13 +159,12 @@ pub fn title_of(task: &str, name: &str) -> String {
     if line.is_empty() { name.into() } else { line }
 }
 
-/// The first non-blank line, at most n chars (with … when cut).
+/// The first non-blank line, at most n chars, with an ellipsis when cut.
 pub fn first_line(text: &str, n: usize) -> String {
     let line = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
     if line.chars().count() <= n { line.into() } else { format!("{}…", chars(line, n.saturating_sub(1))) }
 }
 
-/// "Model opus → sonnet": the first letter up, the rest down.
 fn capitalize(s: &str) -> String {
     let mut it = s.chars();
     it.next().map(|c| c.to_uppercase().chain(it.flat_map(char::to_lowercase)).collect()).unwrap_or_default()
@@ -238,7 +232,7 @@ pub struct Record {
     /// What summon gave it: its first task.
     pub task: String,
     pub cwd: String,
-    /// The Claude model, or the harness for an ACP agent (which picks its own).
+    /// The model, or the harness for an ACP agent (which picks its own).
     pub model: String,
     pub effort: Option<String>,
     /// An effort set while it works: it applies at the next turn boundary.
@@ -260,7 +254,7 @@ pub struct Record {
     pub card: Option<String>,
     /// Its permission mode, when summon or the user set one.
     pub mode: Option<String>,
-    /// "acp:<agent>"; None for Claude Code.
+    /// "acp:<agent>"; None for the default harness.
     pub harness: Option<String>,
     /// The plugin groups summon granted.
     pub tools: Vec<String>,
@@ -322,8 +316,7 @@ pub struct Worker {
     pool: Weak<Pool>,
     /// Its session's task, started with the first command.
     tx: Mutex<Option<mpsc::UnboundedSender<Cmd>>>,
-    /// Permission requests numbered as Claude Code sent them, and the newest one its record shows: cards asked
-    /// together are handled on separate tasks, and the last one asked is the one it waits on.
+    /// Permission requests numbered as the harness sent them, and the newest one its record shows: cards asked together are handled on separate tasks, and the last one asked is the one it waits on.
     asked: AtomicU64,
     shown: AtomicU64,
     /// Its own tool calls (not its subagents'): every style::EVERY of them hears the user's style again.
@@ -371,7 +364,7 @@ impl Worker {
         self.rec.lock().unwrap().effort_next.as_ref().is_some_and(|e| !e.is_empty())
     }
 
-    /// The ACP agent it runs on (harness acp:<agent>); None for Claude Code.
+    /// The ACP agent it runs on (harness acp:<agent>); None for the default harness.
     pub fn agent(&self) -> Option<String> {
         self.rec.lock().unwrap().harness.as_deref().and_then(|h| h.strip_prefix("acp:")).map(String::from)
     }
@@ -420,8 +413,7 @@ impl Worker {
         self.pool().changed();
     }
 
-    /// A permission card of its is open (what it wants) or settled (None): the Agents page and its board task show
-    /// that it waits on the user, and seimei hears it.
+    /// A permission card of its is open (what it wants) or settled (None): the Agents page and its board task show that it waits on the user, and seimei hears it.
     fn waiting_card(&self, seq: u64, text: Option<String>) {
         if text.is_some() && self.shown.fetch_max(seq, Ordering::SeqCst) > seq {
             return;
@@ -467,8 +459,6 @@ impl Worker {
     fn env(&self) -> Vec<(String, String)> {
         let r = self.rec();
         let subagents = if r.subagents.is_empty() { &crate::plan::get().quick } else { &r.subagents };
-        // No auto-memory: a shikigami reports what it learned, and seimei decides what is kept. The todo tools
-        // (TaskCreate, TaskUpdate) are off by default for current models: the board mirrors them.
         let mut env = self.pool().plugins.env(&r.name);
         env.extend([
             (NO_CONNECTORS.0.to_string(), NO_CONNECTORS.1.to_string()),
@@ -491,7 +481,7 @@ impl Worker {
             cwd: Some(PathBuf::from(&r.cwd)),
             model: Some(r.model.clone()),
             permission_mode: Some(self.mode()),
-            // Whatever Claude Code would ask in a terminal becomes a card (in bypass only its safety checks ask: blocked).
+            // Whatever the agent would ask in a terminal becomes a card (in bypass only its safety checks ask: blocked).
             can_use_tool: true,
             // Its own tools and seimei's plugins carry their own cards; external MCP servers ask like the rest.
             allowed_tools: [vec!["mcp__shikigami".into()], plugins.allowed(Some(&groups))].concat(),
@@ -530,8 +520,8 @@ impl Worker {
         let _ = tx.as_ref().expect("a channel").send(c);
     }
 
-    /// Start the session if needed and hand it a message; folds into a running turn. The log keeps what the user
-    /// wrote (shown) and their files as chips; the session gets text, with the files' paths.
+    /// Start the session if needed and hand it a message; folds into a running turn.
+    /// The log keeps what the user wrote (shown) and their files as chips; the session gets text, with the files' paths.
     pub async fn send(self: &Arc<Self>, text: &str, shown: Option<&str>, files: Vec<Value>) -> Result<(), String> {
         if self.state() == "released" {
             return Err(format!(
@@ -555,8 +545,8 @@ impl Worker {
         let _ = rx.await;
     }
 
-    /// Start its claude process without a message: adopt does this before it ends the user's session. Whether the
-    /// process is up (one that exits right after the handshake shows here, not as an error).
+    /// Start its agent process without a message: adopt does this before it ends the user's session.
+    /// Whether the process is up (one that exits right after the handshake shows here, not as an error).
     pub async fn start(self: &Arc<Self>) -> Result<bool, String> {
         let (done, rx) = oneshot::channel();
         self.cmd(Cmd::Start { done });
@@ -573,7 +563,7 @@ impl Worker {
         *self.tx.lock().unwrap() = None;
     }
 
-    /// Close its process, if one runs, and wait until it has exited: two Claude Codes must never run one session.
+    /// Close its process, if one runs, and wait until it has exited: two agent processes must never run one session.
     async fn close(self: &Arc<Self>) {
         let running = self.tx.lock().unwrap().as_ref().is_some_and(|t| !t.is_closed());
         if running {
@@ -584,7 +574,7 @@ impl Worker {
     }
 
     /// The session is open on the server (after Open on server): its terminal window is still there, or a running
-    /// Claude Code holds the session (a trust prompt delays that, hence the window check). Blocking.
+    /// The agent holds the session (a trust prompt delays that, hence the window check). Blocking.
     pub fn on_laptop(&self) -> bool {
         if self.state() != "laptop" {
             return false;
@@ -603,8 +593,8 @@ impl Worker {
         tokio::task::spawn_blocking(move || w.on_laptop()).await.unwrap_or(false)
     }
 
-    /// Lend the session to the user: open it with `claude --resume` in a terminal window on the server. It stays a
-    /// shikigami: once the window is closed, the next message resumes it here.
+    /// Lend the session to the user: resume it in a terminal window on the server.
+    /// It stays a shikigami: once the window is closed, the next message resumes it here.
     pub async fn hand_over(self: &Arc<Self>) -> Result<Option<Value>, String> {
         if self.state() == "released" {
             return Err("it is your session already".into());
@@ -675,9 +665,9 @@ impl Worker {
         self.pool().open_terminal(self, title, extra).await
     }
 
-    /// Change its effort and model without restarting the task. The model switches at its next request; the effort
-    /// through Claude Code's /effort at the next turn boundary (sent mid-turn it would reach the model as text). Its
-    /// log and its record keep what changed.
+    /// Change its effort and model without restarting the task.
+    /// The model switches at its next request; the effort through the harness's effort command at the next turn boundary (sent mid-turn it would reach the model as text).
+    /// Its log and its record keep what changed.
     pub async fn tune(
         self: &Arc<Self>,
         effort: Option<&str>,
@@ -777,7 +767,7 @@ struct Session {
     w: Arc<Worker>,
     pool: Arc<Pool>,
     client: Option<Client>,
-    /// Its agent, for a shikigami on one (harness acp:<agent>) instead of Claude Code.
+    /// Its agent, for a shikigami on one (harness acp:<agent>) instead of the default harness.
     acp: Option<acp::Client>,
     /// An ACP turn runs; messages sent meanwhile wait in queued for the next one.
     turn: bool,
@@ -884,7 +874,7 @@ impl Session {
         self.shell_wait = false;
     }
 
-    /// The stream ended: the claude process is gone.
+    /// The stream ended: the agent process is gone.
     async fn ended(&mut self) {
         self.close().await;
         if ACTIVE.contains(&self.w.state().as_str()) {
@@ -990,8 +980,7 @@ impl Session {
             eprintln!("seimei: interrupting {}: {e}", self.w.name());
         }
         if (!self.tasks.is_empty() || self.grace.is_some() || self.shell_wait) && self.w.state() == "running" {
-            // No turn runs while it only waits for subagents (or after a trivial turn), so no result will say it
-            // stopped.
+            // No turn runs while it only waits for subagents (or after a trivial turn), so no result will say it stopped.
             self.tasks.clear();
             self.grace = None;
             self.shell_wait = false;
@@ -1072,8 +1061,7 @@ impl Session {
             Message::System(s) if s.subtype == "task_notification" => {
                 let id = s.data["task_id"].as_str().unwrap_or("");
                 self.tasks.remove(id);
-                // The last background shell ended: the process may close again, and a held report gets a turn to
-                // read the output (settle nudges it when none starts by itself).
+                // The last background shell ended: the process may close again, and a held report gets a turn to read the output (settle nudges it when none starts by itself).
                 if self.shells.remove(id) && self.shells.is_empty() {
                     if self.shell_wait {
                         self.grace = Some(Instant::now() + SHELL_GRACE);
@@ -1233,8 +1221,8 @@ impl Session {
         self.go_idle();
     }
 
-    /// No turn followed a trivial one: done, with the last thing it said. No turn followed the end of its background
-    /// commands: it is asked to read them and report.
+    /// No turn followed a trivial one: done, with the last thing it said.
+    /// No turn followed the end of its background commands: it is asked to read them and report.
     fn settle(&mut self) {
         self.grace = None;
         if std::mem::take(&mut self.shell_wait)
@@ -1275,7 +1263,7 @@ impl Session {
     }
 }
 
-/// What a shikigami's Claude Code asks of seimei: permission cards, the guard's hooks, its own tools.
+/// What a shikigami's harness asks of seimei: permission cards, the guard's hooks, its own tools.
 struct Side {
     w: Arc<Worker>,
 }
@@ -1356,7 +1344,7 @@ pub struct Summon {
     pub link: Option<String>,
     pub tools: Vec<String>,
     pub mode: Option<String>,
-    /// claude (None) or acp:<agent>, an agent from config [agents].
+    /// The default harness (None) or acp:<agent>, an agent from config [agents].
     pub harness: Option<String>,
 }
 
@@ -1372,8 +1360,7 @@ pub enum Out {
     Note(String, String),
 }
 
-/// A line joins the batch: a repeat moves to the end, keeps being urgent once it was, and counts (unless keyed: a
-/// keyed line replaces the one before).
+/// A line joins the batch: a repeat moves to the end, keeps being urgent once it was, and counts (unless keyed: a keyed line replaces the one before).
 pub fn queue(batch: &mut Batch, line: &str, urgent: bool, key: Option<&str>) {
     let k = key.unwrap_or(line).to_string();
     let old = batch.iter().position(|b| b.0 == k).map(|i| batch.remove(i));
@@ -1390,8 +1377,7 @@ pub fn queue(batch: &mut Batch, line: &str, urgent: bool, key: Option<&str>) {
     batch.push((k, line.into(), urgent, n));
 }
 
-/// Only what needs the dispatcher starts a turn (or joins the running one); info-only lines wait for its next turn
-/// even while it is busy, since a line that reaches a turn just as it ends starts a turn of its own.
+/// Only what needs the dispatcher starts a turn (or joins the running one); info-only lines wait for its next turn even while it is busy, since a line that reaches a turn just as it ends starts a turn of its own.
 pub fn flushed(batch: &Batch) -> Vec<Out> {
     let shown = |line: &str, n: u32| if n > 1 { format!("{line} (×{n})") } else { line.to_string() };
     let (gone, batch): (Vec<_>, Vec<_>) = batch.iter().partition(|b| b.1.is_empty());
@@ -1680,8 +1666,8 @@ impl Pool {
         out
     }
 
-    /// seimei's own sessions by session id, so listings can tell them from the user's. A released one is the
-    /// user's: it shows with their sessions.
+    /// seimei's own sessions by session id, so listings can tell them from the user's.
+    /// A released one is the user's: it shows with their sessions.
     pub fn own_sessions(&self) -> Own {
         let mut labels: Own = (self.all().iter())
             .map(|w| w.rec())
@@ -1865,7 +1851,7 @@ impl Pool {
         Ok(w)
     }
 
-    /// The command that resumes a shikigami's session in a terminal, as the plugins run it (claude-queue).
+    /// The command that resumes a shikigami's session in a terminal, as the plugins run it (the queue's wrapper).
     pub fn resume_argv(&self, w: &Worker) -> Vec<String> {
         let r = w.rec();
         self.plugins.wrap(&r.name, vec!["claude".into(), "--resume".into(), r.session_id])
@@ -1884,9 +1870,9 @@ impl Pool {
         }
     }
 
-    /// Adopting one of the user's sessions, step one: the shikigami's claude process starts on it while the user's
-    /// still runs (adopt ends that one next, then adopt_go). One released earlier comes back as itself: same id, name
-    /// and log. Returns the worker and its record from before (None: a new one), for adopt_undo.
+    /// Adopting one of the user's sessions, step one: the shikigami's agent process starts on it while the user's still runs (adopt ends that one next, then adopt_go).
+    /// One released earlier comes back as itself: same id, name and log.
+    /// Returns the worker and its record from before (None: a new one), for adopt_undo.
     pub async fn adopt_start(&self, a: &Adoption) -> Result<(Arc<Worker>, Option<Record>), String> {
         let (w, before) = match self.released(&a.session_id, &a.cwd) {
             Some(w) => {
@@ -2004,7 +1990,7 @@ impl Pool {
         w.send(first, None, vec![]).await
     }
 
-    /// The released shikigami this session is (Claude Code may have moved it on to a new transcript).
+    /// The released shikigami this session is (the harness may have moved it on to a new transcript).
     pub fn released(&self, session_id: &str, cwd: &str) -> Option<Arc<Worker>> {
         let now = transcript(session_id, cwd);
         self.all().into_iter().find(|w| {
@@ -2014,9 +2000,9 @@ impl Pool {
         })
     }
 
-    /// Workers that were running when seimei stopped lost their turn: each is resumed with a note to check its state
-    /// first (one never started gets its task again). An asking one had ended its turn already: it keeps waiting,
-    /// and the answer resumes its session. Returns the names resumed.
+    /// Workers that were running when seimei stopped lost their turn: each is resumed with a note to check its state first (one never started gets its task again).
+    /// An asking one had ended its turn already: it keeps waiting, and the answer resumes its session.
+    /// Returns the names resumed.
     pub fn startup(self: &Arc<Self>) -> Vec<String> {
         let at = now();
         let mut resumed = vec![];

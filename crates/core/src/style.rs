@@ -1,5 +1,5 @@
-//! The user's writing style: style.md in seimei's state folder, the one place its rules live. It rides on every
-//! message seimei and the shikigami get, and comes back every EVERY tool calls of a long turn, for the model only.
+//! The user's writing style: style.md in seimei's state folder, the one place its rules live.
+//! It rides on every message seimei and the shikigami get, and comes back every EVERY tool calls of a long turn, for the model only.
 
 use std::path::Path;
 

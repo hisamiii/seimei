@@ -1,20 +1,8 @@
-//! Plugins: optional groups of tools on top of seimei's core, each enabled in config.toml.
+//! Plugins: optional groups of tools on top of seimei's core, each enabled in config.toml ([plugins] in docs/config.md).
 //!
-//! ```toml
-//! [plugins]
-//! enabled = ["queue", "mytool"]
-//! [plugins.queue]            # a built-in plugin's own keys
-//! lib = "~/.local/lib/claude-queue"
-//! [plugins.mytool]           # an external MCP server, as Claude Code's mcpServers takes it
-//! command = "mytool-mcp"
-//! prompt = "## My tool\nWhat it is for and its rules."
-//! ```
-//!
-//! Each plugin is an MCP server named after it (its tools are mcp__<name>__<tool>) that Claude Code starts for each
-//! session that has it. A built-in runs as `seimei plugin <name>`; a folder ~/.config/seimei/plugins/<name>/ with a
-//! plugin.toml adds one in any language. seimei always has every enabled plugin; a shikigami gets the ones summon
-//! grants it, with the plugin's prompt section. A plugin raises a card through seimei's socket, with the token of the
-//! session it serves: the card names that session, and a plugin cannot answer cards.
+//! Each plugin is an MCP server named after it (tools mcp__<name>__<tool>) that the harness starts for each session that has it: a built-in as `seimei plugin <name>`, an external one from ~/.config/seimei/plugins/<name>/plugin.toml.
+//! seimei has every enabled plugin; a shikigami gets the ones summon grants it.
+//! A plugin raises a card through seimei's socket with its session's token: the card names that session, and a plugin cannot answer cards.
 
 pub mod link;
 
@@ -51,12 +39,11 @@ pub struct Factory {
     /// Its plugin.toml and its prompt section.
     pub manifest: &'static str,
     pub prompt: &'static str,
-    /// Its MCP server as Claude Code sees it: {"initialize", "tools"} as JSON.
+    /// Its MCP server as the harness sees it: {"initialize", "tools"} as JSON.
     pub spec: &'static str,
     /// Its tools run inside seimei (they share a connector), and its `seimei plugin` process forwards each call.
     pub hosted: bool,
-    /// The plugin from its [plugins.<name>] table and seimei's state folder, in seimei or in its own process; Err
-    /// keeps it off.
+    /// The plugin from its [plugins.<name>] table and seimei's state folder, in seimei or in its own process; Err keeps it off.
     pub make: Make,
 }
 
@@ -99,8 +86,7 @@ pub trait Builtin: Any + Send + Sync {
     }
     /// Its background work inside seimei (a connector's socket, a watcher), started once when the server is up.
     fn start(self: Arc<Self>, _host: Arc<Host>) {}
-    /// Which variant of its spec its `seimei plugin` process serves (the desktop: one per window manager), for a spec
-    /// that is a map of them.
+    /// Which variant of its spec its `seimei plugin` process serves (the desktop: one per window manager), for a spec that is a map of them.
     fn variant(&self) -> Option<String> {
         None
     }
@@ -134,7 +120,7 @@ pub struct Host {
     /// A line for the dispatcher at once, unbatched.
     pub note: Box<dyn Fn(&str) + Send + Sync>,
 }
-/// What an external entry may pass on to Claude Code (its mcpServers format).
+/// What an external entry may pass on to the harness (its mcpServers format).
 const MCP_KEYS: [&str; 6] = ["type", "command", "args", "env", "url", "headers"];
 
 /// Runs a shikigami's own tool for it: (worker id, tool, args) to the tool's result, None for no such worker.
@@ -143,7 +129,7 @@ pub type OwnTools = Box<dyn Fn(&str, &str, &Value) -> Option<Value> + Send + Syn
 /// One enabled plugin: its MCP server entry and the text it adds to the prompts.
 pub struct Plugin {
     pub name: String,
-    /// The server entry for Claude Code, without the session's env.
+    /// The server entry for the harness, without the session's env.
     mcp: Map<String, Value>,
     prompt: String,
     worker_note: String,
@@ -168,8 +154,8 @@ pub struct Plugins {
     pub own: OnceLock<OwnTools>,
 }
 
-/// A session token's session: who it is, the plugins it was given, and its claude process. Only that process and
-/// its children may use the token (another process of the user's could read it from the plugin's environment).
+/// A session token's session: who it is, the plugins it was given, and its agent process.
+/// Only that process and its children may use the token (another process of the user's could read it from the plugin's environment).
 #[derive(Clone)]
 struct Grant {
     who: String,
@@ -227,8 +213,7 @@ fn manifest(text: &str) -> Result<(String, Vec<Value>, String, String), String> 
 }
 
 impl Plugins {
-    /// The enabled plugins from config [plugins], with the built-ins the binary has; one that cannot load is skipped
-    /// with a warning.
+    /// The enabled plugins from config [plugins], with the built-ins the binary has; one that cannot load is skipped with a warning.
     pub fn load(cfg: &toml::Table, state: &Path, builtins: &[Factory]) -> Plugins {
         let exe = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or("seimei".into());
         Plugins::load_at(cfg, state, &exe, builtins)
@@ -393,7 +378,7 @@ impl Plugins {
         t
     }
 
-    /// The claude process a session runs in (it starts the session's plugins): set each time the session starts.
+    /// The agent process a session runs in (it starts the session's plugins): set each time the session starts.
     pub fn root(&self, who: &str, worker: Option<&str>, pid: Option<u32>) {
         let mut tokens = self.tokens.lock().unwrap();
         if let Some(g) = tokens.values_mut().find(|g| g.who == who && g.worker.as_deref() == worker) {
@@ -436,8 +421,8 @@ impl Plugins {
         out
     }
 
-    /// A shikigami's own tools (ask, board) as a stdio MCP server, for an agent that cannot be served in-process. Call
-    /// after servers(): its token then carries the granted plugins and these.
+    /// A shikigami's own tools (ask, board) as a stdio MCP server, for an agent that cannot be served in-process.
+    /// Call after servers(): its token then carries the granted plugins and these.
     pub fn own_server(&self, who: &str, worker: &str) -> Map<String, Value> {
         let mut names = (self.tokens.lock().unwrap().values())
             .find(|g| g.who == who && g.worker.as_deref() == Some(worker))
@@ -515,8 +500,7 @@ impl Plugins {
         }
     }
 
-    /// The socket plugins raise cards through and forward calls to: one JSON line in, one out. {token, op: "card",
-    /// card} gets {outcome}; {token, op: "call", plugin, tool, args} runs a hosted plugin's tool and gets its result.
+    /// The socket plugins raise cards through and forward calls to: one JSON line in, one out. {token, op: "card", card} gets {outcome}; {token, op: "call", plugin, tool, args} runs a hosted plugin's tool and gets its result.
     /// The token must come from its session's process tree, and a call from a session given that plugin.
     pub async fn listen(self: Arc<Self>, approvals: Arc<Approvals>) {
         let _ = std::fs::remove_file(&self.socket);
@@ -587,8 +571,7 @@ impl Plugins {
     }
 }
 
-/// guard.toml's rules for a built-in's own tool call: None to go on, or the reply that ends it. about: what the plugin
-/// knows (facts for the rules, and the card's title and detail); reads: files the call reads; kind: the card's action.
+/// guard.toml's rules for a built-in's own tool call: None to go on, or the reply that ends it. about: what the plugin knows (facts for the rules, and the card's title and detail); reads: files the call reads; kind: the card's action.
 pub async fn ask_guard(
     session: &dyn Session,
     plugin: &str,
@@ -740,7 +723,7 @@ pub async fn serve_stdio(name: &str, builtins: &[Factory]) -> Result<(), String>
     let var = |k: &str| std::env::var(k).unwrap_or_default();
     let factory = builtins.iter().find(|f| f.name == name);
     let mut spec = match (name, factory) {
-        // The shikigami's own tools, for an ACP agent (Claude Code has them in-process).
+        // The shikigami's own tools, for an ACP agent (the default harness has them in-process).
         ("shikigami", _) => crate::tools::SERVER["shikigami"].clone(),
         (_, Some(f)) => serde_json::from_str(f.spec).map_err(|e| format!("{name}'s tools: {e}"))?,
         _ => return Err(format!("no built-in plugin {name}")),
@@ -768,7 +751,7 @@ pub async fn serve_stdio(name: &str, builtins: &[Factory]) -> Result<(), String>
     });
     let spec = Arc::new(spec);
     let out = Arc::new(tokio::sync::Mutex::new(tokio::io::stdout()));
-    // The calls running, by request id, so Claude Code can cancel one.
+    // The calls running, by request id, so the harness can cancel one.
     let running: Arc<Mutex<HashMap<String, tokio::task::AbortHandle>>> = Arc::default();
     let mut lines = tokio::io::BufReader::new(tokio::io::stdin()).lines();
     while let Ok(Some(line)) = lines.next_line().await {

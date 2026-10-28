@@ -1,5 +1,4 @@
-//! tests/cases/sessionevents.json: what the user's sessions
-//! run into, as the lines the dispatcher hears after each scan.
+//! tests/cases/sessionevents.json: what the user's sessions run into, as the lines the dispatcher hears after each scan.
 
 use std::io::Write;
 

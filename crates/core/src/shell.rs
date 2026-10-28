@@ -1,5 +1,4 @@
-//! Reading shell commands well enough to guard them: a small parser for the shell's quoting, nesting, heredocs,
-//! redirections and brace expansion, and every simple command it finds with wrappers and nesting unpeeled.
+//! Reading shell commands well enough to guard them: a small parser for the shell's quoting, nesting, heredocs, redirections and brace expansion, and every simple command it finds with wrappers and nesting unpeeled.
 
 pub const WRAPPERS: [&str; 16] = [
     "env", "nice", "ionice", "timeout", "doas", "sudo", "setsid", "nohup", "exec", "command", "time", "stdbuf", "chrt",
@@ -52,8 +51,7 @@ struct Simple {
     nested: Vec<Script>,
 }
 
-/// A heredoc waiting for its body at the next newline: its delimiter, whether it was quoted, and its command's
-/// place (pipeline, stage).
+/// A heredoc waiting for its body at the next newline: its delimiter, whether it was quoted, and its command's place (pipeline, stage).
 struct Pending {
     delim: String,
     quoted: bool,
@@ -198,8 +196,7 @@ impl Lexer {
         }
     }
 
-    /// One word, quotes removed and $'...' decoded; $(...), backticks and <(...) stay as written, their command
-    /// lines parsed into `nested`.
+    /// One word, quotes removed and $'...' decoded; $(...), backticks and <(...) stay as written, their command lines parsed into `nested`.
     fn word(&mut self, depth: usize, nested: &mut Vec<Script>) -> String {
         let mut w = String::new();
         while let Some(c) = self.peek(0) {
@@ -491,8 +488,8 @@ pub fn unwrap(argv: &[String]) -> Vec<String> {
     argv[i..].to_vec()
 }
 
-/// Where a shell's command string is: after the first option cluster with a c (`-c`, `-lc`, `-ec`). Codex runs
-/// every command as `bash -lc '...'`.
+/// Where a shell's command string is: after the first option cluster with a c (`-c`, `-lc`, `-ec`).
+/// Codex runs every command as `bash -lc '...'`.
 fn script_at(argv: &[String]) -> Option<usize> {
     let opt = |a: &String| a.len() > 1 && a.starts_with('-') && !a.starts_with("--") && a.contains('c');
     let at = argv.iter().skip(1).position(opt)?;

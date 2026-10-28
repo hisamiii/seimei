@@ -1,6 +1,5 @@
-//! Permission modes, and the buttons of a card for Claude Code's permission prompts. Suggestions stay JSON in
-//! the control protocol's shape and go back as Claude Code sent them; tests/cases/permissions.json holds the
-//! answers.
+//! Permission modes, and the buttons of a card for the harness's permission prompts.
+//! Suggestions stay JSON in the control protocol's shape and go back as the harness sent them; tests/cases/permissions.json holds the answers.
 
 use std::time::Duration;
 
@@ -109,8 +108,8 @@ pub fn broad(r: &Rule) -> bool {
         && (words.len() == 1 || (words.len() == 2 && ["run", "exec", "x", "-c", "-e"].contains(&words[1])))
 }
 
-/// The card's buttons, and what each one answers with (by option id). Every option has a plain label; rule options
-/// also carry the rule and where it applies, for the cards to show the rule as code.
+/// The card's buttons, and what each one answers with (by option id).
+/// Every option has a plain label; rule options also carry the rule and where it applies, for the cards to show the rule as code.
 pub fn options(tool: &str, suggestions: &[Value], ceiling: &str) -> (Vec<Value>, Map<String, Value>) {
     if tool == "ExitPlanMode" {
         let go = if ceiling != "plan" { ceiling } else { "default" };
@@ -231,7 +230,7 @@ fn deny(message: &str) -> Decided {
     Decided { permission: Permission::Deny { message: message.into(), interrupt: false }, mode: None }
 }
 
-/// Claude Code's permission prompt as a card. worker: the shikigami's id (None for seimei, whose card counts as denied
+/// The harness's permission prompt as a card. worker: the shikigami's id (None for seimei, whose card counts as denied
 /// after DISPATCHER_WAIT; a shikigami's waits, with one reminder push). ceiling: the mode the plan card may go to;
 /// mode: the session's own mode now. waiting: told what the card is about while it is open, then None.
 pub async fn can_use(
@@ -251,8 +250,8 @@ pub async fn can_use(
         };
     }
     if mode == "bypassPermissions" {
-        // Claude Code still asks in bypass for its own safety checks ("This shell -c script runs rm and could not be
-        // checked"). Bypass stays card-free and blocks them.
+        // The harness still asks in bypass for its own safety checks ("This shell -c script runs rm and could not be checked").
+        // Bypass stays card-free and blocks them.
         let why = req.decision_reason.as_deref().unwrap_or("a safety check");
         return deny(&format!(
             "Claude Code blocked this even in bypass mode: {why}. Nobody was asked. Write the command so it can be \
@@ -306,9 +305,9 @@ pub async fn can_use(
     }
 }
 
-/// seimei's AskUserQuestion as chat cards, one per question: its options as buttons, a written answer through the
-/// note, Skip to leave it. The answers go back as the tool's own (updatedInput.answers, question to label), so the
-/// model reads them as the user's choice. A card counts as skipped after DISPATCHER_WAIT.
+/// seimei's AskUserQuestion as chat cards, one per question: its options as buttons, a written answer through the note, Skip to leave it.
+/// The answers go back as the tool's own (updatedInput.answers, question to label), so the model reads them as the user's choice.
+/// A card counts as skipped after DISPATCHER_WAIT.
 async fn ask(approvals: &Approvals, who: &str, input: &Value) -> Decided {
     let questions = input["questions"].as_array().cloned().unwrap_or_default();
     let mut answers = Map::new();

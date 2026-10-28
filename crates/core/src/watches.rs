@@ -1,8 +1,7 @@
 //! Watch rules the dispatcher registers: when something happens, ping the user with its text.
 //!
-//! A rule names a trigger and a target, the ping (title, body, level, key, reply) and an expiry. It fires once unless
-//! repeat is set; the dispatcher hears that it fired, and that it expired without firing. {name} and {detail} in the
-//! title or body become who it was about and what happened (a shikigami's summary, a session's question).
+//! A rule names a trigger and a target, the ping (title, body, level, key, reply) and an expiry.
+//! It fires once unless repeat is set; the dispatcher hears that it fired, and that it expired without firing. {name} and {detail} in the title or body become who it was about and what happened (a shikigami's summary, a session's question).
 //! Plugins add triggers of their own (the queue's).
 
 use std::collections::HashMap;

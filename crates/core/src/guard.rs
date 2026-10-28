@@ -1,7 +1,6 @@
-//! seimei's guard, in front of every tool call of the dispatcher and the shikigami. Its rules are the user's, in
-//! guard.toml (contrib/guard.example.toml shows them). Built in is what keeps the rules the user's and seimei's own
-//! secrets safe: agents cannot write, move or delete guard.toml, cannot read or write the secrets under seimei's
-//! data folder (SECRETS), and a command nested too deep to check is refused.
+//! seimei's guard, in front of every tool call of the dispatcher and the shikigami.
+//! Its rules are the user's, in guard.toml (contrib/guard.example.toml shows them).
+//! Built in is what keeps the rules the user's and seimei's own secrets safe: agents cannot write, move or delete guard.toml, cannot read or write the secrets under seimei's data folder (SECRETS), and a command nested too deep to check is refused.
 //! tests/cases/guard.json holds it to its decisions.
 
 use std::collections::{BTreeMap, HashMap};
@@ -112,8 +111,7 @@ fn alternatives(p: &str) -> Vec<String> {
 
 type Comps = Vec<Vec<char>>;
 
-/// A rule's path: each alternative as components from /, also with its links followed, and the components that name it
-/// inside any word (a path built in code: f"{home}/.cloudflared/cert.pem").
+/// A rule's path: each alternative as components from /, also with its links followed, and the components that name it inside any word (a path built in code: f"{home}/.cloudflared/cert.pem").
 struct PathPat {
     alts: Vec<Comps>,
     names: Vec<Comps>,
@@ -316,8 +314,9 @@ struct Loaded {
 
 static LOADED: LazyLock<Mutex<Loaded>> = LazyLock::new(Mutex::default);
 
-/// The rules in guard.toml, read again when the file changes. No file: no rules. A file that does not parse keeps the
-/// last good rules, and its error waits in take_error() for the user to see.
+/// The rules in guard.toml, read again when the file changes.
+/// No file: no rules.
+/// A file that does not parse keeps the last good rules, and its error waits in take_error() for the user to see.
 pub fn rules() -> Arc<Rules> {
     let path = crate::util::guard_file();
     let meta = std::fs::metadata(&path).ok();
@@ -352,8 +351,8 @@ pub fn rules() -> Arc<Rules> {
     l.rules.clone()
 }
 
-/// seimei's own secrets under its data folder (and the dev server's): no agent reads or writes them, whatever
-/// guard.toml allows. Only a deny of the user's comes first.
+/// seimei's own secrets under its data folder (and the dev server's): no agent reads or writes them, whatever guard.toml allows.
+/// Only a deny of the user's comes first.
 const SECRETS: [(&str, &str); 6] = [
     ("{,dev/}auth.json", "seimei's login secrets"),
     ("{,dev/}unlock", "the screen password"),
@@ -484,8 +483,8 @@ pub fn name_matches(pat: &[char], name: &[char]) -> bool {
     }
 }
 
-/// Whether a path matches a glob, component by component; `**` takes any number of them. With `below`, a path the
-/// glob goes on beneath counts too.
+/// Whether a path matches a glob, component by component; `**` takes any number of them.
+/// With `below`, a path the glob goes on beneath counts too.
 fn path_matches(pat: &[Vec<char>], path: &[Vec<char>], below: bool) -> bool {
     match (pat.first(), path.first()) {
         (Some(p), _) if p[..] == ['*', '*'] => {
@@ -502,8 +501,8 @@ fn chars(path: &Path) -> Comps {
     parts(&path.to_string_lossy()).iter().map(|c| c.chars().collect()).collect()
 }
 
-/// What a glob expands to on disk, breadth first, at most GLOB_LIMIT names looked at. `**` does not go down links,
-/// but the rest of the glob is tried in a linked folder.
+/// What a glob expands to on disk, breadth first, at most GLOB_LIMIT names looked at.
+/// `**` does not go down links, but the rest of the glob is tried in a linked folder.
 fn glob_hits(pattern: &Path) -> Vec<PathBuf> {
     let pat: Vec<String> = parts(&pattern.to_string_lossy()).iter().map(|c| c.to_string()).collect();
     let mut todo = std::collections::VecDeque::from([(PathBuf::from("/"), 0)]);
@@ -600,8 +599,7 @@ impl<'a> Piece<'a> {
     }
 }
 
-/// Whether a rule's path takes in what a piece touches: by name inside the word, where it points (links followed), or
-/// by a glob that reaches it.
+/// Whether a rule's path takes in what a piece touches: by name inside the word, where it points (links followed), or by a glob that reaches it.
 fn path_hit(pat: &PathPat, p: &Piece) -> bool {
     let have: Vec<Vec<char>> = parts(&p.word).iter().map(|c| c.chars().collect()).collect();
     let named = |seq: &Comps| have.windows(seq.len()).any(|w| w.iter().zip(seq).all(|(n, s)| name_matches(s, n)));
@@ -619,8 +617,8 @@ fn path_hit(pat: &PathPat, p: &Piece) -> bool {
     p.globs.iter().any(|g| pat.alts.iter().any(|a| glob_reaches(g, a, p.deep)))
 }
 
-/// Whether a glob reaches what a rule's path matches, looking on disk from the rule's fixed part (a folder too big to
-/// look through counts as reached). A glob that names a folder above it reaches it when the command goes deep.
+/// Whether a glob reaches what a rule's path matches, looking on disk from the rule's fixed part (a folder too big to look through counts as reached).
+/// A glob that names a folder above it reaches it when the command goes deep.
 fn glob_reaches(glob: &Comps, alt: &Comps, deep: bool) -> bool {
     let fixed = alt.iter().take_while(|c| !c.iter().any(|x| matches!(x, '*' | '?' | '['))).count();
     let root: PathBuf = std::iter::once("/".to_string()).chain(alt[..fixed].iter().map(|c| c.iter().collect())).collect();
@@ -670,8 +668,7 @@ fn substituted(word: &str) -> Option<Vec<Cmd>> {
     Some(commands(inner).into_iter().flatten().collect())
 }
 
-/// Whether commands feed each other stage by stage: later in one pipeline, or the earlier ones in a substitution the
-/// last one is given (`bash <(curl ..)`, `sh -c "$(curl ..)"`, `bash < <(curl ..)`).
+/// Whether commands feed each other stage by stage: later in one pipeline, or the earlier ones in a substitution the last one is given (`bash <(curl ..)`, `sh -c "$(curl ..)"`, `bash < <(curl ..)`).
 fn pipe_hits(stages: &[Vec<Pat>], cmds: &[&Cmd]) -> bool {
     fn from(stages: &[Vec<Pat>], cmds: &[&Cmd], prev: &Cmd) -> bool {
         let Some((first, rest)) = stages.split_first() else { return true };
@@ -724,8 +721,7 @@ fn rule_hits(r: &Rule, call: &Call, piped: bool, p: &Piece) -> bool {
     r.paths.is_empty() || (p.op & r.ops != 0 && !p.word.is_empty() && r.paths.iter().any(|pp| path_hit(pp, p)))
 }
 
-/// Which of a command's words are no paths: grep's pattern and sed's script (the first operand unless -e or -f gave
-/// it), what -e and an option's value hold, find's tests, and what --exclude, --ignore or --include leave out.
+/// Which of a command's words are no paths: grep's pattern and sed's script (the first operand unless -e or -f gave it), what -e and an option's value hold, find's tests, and what --exclude, --ignore or --include leave out.
 fn not_paths(prog: &str, argv: &[String]) -> Vec<bool> {
     let mut out = vec![false; argv.len()];
     let pattern = GREPS.contains(&prog) || prog == "sed";
@@ -854,10 +850,8 @@ fn bash_pieces<'a>(cmds: &[&'a Cmd], cwd: &Path, flat: &str) -> Vec<Piece<'a>> {
         }
     }
     if code {
-        // Code's string literals could be read, written or run: one used whole as a path (from / or ~, or with a
-        // folder in it), from here or from home, or with a rule's names in it (HOME + '/.cloudflared/cert.pem'). A
-        // bare name ("auth.json" in a list of names to skip) points nowhere, and a folder above what a rule holds is
-        // not taken as walked; the guard's own file is still known by name.
+        // Code's string literals could be read, written or run: one used whole as a path (from / or ~, or with a folder in it), from here or from home, or with a rule's names in it (HOME + '/.cloudflared/cert.pem').
+        // A bare name ("auth.json" in a list of names to skip) points nowhere, and a folder above what a rule holds is not taken as walked; the guard's own file is still known by name.
         for m in LITERALS.iter().flat_map(|p| p.captures_iter(flat)) {
             let lit = &m[1];
             let whole = lit.starts_with(['/', '~']) || lit.trim_end_matches('/').contains('/');
@@ -900,8 +894,8 @@ fn tool_pieces<'a>(tool: &str, inp: &Value, cwd: &Path, reads: &[PathBuf]) -> Ve
     out
 }
 
-/// What guard.toml's rules say about a call: for each piece of it the first rule that matches, and of those the
-/// strictest. None: no rule matches. facts: what a plugin knows about the call; reads: files a plugin tool will read.
+/// What guard.toml's rules say about a call: for each piece of it the first rule that matches, and of those the strictest.
+/// None: no rule matches. facts: what a plugin knows about the call; reads: files a plugin tool will read.
 pub fn decide(tool: &str, inp: &Value, cwd: &str, facts: &Value, reads: &[PathBuf]) -> Option<Verdict> {
     let user = decide_by(&rules(), tool, inp, cwd, facts, reads);
     if user.as_ref().is_some_and(|v| v.action == Action::Deny) {
@@ -976,9 +970,8 @@ fn empties_rules_dir(p: &Piece, dir: &[Comps]) -> bool {
     }
 }
 
-/// What seimei refuses whatever guard.toml says: an agent writing, replacing, moving or deleting guard.toml (its
-/// folder too, which takes it along), and a command nested too deep to check (which could hide that). Naming the
-/// file or its folders is fine: reading, listing, searching.
+/// What seimei refuses whatever guard.toml says: an agent writing, replacing, moving or deleting guard.toml (its folder too, which takes it along), and a command nested too deep to check (which could hide that).
+/// Naming the file or its folders is fine: reading, listing, searching.
 pub fn builtin(tool: &str, inp: &Value, cwd: &str) -> Option<String> {
     let cwd = Path::new(cwd);
     let (file, dir) = rules_targets();
@@ -1001,8 +994,7 @@ pub fn builtin(tool: &str, inp: &Value, cwd: &str) -> Option<String> {
     let Some(cmds) = all.iter().map(Option::as_ref).collect::<Option<Vec<&Cmd>>>() else {
         return Some("a command nested too deep to check".into());
     };
-    // What may be written: redirects, writers' operands, NAME=value words and code's string literals (where those
-    // end up is not known).
+    // What may be written: redirects, writers' operands, NAME=value words and code's string literals (where those end up is not known).
     let hit = bash_pieces(&cmds, cwd, &flat)
         .iter()
         .any(|p| (p.op & WRITE != 0 && names_rules(p, &file, true)) || empties_rules_dir(p, &dir));
@@ -1177,8 +1169,8 @@ impl Guard {
         }
     }
 
-    /// The guard's answer for a call, with what the plugins know about it. Built-in plugins' own tools ask the guard
-    /// themselves; only the built-in refusals apply to them here.
+    /// The guard's answer for a call, with what the plugins know about it.
+    /// Built-in plugins' own tools ask the guard themselves; only the built-in refusals apply to them here.
     async fn verdict(&self, tool: &str, args: &Value, cwd: &str) -> (Option<Verdict>, Option<About>) {
         self.rules_error();
         if let Some(why) = builtin(tool, args, cwd) {
@@ -1245,8 +1237,8 @@ impl Guard {
         }
     }
 
-    /// A call an ACP agent ran without asking for permission, seen once it ended. What pre() would have blocked or held
-    /// for a card comes back as what it was, for the worker to stop its turn; the rest is only audited.
+    /// A call an ACP agent ran without asking for permission, seen once it ended.
+    /// What pre() would have blocked or held for a card comes back as what it was, for the worker to stop its turn; the rest is only audited.
     pub async fn unasked(
         &self,
         who: &str,

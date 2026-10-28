@@ -1,5 +1,5 @@
-//! The process environment is one for every test in this binary. A test that sets variables holds the lock for its
-//! whole run, and what it set is put back when the guard drops.
+//! The process environment is one for every test in this binary.
+//! A test that sets variables holds the lock for its whole run, and what it set is put back when the guard drops.
 
 use std::ffi::{OsStr, OsString};
 use std::path::Path;

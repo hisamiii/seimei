@@ -1,7 +1,5 @@
-//! What seimei's live tests share: a pool wired like the server's, a stand-in
-//! for the dispatcher that keeps what it hears, and waiting on a condition. They start real headless claude sessions,
-//! so they are ignored by default; tests/live.sh runs them in a scrubbed environment (its own Claude config dir, no
-//! job variables, auto-memory off).
+//! What seimei's live tests share: a pool wired like the server's, a stand-in for the dispatcher that keeps what it hears, and waiting on a condition.
+//! They start real headless agent sessions, so they are ignored by default; tests/live.sh runs them in a scrubbed environment (its own harness config dir, no job variables, auto-memory off).
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};

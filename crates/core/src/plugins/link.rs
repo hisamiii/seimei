@@ -1,7 +1,7 @@
 //! A unix socket that one local connector (the browser extension's host) connects to.
 //!
-//! Mode 600 in a 700 folder under the user's runtime dir; nothing of it is reachable through the tunnel. Requests and
-//! answers are JSON lines: {"id", "op", "args"} out, {"id", "ok", "result" | "error"} back.
+//! Mode 600 in a 700 folder under the user's runtime dir; nothing of it is reachable through the tunnel.
+//! Requests and answers are JSON lines: {"id", "op", "args"} out, {"id", "ok", "result" | "error"} back.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
