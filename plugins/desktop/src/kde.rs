@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
-use super::backend::{Backend, Ctx, Emit, Env, Ours, desktop_env, encode, listening};
+use super::backend::{Backend, Ctx, Emit, Env, Meta, Ours, desktop_env, encode, listening};
 use super::dbus::{Arg, Bus};
 use super::text_of;
 use super::vinput::{MOD_KEYS, Op, char_sym, combo};
@@ -382,24 +382,18 @@ fn geometry(geo: &str) -> Result<(f64, f64, f64, f64), String> {
     }
 }
 
+const META: Meta = Meta {
+    name: "kde",
+    label: "KDE Plasma",
+    cli: "`qdbus`, `kdotool` or `spectacle`",
+    restarts: "KWin",
+    ends: "logout",
+    action_cmd: "kde",
+};
+
 impl Backend for Kde {
-    fn name(&self) -> &'static str {
-        "kde"
-    }
-    fn label(&self) -> &'static str {
-        "KDE Plasma"
-    }
-    fn cli(&self) -> &'static str {
-        "`qdbus`, `kdotool` or `spectacle`"
-    }
-    fn restarts(&self) -> &'static str {
-        "KWin"
-    }
-    fn ends(&self) -> &'static str {
-        "logout"
-    }
-    fn action_cmd(&self) -> &'static str {
-        "kde"
+    fn meta(&self) -> &'static Meta {
+        &META
     }
     fn ctx(&self) -> &Ctx {
         &self.ctx

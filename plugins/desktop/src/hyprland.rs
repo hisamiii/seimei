@@ -11,7 +11,7 @@ use std::time::Duration;
 use regex::Regex;
 use serde_json::{Value, json};
 
-use super::backend::{Backend, Ctx, Emit, Env, Ours, grim_region, grim_screen, listening, rect_shot};
+use super::backend::{Backend, Ctx, Emit, Env, Meta, Ours, grim_region, grim_screen, listening, rect_shot};
 use super::text_of;
 use seimei_core::util::{py_json_compact, token_urlsafe, truthy};
 
@@ -113,24 +113,18 @@ impl Hyprland {
     }
 }
 
+const META: Meta = Meta {
+    name: "hyprland",
+    label: "Hyprland",
+    cli: "`hyprctl`, grim or ydotool",
+    restarts: "Hyprland",
+    ends: "exiting Hyprland",
+    action_cmd: "hyprctl dispatch",
+};
+
 impl Backend for Hyprland {
-    fn name(&self) -> &'static str {
-        "hyprland"
-    }
-    fn label(&self) -> &'static str {
-        "Hyprland"
-    }
-    fn cli(&self) -> &'static str {
-        "`hyprctl`, grim or ydotool"
-    }
-    fn restarts(&self) -> &'static str {
-        "Hyprland"
-    }
-    fn ends(&self) -> &'static str {
-        "exiting Hyprland"
-    }
-    fn action_cmd(&self) -> &'static str {
-        "hyprctl dispatch"
+    fn meta(&self) -> &'static Meta {
+        &META
     }
     fn ctx(&self) -> &Ctx {
         &self.ctx

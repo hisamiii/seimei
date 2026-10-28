@@ -65,29 +65,26 @@ pub type Ours = HashSet<i64>;
 /// ("workspaces", [workspace]), ("layouts", layouts), ("layout_idx", n), and ("up", null) once it is connected.
 pub type Emit<'a> = &'a mut dyn FnMut(&str, Value);
 
-pub trait Backend: Send + Sync {
-    fn name(&self) -> &'static str;
+/// A window manager's names, for the prompt, errors and cards.
+pub struct Meta {
+    pub name: &'static str,
     /// How the prompt and errors name it.
-    fn label(&self) -> &'static str;
+    pub label: &'static str,
     /// The WM's own command line (the prompt steers away from it), what restarts, and what ends the session.
-    fn cli(&self) -> &'static str {
-        ""
-    }
-    fn restarts(&self) -> &'static str {
-        ""
-    }
-    fn ends(&self) -> &'static str {
-        ""
-    }
+    pub cli: &'static str,
+    pub restarts: &'static str,
+    pub ends: &'static str,
     /// The native tool's command, as a card shows it.
-    fn action_cmd(&self) -> &'static str {
-        ""
-    }
+    pub action_cmd: &'static str,
+}
+
+pub trait Backend: Send + Sync {
+    fn meta(&self) -> &'static Meta;
     fn ctx(&self) -> &Ctx;
 
     /// The environment a command needs to reach this session; Err when it is down.
     fn env(&self) -> Result<Env, String> {
-        Err(format!("no desktop session ({} is not running)", self.label()))
+        Err(format!("no desktop session ({} is not running)", self.meta().label))
     }
     fn up(&self) -> bool {
         self.env().is_ok()

@@ -9,7 +9,7 @@ use std::time::Duration;
 use regex::Regex;
 use serde_json::{Value, json};
 
-use super::backend::{Backend, Ctx, Emit, Env, Ours, exec, grim_region, grim_screen, listening, session_socket};
+use super::backend::{Backend, Ctx, Emit, Env, Meta, Ours, exec, grim_region, grim_screen, listening, session_socket};
 use seimei_core::util::{py_json_compact, sh_quote, token_urlsafe, truthy};
 
 const QUERIES: [&str; 8] =
@@ -160,24 +160,18 @@ fn png_complete(path: &std::path::Path) -> bool {
     std::fs::read(path).is_ok_and(|d| d.ends_with(b"IEND\xaeB`\x82"))
 }
 
+const META: Meta = Meta {
+    name: "niri",
+    label: "niri",
+    cli: "`niri msg`, grim or ydotool",
+    restarts: "niri",
+    ends: "quitting niri",
+    action_cmd: "niri msg action",
+};
+
 impl Backend for Niri {
-    fn name(&self) -> &'static str {
-        "niri"
-    }
-    fn label(&self) -> &'static str {
-        "niri"
-    }
-    fn cli(&self) -> &'static str {
-        "`niri msg`, grim or ydotool"
-    }
-    fn restarts(&self) -> &'static str {
-        "niri"
-    }
-    fn ends(&self) -> &'static str {
-        "quitting niri"
-    }
-    fn action_cmd(&self) -> &'static str {
-        "niri msg action"
+    fn meta(&self) -> &'static Meta {
+        &META
     }
     fn ctx(&self) -> &Ctx {
         &self.ctx

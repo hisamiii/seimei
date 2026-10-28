@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
-use super::backend::{Backend, Ctx, Emit, Env, Ours, desktop_env, encode, listening};
+use super::backend::{Backend, Ctx, Emit, Env, Meta, Ours, desktop_env, encode, listening};
 use super::dbus::{Arg, Bus};
 use super::vinput::{MOD_KEYS, Op, char_sym, combo};
 use super::wire::socket_path;
@@ -109,24 +109,18 @@ impl Gnome {
     }
 }
 
+const META: Meta = Meta {
+    name: "gnome",
+    label: "GNOME",
+    cli: "`gdbus`, `gnome-screenshot` or `gnome-extensions`",
+    restarts: "GNOME Shell",
+    ends: "logout",
+    action_cmd: "gnome",
+};
+
 impl Backend for Gnome {
-    fn name(&self) -> &'static str {
-        "gnome"
-    }
-    fn label(&self) -> &'static str {
-        "GNOME"
-    }
-    fn cli(&self) -> &'static str {
-        "`gdbus`, `gnome-screenshot` or `gnome-extensions`"
-    }
-    fn restarts(&self) -> &'static str {
-        "GNOME Shell"
-    }
-    fn ends(&self) -> &'static str {
-        "logout"
-    }
-    fn action_cmd(&self) -> &'static str {
-        "gnome"
+    fn meta(&self) -> &'static Meta {
+        &META
     }
     fn ctx(&self) -> &Ctx {
         &self.ctx
