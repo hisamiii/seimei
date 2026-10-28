@@ -637,3 +637,41 @@ async fn end(s: &Value, pid: i64, bg: bool) -> Result<(), String> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_session_is_found_by_name_then_pid_then_job() {
+        let rows = vec![
+            json!({"name": "Docs", "pid": 41, "job": null}),
+            json!({"name": "docs-two", "pid": 42, "job": "bg7"}),
+            json!({"name": "42", "pid": 43, "job": ""}),
+        ];
+        assert_eq!(find(&rows, "Docs").unwrap()["pid"], 41);
+        assert_eq!(find(&rows, " docs ").unwrap()["pid"], 41, "trimmed, any case");
+        // A name wins over a pid that reads the same
+        assert_eq!(find(&rows, "42").unwrap()["pid"], 43);
+        assert_eq!(find(&rows, "41").unwrap()["pid"], 41);
+        assert_eq!(find(&rows, "bg7").unwrap()["pid"], 42, "a background session by its job id");
+        assert!(find(&rows, "nope").is_none());
+    }
+
+    #[test]
+    fn a_job_is_the_command_inside_the_snapshot_wrapper() {
+        let wrapped = "/bin/bash -c source /home/me/.claude/shell-snapshots/snapshot-bash-1.sh && eval 'cargo test -p x' < /dev/null && pwd -P >| /tmp/cwd";
+        assert_eq!(job(wrapped), "cargo test -p x");
+        let quoted = "bash -c x shell-snapshots/s.sh; eval 'echo '\\''hi'\\''' < /dev/null";
+        assert_eq!(job(quoted), "echo 'hi'");
+        assert_eq!(job("python3 server.py"), "python3 server.py", "a plain command stays");
+    }
+
+    #[test]
+    fn idle_means_no_question_open() {
+        assert!(idle(&json!({"status": "idle"})));
+        assert!(!idle(&json!({"status": "idle", "question": true})));
+        assert!(!idle(&json!({"status": "busy"})));
+    }
+}

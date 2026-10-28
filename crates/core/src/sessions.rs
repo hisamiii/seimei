@@ -70,7 +70,7 @@ pub fn alive(rec: &Value) -> bool {
     let Some(start) = stat.rsplit_once(')').and_then(|(_, rest)| rest.split_whitespace().nth(19)) else {
         return false;
     };
-    // A procStart that is there but null matches nothing, like Python's str(None).
+    // A procStart that is there but null matches no process.
     rec.get("procStart").is_none_or(|v| !v.is_null() && as_text(v) == start)
 }
 
@@ -690,5 +690,38 @@ impl Watcher {
             }
             tokio::time::sleep(Duration::from_secs(4)).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn own_start() -> String {
+        let stat = std::fs::read_to_string("/proc/self/stat").unwrap();
+        stat.rsplit_once(')').unwrap().1.split_whitespace().nth(19).unwrap().to_string()
+    }
+
+    #[test]
+    fn a_reused_pid_is_not_the_session() {
+        let pid = std::process::id();
+        assert!(alive(&json!({"pid": pid, "procStart": own_start()})));
+        assert!(alive(&json!({"pid": pid})), "an old record without procStart");
+        assert!(!alive(&json!({"pid": pid, "procStart": "1"})), "another process got the pid");
+        assert!(!alive(&json!({"pid": pid, "procStart": null})));
+        assert!(!alive(&json!({"pid": "x"})));
+    }
+
+    #[test]
+    fn ages_and_waits_read_short() {
+        let t = now();
+        assert_eq!(ago(t - 5.0), "5s ago");
+        assert_eq!(ago(t - 190.0), "3 min ago");
+        assert_eq!(ago(t - 7300.0), "2 h ago");
+        assert_eq!(ago(t + 30.0), "0s ago", "a clock ahead reads as now");
+        assert_eq!(waiting_text(Some("dialog open")), "A dialog is open on the server");
+        assert_eq!(waiting_text(Some("")), "Waiting on the server");
+        assert_eq!(waiting_text(Some("something new")), "Waiting on the server: something new");
     }
 }
