@@ -17,7 +17,7 @@ use crate::transcripts::{
     brief, claude_dir, input_of, project_of, prompt_text, rows_from, summary, text_of, time_of, tool_results,
     transcript,
 };
-use crate::util::{as_text, chars, children, now, read_tail, stat_field};
+use crate::util::{as_text, chars, children, mtime, now, read_tail, stat_field};
 use crate::workers::Pool;
 
 /// What peek and the timeline read from the end of a transcript.
@@ -85,14 +85,6 @@ pub fn ago(t: f64) -> String {
     } else {
         format!("{} d ago", s / 86400)
     }
-}
-
-fn mtime(path: &Path) -> f64 {
-    std::fs::metadata(path)
-        .and_then(|m| m.modified())
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map_or(0.0, |d| d.as_secs_f64())
 }
 
 /// A session record's current transcript.

@@ -92,6 +92,12 @@ pub fn save_json(path: &Path, data: &impl Serialize) {
     }
 }
 
+/// When a file last changed, as a unix time; 0 when it cannot be read.
+pub fn mtime(path: &Path) -> f64 {
+    let t = std::fs::metadata(path).and_then(|m| m.modified()).ok();
+    t.and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0.0, |d| d.as_secs_f64())
+}
+
 /// A file's bytes from `off` to its end.
 pub fn read_from(path: &Path, off: u64) -> std::io::Result<Vec<u8>> {
     use std::io::{Read, Seek, SeekFrom};

@@ -301,7 +301,8 @@ fn session_name(c: &Cost, sid: &str, names: &HashMap<String, String>) -> String 
     format!("{} ({short})", folder.filter(|f| !f.is_empty()).unwrap_or_else(|| "?".into()))
 }
 
-fn k(n: f64) -> String {
+/// A token count, short: 1.2M, 340k, 512.
+pub(crate) fn k(n: f64) -> String {
     if n >= 1e6 {
         format!("{:.1}M", n / 1e6)
     } else if n >= 1e3 {
