@@ -26,7 +26,7 @@
   },
   {
    "name": "queue_stop",
-   "description": "Stop the command that holds the GPU/NPU turn: SIGTERM to its whole command, after the user approves. Only when the user asks, or a holder is clearly stuck.",
+   "description": "Stop the command that holds the GPU/NPU turn: SIGTERM to its whole command. Only when the user asks, or a holder is clearly stuck.",
    "inputSchema": {
     "type": "object",
     "properties": {},

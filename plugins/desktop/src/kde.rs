@@ -399,10 +399,6 @@ impl Backend for Kde {
         running(&self.ctx, |comm| comm.starts_with("kscreenlocker_g"))
     }
 
-    fn config_dir(&self) -> Option<PathBuf> {
-        Some(self.ctx.home.join(".config/kwinrc"))
-    }
-
     fn windows(&self) -> Result<Vec<Value>, String> {
         let (wins, desks) = self.snapshot()?;
         Ok(wins

@@ -188,10 +188,6 @@ impl Backend for Sway {
         Some(self.socket()?.file_name()?.to_str()?.to_string())
     }
 
-    fn config_dir(&self) -> Option<PathBuf> {
-        Some(self.ctx.home.join(".config/sway"))
-    }
-
     fn windows(&self) -> Result<Vec<Value>, String> {
         let tree = self.ipc(GET_TREE, "")?;
         let mut found = vec![];

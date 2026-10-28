@@ -32,7 +32,7 @@ const SPEC_TOOLS: [(&str, &str); 6] = [
 const NIRI_PROMPT: &str = r#"## Desktop
 Drive the laptop with your desktop tools (start with desktop), not `niri msg`, grim or ydotool in Bash: niri can restart, and your shell keeps the old socket.
 - Work in the agent display (display: "agent" on the desktop tools, browser: "agent" on the browser tools): it has its own screen, keyboard and pointer, so the user's focus and mouse stay theirs. Touch the user's display only when the task is about something there; then focus stealing is fine, and apps you open go to the "seimei" workspace (open_app does that).
-- Closing a window you did not open, quitting niri and editing ~/.config/niri wait for the user's OK on their phone; ask in chat first when the reason is not obvious.
+- Closing a window you did not open and quitting niri wait for the user's OK on their phone; ask in chat first when the reason is not obvious.
 - screenshot returns the image's path: Read it when you need to look (show=true puts it in the chat and returns the image).
 - Never type into a window you have not just looked at. Prefer keyboard shortcuts and typing over clicks.
 - The user has a stop key on the laptop. When they press it, your turn ends and desktop input is blocked for a minute: do not resume driving until they say so."#;

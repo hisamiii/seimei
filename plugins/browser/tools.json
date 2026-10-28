@@ -297,7 +297,7 @@
    "_meta": {
     "anthropic/alwaysLoad": true
    },
-   "description": "Close browser tabs by id. Tabs you opened close at once; closing tabs the user opened may ask them with an Approve card first.",
+   "description": "Close browser tabs by id. Tabs you opened close at once; closing tabs the user opened asks them with an Approve card first.",
    "inputSchema": {
     "properties": {
      "tabs": {

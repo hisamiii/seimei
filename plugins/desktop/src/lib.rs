@@ -264,16 +264,7 @@ impl Desktop {
 
     /// The prompt section, for the computer called about.
     pub fn prompt(&self, about: &str) -> String {
-        let (b, m) = (&self.b, self.b.meta());
-        let conf = b.config_dir().map(|c| match c.strip_prefix(&b.ctx().home) {
-            Ok(rel) => format!("~/{}", rel.display()),
-            Err(_) => c.display().to_string(),
-        });
-        let ends: Vec<String> =
-            [Some(m.ends.to_string()).filter(|e| !e.is_empty()), conf.map(|c| format!("editing {c}"))]
-                .into_iter()
-                .flatten()
-                .collect();
+        let m = self.b.meta();
         let focus = if matches!(m.name, "niri" | "kde" | "gnome") {
             "- Work in the agent display (display: \"agent\" on the desktop tools, browser: \"agent\" on the browser tools): it has its own screen, keyboard and pointer, so the user's focus and mouse stay theirs. Touch the user's display only when the task is about something there; then focus stealing is fine, and apps you open go to the \"seimei\" workspace (open_app does that)."
         } else {
@@ -284,8 +275,8 @@ impl Desktop {
             .replace("{about}", about.split(" (").next().unwrap_or(about))
             .replace("{cli}", m.cli)
             .replace("{restarts}", m.restarts)
-            .replace("{ends}", &if ends.is_empty() { String::new() } else { format!(", {}", ends.join(" and ")) })
-            .replace("{wait}", if ends.is_empty() { "waits" } else { "wait" })
+            .replace("{ends}", &if m.ends.is_empty() { String::new() } else { format!(" and {}", m.ends) })
+            .replace("{wait}", if m.ends.is_empty() { "waits" } else { "wait" })
     }
 
     /// The windows seimei opened.

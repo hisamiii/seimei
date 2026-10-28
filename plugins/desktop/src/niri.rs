@@ -160,10 +160,6 @@ impl Backend for Niri {
         Some(self.socket()?.file_name()?.to_str()?.to_string())
     }
 
-    fn config_dir(&self) -> Option<PathBuf> {
-        Some(self.ctx.home.join(".config/niri"))
-    }
-
     fn windows(&self) -> Result<Vec<Value>, String> {
         Ok(self.ipc("Windows")?.as_array().cloned().unwrap_or_default().into_iter().map(window).collect())
     }

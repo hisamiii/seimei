@@ -93,11 +93,6 @@ pub trait Backend: Send + Sync {
     fn locked(&self) -> bool {
         running(self.ctx(), |comm| LOCKERS.contains(&comm))
     }
-    /// The WM's config folder: writes there wait for the user's OK.
-    fn config_dir(&self) -> Option<PathBuf> {
-        None
-    }
-
     fn windows(&self) -> Result<Vec<Value>, String>;
     fn workspaces(&self) -> Result<Vec<Value>, String>;
     fn outputs(&self) -> Result<Vec<(String, Value)>, String>;

@@ -131,10 +131,6 @@ impl Backend for Hyprland {
         Some(self.find_dir()?.file_name()?.to_str()?.to_string())
     }
 
-    fn config_dir(&self) -> Option<PathBuf> {
-        Some(self.ctx.home.join(".config/hypr"))
-    }
-
     fn windows(&self) -> Result<Vec<Value>, String> {
         let active = self.get("activewindow")?;
         let focused = active.get("address").cloned().unwrap_or(Value::Null);
