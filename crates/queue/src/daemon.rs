@@ -892,7 +892,7 @@ impl Daemon {
                 job.wait_s = self.waited(ps);
                 let first_pid = first.pid;
                 self.jobs_of(queued).insert(cg.clone(), job);
-                if queued {
+                if queued && self.args.shadow {
                     self.shadow_start(cg, first_pid, now);
                 }
             }
@@ -1107,7 +1107,9 @@ impl Daemon {
         self.wait_seen.retain(|k, (t, _)| live.contains(k) || now - *t <= 3600.0);
         out.sort_by(|a, b| a.since.total_cmp(&b.since));
         self.waiters = out.clone();
-        self.shadow_v1(&out, now);
+        if self.args.shadow {
+            self.shadow_v1(&out, now);
+        }
     }
 
     fn wait_events(&mut self, rows: &[Value], now: f64) {
