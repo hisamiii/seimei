@@ -1,12 +1,12 @@
 //! The queue inside `seimei serve`: the scheduler on an OS thread of its own with its own runtime, so a route or a
 //! plugin that panics or blocks the main runtime cannot stall a tick. A tick that panics is caught (server::safe_tick);
-//! a scheduler that dies as a whole is started again from scratch, and three deaths in a minute leave it off (safe
-//! mode: everything it froze thawed, the shims back on their own v1 gate). One scheduler per user: the first serve
-//! takes the lock, a second one (a dev instance, a test) runs without it.
+//! a scheduler that dies as a whole is started again from scratch, and three deaths in a minute leave it off until
+//! serve restarts (safe mode: a flag serve reads; the shadow froze nothing, so there is nothing to thaw). One scheduler
+//! per user: the first serve takes the lock, a second one (a dev instance, a test) runs without it.
 //!
 //! Modes (`[queue] mode` in config.toml): "off"; "shadow", beside a live cqd: it scans and classifies, binds no socket,
-//! touches nothing, and logs where its view differs from cqd's (shadow-diff.jsonl); "on" waits for the cutover. With no
-//! mode set it shadows when cqd answers on its socket, else it is off.
+//! touches nothing, and logs where its view differs from cqd's (shadow-diff.jsonl). "on" is refused until the cutover.
+//! With no mode set it shadows when cqd answers on its socket, else it is off.
 
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
@@ -50,11 +50,8 @@ pub fn mode(configured: Option<&str>) -> Result<Mode, String> {
     match configured {
         Some("off") => Ok(Mode::Off),
         Some("shadow") => Ok(Mode::Shadow),
-        Some("on") => {
-            Err("[queue] mode = \"on\" comes with the cutover from cqd (docs/queue/DESIGN.md); running as shadow"
-                .into())
-        }
-        Some(other) => Err(format!("[queue] mode = {other:?}: off, shadow or on")),
+        Some("on") => Err("[queue] mode = \"on\" comes with the cutover from cqd (docs/queue/DESIGN.md)".into()),
+        Some(other) => Err(format!("[queue] mode = {other:?}: off or shadow")),
         None => Ok(if cqd_running() { Mode::Shadow } else { Mode::Off }),
     }
 }
@@ -122,7 +119,6 @@ pub fn start(mode: Mode, state: &Path) -> Option<Host> {
             deaths.retain(|d| t - d < 60.0);
             deaths.push(t);
             if deaths.len() >= 3 {
-                // Safe mode: nothing of ours stays frozen, and the queue stays off until serve restarts.
                 safe.store(true, Ordering::Relaxed);
                 eprintln!(
                     "seimei: queue: the scheduler died three times in a minute; it stays off until seimei restarts"
@@ -137,7 +133,7 @@ pub fn start(mode: Mode, state: &Path) -> Option<Host> {
         eprintln!("seimei: queue: no thread: {e}");
         return None;
     }
-    eprintln!("seimei: queue: {}", if mode == Mode::Shadow { "shadow beside cqd" } else { "on" });
+    eprintln!("seimei: queue: shadow beside cqd");
     Some(host)
 }
 

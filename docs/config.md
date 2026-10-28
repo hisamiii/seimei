@@ -29,7 +29,7 @@ seimei reads `~/.config/seimei/config.toml`. Every key is optional; `config.exam
 | | `zdr` | `false` | only providers that keep no data (OpenRouter's `provider.zdr`; both default models have one) |
 | | `deny` | `[]` | words and globs never sent, whatever their source |
 | `[asr.sources]` | `chat`, `names`, `board`, `window`, `draft`, `auto` | all `true` | one switch per source of the word list; with all off only the pins in `asr/words.txt` go |
-| `[queue]` | `mode` | `shadow` while claude-queue's cqd runs, else `off` | the agent queue ([queue/DESIGN.md](queue/DESIGN.md)); `shadow` watches beside cqd and logs where it would differ, `on` comes with the cutover |
+| `[queue]` | `mode` | `shadow` while claude-queue's cqd runs, else `off` | the agent queue ([queue/DESIGN.md](queue/DESIGN.md)); `shadow` watches beside cqd and logs where it would differ, `on` is refused (the queue stays off) until the cutover |
 
 ## Permission modes
 

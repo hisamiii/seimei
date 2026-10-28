@@ -356,8 +356,8 @@ fn main() {
     } else {
         let configured = cfg.get("queue").and_then(|q| q.get("mode")).and_then(|m| m.as_str());
         let mode = seimei_queue::host::mode(configured).unwrap_or_else(|e| {
-            eprintln!("seimei: {e}");
-            if configured == Some("on") { seimei_queue::host::Mode::Shadow } else { seimei_queue::host::Mode::Off }
+            eprintln!("seimei: {e}; the queue stays off");
+            seimei_queue::host::Mode::Off
         });
         seimei_queue::host::start(mode, &state)
     };
