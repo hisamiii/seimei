@@ -8,7 +8,6 @@
 //!   message it got to the next done, ask, failure or stop.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
 
 use chrono::TimeZone;
@@ -16,6 +15,7 @@ use regex::Regex;
 use serde_json::{Value, json};
 
 use crate::cost::Spend;
+use crate::events::EventLog;
 
 const REOPEN: f64 = 24.0 * 3600.0;
 static ACK: LazyLock<Regex> = LazyLock::new(|| {
@@ -195,36 +195,29 @@ pub fn text(rows: &[Value]) -> String {
 /// Worker events by worker id.
 pub type ByWorker = Arc<HashMap<String, Vec<Value>>>;
 
-/// The main event log's worker events by worker, read again only when the file grew.
+/// The main event log's worker events by worker, taken from the log in memory as it grows.
 pub struct WorkerEvents {
-    path: PathBuf,
-    /// The file size it was read at, and what it held.
-    cache: Mutex<(u64, ByWorker)>,
+    log: Arc<EventLog>,
+    /// The last event id taken, and what they held.
+    cache: Mutex<(i64, ByWorker)>,
 }
 
 impl WorkerEvents {
-    pub fn new(path: &Path) -> WorkerEvents {
-        WorkerEvents { path: path.into(), cache: Mutex::new((u64::MAX, Arc::default())) }
+    pub fn new(log: Arc<EventLog>) -> WorkerEvents {
+        WorkerEvents { log, cache: Mutex::new((0, Arc::default())) }
     }
 
     pub fn get(&self) -> ByWorker {
         let mut c = self.cache.lock().unwrap();
-        let Ok(size) = std::fs::metadata(&self.path).map(|m| m.len()) else { return c.1.clone() };
-        if size != c.0 {
-            let mut out: HashMap<String, Vec<Value>> = HashMap::new();
-            let data = std::fs::read(&self.path).unwrap_or_default();
-            for line in data.split(|&b| b == b'\n') {
-                if !line.windows(8).any(|w| w == b"\"worker\"") {
-                    continue;
-                }
-                let Ok(e) = serde_json::from_slice::<Value>(line) else { continue };
-                if e["type"] == "worker"
-                    && let Some(w) = e["worker"].as_str().filter(|w| !w.is_empty())
-                {
-                    out.entry(w.to_string()).or_default().push(e);
+        let new = self.log.after(c.0);
+        if let Some(last) = new.last() {
+            c.0 = last["id"].as_i64().unwrap_or(c.0);
+            let map = Arc::make_mut(&mut c.1);
+            for e in new.iter().filter(|e| e["type"] == "worker") {
+                if let Some(w) = e["worker"].as_str().filter(|w| !w.is_empty()) {
+                    map.entry(w.to_string()).or_default().push((**e).clone());
                 }
             }
-            *c = (size, Arc::new(out));
         }
         c.1.clone()
     }

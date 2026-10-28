@@ -169,7 +169,7 @@ impl App {
         let pool = Pool::new(state, &shikigami, &disp.about, parts)?;
         let p = pool.clone();
         let _ = guard.tell.set(Box::new(move |w, line, urgent, key| p.tell(w, line, urgent, key)));
-        let worker_events = Arc::new(WorkerEvents::new(&state.join("events.jsonl")));
+        let worker_events = Arc::new(WorkerEvents::new(events.clone()));
         let adopter = Adopter::new(pool.clone(), approvals.clone(), state);
         let p = pool.clone();
         let tell = Box::new(move |line: &str| p.notify(line, false, None));
