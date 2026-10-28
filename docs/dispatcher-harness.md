@@ -57,7 +57,7 @@ Codex method names follow the app-server v2 schema and move between versions. St
 
 ## 3. The guard on each harness
 
-The guard sees every call before it runs only on Claude Code. On ACP and Codex it sees a call first only when the agent asks, and stops the turn when a call it would refuse ran unasked.
+Only on Claude Code does the guard see every call before it runs. ACP and Codex show it only the calls the agent asks about first.
 
 - **Claude Code: every call, before it runs.** `PreToolUse` fires for each tool in every permission mode, MCP tools and subagents included.
 - **ACP: asked calls before, the rest after.** A call that ends without `session/request_permission` arrives as `Event::Unasked`; `Guard::unasked` audits it and the turn is cancelled, but the call has run.
