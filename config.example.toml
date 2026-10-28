@@ -24,10 +24,12 @@ about = "computer"                  # how the prompts name this machine, e.g. "d
 # terminal = "foot -D {cwd} -T {title}"   # opens a session for the user (a release, a loan); default: the one setup found
 
 # Permission modes, by Claude Code's names: default, acceptEdits, plan, auto, dontAsk or bypassPermissions. What Claude Code would ask in a terminal becomes a card on the phone.
-# The shikigami mode is also a ceiling: summon may only pick a stricter one, and only you raise it (on the Agents page). seimei's guard runs first, in every mode.
+# The shikigami mode is also a ceiling: summon may only pick a stricter one, and only you raise it (on the Agents page).
 [approvals]
 dispatcher = "default"
 shikigami = "default"
+# Paths no agent may read or edit, as Claude Code deny rules; a trailing / for a folder. The default is seimei's own secrets in its data folder and dev/.
+# deny_paths = ["~/.local/share/seimei/auth.json", "~/.local/share/seimei/signing/"]
 
 # Plugins: optional tool groups on top of the core, each with its tools (mcp__<name>__<tool>), its prompt section and its approval cards.
 # None are on by default; seimei always gets every enabled one and a shikigami the ones summon grants it (tools: ["desktop"]).
@@ -60,7 +62,7 @@ enabled = []
 # What it is for and its rules."""
 
 # ACP agents a shikigami can run on instead of Claude Code (harness "acp:<name>"): seimei talks ACP over their stdio, and they keep their own login and model settings.
-# Every call goes through seimei's guard and the shikigami's mode, so the agent must ask before each one: for dsh, add contrib/dsh/ to its acp profile (see contrib/dsh/cordis.patch.yml).
+# Every call goes through the shikigami's mode, so the agent must ask before each one: for dsh, add contrib/dsh/ to its acp profile (see contrib/dsh/cordis.patch.yml).
 # [agents.dsh]
 # command = "dsh"
 # args = ["--profile", "acp"]

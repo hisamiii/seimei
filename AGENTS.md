@@ -10,13 +10,13 @@ The server is one Rust binary. The default harness is Claude Code; ACP agents an
 
 - `crates/`: the Rust workspace.
   - `proto`: the clients for Claude Code's stream-json, ACP and Codex.
-  - `core`: state, login, push and the guard. `core/src/workers/claude.rs` is the Claude Code adapter, `core/src/plugins/` the plugin host, and `core/data/tools.json` seimei's own MCP tools.
+  - `core`: state, login, push and the audit log. `core/src/workers/claude.rs` is the Claude Code adapter, `core/src/plugins/` the plugin host, and `core/data/tools.json` seimei's own MCP tools.
   - `server`: the HTTP routes.
   - `seimei`: the binary. Its `src/lib.rs` lists the plugins built in.
 - `plugins/`: the plugins. Each holds its crate, manifest, prompt, tools, tests and connector: `desktop`, `browser`, `music`, `queue`, and `template` to copy for a plugin of your own. The browser extension is in `plugins/browser/extension/`.
 - `web/`: the web page, built into the binary. Plain JS and CSS, no build step.
 - `android/`: the app, in Kotlin.
-- `contrib/`: the guard example, the release script and its minisign key, the theme generator and the dsh profile. `contrib/maintainer/` is one maintainer's deploy.
+- `contrib/`: the release script and its minisign key, the theme generator and the dsh profile. `contrib/maintainer/` is one maintainer's deploy.
 - `tests/`: `cases/` holds the case files the Rust tests run, `fakes/` a fake Claude Code CLI, ACP agent and Codex, and `qa/` the QA server. `live.sh` runs the live tests.
   - A plugin keeps its own case files in its `tests/`, and the desktop's fake window managers are in `plugins/desktop/tests/fakes/`.
 - `docs/`: see Docs below.
@@ -30,7 +30,7 @@ Keep it simple: a simpler change that does 90% of the job beats a complex one th
 - ASCII only in code and comments: `-`, `->`, `...`. User-facing strings may use what they need, like an ellipsis character in a shortened title.
 - Rust: edition 2024, `rustfmt.toml` in the root with 120 columns, `cargo clippy` clean. Use std, a small well-known crate like shlex or glob, or a few lines of our own.
 - What must stay stable: the wire protocol to the web page and the app, and the meaning of the state files. Their formatting is free.
-- For the guard, blocking a bit more is fine. Every real bypass becomes a new case in `tests/cases/guard.json`.
+- For cards, asking a bit more is fine. A tool of seimei's own that acts without its card is a bug with a test.
 - Python, for the test fakes and the connectors' helpers: 4-space indent, the existing style.
 - Case files in `tests/cases/` and `plugins/*/tests/cases.json` hold one case per line, as `json.dumps(case, ensure_ascii=False, separators=(", ", ": "))` writes it.
 - Kotlin: the app's existing style. Web: plain JS and CSS, with colors only through the theme tokens.
@@ -80,7 +80,7 @@ about = "computer"   # how the prompts name this machine, e.g. "desktop (an Arch
 ```markdown
 <!-- GOOD: the answer first -->
 ## What the agents can do
-The dispatcher and every shikigami run as the user, in the permission mode set in config. seimei's guard runs before every tool call.
+The dispatcher and every shikigami run as the user, in the permission mode set in config. The harness's own permissions decide each tool call.
 <!-- BAD: straight into the details -->
 ## What the agents can do
 - **A rule** has match fields and an action:
@@ -99,7 +99,7 @@ Docs live in `docs/`, indexed in `docs/README.md`. `SECURITY.md` and `CONTRIBUTI
 - `architecture.md`: processes, state, the code map, deploys and tests.
 - `install.md`: requirements and install. `reach.md`: HTTPS for the phone.
 - `config.md`: every config key and command. `plugins.md`: the plugin interface and each plugin.
-- `security.md`: who can reach what, the guard and the cards.
+- `security.md`: who can reach what, the denied paths and the cards.
 - `asr.md`: dictation. `troubleshooting.md`: symptoms and fixes.
 
 ### Local scratchpads
@@ -118,7 +118,6 @@ Docs live in `docs/`, indexed in `docs/README.md`. `SECURITY.md` and `CONTRIBUTI
 - Headless only: no visible windows, no on-screen emulator, no real cards or notifications on the user's phone. `-no-window` is fine.
 - Test sessions use the test config dir `~/.local/share/seimei-test/claude`, never the user's. Log it in once with `CLAUDE_CONFIG_DIR=<dir> claude /login`.
 - Shut down what a test started: the QA server with `tests/qa/stop.sh`, gradle, the emulator.
-- The guard's path rules match file names anywhere in a command line. So a shell command that edits code naming a guarded file can be blocked: edit such code with the Edit tool.
 
 ## Commits
 
@@ -131,15 +130,15 @@ Make small, focused commits, with format-only changes in their own commit. Write
 
 ```
 // GOOD
-guard : port the deny-list to Rust over tests/cases/guard.json
+audit : write the log from the harness's tool-call events
 
 Assisted-by: Claude Opus 5.5
 
 
 // BAD
-This commit introduces a comprehensive Rust implementation of the guard,
-adding new modules for shell parsing, path handling and approvals, and
-significantly improving the robustness of the security layer.
+This commit introduces a comprehensive new audit subsystem, adding
+modules for logging, rotation and failure tracking, and significantly
+improving the observability of every agent session.
 ```
 
 ## Deploys

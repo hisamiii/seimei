@@ -4,7 +4,7 @@ Start with the logs, then find the symptom below. Each section names the cause f
 
 ## Where the logs are
 
-The service log is in the journal under systemd and in a file under OpenRC. The guard logs each tool call it checks, and what it decided, in `~/.local/share/seimei/audit.jsonl`.
+The service log is in the journal under systemd and in a file under OpenRC. seimei logs each tool call of its agents in `~/.local/share/seimei/audit.jsonl`.
 
 - systemd: `journalctl --user -u seimei`, with `-f` to follow.
 - OpenRC: `~/.local/state/seimei/seimei.log`.

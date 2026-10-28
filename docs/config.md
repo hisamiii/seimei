@@ -23,6 +23,7 @@ The table lists each section's keys, their defaults and what they set. Notes on 
 | `[sessions]` | `terminal` | see below | the terminal a session opens in for the user |
 | `[approvals]` | `dispatcher` | `default` | the dispatcher's permission mode |
 | | `shikigami` | `default` | the permission mode and ceiling for shikigami |
+| | `deny_paths` | seimei's secrets | paths no agent may read or edit |
 | `[plugins]` | `enabled` | `[]` | the plugins to load |
 | `[agents.<name>]` | `command`, `args`, `env` | none | an ACP agent a shikigami can run on |
 | | `protocol` | `acp` | `codex` for `codex app-server` |
@@ -44,6 +45,7 @@ Notes on the keys:
 - `context` takes 200k, 256k, 400k or 1m. For a Pro plan, `seimei setup` writes sonnet and 200k.
 - `[sessions] terminal` opens a session the user takes over, as with "Open on server". It is a command line such as `foot -D {cwd} --title {title}`, and the session's command follows it. The default is `$TERMINAL`'s, else the first one installed of kitty, foot, alacritty, ghostty, wezterm, gnome-terminal, konsole and xfce4-terminal.
 - `[approvals]` takes Claude Code's mode names, see [Permission modes](#permission-modes).
+- `deny_paths` takes absolute paths or paths under `~`, with a trailing `/` for a folder. The default is seimei's own secrets, which [security.md](security.md) lists. Claude Code sessions get them as Read and Edit deny rules.
 - `[plugins.<name>]` tables configure each plugin, see [plugins.md](plugins.md).
 - An `[agents.<name>]` agent is picked with summon's `harness = "acp:<name>"`. It keeps its own login and model.
 - Without the OpenRouter key in `key_file` the mic is not shown, see [asr.md](asr.md). `vocab_max` stays at 100 because MAI got worse with 150.
@@ -64,12 +66,6 @@ The modes take Claude Code's names, and whatever Claude Code would ask in a term
 | `bypassPermissions` | Bypass |
 
 In bypass nothing asks, except Claude Code's own safety checks. seimei blocks those without a card, for example "This shell -c script runs rm and could not be checked". Read [security.md](security.md) before you pick bypass.
-
-## Guard rules
-
-`~/.config/seimei/guard.toml` holds the guard's rules, one `[[rule]]` each. Without the file there are no rules.
-
-`contrib/guard.example.toml` documents the fields and has a starting set of rules, commented out. When there is no guard.toml yet, `seimei setup` offers to write that set with every rule on. seimei reads the file again when it changes. [security.md](security.md) says how a call is decided.
 
 ## Command line
 

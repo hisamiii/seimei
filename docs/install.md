@@ -49,7 +49,7 @@ The foss build gets notifications through a UnifiedPush distributor, such as ntf
 FCM delivers through Google Play services, with no distributor app and no background connection. The server can push only to an FCM build made for its own Firebase project, so you build that app yourself.
 
 1. In the Firebase console, make a project and add an Android app with the package name `com.hisamiowo.seimei`. Save its `google-services.json` as `~/.local/share/seimei/firebase/google-services.json`.
-2. In the project's settings, under Service accounts, generate a private key. Save it as `~/.local/share/seimei/firebase/service-account.json` and `chmod 600` it. seimei sends with this key, and the guard keeps agents out of `firebase/`.
+2. In the project's settings, under Service accounts, generate a private key. Save it as `~/.local/share/seimei/firebase/service-account.json` and `chmod 600` it. seimei sends with this key, and the default `deny_paths` keeps Claude Code sessions out of `firebase/`.
 3. Install JDK 21 and the Android SDK, and point `ANDROID_HOME` at the SDK. The command-line tools are enough.
 4. Run `android/publish.sh minor`. With the Firebase config in place it builds the fcm flavor and puts the APK where the menu's Phone app offers it.
 5. Restart seimei so it picks up the service account.

@@ -55,6 +55,6 @@ A card is one line to the socket and one line back. `target` is the card's title
 {"outcome": "approved" | "denied" | "cancelled" | "expired"}  or  {"error"}
 ```
 
-A plugin's tool calls also pass through Claude Code's permission prompts and seimei's guard, like any MCP tool's. "Always allow" on the first call leaves only the plugin's own cards.
+A plugin's tool calls also pass through Claude Code's permission prompts, like any MCP tool's. "Always allow" on the first call leaves only the plugin's own cards.
 
 The built-in plugins in `plugins/desktop`, `plugins/browser`, `plugins/music` and `plugins/queue` are Rust crates linked into the binary. See [docs/plugins.md](../../docs/plugins.md).

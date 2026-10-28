@@ -10,7 +10,7 @@ enabled = ["desktop", "music", "mytool"]
 ```
 
 - **seimei**, the dispatcher, gets every enabled plugin.
-- **A shikigami** gets the ones its summon grants, as in `tools: ["desktop"]`. The same guard, cards and rules apply.
+- **A shikigami** gets the ones its summon grants, as in `tools: ["desktop"]`. The same cards and rules apply.
 - Each plugin brings a **prompt section** that rides along with its tools, and its own **approval cards**.
 - The server is built fresh for every session that gets it, so a card names the right session. The backend behind it, such as a desktop connection or a connector socket, is shared.
 
@@ -37,9 +37,8 @@ The music bridge is `plugins/music/seimei_bridge.py`. The queue holds the GPU or
 
 The built-in plugins raise cards for actions the user should see first.
 
-- **desktop:** closing a window seimei did not open, quitting the compositor, writing the WM config, and reading the user's clipboard. The agent display's clipboard needs no card.
-- **music:** tag edits and playlist deletes.
-- **browser:** the first action or navigation in a tab the user opened, once per tab and site. Closing the user's tabs goes by guard.toml.
+- **desktop:** closing a window seimei did not open with the WM's own tool, quitting the compositor, and reading the user's clipboard. The agent display's clipboard needs no card.
+- **browser:** the first action or navigation in a tab the user opened, once per tab and site, and closing a tab the user opened.
 
 seimei's own browser tabs need no card. seimei keeps them in a collapsed "seimei" tab group, and every tab in the agent browser is its own too.
 
@@ -60,7 +59,7 @@ Most distros leave `/dev/uinput` to root. `uaccess` needs systemd-logind or elog
 
 Screen unlock is off until you save the lock screen's password with `seimei screen-password`. `seimei screen-password --clear` removes it.
 
-The password is stored in seimei's data folder with mode 0600, and the guard blocks every agent from reading it. `unlock_screen` types it without a card. So once it is saved, any session with the desktop plugin can unlock the screen while you are away. Whoever is at the machine then has your unlocked desktop, so save it only on a machine nobody else can get to.
+The password is stored in seimei's data folder with mode 0600, and the default `deny_paths` keeps Claude Code sessions from reading it. `unlock_screen` types it without a card. So once it is saved, any session with the desktop plugin can unlock the screen while you are away. Whoever is at the machine then has your unlocked desktop, so save it only on a machine nobody else can get to.
 
 ### The browser extension
 
@@ -146,7 +145,7 @@ prompt = """## My tool
 What it is for and its rules."""
 ```
 
-External servers get no cards of their own. Their calls go through seimei's guard and through Claude Code's permission prompts like any other tool, so "Always allow" works for them.
+External servers get no cards of their own. Their calls go through Claude Code's permission prompts like any other tool, so "Always allow" works for them.
 
 ## Writing a plugin
 
@@ -161,7 +160,7 @@ The template is a working notes list in Python's standard library, with a tool t
 - `prompt`: optional, a file in the folder with the plugin's prompt section.
 - `worker_note`: optional, a line in every shikigami's prompt.
 
-Claude Code starts the command as an MCP server on stdio for each session that has the plugin. Its environment carries `SEIMEI_SOCKET`, `SEIMEI_TOKEN` and `SEIMEI_STATE`. A plugin raises a card by writing one JSON line with the token to that socket, and the card names the session it serves. Its calls also go through Claude Code's permission prompts and seimei's guard, like an external server's.
+Claude Code starts the command as an MCP server on stdio for each session that has the plugin. Its environment carries `SEIMEI_SOCKET`, `SEIMEI_TOKEN` and `SEIMEI_STATE`. A plugin raises a card by writing one JSON line with the token to that socket, and the card names the session it serves. Its calls also go through Claude Code's permission prompts, like an external server's.
 
 ## Writing a built-in plugin
 

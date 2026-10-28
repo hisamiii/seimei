@@ -30,7 +30,9 @@ Off until you enable them in setup or config: the desktop (windows, screenshots,
 
 ## Safety
 
-Every tool call of the dispatcher and the shikigami passes seimei's guard first: your rules in `~/.config/seimei/guard.toml` (`contrib/guard.example.toml` has a set to copy), plus seimei's own secrets, which no agent reads. Claude Code's own permission prompts become cards on the phone. In bypass mode the cards guard against mistakes, not against a determined agent with a shell. Read [docs/security.md](docs/security.md) before you pick a permission mode.
+Each harness's own permissions decide every tool call, and Claude Code's permission prompts become cards on the phone. Claude Code sessions are denied seimei's own secrets through `deny_paths`.
+
+In bypass mode the cards protect against mistakes, not against a determined agent with a shell. Read [docs/security.md](docs/security.md) before you pick a permission mode.
 
 ## On the server
 

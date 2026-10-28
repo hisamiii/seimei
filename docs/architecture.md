@@ -12,7 +12,7 @@ phone app / web page ──https──> proxy ──> 127.0.0.1:8417  seimei
             ├──────────────────────────────────┴──────────────────────────────┤
             │ dispatcher.rs: one Claude Code session, resumed across restarts │
             │ workers/:      the shikigami (Claude Code, ACP or Codex)        │
-            │ guard.rs:      one PreToolUse hook on every tool call           │
+            │ audit.rs:      every tool call, from the harness's events       │
             │ permissions.rs: Claude Code's permission prompts become cards   │
             │ sessions.rs / adopt.rs: the user's own Claude Code sessions     │
             │ plugins/: desktop, browser, music, queue (MCP servers)         │
@@ -25,7 +25,7 @@ phone app / web page ──https──> proxy ──> 127.0.0.1:8417  seimei
 The workspace has five parts:
 
 - `crates/proto`: the clients for Claude Code's stream-json protocol, ACP and Codex.
-- `crates/core`: state, sessions, the guard, push and the plugin host.
+- `crates/core`: state, sessions, the audit log, push and the plugin host.
 - `plugins/*`: one crate per built-in plugin, for desktop, browser, music and queue.
 - `crates/server`: the HTTP routes. The web page in `web/` is built into the binary.
 - `crates/seimei`: the binary, with serve, setup, update and the account commands.
@@ -64,7 +64,7 @@ A browser turns on notifications in the menu, under Notifications. The page subs
 
 A card holds a tool call until the user answers it on the phone or the web. Cards come from three sources.
 
-1. The guard's own cards. They cover stopping the user's sessions and writes to Claude Code's permission settings. They also cover plugin actions, such as closing windows seimei did not open or editing the WM config.
+1. seimei's own tools and plugins. They cover adopting and handing over sessions, and plugin actions such as closing a window or a tab the user opened, see [security.md](security.md).
 2. Claude Code's permission prompts, `can_use_tool`, in every mode but bypass. They offer the terminal's choices: Allow, Always allow, Allow edits for this session, and Deny with a note.
 3. Plan cards, in plan mode: Go ahead or Keep planning.
 
@@ -77,7 +77,6 @@ seimei keeps its config in `~/.config/seimei/` and its state in `~/.local/share/
 | path | what |
 |---|---|
 | `~/.config/seimei/config.toml` | config, see [config.md](config.md) |
-| `~/.config/seimei/guard.toml` | the user's guard rules, see [security.md](security.md) |
 | `~/.local/share/seimei/` | state, mode 700 |
 | `~/.local/share/seimei/plugins.sock` | where plugin MCP processes reach seimei |
 | `~/.local/share/seimei/mcp/` | each session's MCP config, mode 600 |
@@ -138,8 +137,8 @@ The code map lists where each part lives. Paths are relative to the repo root.
 
 `crates/core/src` also holds the checks:
 
-- `guard.rs`: the rules and the built-in denies. `shell.rs` and `paths.rs` read commands and paths for it.
-- `permissions.rs`: Claude Code's prompts as cards.
+- `permissions.rs`: Claude Code's prompts as cards, and the denied paths.
+- `audit.rs`: the audit log of every tool call.
 - `approvals.rs`: cards that wait for the user.
 
 State and the user live in `crates/core/src` too. `events.rs` is the log, next to `auth.rs`, `push.rs`, `files.rs`, `uploads.rs`, `usage.rs`, `cost.rs`, `metrics.rs`, `watches.rs`, `archive.rs`, `aliases.rs`, `wake.rs`, `deploys.rs` and `util.rs`.
