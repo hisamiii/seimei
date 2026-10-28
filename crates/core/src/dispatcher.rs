@@ -1210,9 +1210,9 @@ impl Turns {
             let why = match took.first() {
                 Some(Source::Event(w, _)) => w.clone(),
                 _ => {
-                    // Claude Code's own input started it: not noise.
+                    // Claude Code's own input started it: not noise. The chat names it, or says it came from Claude Code.
                     self.class = self.class.max(Class::Other);
-                    self.own.take().unwrap_or_default()
+                    self.own.take().unwrap_or_else(|| "a notice from Claude Code".into())
                 }
             };
             let mut turn = Map::new();
