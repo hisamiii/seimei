@@ -808,16 +808,10 @@ struct Session {
     idle: Option<Instant>,
 }
 
-async fn next(client: &mut Option<Client>) -> Option<Message> {
-    match client {
-        Some(c) => c.recv().await,
-        None => std::future::pending().await,
-    }
-}
-
-async fn next_acp(client: &mut Option<acp::Client>) -> Option<acp::Event> {
-    match client {
-        Some(c) => c.recv().await,
+/// The next message of a process that runs; without one, nothing ever.
+async fn next<T>(recv: Option<impl Future<Output = Option<T>>>) -> Option<T> {
+    match recv {
+        Some(r) => r.await,
         None => std::future::pending().await,
     }
 }
@@ -857,11 +851,11 @@ impl Session {
                     Some(c) => self.command(c).await,
                     None => return,
                 },
-                msg = next(&mut self.client) => match msg {
+                msg = next(self.client.as_mut().map(Client::recv)) => match msg {
                     Some(m) => self.handle(m).await,
                     None => self.ended().await,
                 },
-                ev = next_acp(&mut self.acp) => match ev {
+                ev = next(self.acp.as_mut().map(acp::Client::recv)) => match ev {
                     Some(e) => self.acp_event(e).await,
                     None => self.ended().await,
                 },
