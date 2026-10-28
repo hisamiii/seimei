@@ -18,7 +18,7 @@ use crate::approvals::Approvals;
 use crate::kitty;
 use crate::sessions;
 use crate::transcripts::{brief, transcript};
-use crate::util::{as_text, chars, now, read_json, save_json};
+use crate::util::{as_text, chars, children, now, read_json, save_json, stat_field};
 use crate::workers::{Adoption, Pool, Worker};
 
 const SHELLS: [&str; 5] = ["bash", "zsh", "fish", "sh", "dash"];
@@ -63,11 +63,6 @@ fn cmdline(pid: i64) -> String {
     String::from_utf8_lossy(&raw).replace('\0', " ").trim().to_string()
 }
 
-fn stat_field(pid: i64, n: usize) -> Option<String> {
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    stat.rsplit_once(')')?.1.split_whitespace().nth(n).map(String::from)
-}
-
 fn ppid(pid: i64) -> i64 {
     stat_field(pid, 1).and_then(|p| p.parse().ok()).unwrap_or(0)
 }
@@ -75,14 +70,6 @@ fn ppid(pid: i64) -> i64 {
 /// Running: a zombie has ended, it only waits for its parent to read its exit.
 fn alive(pid: i64) -> bool {
     stat_field(pid, 0).is_some_and(|s| s != "Z")
-}
-
-fn children(pid: i64) -> Vec<i64> {
-    let Ok(tasks) = std::fs::read_dir(format!("/proc/{pid}/task")) else { return vec![] };
-    (tasks.flatten())
-        .filter_map(|t| std::fs::read_to_string(t.path().join("children")).ok())
-        .flat_map(|c| c.split_whitespace().filter_map(|k| k.parse().ok()).collect::<Vec<i64>>())
-        .collect()
 }
 
 /// What a background shell runs: the command inside Claude Code's snapshot wrapper.

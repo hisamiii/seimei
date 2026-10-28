@@ -9,7 +9,7 @@ use regex::Regex;
 use serde_json::{Value, json};
 
 use crate::paths::home;
-use crate::util::{chars, read_from};
+use crate::util::{chars, read_from, read_tail};
 
 /// What a brief reads from the end of a transcript.
 const TAIL: u64 = 512 << 10;
@@ -47,16 +47,6 @@ pub fn transcript(session: &str, cwd: &str) -> Option<PathBuf> {
         }
     }
     None
-}
-
-fn read_tail(path: &Path, n: u64) -> std::io::Result<Vec<u8>> {
-    use std::io::{Read, Seek, SeekFrom};
-    let mut f = std::fs::File::open(path)?;
-    let len = f.metadata()?.len();
-    f.seek(SeekFrom::Start(len.saturating_sub(n)))?;
-    let mut data = vec![];
-    f.read_to_end(&mut data)?;
-    Ok(data)
 }
 
 /// The project a path belongs to: its folder under ~/Development/Projects, ~/Development/Scratch, ~/.config or the

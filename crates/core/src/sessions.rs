@@ -14,7 +14,7 @@ use crate::events::EventLog;
 use crate::kitty;
 use crate::paths::home;
 use crate::transcripts::{brief, claude_dir, project_of, rows_from, summary, text_of, time_of, transcript};
-use crate::util::{as_text, chars, now};
+use crate::util::{as_text, chars, children, now, read_tail, stat_field};
 use crate::workers::Pool;
 
 /// What peek and the timeline read from the end of a transcript.
@@ -65,11 +65,7 @@ impl Live {
 
 /// The pid runs and is the same process (pids get reused).
 pub fn alive(rec: &Value) -> bool {
-    let Some(pid) = rec["pid"].as_i64() else { return false };
-    let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else { return false };
-    let Some(start) = stat.rsplit_once(')').and_then(|(_, rest)| rest.split_whitespace().nth(19)) else {
-        return false;
-    };
+    let Some(start) = rec["pid"].as_i64().and_then(|pid| stat_field(pid, 19)) else { return false };
     // A procStart that is there but null matches no process.
     rec.get("procStart").is_none_or(|v| !v.is_null() && as_text(v) == start)
 }
@@ -234,13 +230,8 @@ pub fn peek(path: &Path, count: usize) -> Value {
 
 /// The permission mode the session runs in, as its transcript last recorded it.
 pub fn mode_of(path: &Path) -> Option<String> {
-    use std::io::{Read, Seek, SeekFrom};
     const KEY: &[u8] = b"\"permissionMode\":\"";
-    let mut f = std::fs::File::open(path).ok()?;
-    let size = f.metadata().ok()?.len();
-    let mut buf = vec![];
-    f.seek(SeekFrom::Start(size.saturating_sub(1 << 20))).ok()?;
-    f.read_to_end(&mut buf).ok()?;
+    let buf = read_tail(path, 1 << 20).ok()?;
     let at = buf.windows(KEY.len()).rposition(|w| w == KEY)? + KEY.len();
     let end = buf[at..].iter().position(|b| *b == b'"')?;
     Some(String::from_utf8_lossy(&buf[at..at + end]).into_owned()).filter(|m| !m.is_empty())
@@ -295,14 +286,8 @@ pub fn timeline(path: &Path, start: Option<u64>, events: usize) -> Value {
 
 /// The last lines of the command a session runs now: Claude Code sends its shell's output to a tasks file.
 pub fn running_output(pid: i64, lines: usize) -> Vec<String> {
-    let Ok(tasks) = std::fs::read_dir(format!("/proc/{pid}/task")) else { return vec![] };
-    let kids: Vec<String> = tasks
-        .flatten()
-        .filter_map(|t| std::fs::read_to_string(t.path().join("children")).ok())
-        .flat_map(|c| c.split_whitespace().map(String::from).collect::<Vec<_>>())
-        .collect();
     let mut best: Option<(f64, PathBuf)> = None;
-    for c in kids {
+    for c in children(pid) {
         let Ok(out) = std::fs::read_link(format!("/proc/{c}/fd/1")) else { continue };
         if OUTPUT.is_match(&out.to_string_lossy()) && out.is_file() {
             let m = mtime(&out);
@@ -312,8 +297,7 @@ pub fn running_output(pid: i64, lines: usize) -> Vec<String> {
         }
     }
     let Some((_, best)) = best else { return vec![] };
-    let size = std::fs::metadata(&best).map(|m| m.len()).unwrap_or(0);
-    let Ok(data) = crate::util::read_from(&best, size.saturating_sub(8192)) else { return vec![] };
+    let Ok(data) = read_tail(&best, 8192) else { return vec![] };
     let text = String::from_utf8_lossy(&data);
     static SPLIT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\r?\n").unwrap());
     let rows: Vec<String> = SPLIT

@@ -190,10 +190,7 @@ fn descends(pid: u32, root: u32) -> bool {
         if p == root {
             return true;
         }
-        let Ok(stat) = std::fs::read_to_string(format!("/proc/{p}/stat")) else { return false };
-        // The fields after the command name, which may hold spaces and parentheses itself.
-        let rest = stat.rsplit_once(')').map_or("", |(_, r)| r);
-        match rest.split_whitespace().nth(1).and_then(|v| v.parse().ok()) {
+        match crate::util::stat_field(p.into(), 1).and_then(|v| v.parse().ok()) {
             Some(parent) if parent > 1 => p = parent,
             _ => return false,
         }

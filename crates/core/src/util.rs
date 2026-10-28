@@ -102,6 +102,27 @@ pub fn read_from(path: &Path, off: u64) -> std::io::Result<Vec<u8>> {
     Ok(data)
 }
 
+/// A file's last `n` bytes (all of it when shorter).
+pub fn read_tail(path: &Path, n: u64) -> std::io::Result<Vec<u8>> {
+    read_from(path, std::fs::metadata(path)?.len().saturating_sub(n))
+}
+
+/// Field `n` of /proc/<pid>/stat after the command name (0 is the state, 1 the parent's pid).
+pub fn stat_field(pid: i64, n: usize) -> Option<String> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // The command name may hold spaces and parentheses itself.
+    stat.rsplit_once(')')?.1.split_whitespace().nth(n).map(String::from)
+}
+
+/// The pids of a process's children, from each of its threads.
+pub fn children(pid: i64) -> Vec<i64> {
+    let Ok(tasks) = std::fs::read_dir(format!("/proc/{pid}/task")) else { return vec![] };
+    (tasks.flatten())
+        .filter_map(|t| std::fs::read_to_string(t.path().join("children")).ok())
+        .flat_map(|c| c.split_whitespace().filter_map(|k| k.parse().ok()).collect::<Vec<i64>>())
+        .collect()
+}
+
 pub fn random_bytes(n: usize) -> Vec<u8> {
     let mut b = vec![0; n];
     openssl::rand::rand_bytes(&mut b).expect("the system's random source");
