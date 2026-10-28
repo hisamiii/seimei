@@ -1,8 +1,7 @@
-//! `seimei setup`: the first run. It checks Claude Code, writes config.toml from the example (port, origin, what the
-//! prompts call this machine, the terminal sessions open in, the plugins), sets the password, offers the kitty bridge
-//! and writes a service for this binary: a systemd user unit, or an OpenRC user service when PID 1 is not systemd. What is already there (a config, a password, a service) it
-//! leaves alone, so running it again is safe. Answers come from stdin, one line each; an empty line or the end of input
-//! takes the default.
+//! `seimei setup`: the first run. It checks the agent's CLI, writes config.toml, sets the password, offers the terminal bridge and writes a service.
+//! The service is a systemd user unit, or an OpenRC user service when PID 1 is not systemd.
+//! What is already there (a config, a password, a service) stays, so running it again is safe.
+//! Answers come from stdin, one line each; an empty line or the end of input takes the default.
 
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
@@ -14,10 +13,9 @@ use seimei_core::util::{config_file, config_home, data_dir};
 
 const EXAMPLE: &str = include_str!("../../../config.example.toml");
 
-/// The Claude Code seimei's protocol client was built against; older ones may lack parts of it.
+/// The agent CLI version seimei's protocol client was built against; older ones may lack parts of it.
 const TESTED_CLAUDE: (u32, u32) = (2, 1);
 
-/// A plugin as setup offers it: name, what it is, what it needs, whether it looks present.
 /// Terminals setup knows, each with how it opens in a folder under a title (the command follows).
 const TERMINALS: [(&str, &str); 8] = [
     ("kitty", "kitty -d {cwd} --title {title}"),
@@ -30,7 +28,7 @@ const TERMINALS: [(&str, &str); 8] = [
     ("xfce4-terminal", "xfce4-terminal --working-directory={cwd} -T {title} -x"),
 ];
 
-/// The terminal command to offer: $TERMINAL's when setup knows it, else the first one installed, else kitty's.
+/// The terminal command to offer: $TERMINAL's when setup knows it, else the first one installed, else the first one listed.
 pub fn terminal_default(env_terminal: Option<&str>, installed: impl Fn(&str) -> bool) -> &'static str {
     let named = env_terminal.and_then(|t| Path::new(t).file_name()).and_then(|n| n.to_str());
     let known = |name: &str| TERMINALS.iter().find(|(n, _)| *n == name).map(|(_, c)| *c);
@@ -40,7 +38,7 @@ pub fn terminal_default(env_terminal: Option<&str>, installed: impl Fn(&str) -> 
         .unwrap_or(TERMINALS[0].1)
 }
 
-/// kitty-rc.conf: the remote control password seimei types with, for kitty.conf to include.
+/// The remote control password file seimei types with, for the terminal's own config to include.
 pub fn kitty_rc_text(password: &str) -> String {
     format!(
         "# seimei's kitty remote control: only reading the screen and typing, with this password.\n\
@@ -103,7 +101,7 @@ pub fn reach_origin(answer: &str, port: u16, tailnet: Option<&str>) -> Result<St
 
 pub use seimei_core::util::on_path;
 
-/// Claude Code's version, from `claude --version` (or $SEIMEI_CLAUDE's).
+/// The agent CLI's version, from its `--version` (the executable the environment names, else the default on PATH).
 fn claude_version() -> Option<String> {
     let exe = std::env::var("SEIMEI_CLAUDE").ok().filter(|p| !p.is_empty()).unwrap_or("claude".into());
     let out = Command::new(exe).arg("--version").output().ok().filter(|o| o.status.success())?;
@@ -116,7 +114,6 @@ fn older(version: &str, than: (u32, u32)) -> bool {
     (n.next().unwrap_or(0), n.next().unwrap_or(0)) < than
 }
 
-/// config.toml from the example, with these answers in place of its defaults.
 /// A plan's lines in config.toml: the dispatcher's model and compaction point, and [models]. Max keeps the example's.
 pub fn plan_lines(plan: &str) -> &'static [(&'static str, &'static str)] {
     match plan {
@@ -130,6 +127,7 @@ pub fn plan_lines(plan: &str) -> &'static [(&'static str, &'static str)] {
     }
 }
 
+/// config.toml from the example, with these answers in place of its defaults.
 pub fn config_text(port: u16, origin: &str, about: &str, plan: &str, terminal: &str, enabled: &[&str]) -> String {
     let q = |s: &str| toml::Value::String(s.into()).to_string();
     // A new value keeps the line's comment, in its column.
@@ -196,7 +194,7 @@ pub fn openrc_text(exe: &Path) -> String {
     OPENRC.replace("{exe}", &exe.display().to_string())
 }
 
-/// Like the unit's own cgroup and KillMode: seimei and its Claude sessions in a cgroup of their own, emptied on stop.
+/// Like the unit's own cgroup and KillMode: seimei and its agent sessions in a cgroup of their own, emptied on stop.
 const OPENRC: &str = r#"#!/sbin/openrc-run
 # Written by `seimei setup`.
 
@@ -323,9 +321,8 @@ fn openrc_service(exe: &Path) {
 /// The release's signed extension; [plugins.browser] extension_id overrides it for one packed from source.
 const EXTENSION_ID: &str = "seimei@hisamiowo.xyz";
 
-/// The browser plugin's native-messaging host: a small script that runs this binary, and its manifest where Firefox
-/// and its forks (~/.mozilla, LibreWolf's own) and the Chromium browsers with a profile here look. A manifest that
-/// points elsewhere stays. For Chromium it also writes the extension to load unpacked.
+/// The browser plugin's native-messaging host: a script that runs this binary, and its manifest for Firefox, its forks and the Chromium browsers with a profile here.
+/// A manifest that points elsewhere stays. For Chromium it also writes the extension to load unpacked.
 fn browser_host(state: &Path, exe: &Path) {
     let Some(own) = plugin_on("browser") else { return };
     let id = own.get("extension_id").and_then(|i| i.as_str()).unwrap_or(EXTENSION_ID);
@@ -405,8 +402,8 @@ fn plugin_on(name: &str) -> Option<toml::Table> {
     Some(plugins.get(name).and_then(|t| t.as_table()).cloned().unwrap_or_default())
 }
 
-/// The desktop plugin on GNOME reaches windows through seimei's GNOME Shell extension: written to the extensions
-/// folder and added to the enabled ones. GNOME on Wayland loads a new extension at the next login.
+/// The desktop plugin on GNOME reaches windows through seimei's GNOME Shell extension: written to the extensions folder and added to the enabled ones.
+/// GNOME on Wayland loads a new extension at the next login.
 fn gnome_extension() {
     let Some(own) = plugin_on("desktop") else { return };
     let gnome = match own.get("backend").and_then(|b| b.as_str()) {
@@ -451,7 +448,7 @@ fn write_file(path: &Path, text: &str, mode: u32) {
     }
 }
 
-/// The page types into the user's own Claude sessions through kitty remote control, when they run in kitty.
+/// The page types into the user's own sessions through the terminal's remote control, when they run in a terminal that has it.
 fn kitty_bridge(state: &Path) {
     let rc = state.join("kitty-rc.conf");
     if rc.exists() {
@@ -491,7 +488,7 @@ fn kitty_bridge(state: &Path) {
 pub fn run(read_secret: impl Fn(&str) -> String, builtins: &[seimei_core::plugins::Factory]) {
     println!("seimei setup: what is already set up stays as it is.\n");
 
-    // Claude Code: seimei drives the user's own, on its own login.
+    // The agent's CLI: seimei drives the user's own, on its own login.
     match claude_version() {
         None => {
             println!(
@@ -507,7 +504,6 @@ pub fn run(read_secret: impl Fn(&str) -> String, builtins: &[seimei_core::plugin
         Some(v) => println!("Claude Code {v} found. seimei uses its login: log in with `claude` if you have not."),
     }
 
-    // config.toml
     let cfg_path = config_file();
     let origin = if cfg_path.exists() {
         println!("\n{} exists; leaving it as is.", cfg_path.display());
@@ -636,7 +632,6 @@ pub fn run(read_secret: impl Fn(&str) -> String, builtins: &[seimei_core::plugin
         }
     }
 
-    // The service.
     if seimei_core::util::systemd() {
         systemd_service(&exe);
     } else if on_path("rc-service") {

@@ -1,5 +1,4 @@
-//! `seimei browser-host` between a stand-in browser (framed JSON on its stdin and stdout) and a stand-in seimei (a
-//! unix socket that takes and sends JSON lines).
+//! `seimei browser-host` between a stand-in browser (framed JSON on its stdin and stdout) and a stand-in seimei (a unix socket that takes and sends JSON lines).
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixListener;

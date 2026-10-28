@@ -1,5 +1,5 @@
-//! `seimei setup` and `seimei screen-password` on a temp HOME: answers on stdin, a fake `claude --version` and fake
-//! systemctl, rc-update and rc-service that only log. Nothing reaches the user's config, state or services.
+//! `seimei setup` and `seimei screen-password` on a temp HOME: answers on stdin, a fake agent CLI `--version` and fake systemctl, rc-update and rc-service that only log.
+//! Nothing reaches the user's config, state or services.
 
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
@@ -79,8 +79,7 @@ fn text(o: &Output) -> String {
 #[test]
 fn setup_first_run_then_again() {
     let h = Home::new("first");
-    // port, origin, about, plan, terminal, four plugins (desktop, browser, music, queue: only music), a too-short password, then a good one twice, the
-    // kitty bridge, the example guard rules, start now.
+    // port, origin, about, plan, terminal, four plugins (desktop, browser, music, queue: only music), a too-short password, then a good one twice, the terminal bridge, the example guard rules, start now.
     let answers = "9100\nhttps://seimei.example.net\ntest box\npro\nfoot -D {cwd} -T {title}\nn\nn\ny\n\nshort\nshort\n\
                    correct horse\ncorrect horse\ny\ny\ny\n";
     let o = h.run(&["setup"], answers);
@@ -131,7 +130,7 @@ fn setup_first_run_then_again() {
 #[test]
 fn setup_defaults_and_no_claude() {
     let h = Home::new("defaults");
-    // Every default (end of input) but the password, no kitty bridge, no guard rules and no start.
+    // Every default (end of input) but the password, no terminal bridge, no guard rules and no start.
     let o = h.run(&["setup"], "\n\n\n\n\n\n\n\n\nlong enough\nlong enough\nn\nn\nn\n");
     let out = text(&o);
     assert!(o.status.success(), "{out}");

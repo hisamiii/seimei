@@ -1,10 +1,7 @@
-//! `seimei update [--check]`: the latest GitHub release replaces this binary when it is newer and its minisign
-//! signature checks out against the key built into this binary. The signature's trusted comment names the version
-//! and the file, so an older signed release cannot pass for a newer one. The old binary stays beside it as
-//! `seimei.old`; the running server restarts on the new one once no turn runs (see [`restart_when_idle`]).
-//!
-//! A release build gets its key from SEIMEI_UPDATE_KEY at build time (contrib/release.sh). A build without one
-//! came from source and is updated the way it was built.
+//! `seimei update [--check]`: a newer GitHub release replaces this binary when its minisign signature checks out against the built-in key.
+//! The trusted comment names the version and the file, so an older signed release cannot pass for a newer one.
+//! The old binary stays as `seimei.old`; the server restarts on the new one once no turn runs ([`restart_when_idle`]).
+//! The key comes from SEIMEI_UPDATE_KEY at build time (contrib/release.sh); a build without one came from source.
 
 use std::io::Read;
 use std::os::unix::fs::PermissionsExt;
@@ -42,8 +39,7 @@ pub fn newer(a: &str, b: &str) -> bool {
     }
 }
 
-/// The file is the release `version` of `asset`, signed with `key` (a minisign public key, its file or its base64
-/// line).
+/// The file is the release `version` of `asset`, signed with `key` (a minisign public key, its file or its base64 line).
 pub fn verify(key: &str, data: &[u8], sig: &str, version: &str, asset: &str) -> Result<(), String> {
     use minisign_verify::{PublicKey, Signature};
     let pk = PublicKey::decode(key)
@@ -139,8 +135,7 @@ pub fn run(check: bool, state: &Path) {
     println!("A running server restarts on it once no turn runs.");
 }
 
-/// The server's side: once `seimei update` left its marker and no turn runs (seimei's or a shikigami's), it exits
-/// with 75 so systemd (Restart=on-failure) starts the new binary.
+/// The server's side: once `seimei update` left its marker and no turn runs (seimei's or a shikigami's), it exits with 75 so systemd (Restart=on-failure) starts the new binary.
 pub async fn restart_when_idle(state: PathBuf, idle: impl Fn() -> bool, before: impl Fn(&str)) {
     let marker = state.join(MARKER);
     loop {

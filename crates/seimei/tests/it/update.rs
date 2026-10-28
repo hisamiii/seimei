@@ -1,6 +1,5 @@
-//! `seimei update` on a copy of the binary, against a fake GitHub release server on localhost and a test key: what
-//! it refuses (another key, an older release's signature, a binary that is not that version), --check, up to date,
-//! and the swap with the old binary kept and the restart marker left. Nothing reaches GitHub or the real binary.
+//! `seimei update` on a copy of the binary, against a fake GitHub release server on localhost and a test key: what it refuses (another key, an older release's signature, a binary that is not that version), --check, up to date, and the swap with the old binary kept and the restart marker left.
+//! Nothing reaches GitHub or the real binary.
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};

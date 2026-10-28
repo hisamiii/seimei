@@ -1,6 +1,4 @@
-//! The plugins end to end on stdio, as Claude Code starts them, with seimei's card socket: `seimei plugin queue` with
-//! a fake cqd (its spec, a tool's text, a kill card approved and denied, a lost seimei and a stopped cqd), music,
-//! the browser forwarding to seimei, and plugins/template installed the way its README says.
+//! The plugins end to end on stdio, as the agent's CLI starts them, with seimei's card socket: `seimei plugin queue` with a fake cqd (its spec, a tool's text, a kill card approved and denied, a lost seimei and a stopped cqd), music, the browser forwarding to seimei, and plugins/template installed the way its README says.
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
@@ -147,7 +145,7 @@ async fn queue_plugin_over_stdio() {
         }
     }
 
-    // A card whose call goes away ends as cancelled: Claude Code cancels the request, or the plugin process ends.
+    // A card whose call goes away ends as cancelled: the agent's CLI cancels the request, or the plugin process ends.
     let kill = json!({"name": "queue_stop", "arguments": {}});
     for id in [6, 7] {
         let mut sub = events.subscribe();
@@ -188,8 +186,8 @@ async fn queue_plugin_over_stdio() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
-/// Seimei's socket for a test: its plugins (as config enables them) and the cards they raise. The test stands in
-/// for seimei's claude process: the plugins it starts may use seimei's token.
+/// Seimei's socket for a test: its plugins (as config enables them) and the cards they raise.
+/// The test stands in for seimei's agent process: the plugins it starts may use seimei's token.
 async fn host(name: &str, enabled: &str) -> (std::path::PathBuf, Arc<EventLog>, Arc<Approvals>, Arc<Plugins>) {
     let d = std::env::temp_dir().join(format!("seimei-plugin-{name}-{}", std::process::id()));
     let state = d.join("state");
@@ -396,7 +394,7 @@ async fn browser_plugin_forwards_to_seimei() {
     plugins.root("w", Some("w1"), Some(std::process::id()));
     let mut w_env = env.clone();
     w_env.insert("SEIMEI_TOKEN".into(), w_token);
-    // seimei's token from a process outside seimei's claude process.
+    // seimei's token from a process outside seimei's agent process.
     let mut other = Command::new("sleep").arg("30").spawn().unwrap();
     let env3 = env.clone();
     let refused = tokio::task::spawn_blocking(move || {
@@ -419,8 +417,7 @@ async fn browser_plugin_forwards_to_seimei() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
-/// plugins/template, copied into the user's plugins folder as its README says: seimei lists it with its prompt and
-/// note, Claude Code would start its command, and its clear raises a card that only an approval gets past.
+/// plugins/template, copied into the user's plugins folder as its README says: seimei lists it with its prompt and note, the agent's CLI would start its command, and its clear raises a card that only an approval gets past.
 #[tokio::test(flavor = "multi_thread")]
 async fn template_plugin_as_a_user_installs_it() {
     let d = std::env::temp_dir().join(format!("seimei-template-{}", std::process::id()));

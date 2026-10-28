@@ -1,7 +1,6 @@
-//! A live ACP shikigami on dsh (`dsh --profile acp`, its own login and model): a command through a card, a denied one,
-//! a key read the guard refuses, its own ask tool through the built binary, a let-go session resumed, and bypass
-//! running without cards. Ignored by default; run by tests/live.sh acp, which gives it a temp HOME with a decoy
-//! key (dsh keeps its own home through DSH_HOME). State and work folders are temp ones, no phone sees a card.
+//! A live ACP shikigami on dsh (`dsh --profile acp`, its own login and model): a command through a card, a denied one, a key read the guard refuses, its own ask tool through the built binary, a let-go session resumed, and bypass running without cards.
+//! Ignored by default; run by tests/live.sh acp, which gives it a temp HOME with a decoy key (dsh keeps its own home through DSH_HOME).
+//! State and work folders are temp ones, no phone sees a card.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};

@@ -1,5 +1,4 @@
-//! An ACP shikigami's own tools (ask, board): the fake agent starts `seimei plugin shikigami` as its session got it,
-//! and the call reaches the worker through the plugin socket (a temp one), from that agent's process tree only.
+//! An ACP shikigami's own tools (ask, board): the fake agent starts `seimei plugin shikigami` as its session got it, and the call reaches the worker through the plugin socket (a temp one), from that agent's process tree only.
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Write};

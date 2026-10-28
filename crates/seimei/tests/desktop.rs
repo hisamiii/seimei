@@ -1,9 +1,6 @@
-//! plugins/desktop/tests/cases.json against the desktop plugin, on fakes: HOME,
-//! XDG_RUNTIME_DIR and PATH point into a temp folder before any thread starts (this test has its own main for that),
-//! the window manager's tools there are plugins/desktop/tests/fakes/fakebin.py, the niri group talks to
-//! plugins/desktop/tests/fakes/niri.py, and the input devices write their events to a file instead of /dev/uinput. Then
-//! `seimei plugin desktop` end to end: its spec, a call forwarded to seimei, and the close-window card through the
-//! guard facts. Nothing reaches the real desktop.
+//! plugins/desktop/tests/cases.json against the desktop plugin on fakes (plugins/desktop/tests/fakes), then `seimei plugin desktop` end to end.
+//! HOME, XDG_RUNTIME_DIR and PATH point into a temp folder before any thread starts: this test has its own main for that.
+//! The input devices write their events to a file instead of /dev/uinput; nothing reaches the real desktop.
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -242,8 +239,7 @@ fn main() {
     }
 }
 
-/// `seimei plugin desktop` as Claude Code starts it: the spec for seimei's backend, a call seimei runs on the fake
-/// niri, and the facts the guard sees for closing a window seimei did not open.
+/// `seimei plugin desktop` as the agent's CLI starts it: the spec for seimei's backend, a call seimei runs on the fake niri, and the facts the guard sees for closing a window seimei did not open.
 async fn end_to_end(t: &mut T, g: &Value) {
     let state = t.root.join("e2e");
     std::fs::create_dir_all(&state).unwrap();

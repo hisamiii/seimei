@@ -8,9 +8,9 @@ mod update;
 #[global_allocator]
 static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-/// mimalloc keeps freed memory a second and commits whole arenas up front; with THP on that left the server at 2-3x
-/// glibc's RSS. Give memory back at once and commit as used. (Turning THP off instead would go through a prctl every
-/// child inherits.) The option numbers are mimalloc v3's `mi_option_t`.
+/// mimalloc keeps freed memory a second and commits whole arenas up front; with THP on that left the server at 2-3x glibc's RSS.
+/// So give memory back at once and commit as used; turning THP off instead would need a prctl that every child inherits.
+/// The option numbers are mimalloc v3's `mi_option_t`.
 #[cfg(target_env = "musl")]
 fn tune_alloc() {
     const ARENA_EAGER_COMMIT: std::ffi::c_int = 4;
@@ -309,7 +309,7 @@ fn main() {
     tune_alloc();
     let a = args();
     if a.command == "plugin" {
-        // Claude Code starts it for a session: an MCP server on stdin and stdout.
+        // The agent's CLI starts it for a session: an MCP server on stdin and stdout.
         let name = a.plugin.clone().unwrap_or_else(|| die("usage: seimei plugin NAME"));
         let rt = tokio::runtime::Runtime::new().expect("a runtime");
         return rt.block_on(seimei_core::plugins::serve_stdio(&name, &BUILTINS)).unwrap_or_else(|e| die(&e));
@@ -366,8 +366,7 @@ fn main() {
         }
         ([origin.clone()].into(), Some(auth))
     };
-    // The port before anything else: a second server (a respawn while another one runs) has to stop here, before it
-    // replaces the plugin sockets, writes the event log or resumes the shikigami of the one that runs.
+    // Bind the port first: a second server (a respawn while one runs) must stop here, before it replaces the plugin sockets, writes the event log or resumes the running server's shikigami.
     let rt = tokio::runtime::Runtime::new().expect("a runtime");
     let listener = web_on.then(|| {
         rt.block_on(tokio::net::TcpListener::bind(("127.0.0.1", port)))
@@ -503,13 +502,12 @@ fn main() {
             None => stop.await,
         }
     });
-    // A plain drop waits for every blocking thread, and a plugin's socket reader blocks until the plugin hangs up:
-    // seimei would never exit. Tasks still drop here (their children are killed); stuck readers end with the process.
+    // A plain drop waits for every blocking thread, and a plugin's socket reader blocks until the plugin hangs up, so seimei would never exit.
+    // Tasks still drop here (their children are killed); stuck readers end with the process.
     rt.shutdown_timeout(Duration::from_secs(5));
 }
 
-/// What the dispatcher reads from the rest at the start of a turn: where the task board and the shikigami disagree,
-/// and after a compaction the open board items and the shikigami at work.
+/// What the dispatcher reads from the rest at the start of a turn: where the task board and the shikigami disagree, and after a compaction the open board items and the shikigami at work.
 fn wire(app: &Arc<seimei_server::App>) {
     let a = app.clone();
     let _ = app.dispatcher.drift.set(Box::new(move || {

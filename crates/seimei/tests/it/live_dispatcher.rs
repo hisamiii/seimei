@@ -1,7 +1,6 @@
-//! Phase 4's dispatcher run: seimei's dispatcher on haiku, wired as the dev server wires it (seimei_server::App),
-//! with the queue, music and browser plugins on fakes. One message asks it for one read-only tool of each;
-//! the tools reach the fakes and their texts reach the session, with no card. Desktop is left out: its devices are
-//! the real /dev/uinput. Run by tests/live.sh dispatcher.
+//! seimei's dispatcher on haiku, wired as the dev server wires it, with the queue, music and browser plugins on fakes.
+//! One message asks for one read-only tool of each: the tools reach the fakes and their texts reach the session, with no card.
+//! Desktop is left out (its devices are the real /dev/uinput). Run by tests/live.sh dispatcher.
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -58,8 +57,8 @@ fn dispatcher_live() {
     let script = format!("#!/bin/sh\necho \"$@\" >> {}\nexit 0\n", played.display());
     std::fs::write(bin.join("playerctl"), script).unwrap();
     std::fs::set_permissions(bin.join("playerctl"), std::fs::Permissions::from_mode(0o755)).unwrap();
-    // Set before any session starts. The plugins inherit them through Claude Code: the fake queue gate, the fake Quod Libet
-    // bridge, playerctl from bin; no user plugins and no real connector socket.
+    // Set before any session starts; the plugins inherit them through the agent's CLI.
+    // The fake queue gate, the fake Quod Libet bridge, playerctl from bin; no user plugins and no real connector socket.
     let mut env = crate::env::Env::lock();
     env.set("CLAUDE_QUEUE_DIR", &state);
     env.set("SEIMEI_QL_SOCK", &ql_sock);

@@ -1,6 +1,5 @@
-//! Who can reach what, against a real `seimei serve --dev` in a throwaway home (docs/security.md): the Host allowlist,
-//! the login wall, the Origin and content-type checks on POST, the body caps, the password throttle and the auth.json
-//! tripwire. Plain HTTP over a socket, so nothing but the server is under test.
+//! Who can reach what, against a real `seimei serve --dev` in a throwaway home (docs/security.md): the Host allowlist, the login wall, the Origin and content-type checks on POST, the body caps, the password throttle and the auth.json tripwire.
+//! Plain HTTP over a socket, so nothing but the server is under test.
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
