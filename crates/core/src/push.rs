@@ -842,6 +842,10 @@ fn approval_note(a: &Value) -> Value {
             data["always"] = rule["id"].clone();
         }
     }
+    // A plan card's note is "keep planning": the agent goes on with it instead of starting.
+    if a["action"] == "plan" {
+        data["plan"] = json!(1);
+    }
     data
 }
 

@@ -112,8 +112,9 @@ object Push {
             .setVisibility(Notification.VISIBILITY_PRIVATE).setPublicVersion(public)
         d["group"]?.let { n.setGroup(it) }
         val aid = d["aid"]
-        // Each card gets its own Allow and Deny, plus Always allow when it has a rule to remember (at most three
-        // actions): only on an unlocked phone (API 31+), only while the app's session is unlocked.
+        // Each card gets its own Allow and Deny, plus Always allow when it has a rule to remember, else a note that goes
+        // with a deny ("Keep planning" on a plan card; at most three actions): only on an unlocked phone (API 31+),
+        // only while the app's session is unlocked.
         val unlocked = Build.VERSION.SDK_INT >= 31 && session() != null
         if (aid != null && unlocked) {
             n.addExtras(Bundle().apply { putString("aid", aid) })
@@ -128,6 +129,18 @@ object Push {
                 )
                 n.addAction(Notification.Action.Builder(Icon.createWithResource(ctx, R.drawable.ic_notify), label, pi)
                     .setAuthenticationRequired(true).build())
+            }
+            if (d["always"] == null) {
+                val plan = d["plan"] == "1"
+                val input = RemoteInput.Builder(Decide.NOTE).setLabel(if (plan) "What to change in the plan" else "Note for the agent").build()
+                val pi = PendingIntent.getBroadcast(
+                    ctx, (aid + "note").hashCode(),
+                    Intent(ctx, Decide::class.java).putExtra("aid", aid).putExtra("approve", false).putExtra("option", if (perm) "deny" else null),
+                    PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                )
+                n.addAction(Notification.Action.Builder(Icon.createWithResource(ctx, R.drawable.ic_notify),
+                    if (plan) "Keep planning" else "Deny with note", pi)
+                    .addRemoteInput(input).setAuthenticationRequired(true).setAllowGeneratedReplies(false).build())
             }
         }
         // The reply ping: answer from the shade (RemoteInput), or open the chat
@@ -171,7 +184,7 @@ object Push {
         "urgent" to "seimei: urgent")
 }
 
-/** Allow or Deny on an approval notification: settles that one card through the unlocked session. After the app's process
+/** Allow, Deny or a note on an approval notification: settles that one card through the unlocked session. After the app's process
  * died or its session locked, it asks to open the app instead (Android blocks starting an activity from here). */
 class Decide : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
@@ -180,6 +193,8 @@ class Decide : BroadcastReceiver() {
         val api = Push.session() ?: return Push.openToAnswer(ctx, aid, "Couldn't send your answer", "The app is locked. Tap to answer")
         val body = JSONObject().put("decision", if (approve) "approve" else "deny")
         intent.getStringExtra("option")?.let { body.put("option", it) }
+        RemoteInput.getResultsFromIntent(intent)?.getCharSequence(NOTE)?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+            ?.let { body.put("note", it) }
         val done = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
@@ -193,6 +208,10 @@ class Decide : BroadcastReceiver() {
                 done.finish()
             }
         }
+    }
+
+    companion object {
+        const val NOTE = "note"
     }
 }
 
