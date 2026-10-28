@@ -160,7 +160,7 @@ Each step is one commit, and `cargo test --workspace` passes after each. The fak
 9. **Add the config key.** This covers `[dispatcher] harness`, a `harness` field in the `state` event, the page and app header, and `config.md`, `security.md` and `architecture.md`. A case checks the `state` event, and the QA server shows the header by hand.
 10. **Optionally, move the shikigami onto the trait.** The `acp_worker` and `codex_worker` tests pass unchanged.
 
-## 7. Risks and open questions
+## 7. Risks
 
 The main risk is that the session which summons everything else runs under another harness's permissions. The rest are protocol drift and what a rollover loses.
 
@@ -170,7 +170,9 @@ The main risk is that the session which summons everything else runs under anoth
 - Off Claude Code the checklist does not shape the agent's own compaction summary, so what the notes miss may be lost.
 - Usage on other harnesses shows tokens only: the price table is per model of the default harness.
 
-Open questions for the owner:
+## 8. Decisions
 
-1. Scope: the proposal is the dispatcher first, and the shikigami onto the trait later, as step 10.
-2. The relay: may seimei's server write to Claude Code's undocumented messaging socket itself, as step 2 proposes? Without that, the relay needs a Claude Code process to call SendMessage.
+The owner settled both open questions. The plan above follows them.
+
+- **Scope**: the dispatcher moves to the trait first, and the shikigami follow later, as step 10.
+- **The relay**: seimei's server writes to Claude Code's messaging socket itself, as step 2 says.
