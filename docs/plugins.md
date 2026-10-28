@@ -29,6 +29,17 @@ Cards the built-in plugins raise:
 - **music:** tag edits and playlist deletes.
 - **browser:** the first action or navigation in a tab the user opened (once per tab and site; seimei's own tabs, which it keeps in a collapsed "seimei" tab group, and the agent browser need none). Closing the user's tabs goes by guard.toml.
 
+The desktop plugin types and moves the pointer through `/dev/uinput`, which most distros leave to root. Without access, typing and the pointer fail with `/dev/uinput: Permission denied`; windows, screenshots and AT-SPI still work. To give it to the user at the seat, add a udev rule and reload:
+
+```
+echo 'KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"' | sudo tee /etc/udev/rules.d/60-seimei-uinput.rules
+sudo modprobe uinput && sudo udevadm control --reload && sudo udevadm trigger
+```
+
+`uaccess` needs systemd-logind or elogind; without either, a group that owns `/dev/uinput` (often `input`, with `GROUP="input", MODE="0660"` in the rule) works too, after logging in again.
+
+Screen unlock is off until you save the lock screen's password with `seimei screen-password`. It is stored in seimei's data folder (0600, never readable by an agent: the guard blocks it), and `unlock_screen` types it without a card. So once it is saved, any session with the desktop plugin can unlock the screen while you are away, and whoever is at the machine then has your unlocked desktop. Save it only on a machine nobody else can get to; `seimei screen-password --clear` removes it.
+
 The browser extension talks to seimei through a native-messaging host, `seimei browser-host`. `seimei setup` installs it when the browser plugin is on: a script `~/.local/share/seimei/browser-host` that runs the binary, and its manifest in `~/.mozilla/native-messaging-hosts` (Firefox and most forks) and `~/.librewolf/native-messaging-hosts` when LibreWolf is there. Then install `seimei.xpi` from the release page once (about:addons, Install Add-on From File). Chromium-based browsers are not supported: the extension is a Firefox (Manifest V2) one.
 
 From a checkout, `plugins/browser/extension/install.py` (the maintainer's deploy runs it) does the same with `<checkout>/bin/seimei` and writes the extension to `~/.local/share/seimei/seimei.xpi`. Firefox builds that enforce signing load only a signed one: `python3 plugins/browser/extension/sign.py` has addons.mozilla.org sign the current version unlisted (an API key in `~/.config/amo/amo.env`, a new `version` in `manifest.json` for each signing) and writes `seimei.xpi` beside them, which install.py then uses and releases ship. An extension packed from source under another id needs `[plugins.browser] extension_id` in config.toml.
