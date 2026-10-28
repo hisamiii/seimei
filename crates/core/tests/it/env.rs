@@ -59,13 +59,4 @@ impl Drop for Env {
     }
 }
 
-/// contrib/guard.example.toml with its rules taken out of their comments: "#[[rule]]" and "#paths = ..." lose the #,
-/// prose ("# ...") stays.
-pub fn example() -> String {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../contrib/guard.example.toml");
-    let line = |l: &str| match l.strip_prefix('#') {
-        Some(rest) if !rest.is_empty() && !rest.starts_with(' ') => rest.to_string(),
-        _ => l.to_string(),
-    };
-    std::fs::read_to_string(path).unwrap().lines().map(line).collect::<Vec<_>>().join("\n")
-}
+pub use seimei_core::guard::example_rules as example;

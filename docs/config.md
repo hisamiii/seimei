@@ -39,7 +39,7 @@ In bypass nothing asks, except Claude Code's own safety checks: those it still r
 
 ## Guard rules
 
-`~/.config/seimei/guard.toml` holds the guard's rules, one `[[rule]]` each; there is none until the user writes it. `contrib/guard.example.toml` documents the fields and has a starting set of rules, commented out. seimei reads the file again when it changes. See [security.md](security.md) for how a call is decided.
+`~/.config/seimei/guard.toml` holds the guard's rules, one `[[rule]]` each. `contrib/guard.example.toml` documents the fields and has a starting set of rules, commented out; `seimei setup` offers to write it with every rule on when there is no guard.toml yet. Without the file there are no rules. seimei reads the file again when it changes. See [security.md](security.md) for how a call is decided.
 
 ## Command line
 

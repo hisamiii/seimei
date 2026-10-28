@@ -292,6 +292,15 @@ fn compile(n: usize, r: RawRule) -> Result<Rule, String> {
     })
 }
 
+/// contrib/guard.example.toml with its rules on: "#[[rule]]" and "#paths = ..." lose the #, prose ("# ...") stays.
+pub fn example_rules() -> String {
+    let line = |l: &'static str| match l.strip_prefix('#') {
+        Some(rest) if !rest.is_empty() && !rest.starts_with(' ') => rest,
+        _ => l,
+    };
+    include_str!("../../../contrib/guard.example.toml").lines().map(line).collect::<Vec<_>>().join("\n")
+}
+
 /// guard.toml's text as rules, or what is wrong with it.
 pub fn parse(text: &str) -> Result<Rules, String> {
     let raw: RawFile = toml::from_str(text).map_err(|e| e.to_string().trim().to_string())?;

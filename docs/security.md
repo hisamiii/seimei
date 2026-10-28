@@ -17,7 +17,7 @@
 
 The dispatcher and every shikigami run as the user, with Bash, in the permission mode set in config.
 
-**seimei's guard** runs before every tool call, in every mode. Its rules are the user's, in `~/.config/seimei/guard.toml`, and `contrib/guard.example.toml` has a set to copy (secrets, deleting the home folder, downloads run as scripts, kitty remote control, the user's sessions, the desktop, the plugins).
+**seimei's guard** runs before every tool call, in every mode. Its rules are the user's, in `~/.config/seimei/guard.toml`, and `contrib/guard.example.toml` has a set to copy, which `seimei setup` offers to turn on (secrets, deleting the home folder, downloads run as scripts, kitty remote control, the user's sessions, the desktop, the plugins).
 
 - **A rule** has match fields and an action:
   - Match fields: `tool` (a glob on the tool name), `paths` with `op` (read, write or any), `argv` (a command's first words, globs), `pipe` (stages of a shell pipeline), `input` (regexes on the tool's input fields), `facts` (what a plugin knows about the call).

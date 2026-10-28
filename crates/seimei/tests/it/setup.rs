@@ -80,15 +80,17 @@ fn text(o: &Output) -> String {
 fn setup_first_run_then_again() {
     let h = Home::new("first");
     // port, origin, about, plan, terminal, five plugins (desktop, browser, music, queue, discord: only music), a too-short password, then a good one twice, the
-    // kitty bridge, start now.
+    // kitty bridge, the example guard rules, start now.
     let answers = "9100\nhttps://seimei.example.net\ntest box\npro\nfoot -D {cwd} -T {title}\nn\nn\ny\n\nn\nshort\nshort\n\
-                   correct horse\ncorrect horse\ny\ny\n";
+                   correct horse\ncorrect horse\ny\ny\ny\n";
     let o = h.run(&["setup"], answers);
     let out = text(&o);
     assert!(o.status.success(), "{out}");
     assert!(out.contains("Claude Code 2.1.296 found"), "{out}");
     assert!(out.contains("at least 8"), "the short one is refused: {out}");
     assert!(out.contains("contrib/guard.example.toml"), "where rules come from: {out}");
+    let rules = h.read("cfg/seimei/guard.toml");
+    assert!(seimei_core::guard::parse(&rules).is_ok_and(|r| !r.is_empty()), "the example's rules, on: {rules}");
 
     let cfg: toml::Table = h.read("cfg/seimei/config.toml").parse().unwrap();
     assert_eq!(cfg["server"]["port"].as_integer(), Some(9100));
@@ -129,8 +131,8 @@ fn setup_first_run_then_again() {
 #[test]
 fn setup_defaults_and_no_claude() {
     let h = Home::new("defaults");
-    // Every default (end of input) but the password, no kitty bridge and no start.
-    let o = h.run(&["setup"], "\n\n\n\n\n\n\n\n\n\nlong enough\nlong enough\nn\nn\n");
+    // Every default (end of input) but the password, no kitty bridge, no guard rules and no start.
+    let o = h.run(&["setup"], "\n\n\n\n\n\n\n\n\n\nlong enough\nlong enough\nn\nn\nn\n");
     let out = text(&o);
     assert!(o.status.success(), "{out}");
     let cfg: toml::Table = h.read("cfg/seimei/config.toml").parse().unwrap();
@@ -163,7 +165,7 @@ fn setup_defaults_and_no_claude() {
 fn setup_openrc_service() {
     let mut h = Home::new("openrc");
     h.init = "openrc";
-    let o = h.run(&["setup"], "\n\n\n\n\n\n\n\n\n\nlong enough\nlong enough\nn\ny\n");
+    let o = h.run(&["setup"], "\n\n\n\n\n\n\n\n\n\nlong enough\nlong enough\nn\nn\ny\n");
     let out = text(&o);
     assert!(o.status.success(), "{out}");
     if Path::new("/etc/user/init.d/seimei").exists() {
@@ -216,8 +218,8 @@ fn help_lists_the_commands() {
 fn setup_browser_host() {
     let h = Home::new("browser");
     std::fs::create_dir_all(h.base.join(".librewolf")).unwrap();
-    // port, reach, about, plan, terminal; plugins: only the browser; the password twice, no bridge, no start.
-    let answers = "\n\n\n\n\nn\ny\nn\nn\nn\nlong enough\nlong enough\nn\nn\n";
+    // port, reach, about, plan, terminal; plugins: only the browser; the password twice, no bridge, no guard rules, no start.
+    let answers = "\n\n\n\n\nn\ny\nn\nn\nn\nlong enough\nlong enough\nn\nn\nn\n";
     let o = h.run(&["setup"], answers);
     let out = text(&o);
     assert!(o.status.success(), "{out}");
