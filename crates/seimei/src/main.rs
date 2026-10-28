@@ -261,6 +261,60 @@ fn account(auth: &Auth, a: &Args, state: &std::path::Path) {
     }
 }
 
+/// config.toml (docs/config.md). The sections other modules read stay tables and go to them as they are.
+#[derive(serde::Deserialize, Default)]
+#[serde(default)]
+struct Config {
+    server: Server,
+    host: Host,
+    sessions: Sessions,
+    queue: Queue,
+    dispatcher: toml::Table,
+    approvals: toml::Table,
+    plugins: toml::Table,
+    models: Option<toml::Table>,
+    agents: Option<toml::Table>,
+    asr: Option<toml::Value>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(default)]
+struct Server {
+    port: u16,
+    origin: Option<String>,
+    web: bool,
+}
+
+impl Default for Server {
+    fn default() -> Self {
+        Server { port: 8417, origin: None, web: true }
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(default)]
+struct Host {
+    about: String,
+}
+
+impl Default for Host {
+    fn default() -> Self {
+        Host { about: "computer".into() }
+    }
+}
+
+#[derive(serde::Deserialize, Default)]
+#[serde(default)]
+struct Sessions {
+    terminal: Option<String>,
+}
+
+#[derive(serde::Deserialize, Default)]
+#[serde(default)]
+struct Queue {
+    mode: Option<String>,
+}
+
 fn main() {
     tune_alloc();
     let argv: Vec<String> = std::env::args().skip(1).collect();
@@ -287,16 +341,14 @@ fn main() {
     if a.command == "version" {
         return println!("seimei {}", env!("CARGO_PKG_VERSION"));
     }
-    let cfg: toml::Table = std::fs::read_to_string(config_file())
+    let cfg: Config = std::fs::read_to_string(config_file())
         .ok()
-        .map(|s| s.parse().unwrap_or_else(|e| die(&format!("config.toml: {e}"))))
+        .map(|s| toml::from_str(&s).unwrap_or_else(|e| die(&format!("config.toml: {e}"))))
         .unwrap_or_default();
-    seimei_core::plan::set(seimei_core::plan::from_config(cfg.get("models").and_then(|m| m.as_table())));
-    let server = cfg.get("server").and_then(|s| s.as_table()).cloned().unwrap_or_default();
-    let mut port = server.get("port").and_then(|p| p.as_integer()).unwrap_or(8417) as u16;
+    seimei_core::plan::set(seimei_core::plan::from_config(cfg.models.as_ref()));
+    let mut port = cfg.server.port;
     // The address phones and browsers use (also the passkey domain): set it when seimei sits behind a tunnel.
-    let origin =
-        server.get("origin").and_then(|o| o.as_str()).map(String::from).unwrap_or(format!("http://localhost:{port}"));
+    let origin = cfg.server.origin.clone().unwrap_or(format!("http://localhost:{port}"));
     let state = if a.dev { data_dir().join("dev") } else { data_dir() };
     std::fs::create_dir_all(&state).unwrap_or_else(|e| die(&format!("{}: {e}", state.display())));
     // The chat, notes and board are the user's only, also on older installs made 755.
@@ -318,7 +370,7 @@ fn main() {
         die(&e);
     }
     // `[server] web = false`: the queue and the plugins without the phone server.
-    let web_on = server.get("web").and_then(|w| w.as_bool()).unwrap_or(true);
+    let web_on = cfg.server.web;
 
     let (origins, auth): (HashSet<String>, Option<Arc<Auth>>) = if a.dev {
         port += 1;
@@ -349,8 +401,7 @@ fn main() {
     let queue = if a.dev {
         None
     } else {
-        let configured = cfg.get("queue").and_then(|q| q.get("mode")).and_then(|m| m.as_str());
-        let mode = seimei_queue::host::mode(configured).unwrap_or_else(|e| {
+        let mode = seimei_queue::host::mode(cfg.queue.mode.as_deref()).unwrap_or_else(|e| {
             eprintln!("seimei: {e}; the queue stays off");
             seimei_queue::host::Mode::Off
         });
@@ -371,13 +422,12 @@ fn main() {
     }
     // The web UI is built in; SEIMEI_WEB serves a folder instead (to try page edits without a build).
     let web = std::env::var_os("SEIMEI_WEB").map(std::path::PathBuf::from);
-    let approvals = cfg.get("approvals").and_then(|s| s.as_table()).cloned().unwrap_or_default();
-    let mut disp = cfg.get("dispatcher").and_then(|s| s.as_table()).cloned().unwrap_or_default();
+    let mut disp = cfg.dispatcher.clone();
     if let Some(m) = &a.model {
         disp.insert("model".into(), toml::Value::String(m.clone()));
     }
-    let about = cfg.get("host").and_then(|h| h.get("about")).and_then(|v| v.as_str()).unwrap_or("computer");
-    let disp = dispatcher::Config::new(&disp, &configured(&approvals, "dispatcher"), about, a.dev);
+    let about = cfg.host.about.as_str();
+    let disp = dispatcher::Config::new(&disp, &configured(&cfg.approvals, "dispatcher"), about, a.dev);
     let setup = seimei_server::Setup {
         events: events.clone(),
         auth,
@@ -386,28 +436,15 @@ fn main() {
         state: state.clone(),
         push: push.clone(),
         dispatcher: disp,
-        shikigami: configured(&approvals, "shikigami"),
-        terminal: cfg
-            .get("sessions")
-            .and_then(|s| s.get("terminal"))
-            .and_then(|t| t.as_str())
-            .filter(|t| !t.is_empty())
-            .map(String::from)
-            .unwrap_or_else(|| {
-                setup::terminal_default(std::env::var("TERMINAL").ok().as_deref(), setup::on_path).into()
-            }),
-        plugins: Arc::new(
-            Plugins::load(
-                &cfg.get("plugins").and_then(|p| p.as_table()).cloned().unwrap_or_default(),
-                &state,
-                &BUILTINS,
-            )
-            .about(about),
-        ),
-        asr: Some(seimei_core::asr::Asr::new(seimei_core::asr::Config::from_toml(cfg.get("asr")), &state)),
+        shikigami: configured(&cfg.approvals, "shikigami"),
+        terminal: cfg.sessions.terminal.clone().filter(|t| !t.is_empty()).unwrap_or_else(|| {
+            setup::terminal_default(std::env::var("TERMINAL").ok().as_deref(), setup::on_path).into()
+        }),
+        plugins: Arc::new(Plugins::load(&cfg.plugins, &state, &BUILTINS).about(about)),
+        asr: Some(seimei_core::asr::Asr::new(seimei_core::asr::Config::from_toml(cfg.asr.as_ref()), &state)),
     };
     let app = Arc::new(seimei_server::App::new(setup).unwrap_or_else(|e| die(&format!("workers: {e}"))));
-    let _ = app.pool.agents.set(seimei_core::workers::agents_from(cfg.get("agents").and_then(|a| a.as_table())));
+    let _ = app.pool.agents.set(seimei_core::workers::agents_from(cfg.agents.as_ref()));
     wire(&app);
 
     rt.block_on(async move {

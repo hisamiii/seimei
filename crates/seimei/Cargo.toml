@@ -17,6 +17,7 @@ seimei-plugin-music = { path = "../../plugins/music" }
 seimei-plugin-queue = { path = "../../plugins/queue" }
 seimei-queue = { path = "../queue" }
 seimei-server = { path = "../server" }
+serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["full"] }
 toml = "1.1.8"
