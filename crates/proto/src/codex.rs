@@ -18,7 +18,7 @@ use tokio::sync::mpsc;
 
 use crate::acp::{
     Client, Error, Event, Handler, Options, Outcome, PermissionOption, PermissionRequest, PlanEntry, Rpc, ToolCall,
-    Update, Waiter, error_text,
+    Update, Waiter, error_text, s,
 };
 use crate::client::{Line, read_line};
 
@@ -131,10 +131,6 @@ async fn open(c: &mut Client, opts: &Options, turn: &Turn) -> Result<(), Error> 
     }
     c.session = r;
     Ok(())
-}
-
-fn s(v: &Value) -> String {
-    v.as_str().unwrap_or("").to_string()
 }
 
 /// An item that is a tool call, as ACP would report it; None for messages, reasoning and the like.
@@ -267,7 +263,7 @@ async fn read(
                         if let Some(call) = tool_call(&p["item"], &cwd) {
                             let mut whole = it.calls.remove(&call.id).unwrap_or_default();
                             let first = whole.id.is_empty();
-                            merge(&mut whole, &call);
+                            whole.merge(&call);
                             it.calls.insert(call.id.clone(), whole.clone());
                             if first {
                                 up(Update::ToolCall(whole));
@@ -293,7 +289,7 @@ async fn read(
                             call.content = output(item);
                             let mut whole = it.calls.remove(&call.id).unwrap_or_default();
                             let known = !whole.id.is_empty();
-                            merge(&mut whole, &call);
+                            whole.merge(&call);
                             if !known {
                                 up(Update::ToolCall(whole.clone()));
                             }
@@ -364,21 +360,6 @@ async fn read(
     for (_, (_, task, _)) in rpc.inflight.lock().unwrap().drain() {
         task.abort();
     }
-}
-
-fn merge(whole: &mut ToolCall, u: &ToolCall) {
-    for (mine, theirs) in [(&mut whole.title, &u.title), (&mut whole.kind, &u.kind), (&mut whole.status, &u.status)] {
-        if !theirs.is_empty() {
-            mine.clone_from(theirs);
-        }
-    }
-    if u.input.is_some() {
-        whole.input.clone_from(&u.input);
-    }
-    if !u.content.is_empty() {
-        whole.content.clone_from(&u.content);
-    }
-    whole.id.clone_from(&u.id);
 }
 
 /// A request from Codex. Command and file change approvals go to the handler on a task of their own (a cancel aborts

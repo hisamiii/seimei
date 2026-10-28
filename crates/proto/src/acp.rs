@@ -105,8 +105,9 @@ pub struct ToolCall {
 }
 
 impl ToolCall {
-    /// What an update (or a permission request's partial call) says, over what was known.
-    fn merge(&mut self, u: &ToolCall) {
+    /// What an update (or a permission request's partial call) says, over what was known; it takes its id.
+    pub(crate) fn merge(&mut self, u: &ToolCall) {
+        self.id.clone_from(&u.id);
         for (mine, theirs) in [(&mut self.title, &u.title), (&mut self.kind, &u.kind), (&mut self.status, &u.status)] {
             if !theirs.is_empty() {
                 mine.clone_from(theirs);
@@ -382,7 +383,7 @@ impl Client {
     }
 }
 
-fn s(v: &Value) -> String {
+pub(crate) fn s(v: &Value) -> String {
     v.as_str().unwrap_or("").to_string()
 }
 
@@ -479,7 +480,6 @@ async fn read(stdout: ChildStdout, handler: Arc<dyn Handler>, rpc: Arc<Rpc>, eve
                         if let Update::ToolCall(t) | Update::ToolCallUpdate(t) = &u {
                             let mut whole = calls.remove(&t.id).unwrap_or_default();
                             whole.merge(t);
-                            whole.id.clone_from(&t.id);
                             if !["completed", "failed"].contains(&t.status.as_str()) {
                                 calls.insert(t.id.clone(), whole);
                             } else if !asked.remove(&t.id) {
@@ -546,7 +546,6 @@ fn permission(id: Value, p: &Value, calls: &HashMap<String, ToolCall>, handler: 
     let asked = tool_call(&p["toolCall"]);
     let mut tool = calls.get(&asked.id).cloned().unwrap_or_default();
     tool.merge(&asked);
-    tool.id = asked.id;
     let req = PermissionRequest { tool, options };
     let key = id.to_string();
     let (h, rpc2, id2, key2) = (handler.clone(), rpc.clone(), id.clone(), key.clone());
