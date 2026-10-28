@@ -1,31 +1,8 @@
-# The agent queue: claude-queue inside seimei (design)
+# The agent queue: claude-queue inside seimei (plan)
 
-Status: the user's answers are in (Decisions). Built: the port (`crates/queue`, Migration step 1, passing claude-queue's socket suite, 150 checks, run without systemd by its new tests/cg.py) and the shadow inside serve (step 2). Next, before the cutover: the restart rules (persistence, the keeper). Absorbs claude-queue (cqd, devgate, queue-prefix, bench, cq) into seimei as a general-purpose queue for agents on one machine, usable by people who are not this laptop's owner.
+Built: the scheduler, a port of claude-queue's cqd that passes cqd's socket suite (`crates/queue`), and the shadow inside serve (`[queue] mode = "shadow"`), which watches beside cqd and logs where its view differs. Not built: the rest of this page, which is what the cutover needs (restarts that keep the queue, the keeper), then placement without the fish wrapper, resources, and the paths. `mode = "on"` is refused until then.
 
-## Why
-
-claude-queue makes several agents share one machine: their GPU/NPU jobs take turns, a bench gets a quiet machine, and nobody's job runs a 30 GB UMA laptop out of memory. Today it is a separate project with its own install, a fish function in front of `claude`, a Python daemon, and seimei as a client that guesses its paths. Three problems follow:
-
-1. **Two cgroup roots, and benches miss one** (found while writing this; fixed in step 0). queue-prefix derives its root from the caller's own cgroup. seimei runs as an OpenRC service in `/1/seimei`, so its shikigami land in `/1/seimei/delegated/queue.slice/`; the user's sessions land in `/1/delegated/queue.slice/`. cqd freezes only `<its root>/queue.slice/queue-*.slice` (`bench_targets`, cqd.py:1393), its root being `/1/delegated`. A bench right now leaves every shikigami running (queue-dev, queue-audit, queue-connectors, queue-dictate). Device gating still works, since devgate and cqd's /proc scan match `/queue.slice/queue-<name>.slice/` anywhere.
-2. **Placement depends on how a session was started.** A plain `claude` is queued only through the fish function. `claude --bg`, another shell, another agent (Codex, an ACP agent, aider) or a terminal tab started before the function existed all run outside the queue, and so does the GPU job they start.
-3. **Nobody else can install it.** Paths, the exempt name "seimei", the desktop allowlist (niri, waybar, qs.py) and the fish wrapper are this laptop's.
-
-The user asked: "why not absorb queue into seimei itself? and make it a general purpose agent queue".
-
-## What exists (measured 2026-10-26)
-
-| piece | size | what it does | verdict |
-|---|---|---|---|
-| `cqd.py` | 2,279 lines Python | scans /proc and cgroupfs every 1 s; leases, classes, ETAs, learned memory needs, desktop rehoming, bench freezing with verified GPU preemption, events, JSON socket | port to Rust, same behaviour, same protocol |
-| `devgate.c` | 542 lines C | LD_PRELOAD shim on `open`/`openat` of device globs; asks cqd for a grant, falls back to its own scan | keep as C, ship it from the binary |
-| `queue-prefix` | 30 lines sh | Claude Code's `CLAUDE_CODE_SHELL_PREFIX`: puts each command in `queue-<agent>.slice/run-<pid>.scope`, preloads devgate | becomes `seimei queue prefix` |
-| `claude-queue`, `claude.fish` | 31 + 9 lines | set the agent name and env, then exec claude | replaced (see Placement) |
-| `bench` | 306 lines bash | settle CPU and temperature, freeze through cqd, run, thaw; v1 freezing when cqd is down | becomes `seimei bench`, a cqd client as today |
-| `cq` | 263 lines Python | status, watch, control, policy, history, ping, thaw-all | becomes `seimei queue <verb>` |
-| `plugins/queue` | 923 lines Rust | the queue tools, the /proc fallback view, events to the dispatcher | stays, talks to the scheduler |
-| tests | 1,500 lines Python and sh | drive cqd through its socket with a fake device in /dev/shm and throwaway `queue-cqt*` slices | the conformance suite for the port (see Migration) |
-
-cqd here: 26 MB RSS, 5 min 44 s of CPU over 8 h 39 min (about 1.1% of a core). A queued command takes 12.7 ms against 1.0 ms for a bare `bash -c true` (the scope and the preload); a static `seimei` exec takes 0.7 ms, so a Rust prefix costs nothing extra.
+The goal: agents on one machine share its GPU/NPU and memory in turns, a bench gets a quiet machine, and every agent is queued however it was started, with nothing in the defaults that names one machine.
 
 ## Shape
 
@@ -40,7 +17,7 @@ seimei queue keeper (only while something is frozen, outside seimei's cgroup) <â
 
 **One process: the scheduler runs inside `seimei serve`** (decision 1). It is a plain Rust module tree in a new crate `crates/queue` (`seimei-queue`): scheduler, scanner, cgroup and freeze code, the socket. serve starts it on its own OS thread with its own single-threaded tokio runtime; the rest of seimei talks to it over channels and never links its internals. `plugins/queue` keeps the tools and depends on the crate for the wire types.
 
-Being inside serve means the queue now lives through serve's restarts: every deploy (several a day), `seimei update`, a crash and its respawn. The four rules that make that safe follow.
+Being inside serve means the queue lives through serve's restarts: every deploy, `seimei update`, a crash and its respawn. The four rules that make that safe follow.
 
 ### Restarts keep the queue
 
@@ -63,7 +40,7 @@ The pick is a tiny helper, `seimei queue keeper` (same binary, a blocking loop, 
 How it works:
 
 1. The scheduler spawns the keeper the first time it freezes anything (a bench, a paused GPU job) and the keeper exits once nothing is frozen and the scheduler says so. With nothing frozen there is no process.
-2. It runs outside serve's cgroup and outside every queue.slice, so neither a stop nor a bench takes it: under systemd a transient unit (`systemd-run --user --unit=seimei-queue-keeper --collect`), without systemd a leaf of its own at the top of the user's cgroup (`/<session>/seimei-keeper`, the same move `stop_post` makes into `seimei-ctl`; this user owns `/1` here).
+2. It runs outside serve's cgroup and outside every queue.slice, so neither a stop nor a bench takes it: under systemd a transient unit (`systemd-run --user --unit=seimei-queue-keeper --collect`), without systemd a leaf of its own at the top of the user's cgroup (`/<session>/seimei-keeper`, the same move `stop_post` makes into `seimei-ctl`).
 3. It listens on `queue/keeper.sock`. The scheduler sends it a heartbeat every second with the frozen list (it also reads state.json), and at a bench's start hands it a dup of the locked `bench.lock` fd over SCM_RIGHTS. A flock belongs to the open file, so the lock holds while either process lives, and v1 shims keep waiting during a restart.
 4. On EOF, or 10 s without a heartbeat (a wedged scheduler counts as gone), it starts the grace window, `[queue] restart_grace_s = 60`. A new serve connects, says `adopt`, gets the lock fd back, and the keeper goes on standing by. If the window runs out, it thaws exactly the recorded slices and scopes, closes the lock, writes an event to `queue/events.jsonl` ("seimei was not back in 60 s: thawed 12 slices"), and exits.
 5. It also enforces `max_freeze_s` (3600) on its own clock, so a freeze ends even if every other piece fails.
@@ -112,13 +89,13 @@ The `cpu` default and the token are decision 3; V4 checks the weight.
 
 Policy (bench window, preemption, exempt agents, interactive daemons, desktop allowlist, memory numbers, event thresholds) keeps cqd's keys and defaults. Its file moves from `~/.config/claude-queue/policy.json` to seimei's state folder, `queue/policy.json`, because `queue_policy` writes it; config.toml holds only what the user sets by hand (resources, the cgroup root, a policy override).
 
-The defaults stop naming this laptop: the exempt list becomes "seimei's dispatcher" by role (the scheduler knows seimei's own slice name), the desktop allowlist keeps the generic entries (browsers, electron gpu-process, Xwayland, terminals) and loses qs.py, z13gui, niri, waybar and friends, which move to this laptop's policy.json (done in the port; cqd and the shadow read the same policy.json, so the shadow agrees with cqd once they are there).
+The defaults name no machine: the exempt list becomes "seimei's dispatcher" by role (the scheduler knows seimei's own slice name), the desktop allowlist keeps the generic entries (browsers, electron gpu-process, Xwayland, terminals) and nothing else; a machine's own (its bar, its compositor's helpers) go in its policy.json. The shadow reads cqd's policy.json.
 
 ## Placement
 
 The hierarchy stays: `<root>/queue.slice/queue-<agent>.slice/run-<pid>.scope`, desktop apps rehomed to `<root>/app.slice/app-cq-<name>.scope`.
 
-**One root, decided by the scheduler.** The prefix never derives the root from its own cgroup again. The scheduler picks it at start and writes it to `$XDG_RUNTIME_DIR/seimei/queue/root`; the prefix reads that file. Under systemd the root is the user manager's (`user@<uid>.service`) and scopes are made with `systemd-run --user --scope --slice=...` as today (writing into a systemd-managed tree by hand would fight systemd). Without systemd it is elogind's delegated session cgroup (`/<session>/delegated`), and the prefix makes the scope itself, as queue-prefix does. This fixes problem 1.
+**One root, decided by the scheduler.** The prefix never derives the root from its own cgroup again. The scheduler picks it at start and writes it to `$XDG_RUNTIME_DIR/seimei/queue/root`; the prefix reads that file. Under systemd the root is the user manager's (`user@<uid>.service`) and scopes are made with `systemd-run --user --scope --slice=...` as today (writing into a systemd-managed tree by hand would fight systemd). Without systemd it is elogind's delegated session cgroup (`/<session>/delegated`), and the prefix makes the scope itself, as queue-prefix does. Today queue-prefix derives the root from the caller's cgroup, so a seimei running as a service puts its shikigami under a second root.
 
 **seimei's own sessions** (dispatcher, shikigami on Claude Code) already get the prefix through the plugin's `env` hook; nothing changes except the prefix being `seimei queue prefix` and the name coming from seimei. ACP and Codex shikigami have no shell prefix hook: seimei starts the agent process itself inside `queue-<name>.slice/agent.scope` with devgate preloaded, so the whole agent is the unit (its commands inherit both). A bench then freezes the agent's own process too; that is the price of an agent without a prefix hook, and it only pauses its API calls.
 
@@ -174,18 +151,14 @@ Some machines give the user no writable cgroup (no systemd user manager, elogind
 
 The plugin's /proc fallback stays for when the scheduler is off (a second serve, safe mode). The plugin's `wrap` (a session opened in a terminal stays queued) becomes the env entry instead of a `claude-queue` argv prefix.
 
-## Migration on this laptop, with no downtime
+## Cutover
 
-Constraints: running Claude Code processes keep the environment they started with (`CLAUDE_CODE_SHELL_PREFIX=~/.local/lib/claude-queue/queue-prefix`, `CLAUDE_QUEUE_LIB=.../devgate.so`), the shim is mapped into running GPU jobs, old shims reconnect within 2 s or fall back to v1, and nothing may restart seimei or cqd from a queue slice.
+Running Claude Code processes keep the environment they started with (the old `queue-prefix` and `devgate.so` paths), and the shim is mapped into running GPU jobs, so:
 
-0. **Done 2026-10-26 (claude-queue 39cee51):** cqd's bench, frozen list, leftover thaw, scope cleanup and hog scan cover every `<session>/*/delegated/queue.slice`. Verified live: a bench from the login session froze 16 agents in both roots, seimei's queue-dev included, and thawed them all.
-1. **Done 2026-10-26: port with the old tests as the judge.** The Python tests start `cqd.py --runtime-dir --state-dir --config-dir ...` and talk to its socket. A test entry point, `seimei queue scheduler` with the same flags, runs the crate alone (no web, no plugins), so the same suite runs against both; the port is done when it passes unchanged. New Rust tests cover resources, the one-root rule, no-delegation mode, and the restart rules (below).
-2. **Shadow** (running from 2026-10-26). `[queue] mode = "shadow"` in config.toml, and the default while cqd answers, picked up at the next deploy: the scheduler scans and classifies, binds no socket, freezes nothing, and logs where its view (holders, waits, desktop apps, frozen agents) differs from cqd's state.json for 15 ticks in a row, to `~/.local/share/seimei/queue-shadow/shadow-diff.jsonl` (cqd's own shadow.jsonl did this for v1 to v2). Deploys in this phase are ordinary. Finding, 2026-10-27: the first 6 rows (q4806 npu x3, phonewm_mockups gpu x3, 13 to 34 s each) were lease jobs that open the device in bursts. cqd held the lease the whole time; the shadow, with no socket, sees a holder only while an fd is open (reproduced: a job opening the render node 0.2 s in every 0.7 s shows as held, gone, held in the shadow). A shadow artifact, not a gap in the scheduler: from then on a cqd lease none of whose processes has a device open is not compared.
-3. **Keep the old paths alive.** serve keeps writing `~/.local/lib/claude-queue/devgate.so` and `queue-prefix` by rename-into-place, so every running session's baked environment stays valid; queue-prefix becomes a two-line `exec seimei queue prefix "$1"`.
-4. **Cut over at a deploy.** A script, started from the login session (never a queue slice), waits until no bench runs and nothing is frozen, stops cqd (nothing to thaw), sets `[queue] mode = "on"`, and restarts seimei through deploy.sh. The scheduler binds cqd's socket path, `$XDG_RUNTIME_DIR/claude-queue/cqd.sock`, adopts holders by fd scan and waiter positions from cqd's state.json (read once, the format both understand). Holders keep their fds throughout; waiters reconnect with the same `req` and keep their places, or fall back to v1 for the gap, which serializes safely. Then cqd's service leaves the default runlevel.
-5. **Rollback** is the same step reversed: `mode = "off"`, a deploy, start cqd. The state file stays readable by both until cqd is retired.
-6. **Placement next.** After V1 passes, setup adds the settings `env` entry; new sessions get `seimei queue prefix` and the one root. The fish function goes once no shell still has the old function loaded (open terminals keep it until they close; harmless, both prefixes land in the same root after step 0).
-7. **Paths last.** Move to `$XDG_RUNTIME_DIR/seimei/queue.sock` and `~/.local/lib/seimei/devgate.so` with the old paths as symlinks until no process maps the old shim (`grep -l claude-queue/devgate.so /proc/*/maps`). Then archive the claude-queue repo with a pointer here.
+1. **Keep the old paths alive.** serve keeps writing `~/.local/lib/claude-queue/devgate.so` and `queue-prefix` by rename-into-place; queue-prefix becomes `exec seimei queue prefix "$1"`.
+2. **Cut over at a deploy.** A script started from the login session (never a queue slice) waits until no bench runs and nothing is frozen, stops cqd, sets `[queue] mode = "on"` and restarts seimei. The scheduler binds cqd's socket path, adopts holders by fd scan and waiter positions from cqd's state.json. Rollback is the same reversed: `mode = "off"`, a deploy, start cqd.
+3. **Placement next.** After V1, setup adds the settings `env` entry; the fish function goes once no shell has it loaded.
+4. **Paths last.** Move to `$XDG_RUNTIME_DIR/seimei/queue.sock` and `~/.local/lib/seimei/devgate.so`, the old paths as symlinks until no process maps the old shim. Then claude-queue is archived with a pointer here.
 
 ## Distribution
 
@@ -209,22 +182,13 @@ Constraints: running Claude Code processes keep the environment they started wit
 - V5: how long a deploy's gap is (SIGTERM, `stop_post`, start, socket bound), which says whether old shims keep their places or take v1 for it.
 - V6: the keeper outlives `stop_post`'s `cgroup.kill`, a SIGKILLed serve and supervise-daemon's respawn, under OpenRC here and under systemd in a VM.
 
-## Build steps
+## Remaining steps
 
-Each step ends green on its own tests and is committed and pushed; nothing reaches the live queue before step B10.
+Each ends green on its own tests; nothing reaches the live queue before the cutover.
 
-| step | what | estimate |
-|---|---|---|
-| B0 | the Python suite runs on OpenRC: a no-systemd path for its `systemd-run` scopes, so cqd_test, lease_test, preempt_test and bench_test run here against cqd first | 1.5 h |
-| B1 | `crates/queue`: /proc and cgroupfs scanner, classification, policy file, state files, `seimei queue scheduler` entry point | 2.5 h |
-| B2 | leases, memory admission and learned needs, ETAs, both protocols on the socket | 3 h |
-| B3 | benches, freezing, GPU preemption with the drain checks, desktop rehoming | 3 h |
-| B4 | inside serve: own thread and runtime, `catch_unwind` and safe mode, persistence and re-adoption, the restarting marker, the keeper, the cgroup self-check, `web = false`, the one-scheduler lock | 4 h |
-| B5 | conformance: the Python suite against both; restart tests (restart mid-bench within the window: nothing thaws, waiters keep places; serve killed: the keeper thaws after the window; three panics: safe mode); V5, V6 | 3 h |
-| B6 | placement: `seimei queue prefix`, the root file, devgate v3's reconnect, setup's settings.json diff; V1 | 2 h |
-| B7 | resources and tokens, `cpu.weight`, the `cpu` token; V4 | 1.5 h |
-| B8 | no-delegation mode; V3 | 2 h |
-| B9 | the plugin tools, `seimei bench`, `seimei queue <verb>`, `queue launch` | 1.5 h |
-| B10 | release.sh's glibc devgate (V2), docs, then shadow, cutover and the paths (Migration 2 to 7) | 1.5 h, plus 2 to 3 days of shadow |
-
-About 25 hours of work, three to four days with reviews between the big steps (after B3, B5 and B6), then the shadow days before the cutover.
+1. Inside serve: persistence and re-adoption, the restarting marker, the keeper, `catch_unwind` and safe mode, the cgroup self-check, the one-scheduler lock; restart tests (mid-bench within the window nothing thaws, a killed serve is thawed by the keeper, three panics give safe mode); V5, V6.
+2. Placement: `seimei queue prefix`, the root file, devgate v3's reconnect, setup's settings.json diff; V1.
+3. Resources and tokens, `cpu.weight` and the `cpu` token; V4.
+4. No-delegation mode; V3.
+5. `seimei bench`, `seimei queue <verb>`, `queue launch`, the tools' per-resource targets.
+6. release.sh's glibc devgate (V2), docs, the cutover and the paths.

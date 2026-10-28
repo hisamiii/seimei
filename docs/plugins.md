@@ -46,6 +46,18 @@ From a checkout, `plugins/browser/extension/install.py` (the maintainer's deploy
 
 What the extension does in a page: it reads the text and a numbered list of links, buttons and fields (open and closed shadow roots and frames included), and clicks, fills, selects, presses keys and submits with DOM events (`isTrusted` false), in background tabs, without focusing anything. It never reads or fills password, payment card, one-time code or file fields, and it does not touch cookies or private windows. Page dialogs during an action are recorded instead of shown; `confirm()` is cancelled unless the agent asked to accept it. Tab screenshots use `tabs.captureTab`; waiting for the network watches the tab's requests with `webRequest` (observe only). Tab groups need Firefox 139 or later; older versions open seimei's tabs ungrouped.
 
+### The agent display and the agent browser
+
+On niri, KDE Plasma and GNOME the desktop plugin can start a second display that agent apps live in (`plugins/desktop/src/agent.rs`). It has its own seat, so nothing an agent does there reaches the user's focus, pointer, clipboard or screen. The desktop tools take `display: "user" | "agent"` (default user); `agent_display` starts, stops and reports on it. It starts on demand (`open_app` with `display: "agent"`), is found again after a seimei restart, and stops after `[plugins.desktop] agent_idle_minutes` (30) without an agent call, its apps with it. The apps run as the user with the user's files: the display isolates input and screen, not permissions.
+
+- niri: a nested niri, `vblank_mode=0 niri -c <state>/agent-display/config.kdl`, a 1280x800 window on the "seimei" workspace, started without `DISPLAY`. Its config is seimei's own (key repeat and animations off). Without `vblank_mode=0` it waits for the outer niri's frame callbacks, about once a second on a hidden workspace. Input goes through the Wayland virtual keyboard and pointer protocols (`vinput.rs`), so it needs no `/dev/uinput`. Its apps are found by the `NIRI_SOCKET` they inherit.
+- KDE: `kwin_wayland --virtual --width 1280 --height 800 --socket seimei-agent` under `dbus-run-session`, driven by the KDE backend with input through `fake_input`.
+- GNOME: `gnome-shell --headless --virtual-monitor 1280x800 --wayland-display seimei-agent` under `dbus-run-session`, with seimei's extension in a settings database of its own (`DCONF_PROFILE`). A headless display shows on the user's screen only through screenshots.
+
+The agent browser is a logged-out Firefox in the agent display (`--no-remote --profile <state>/agent-display/browser`), with the signed extension copied in and `user.js` capping drawing at 10 fps so an animated page does not spin both compositors. Its native host reaches seimei's second socket, `agent-browser.sock`, through `SEIMEI_BROWSER_SOCK`. Browser tools take `browser: "user" | "agent"`; every tab there is seimei's, so none raises a card.
+
+How the backends reach their desktop: niri, sway and Hyprland through their IPC sockets (pinned to the user's compositor, nested ones skipped); KDE through the Plasma window-management and virtual-desktop Wayland protocols (`wire.rs`) and `org.kde.KWin.ScreenShot2`; GNOME, where nothing outside the shell lists windows, through seimei's Shell extension (`plugins/desktop/gnome/`), which exports `org.seimei.Desktop.Call(s) -> s` (JSON in and out) on the session bus and loads at the next login after setup installs it.
+
 ## External MCP servers
 
 Any other name in `enabled` is an external MCP server, in the format Claude Code's `mcpServers` takes, plus a prompt section:

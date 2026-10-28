@@ -61,7 +61,7 @@ Docs are for a human reader who knows Linux and Claude Code but not this repo. T
 - No session diaries, no dated "today we..." sections, no step-by-step history. Git history is the history.
 - Update the doc in the same commit as the code it describes. Delete text that is no longer true.
 
-Docs live in `docs/`, indexed in `docs/README.md`: `architecture.md` (processes, state, the code map, deploys, tests), `install.md` (requirements and install), `reach.md` (HTTPS for the phone), `config.md` (every config key and command), `plugins.md` (the plugin interface and each plugin), `security.md` (who can reach what, the guard, the cards), `troubleshooting.md`. `SECURITY.md` and `CONTRIBUTING.md` sit in the root.
+Docs live in `docs/`, indexed in `docs/README.md`: `architecture.md` (processes, state, the code map, deploys, tests), `install.md` (requirements and install), `reach.md` (HTTPS for the phone), `config.md` (every config key and command), `plugins.md` (the plugin interface and each plugin), `security.md` (who can reach what, the guard, the cards), `asr.md` (dictation), `queue/DESIGN.md` (the agent queue's plan), `troubleshooting.md`. `SECURITY.md` and `CONTRIBUTING.md` sit in the root.
 
 ### Local scratchpads
 
