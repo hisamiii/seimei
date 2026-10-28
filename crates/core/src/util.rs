@@ -30,7 +30,7 @@ pub fn config_home() -> PathBuf {
 }
 
 /// Whether systemd runs this machine (else OpenRC or another init): /run/systemd/system, the check sd_booted makes.
-/// SEIMEI_INIT=systemd or =openrc says so instead. seimei_queue::cgroup::systemd makes the same check.
+/// SEIMEI_INIT=systemd or =openrc says so instead.
 pub fn systemd() -> bool {
     match std::env::var("SEIMEI_INIT").as_deref() {
         Ok("systemd") => true,

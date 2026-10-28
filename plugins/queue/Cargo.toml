@@ -7,11 +7,9 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
-chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 libc.workspace = true
 regex = "1.13.1"
 seimei-core = { path = "../../crates/core" }
-seimei-queue = { path = "../../crates/queue" }
 serde_json.workspace = true
 toml = "1.1.8"
 tokio = { workspace = true, features = ["rt", "time", "net", "io-util"] }

@@ -1,76 +1,146 @@
 {
- "about": "The queue plugin's texts and hooks, run by plugins/queue/tests/queue.rs. describe: the queue tool's text from a cqd status reply (cqd) or a /proc snapshot (snap). history: queue_history's text from cqd's rows, in UTC. wrap and env: how sessions run under claude-queue ({lib} and {run} are the test's folders). triggers: whether a queue_wait target is valid.",
- "names": {"npu_dma": "shikigami npu-dma", "seimei": "seimei (you)"},
+ "about": "The queue plugin's texts and hooks, run by plugins/queue/tests/queue.rs. describe: the queue tool's text from the gate's status reply. wrap and env: how sessions run under claude-queue ({lib} and {run} are the test's folders). triggers: whether a queue_wait target is valid.",
+ "names": {
+  "npu_dma": "shikigami npu-dma",
+  "seimei": "seimei (you)"
+ },
  "describe": [
   {
-   "name": "cqd: grants closed, a bench, holders running, detached and external, two waiters, frozen, a hog",
-   "cqd": {"t": 1000, "bench": true, "grants_open": false, "mem_available_gb": 12.5, "headroom_gb": 4.0,
-           "frozen": ["w_a", "w_b"], "hogs": [{"name": "llama", "rss_gb": 20.1, "idle_min": 45}], "desktop": [1, 2, 3],
-           "holders": [
-            {"id": "L3", "pids": [4242], "agent": "npu_dma", "cmd": "python bench.py --long", "since": 400, "state": "running",
-             "res": ["gpu", "npu"], "eta_s": 300, "known": true, "mem_gb": 6.5, "need_gb": 8, "busy_pct": 87},
-            {"id": "L4", "pids": [], "agent": "gone", "cmd": "./old", "since": 100, "state": "detached", "res": ["gpu"],
-             "eta_s": null, "known": true, "mem_gb": 1, "need_gb": 1, "busy_pct": null},
-            {"id": "L5", "pids": [99], "agent": "seimei", "cmd": "make", "since": 990, "state": "running", "res": ["gpu"],
-             "eta_s": null, "known": false, "mem_gb": 0.5, "need_gb": 2.0},
-            {"id": "X1", "pids": [777], "agent": "", "cmd": "blender", "since": 900, "state": "external", "res": [],
-             "devices": ["/dev/dri/renderD128"], "eta_s": null, "idle_s": 30, "mem_gb": 0.3, "need_gb": 0}],
-           "waiters": [
-            {"id": "W12", "pos": 1, "pid": 5151, "agent": "seimei", "cmd": "llama-bench -m x", "waited_s": 700, "eta_s": 120,
-             "blocked_by": "L3 (npu_dma)"},
-            {"id": "W13", "pos": 2, "pid": 5152, "agent": "other", "cmd": "ollama run", "waited_s": 30, "eta_s": null,
-             "blocked_by": "a running bench"}]},
-   "want": "GRANTS CLOSED: cqd saw a GPU/NPU fault in the kernel log. Check dmesg; the user reopens them with `cq grants on`.\nA bench is running: queued GPU/NPU opens wait for it.\nGPU/NPU turn held by:\n- L3 pid 4242 (shikigami npu-dma) python bench.py --long: holds gpu+npu for 10 min (running), ~5 min left, memory 6.5 GB (needs ~8), GPU busy 87%\n- L4 pid 0 (gone) ./old: holds gpu for 15 min (detached), past its usual duration, memory 1 GB (needs ~1) [STUCK: its command ended but it still holds the turn]\n- L5 pid 99 (seimei (you)) make: holds gpu for 10s (running), duration unknown, memory 0.5 GB (needs ~2.0)\n- pid 777 blender: outside the queue, holds /dev/dri/renderD128 for 1 min, idle 30s\nWaiting:\n- #1 pid 5151 (seimei (you)) llama-bench -m x: waited 11 min, starts in ~2 min, blocked by L3 (npu_dma)\n- #2 pid 5152 (other) ollama run: waited 30s, blocked by a running bench\nFrozen by a bench: w_a, w_b.\n12.5 GiB memory free, headroom 4.0 GB. 3 desktop processes outside the queue (desktop, browsers, open_app) use the GPU too; they never block the queue.\nIdle memory hog: llama holds 20.1 GB, idle 45 min.\nA stuck holder is usually an app restarted from an agent's shell. It keeps the turn until it quits; ask the user before closing a window they use. Restart it outside the queue with open_app or `env -u LD_PRELOAD systemd-run --user --collect <app>`."
+   "name": "a holder and two waiters",
+   "snap": {
+    "t": 1000,
+    "holder": {
+     "id": "L3",
+     "agent": "npu_dma",
+     "pid": 4242,
+     "cmd": "python bench.py --long",
+     "device": "/dev/accel/accel0",
+     "since": 400,
+     "ended": false
+    },
+    "waiters": [
+     {
+      "agent": "seimei",
+      "pid": 99,
+      "cmd": "make gpu",
+      "device": "/dev/kfd",
+      "since": 970
+     },
+     {
+      "agent": "other",
+      "pid": 7,
+      "cmd": "./run",
+      "device": "/dev/dri/renderD128",
+      "since": 990
+     }
+    ]
+   },
+   "want": "L3 holds the turn: pid 4242 (shikigami npu-dma) python bench.py --long, /dev/accel/accel0 for 10 min\nWaiting, in order:\n- pid 99 (seimei (you)) make gpu, /dev/kfd for 30s\n- pid 7 (other) ./run, /dev/dri/renderD128 for 10s"
   },
   {
-   "name": "cqd: an empty queue",
-   "cqd": {"t": 0, "bench": false, "grants_open": true, "mem_available_gb": 30, "headroom_gb": 10, "frozen": [], "hogs": [],
-           "desktop": [], "holders": [], "waiters": []},
-   "want": "No queued command holds the GPU/NPU turn.\nNothing waits.\n30.0 GiB memory free, headroom 10 GB. 0 desktop processes outside the queue (desktop, browsers, open_app) use the GPU too; they never block the queue."
+   "name": "a holder whose processes ended",
+   "snap": {
+    "t": 100,
+    "holder": {
+     "id": "L1",
+     "agent": "seimei",
+     "pid": 5,
+     "cmd": "x",
+     "device": "/dev/kfd",
+     "since": 40,
+     "ended": true
+    },
+    "waiters": []
+   },
+   "want": "L1 holds the turn: pid 5 (seimei (you)) x, /dev/kfd for 1 min\nIts processes are gone; the turn passes on in a few seconds.\nNothing waits."
   },
   {
-   "name": "/proc: a stuck holder, a graphics app, waits on a holder, a gone pid and a bench",
-   "snap": {"cqd": false, "bench": false, "outside": 2, "mem_free": 8589934592,
-            "holders": [
-             {"pid": 10, "agent": "x", "who": "shikigami x", "command": "python train.py", "comm": "python",
-              "devices": ["/dev/dri/renderD128", "/dev/kfd"], "rss": 1073741824, "gpu_mem": 536870912, "age": 4000,
-              "gui": false, "ended": true, "stuck": true},
-             {"pid": 11, "agent": "y", "who": "y", "command": "firefox", "comm": "firefox", "devices": ["/dev/dri/renderD128"],
-              "rss": 0, "gpu_mem": 0, "age": 59, "gui": true, "ended": false, "stuck": false}],
-            "waits": [
-             {"pid": 20, "agent": "z", "who": "z", "since": 0, "waited": 125, "kind": "pid", "blocker": 10, "device": "/dev/kfd",
-              "command": "llama"},
-             {"pid": 21, "agent": "z", "who": "z", "since": 0, "waited": 3700, "kind": "pid", "blocker": 99, "device": "/dev/kfd",
-              "command": "llama2"},
-             {"pid": 22, "agent": "z", "who": "z", "since": 0, "waited": 5, "kind": "bench", "blocker": 0, "device": "/dev/kfd",
-              "command": "bench"}]},
-   "want": "GPU/NPU turn held by:\n- pid 10 (shikigami x) python train.py: holds /dev/dri/renderD128, /dev/kfd for 1 h 6 min, RSS 1.0 GiB, GPU memory 0.5 GiB [STUCK: its command ended but it still holds the turn]\n- pid 11 (y) firefox: holds /dev/dri/renderD128 for 59s, RSS 0.0 GiB, GPU memory 0.0 GiB [graphics app, no compute device]\nWaiting:\n- pid 20 (z) llama: waited 2 min, blocked by pid 10 (shikigami x) python train.py: holds /dev/dri/renderD128, /dev/kfd for 1 h 6 min, RSS 1.0 GiB, GPU memory 0.5 GiB [STUCK: its command ended but it still holds the turn]\n- pid 21 (z) llama2: waited 1 h 1 min, blocked by pid 99 (gone now)\n- pid 22 (z) bench: waited 5s, blocked by a running bench\n8.0 GiB memory free. 2 desktop processes outside the queue (desktop, browsers, open_app) use the GPU too; they never block the queue.\n(cqd is not running: this view comes from /proc, without ETAs.)\nA stuck holder is usually an app restarted from an agent's shell. It keeps the turn until it quits; ask the user before closing a window they use. Restart it outside the queue with open_app or `env -u LD_PRELOAD systemd-run --user --collect <app>`."
+   "name": "free",
+   "snap": {
+    "t": 1,
+    "holder": null,
+    "waiters": []
+   },
+   "want": "Nobody holds the GPU/NPU turn.\nNothing waits."
+  },
+  {
+   "name": "cqd answers instead",
+   "snap": {
+    "t": 1,
+    "holders": []
+   },
+   "want": "Another daemon (claude-queue's cqd) holds the queue socket; seimei's queue starts once it stops."
   }
  ],
- "history": [
-  {
-   "rows": [
-    {"since": 1792600000, "agent": "npu_dma", "class": "bench", "dur": 3725, "wait": 65, "peak_anon_gb": 3.2, "peak_gtt_gb": 10,
-     "contaminated": ["desktop 40%", "thermal"], "key": "bench.py"},
-    {"since": 1792600600, "agent": "x", "dur": 20, "wait": 0, "peak_anon_gb": 0.5, "peak_gtt_gb": 0.0, "key": "a.sh"}],
-   "want": "10-21 16:26 npu_dma [bench] ran 1 h 2 min, waited 1 min, peaks anon 3.2 GB, GTT 10 GB, CONTAMINATED: desktop 40%; thermal: bench.py\n10-21 16:36 x [batch] ran 20s, peaks anon 0.5 GB, GTT 0.0 GB: a.sh"
-  },
-  {"rows": [], "want": "No matching jobs."}
- ],
  "wrap": [
-  {"name": "npu-dma", "argv": ["claude", "--resume", "abc"], "want": ["claude-queue", "npu-dma", "--resume", "abc"]},
-  {"name": "npu-dma", "argv": ["kitty", "claude"], "want": ["kitty", "claude"]}
+  {
+   "name": "npu-dma",
+   "argv": [
+    "claude",
+    "--resume",
+    "abc"
+   ],
+   "want": [
+    "claude-queue",
+    "npu-dma",
+    "--resume",
+    "abc"
+   ]
+  },
+  {
+   "name": "npu-dma",
+   "argv": [
+    "kitty",
+    "claude"
+   ],
+   "want": [
+    "kitty",
+    "claude"
+   ]
+  }
  ],
  "env": [
-  {"name": "npu-dma", "prefix": true, "want": {"CLAUDE_QUEUE": "npu_dma", "CLAUDE_QUEUE_DIR": "{run}/claude-queue",
-   "CLAUDE_QUEUE_LIB": "{lib}/devgate.so", "CLAUDE_CODE_SHELL_PREFIX": "{lib}/queue-prefix"}},
-  {"name": "seimei", "prefix": false, "want": {}}
+  {
+   "name": "npu-dma",
+   "prefix": true,
+   "want": {
+    "CLAUDE_QUEUE": "npu_dma",
+    "CLAUDE_QUEUE_DIR": "{run}/claude-queue",
+    "CLAUDE_QUEUE_LIB": "{lib}/devgate.so",
+    "CLAUDE_CODE_SHELL_PREFIX": "{lib}/queue-prefix"
+   }
+  },
+  {
+   "name": "seimei",
+   "prefix": false,
+   "want": {}
+  }
  ],
  "triggers": [
-  {"trigger": "queue_wait", "target": "15", "ok": true},
-  {"trigger": "queue_wait", "target": "*", "ok": true},
-  {"trigger": "queue_wait", "target": "2.5", "ok": true},
-  {"trigger": "queue_wait", "target": "soon", "ok": false},
-  {"trigger": "queue_free", "target": "anything", "ok": true}
+  {
+   "trigger": "queue_wait",
+   "target": "15",
+   "ok": true
+  },
+  {
+   "trigger": "queue_wait",
+   "target": "*",
+   "ok": true
+  },
+  {
+   "trigger": "queue_wait",
+   "target": "2.5",
+   "ok": true
+  },
+  {
+   "trigger": "queue_wait",
+   "target": "soon",
+   "ok": false
+  },
+  {
+   "trigger": "queue_free",
+   "target": "anything",
+   "ok": true
+  }
  ]
 }

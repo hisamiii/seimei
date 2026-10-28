@@ -7,7 +7,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::sync::{Arc, Mutex};
 
-use crate::cqd;
+use crate::fake_queue::fake_queue;
 use crate::live::{self, Checks, until, work};
 use seimei_core::dispatcher;
 use seimei_core::events::EventLog;
@@ -52,16 +52,16 @@ fn dispatcher_live() {
     live::claude_dir();
     let work = work("t82p4d");
     let state = live::state("dispatchertest");
-    let (cqd_sock, ql_sock, bin) = (state.join("cqd.sock"), state.join("ql.sock"), state.join("bin"));
+    let (ql_sock, bin) = (state.join("ql.sock"), state.join("bin"));
     std::fs::create_dir_all(&bin).unwrap();
     let played = state.join("playerctl.log");
     let script = format!("#!/bin/sh\necho \"$@\" >> {}\nexit 0\n", played.display());
     std::fs::write(bin.join("playerctl"), script).unwrap();
     std::fs::set_permissions(bin.join("playerctl"), std::fs::Permissions::from_mode(0o755)).unwrap();
-    // Set before any session starts. The plugins inherit them through Claude Code: the fake cqd, the fake Quod Libet
+    // Set before any session starts. The plugins inherit them through Claude Code: the fake queue gate, the fake Quod Libet
     // bridge, playerctl from bin; no user plugins and no real connector socket.
     let mut env = crate::env::Env::lock();
-    env.set("SEIMEI_CQD_SOCK", &cqd_sock);
+    env.set("CLAUDE_QUEUE_DIR", &state);
     env.set("SEIMEI_QL_SOCK", &ql_sock);
     env.set("PATH", format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default()));
     env.set("XDG_CONFIG_HOME", state.join("cfg"));
@@ -74,7 +74,7 @@ async fn run(work: std::path::PathBuf, state: std::path::PathBuf) {
     let c = Checks::default();
     let queue: Value = serde_json::from_str(include_str!("../../../../plugins/queue/tests/cases.json")).unwrap();
     let music: Value = serde_json::from_str(include_str!("../../../../plugins/music/tests/cases.json")).unwrap();
-    let cqd_seen = cqd::fake_cqd(state.join("cqd.sock"), queue["describe"][0]["cqd"].clone());
+    let queue_seen = fake_queue(state.join("cqd.sock"), queue["describe"][0]["snap"].clone());
     // The Quod Libet bridge: answers status as music.json says.
     let status = music["describe"][3].clone();
     let listener = std::os::unix::net::UnixListener::bind(state.join("ql.sock")).unwrap();
@@ -168,8 +168,8 @@ async fn run(work: std::path::PathBuf, state: std::path::PathBuf) {
     };
     let (q, err) = result(names[0]);
     c.check(
-        "queue read the fake cqd",
-        !err && q.starts_with("GRANTS CLOSED") && !cqd_seen.lock().unwrap().is_empty(),
+        "queue read the fake gate",
+        !err && q.starts_with("L3 holds the turn") && !queue_seen.lock().unwrap().is_empty(),
         &q,
     );
     let (m, err) = result(names[1]);

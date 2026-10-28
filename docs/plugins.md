@@ -19,7 +19,7 @@ enabled = ["desktop", "music", "mytool"]
 | `desktop` | windows, workspaces, screenshots, typing and pointer (uinput), AT-SPI, layout memory, screen unlock; on niri, sway and Hyprland also the clipboard and mako's notifications; on niri, KDE Plasma and GNOME also the agent display, a screen of seimei's own with its own keyboard and pointer for agent apps (a nested niri; a headless KWin or GNOME Shell) | niri, sway, Hyprland, KDE Plasma 6 or GNOME 45 and later on Wayland (GNOME with seimei's Shell extension, which `seimei setup` installs), or an X11 EWMH window manager |
 | `browser` | tabs, page text and elements, acting on pages, waiting, tab screenshots, open, download; with the agent display also the agent browser, a logged-out Firefox of seimei's own | the seimei extension in Firefox or a fork of it (`seimei.xpi` on the release page), or in a Chromium browser (Chrome, Chromium, Brave, Vivaldi, Edge; loaded unpacked) |
 | `music` | Quod Libet and MPRIS players | the Quod Libet bridge (`plugins/music/seimei_bridge.py`) for tags and playlists |
-| `queue` | claude-queue / cqd: GPU turns for every session | claude-queue installed |
+| `queue` | GPU turns: one queued command at a time holds the GPU/NPU, the rest wait in order | claude-queue installed (its shim and command prefix) |
 
 Cards the built-in plugins raise:
 
@@ -57,6 +57,12 @@ On niri, KDE Plasma and GNOME the desktop plugin can start a second display that
 The agent browser is a logged-out Firefox in the agent display (`--no-remote --profile <state>/agent-display/browser`), with the signed extension copied in and `user.js` capping drawing at 10 fps so an animated page does not spin both compositors. Its native host reaches seimei's second socket, `agent-browser.sock`, through `SEIMEI_BROWSER_SOCK`. Browser tools take `browser: "user" | "agent"`; every tab there is seimei's, so none raises a card.
 
 How the backends reach their desktop: niri, sway and Hyprland through their IPC sockets (pinned to the user's compositor, nested ones skipped); KDE through the Plasma window-management and virtual-desktop Wayland protocols (`wire.rs`) and `org.kde.KWin.ScreenShot2`; GNOME, where nothing outside the shell lists windows, through seimei's Shell extension (`plugins/desktop/gnome/`), which exports `org.seimei.Desktop.Call(s) -> s` (JSON in and out) on the session bus and loads at the next login after setup installs it.
+
+### The GPU queue
+
+seimei serve runs the queue on claude-queue's socket, `$XDG_RUNTIME_DIR/claude-queue/cqd.sock` (`plugins/queue/src/gate.rs`). claude-queue's command prefix puts each command of a queued session in its own scope under `queue.slice`, and its shim (`devgate.so`) asks the socket before the command opens a GPU or NPU device. One command holds the turn at a time; the others wait in the order they asked. The turn passes on a few seconds after the holder's processes are gone. Processes outside `queue.slice`, and desktop apps opening a render node, never wait. Without claude-queue installed the plugin does nothing.
+
+`queue` shows the holder and the line. `queue_stop` stops the holder's whole command, after a card. A wait past 10 minutes is a [seimei] line; `queue_free` and `queue_wait` are watch triggers. While claude-queue's own daemon, cqd, still answers on the socket, seimei leaves it alone and takes over once cqd stops.
 
 ## External MCP servers
 

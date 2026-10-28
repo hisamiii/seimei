@@ -6,7 +6,7 @@ seimei reads `~/.config/seimei/config.toml`. Every key is optional; `config.exam
 |---|---|---|---|
 | `[server]` | `port` | 8417 | listens on 127.0.0.1 (`--dev` uses port + 1) |
 | | `origin` | `http://localhost:8417` | the address phones and browsers use, behind HTTPS ([reach.md](reach.md)); also the passkey domain and the only Host served besides localhost |
-| | `web` | `true` | `false` runs seimei without the phone server: the agent queue and the plugins only |
+| | `web` | `true` | `false` runs seimei without the phone server: the plugins only (the GPU queue among them) |
 | `[dispatcher]` | `model` | `[models] work` | the dispatcher's model |
 | | `name` | `seimei` (`seimei-dev` with `--dev`) | its session's name in Claude Code's registry |
 | | `cwd` | `~` | its working folder |
@@ -29,7 +29,6 @@ seimei reads `~/.config/seimei/config.toml`. Every key is optional; `config.exam
 | | `zdr` | `false` | only providers that keep no data (OpenRouter's `provider.zdr`; both default models have one) |
 | | `deny` | `[]` | words and globs never sent, whatever their source |
 | `[asr.sources]` | `chat`, `names`, `board`, `window`, `draft`, `auto` | all `true` | one switch per source of the word list; with all off only the pins in `asr/words.txt` go |
-| `[queue]` | `mode` | `shadow` while claude-queue's cqd runs, else `off` | the agent queue ([queue/DESIGN.md](queue/DESIGN.md)); `shadow` watches beside cqd and logs where it would differ, `on` is refused (the queue stays off) until the cutover |
 
 ## Permission modes
 
@@ -57,7 +56,6 @@ seimei devices [--revoke ID] list or unpair phones
 seimei logout-all            end every session
 seimei lockdown              end every session, remove every passkey, unpair every phone
 seimei screen-password [--clear]  the screen lock password the desktop plugin types
-seimei queue scheduler [--help]   the agent queue alone, with claude-queue's cqd flags (the conformance suite runs it)
 ```
 
 Run them on the server, as the user seimei runs as.

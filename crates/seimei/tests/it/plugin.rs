@@ -13,7 +13,7 @@ use seimei_core::events::EventLog;
 use seimei_core::plugins::Plugins;
 use serde_json::{Value, json};
 
-use crate::cqd::fake_cqd;
+use crate::fake_queue::fake_queue;
 
 /// A case file, from the repo root.
 fn cases(file: &str) -> Value {
@@ -46,8 +46,9 @@ impl Server {
         Server { child, stdin, stdout }
     }
 
-    fn queue(env: &serde_json::Map<String, Value>, cqd: &Path) -> Server {
-        Server::start("queue", env, &[("SEIMEI_CQD_SOCK", cqd.display().to_string())])
+    /// The queue plugin, with its socket in dir.
+    fn queue(env: &serde_json::Map<String, Value>, dir: &Path) -> Server {
+        Server::start("queue", env, &[("CLAUDE_QUEUE_DIR", dir.display().to_string())])
     }
 
     fn send(&mut self, msg: Value) {
@@ -87,17 +88,18 @@ async fn queue_plugin_over_stdio() {
     rules.example_rules(&std::env::temp_dir().join(format!("seimei-queue_plugin_over_stdio-rules-{}", std::process::id())));
     let (d, events, approvals, plugins) = host("queue", "queue").await;
     let cases_queue = cases("plugins/queue/tests/cases.json");
-    let cqd_sock = d.join("cqd.sock");
-    let seen = fake_cqd(cqd_sock.clone(), cases_queue["describe"][0]["cqd"].clone());
+    let qdir = d.join("queue");
+    std::fs::create_dir_all(&qdir).unwrap();
+    let seen = fake_queue(qdir.join("cqd.sock"), cases_queue["describe"][0]["snap"].clone());
     let entry = plugins.servers("seimei", None, None)["queue"].clone();
     let env = entry["env"].as_object().unwrap().clone();
     assert_eq!(entry["args"], json!(["plugin", "queue"]));
 
     // Blocking stdio: each step runs off the runtime, which serves the card socket meanwhile.
     let spec: Value = serde_json::from_str(seimei_plugin_queue::PLUGIN.spec).unwrap();
-    let (env2, sock2) = (env.clone(), cqd_sock.clone());
+    let (env2, dir2) = (env.clone(), qdir.clone());
     let mut srv = tokio::task::spawn_blocking(move || {
-        let mut srv = Server::queue(&env2, &sock2);
+        let mut srv = Server::queue(&env2, &dir2);
         let init = srv.ask(
             1,
             "initialize",
@@ -107,17 +109,20 @@ async fn queue_plugin_over_stdio() {
         assert_eq!(init, spec["initialize"]);
         assert_eq!(srv.ask(2, "tools/list", json!({}))["tools"], spec["tools"]);
         let (t, err) = srv.call(3, "queue", json!({}));
-        assert!(!err && t.starts_with("GRANTS CLOSED") && t.contains("L5 pid 99 (seimei (you)) make"), "{t}");
+        assert!(
+            !err && t.starts_with("L3 holds the turn: pid 4242") && t.contains("pid 99 (seimei (you)) make gpu"),
+            "{t}"
+        );
         srv
     })
     .await
     .unwrap();
 
-    // revoke + kill raises a card naming seimei; only an approval sends cqd the kill.
+    // queue_stop raises a card naming seimei; only an approval sends the gate the stop.
     for (id, approve) in [(4, true), (5, false)] {
         let mut sub = events.subscribe();
         let call = tokio::task::spawn_blocking(move || {
-            let r = srv.call(id, "queue_control", json!({"action": "revoke", "target": "L3", "kill": true}));
+            let r = srv.call(id, "queue_stop", json!({}));
             (srv, r)
         });
         let card = loop {
@@ -132,9 +137,9 @@ async fn queue_plugin_over_stdio() {
         assert!(approvals.decide(card["aid"].as_str().unwrap(), approve, None, None));
         let (s, (t, err)) = call.await.unwrap();
         srv = s;
-        let kills = seen.lock().unwrap().iter().filter(|r| r["action"] == "kill").count();
+        let kills = seen.lock().unwrap().iter().filter(|r| r["op"] == "stop").count();
         if approve {
-            assert_eq!((serde_json::from_str::<Value>(&t).unwrap(), err), (json!({"ok": true, "did": "kill"}), false));
+            assert_eq!((t.as_str(), err), ("Sent SIGTERM to 1 processes of L3.", false));
             assert_eq!(kills, 1);
         } else {
             assert_eq!((t.as_str(), err), ("The user denied it; nothing changed.", true));
@@ -143,7 +148,7 @@ async fn queue_plugin_over_stdio() {
     }
 
     // A card whose call goes away ends as cancelled: Claude Code cancels the request, or the plugin process ends.
-    let kill = json!({"name": "queue_control", "arguments": {"action": "revoke", "target": "L3", "kill": true}});
+    let kill = json!({"name": "queue_stop", "arguments": {}});
     for id in [6, 7] {
         let mut sub = events.subscribe();
         srv.send(json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": kill}));
@@ -165,20 +170,21 @@ async fn queue_plugin_over_stdio() {
     }
     drop(srv);
 
-    // A token seimei does not know (it restarted) and a cqd that is not running.
+    // A token seimei does not know (it restarted) and a queue that is not running.
     let mut bad = env.clone();
     bad.insert("SEIMEI_TOKEN".into(), json!("not-a-session"));
-    let gone = d.join("no-cqd.sock");
+    let gone = d.join("no-queue");
     tokio::task::spawn_blocking(move || {
-        let mut srv = Server::queue(&bad, &cqd_sock);
-        let (t, err) = srv.call(1, "queue_control", json!({"action": "revoke", "target": "L3", "kill": true}));
+        let mut srv = Server::queue(&bad, &qdir);
+        let (t, err) = srv.call(1, "queue_stop", json!({}));
         assert_eq!((t.as_str(), err), ("seimei restarted, ask again", true));
         let mut srv = Server::queue(&env, &gone);
-        assert_eq!(srv.call(1, "queue_history", json!({})), ("cqd is not running.".into(), true));
+        let (t, err) = srv.call(1, "queue", json!({}));
+        assert!(err && t.starts_with("The queue is not running"), "{t}");
     })
     .await
     .unwrap();
-    assert_eq!(seen.lock().unwrap().iter().filter(|r| r["action"] == "kill").count(), 1);
+    assert_eq!(seen.lock().unwrap().iter().filter(|r| r["op"] == "stop").count(), 1);
     let _ = std::fs::remove_dir_all(&d);
 }
 

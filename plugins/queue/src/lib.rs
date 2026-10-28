@@ -1,36 +1,30 @@
-//! The queue plugin: claude-queue, which takes GPU/NPU jobs in turns (its scheduler daemon is cqd).
-//! Every session seimei starts runs its commands through it; the tools show and steer it, [seimei] lines tell about
-//! long waits and faults, and watch rules can ping when the queue frees or a wait drags on.
-//!
-//! cqd ($CLAUDE_QUEUE_DIR/cqd.sock) is the source when it runs: it knows classes, ETAs, memory needs and frozen
-//! agents, and streams its own events. Without it the view comes from /proc: holders mirror devgate (only processes
-//! under queue.slice block a queued device open) and waits come from devgate's records,
-//! $CLAUDE_QUEUE_DIR/waits/<pid> = "<starttime> <since> <bench|pid|memory> <blocker pid> <device>".
+//! The queue plugin: GPU and NPU turns for every session. seimei serve runs the gate (gate.rs) on claude-queue's
+//! socket; claude-queue's shim and command prefix put each queued command under it. The tools show and stop the
+//! holder, [seimei] lines tell about long waits, and watch rules can ping when the queue frees or a wait drags on.
+
+pub mod gate;
 
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use regex::Regex;
 use serde_json::{Value, json};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
-use seimei_core::plugins::{Builtin, Factory, Fut, Host, Notify, Session, ask_guard, strip};
+use seimei_core::plugins::{Builtin, Factory, Fut, Host, Session, ask_guard, strip};
 use seimei_core::sessions::{self, Own};
 use seimei_core::tools::text;
-use seimei_core::util::{self, chars, now, read_json, truthy};
+use seimei_core::util::{self, as_text, chars, now, read_json};
 use seimei_core::watches::{Watches, mins};
-use seimei_queue::cgroup::bench_running;
-use seimei_queue::runtime_dir;
-use seimei_queue::util::{boot_time, dev_kind, device_patterns, devices, meminfo, proc_cgroup, read, stat};
+
+use gate::{Gate, runtime_dir};
 
 pub const PLUGIN: Factory = Factory {
     name: "queue",
-    what: "claude-queue: every session's commands take GPU turns",
-    needs: "claude-queue",
+    what: "GPU turns: every session's GPU and NPU commands take turns",
+    needs: "claude-queue (its shim and command prefix)",
     found: || util::on_path("claude-queue"),
     manifest: include_str!("../plugin.toml"),
     prompt: include_str!("../prompt.md"),
@@ -68,20 +62,27 @@ impl Builtin for Queue {
         Box::pin(Queue::watch(self, watches, state))
     }
 
-    /// cqd's events go to the dispatcher and the pages.
+    /// The gate on claude-queue's socket, and a [seimei] line for each wait past WAIT_NEWS. A dev server leaves the
+    /// socket to the real one.
     fn start(self: Arc<Self>, host: Arc<Host>) {
-        let (state, h) = (host.state.clone(), host.clone());
-        let watcher = Watcher::new(
-            Box::new(move || names(&state)),
-            Box::new(move |line, urgent, key| (h.notify)(line, urgent, key)),
-        );
-        tokio::spawn(watcher.run());
+        if host.dev {
+            return;
+        }
+        tokio::spawn(self.gate.clone().run(gate::sock()));
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                let snap = self.gate.state.lock().unwrap().status(now());
+                for (line, key) in self.news(&snap, &names(&host.state)) {
+                    (host.notify)(&line, true, &key);
+                }
+            }
+        });
     }
 }
 
-/// A holder whose command ended this long ago is stuck.
-const STUCK: f64 = 600.0;
-const GIB: f64 = (1u64 << 30) as f64;
+/// A wait this long is news to the dispatcher.
+const WAIT_NEWS: f64 = 600.0;
 pub const DEFAULT_LIB: &str = "~/.local/lib/claude-queue";
 
 pub const TRIGGERS: [(&str, &str); 2] = [
@@ -89,42 +90,22 @@ pub const TRIGGERS: [(&str, &str); 2] = [
     ("queue_wait", "a GPU/NPU wait passes N minutes (target: N, default 10)"),
 ];
 
-fn s(v: &Value) -> String {
-    match v {
-        Value::String(s) => s.clone(),
-        Value::Null => "None".into(),
-        v => v.to_string(),
-    }
-}
-
-fn f(v: &Value) -> f64 {
-    v.as_f64().unwrap_or(0.0)
-}
-
 /// claude-queue's name for a session: a dash would nest slices.
 pub fn queue_name(name: &str) -> String {
     name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect()
 }
 
-fn cqd_sock() -> PathBuf {
-    std::env::var_os("SEIMEI_CQD_SOCK")
-        .filter(|d| !d.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or(runtime_dir().join("cqd.sock"))
-}
-
-/// One request to cqd, or None when it does not run. Blocking.
-pub fn cqd(req: &Value) -> Option<Value> {
-    let mut sock = UnixStream::connect(cqd_sock()).ok()?;
+/// One request on the queue socket, or None when nothing answers. Blocking.
+fn ask(req: &Value) -> Option<Value> {
+    let mut sock = UnixStream::connect(gate::sock()).ok()?;
     sock.set_read_timeout(Some(Duration::from_secs(3))).ok()?;
-    sock.set_write_timeout(Some(Duration::from_secs(3))).ok()?;
     sock.write_all(format!("{req}\n").as_bytes()).ok()?;
     let mut line = String::new();
     BufReader::new(sock).read_line(&mut line).ok()?;
     serde_json::from_str(&line).ok()
 }
 
-/// Who each claude-queue name is: shikigami, seimei and the user's sessions (by CLAUDE_QUEUE in their env).
+/// Who each queue name is: shikigami, seimei and the user's sessions (by CLAUDE_QUEUE in their env).
 pub fn names(state: &Path) -> HashMap<String, String> {
     let mut out = HashMap::new();
     for w in read_json(&state.join("workers.json")).and_then(|v| v.as_array().cloned()).unwrap_or_default() {
@@ -144,365 +125,60 @@ pub fn names(state: &Path) -> HashMap<String, String> {
     out
 }
 
-fn who(names: &HashMap<String, String>, agent: &str) -> String {
-    names.get(agent).cloned().unwrap_or(agent.into())
-}
-
-/// cqd's snapshot in this module's shape, plus what only cqd knows (class, state, ETA, need, frozen, hogs).
-pub fn from_cqd(c: &Value, names: &HashMap<String, String>) -> Value {
-    let at = f(&c["t"]);
-    let holders: Vec<Value> = (c["holders"].as_array().into_iter().flatten())
-        .map(|h| {
-            let age = at - f(&h["since"]);
-            let ended = h["state"] == "detached";
-            let mut h = h.clone();
-            h["pid"] = h["pids"].get(0).cloned().unwrap_or(json!(0));
-            h["who"] = json!(who(names, h["agent"].as_str().unwrap_or("")));
-            h["command"] = h["cmd"].clone();
-            h["rss"] = json!((f(&h["mem_gb"]) * GIB) as i64);
-            h["gpu_mem"] = json!(0);
-            h["age"] = json!(age);
-            h["gui"] = json!(false);
-            h["ended"] = json!(ended);
-            h["stuck"] = json!(ended && age >= STUCK);
-            h
-        })
-        .collect();
-    let waits: Vec<Value> = (c["waiters"].as_array().into_iter().flatten())
-        .map(|w| {
-            let mut w = w.clone();
-            w["who"] = json!(who(names, w["agent"].as_str().unwrap_or("")));
-            w["waited"] = w["waited_s"].clone();
-            w["command"] = w["cmd"].clone();
-            w
-        })
-        .collect();
-    json!({"cqd": true, "holders": holders, "waits": waits,
-        "outside": c["desktop"].as_array().map_or(0, |d| d.len()), "bench": c["bench"],
-        "mem_free": (f(&c["mem_available_gb"]) * GIB) as i64, "headroom": c["headroom_gb"], "frozen": c["frozen"],
-        "hogs": c["hogs"], "grants_open": c["grants_open"]})
-}
-
-fn cmdline(pid: i32) -> String {
-    chars(read(format!("/proc/{pid}/cmdline")).replace('\0', " ").trim(), 120)
-}
-
-fn rss(pid: i32) -> u64 {
-    static VMRSS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^VmRSS:\s+(\d+) kB").unwrap());
-    VMRSS.captures(&read(format!("/proc/{pid}/status"))).and_then(|m| m[1].parse::<u64>().ok()).map_or(0, |k| k << 10)
-}
-
-fn comm(pid: i32) -> String {
-    read(format!("/proc/{pid}/comm")).trim().to_string()
-}
-
-/// Resident GTT + VRAM of one DRM fd: on a UMA machine GPU memory is system RAM that RSS does not show.
-fn gpu_mem(pid: i32, fd: &str) -> u64 {
-    static DRM: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?m)^drm-resident-(gtt|vram):\s+(\d+)\s*(\w+)?").unwrap());
-    (DRM.captures_iter(&read(format!("/proc/{pid}/fdinfo/{fd}"))))
-        .map(|m| {
-            let unit = match m.get(3).map(|u| u.as_str()) {
-                Some("KiB") => 1 << 10,
-                Some("MiB") => 1 << 20,
-                Some("GiB") => 1 << 30,
-                _ => 1,
-            };
-            m[2].parse::<u64>().unwrap_or(0) * unit
-        })
-        .sum()
-}
-
-pub fn gib(n: f64) -> String {
-    format!("{:.1} GiB", n / GIB)
-}
-
-/// A desktop app: render nodes only. Agent commands all inherit WAYLAND_DISPLAY, but compute holds /dev/kfd (ROCm),
-/// /dev/nvidia* or /dev/accel (NPU).
-fn graphics(devs: &[(String, String)], env: &[u8]) -> bool {
-    let shown = env.split(|b| *b == 0).any(|e| {
-        let (k, v) = e.split_at(e.iter().position(|b| *b == b'=').unwrap_or(e.len()));
-        (k == b"WAYLAND_DISPLAY" || k == b"DISPLAY") && v.len() > 1
-    });
-    shown && devs.iter().all(|(_, d)| dev_kind(d) == "render")
-}
-
-/// The Bash command that made this scope is over: no process in it still has a parent outside it, other than the
-/// init or user manager it was reparented to. A run_in_background job's shell is still claude's child.
-fn ended(scope: &str, procs: &HashMap<i32, String>) -> bool {
-    let tail = format!("/{scope}");
-    for (pid, cg) in procs {
-        if !cg.ends_with(&tail) {
-            continue;
-        }
-        let Some(ppid) = stat(*pid).get(1).and_then(|p| p.parse::<i32>().ok()) else { continue };
-        if procs.get(&ppid).is_some_and(|c| c.ends_with(&tail)) {
-            continue;
-        }
-        if ppid <= 1 || comm(ppid) == "systemd" {
-            continue;
-        }
-        return false;
-    }
-    true
-}
-
-fn pids() -> impl Iterator<Item = i32> {
-    (std::fs::read_dir("/proc").into_iter().flatten().flatten()).filter_map(|e| e.file_name().to_str()?.parse().ok())
-}
-
-/// Holders and waits right now, from cqd when it runs. Blocking.
-pub fn snapshot(names: &HashMap<String, String>) -> Value {
-    match cqd(&json!({"op": "status"})) {
-        Some(c) if c.get("holders").is_some() => from_cqd(&c, names),
-        _ => proc_snapshot(names),
-    }
-}
-
-/// The /proc view, for when cqd is down. Blocking.
-pub fn proc_snapshot(names: &HashMap<String, String>) -> Value {
-    static SLICE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"/queue\.slice/queue-(\w+)\.slice/([^/]+)").unwrap());
-    let patterns = device_patterns();
-    let tick = unsafe { libc::sysconf(libc::_SC_CLK_TCK) } as f64;
-    let (at, boot) = (now(), boot_time());
-    let procs: HashMap<i32, String> = pids().map(|p| (p, proc_cgroup(p))).collect();
-    let queued: HashMap<i32, String> =
-        procs.iter().filter(|(_, cg)| cg.contains("/queue.slice/")).map(|(p, c)| (*p, c.clone())).collect();
-    let (mut holders, mut outside) = (vec![], 0);
-    for (&pid, cg) in &procs {
-        let devs = devices(pid, &patterns);
-        if devs.is_empty() {
-            continue;
-        }
-        if !queued.contains_key(&pid) {
-            outside += 1;
-            continue;
-        }
-        let (agent, scope) =
-            SLICE.captures(cg).map_or(("?".to_string(), String::new()), |m| (m[1].to_string(), m[2].to_string()));
-        let st = stat(pid);
-        let started = st.get(19).and_then(|t| t.parse::<f64>().ok()).map_or(at, |t| boot + t / tick);
-        let env = std::fs::read(format!("/proc/{pid}/environ")).unwrap_or_default();
-        let mut paths: Vec<&String> = devs.iter().map(|(_, d)| d).collect();
-        paths.sort();
-        paths.dedup();
-        let gpu: u64 = devs.iter().filter(|(_, d)| d.starts_with("/dev/dri/")).map(|(fd, _)| gpu_mem(pid, fd)).sum();
-        let age = at - started;
-        let ended = !scope.is_empty() && ended(&scope, &queued);
-        holders.push(json!({"pid": pid, "who": who(names, &agent), "agent": agent,
-            "command": cmdline(pid), "comm": comm(pid), "devices": paths, "rss": rss(pid), "gpu_mem": gpu,
-            "age": age, "gui": graphics(&devs, &env), "ended": ended, "stuck": ended && age >= STUCK}));
-    }
-    let mut waits = vec![];
-    for e in std::fs::read_dir(runtime_dir().join("waits")).into_iter().flatten().flatten() {
-        let Some(pid) = e.file_name().to_str().and_then(|n| n.parse::<i32>().ok()) else { continue };
-        let parts: Vec<String> = read(e.path()).split_whitespace().map(String::from).collect();
-        if parts.len() < 5 {
-            continue;
-        }
-        // The waiter is gone (or its pid was reused).
-        if stat(pid).get(19) != Some(&parts[0]) {
-            continue;
-        }
-        let agent = procs.get(&pid).and_then(|cg| SLICE.captures(cg)).map_or("?".into(), |m| m[1].to_string());
-        let since: f64 = parts[1].parse().unwrap_or(at);
-        waits.push(json!({"pid": pid, "who": who(names, &agent), "agent": agent,
-            "since": since, "waited": at - since, "kind": parts[2], "blocker": parts[3].parse::<i64>().unwrap_or(0),
-            "device": parts[4], "command": cmdline(pid)}));
-    }
-    waits.sort_by(|a, b| f(&a["since"]).total_cmp(&f(&b["since"])));
-    let mem = meminfo().get("MemAvailable").copied().unwrap_or(0.0) as u64;
-    json!({"cqd": false, "holders": holders, "waits": waits, "outside": outside,
-        "bench": bench_running(&runtime_dir().join("bench.lock")), "mem_free": mem})
-}
-
-/// The biggest processes by RSS: who a memory wait is waiting on.
-fn top_memory() -> Vec<(i32, String, u64)> {
-    let mut rows: Vec<(u64, String, i32)> = pids().map(|p| (rss(p), comm(p), p)).filter(|r| r.0 > 0).collect();
-    rows.sort_by(|a, b| b.cmp(a));
-    rows.into_iter().take(3).map(|(r, comm, pid)| (pid, comm, r)).collect()
-}
-
-pub fn holder_line(h: &Value) -> String {
-    let flags: Vec<&str> = [
-        ("STUCK: its command ended but it still holds the turn", h["stuck"] == true),
-        ("graphics app, no compute device", h["gui"] == true),
-    ]
-    .into_iter()
-    .filter_map(|(t, on)| on.then_some(t))
-    .collect();
-    let flags = if flags.is_empty() { String::new() } else { format!(" [{}]", flags.join("; ")) };
-    let command = chars(&s(&h["command"]), 80);
-    let joined =
-        |v: &Value, sep: &str| -> String { v.as_array().into_iter().flatten().map(s).collect::<Vec<_>>().join(sep) };
-    // From cqd.
-    if h.get("eta_s").is_some() {
-        if h["state"] == "external" {
-            return format!(
-                "pid {} {command}: outside the queue, holds {} for {}, idle {}",
-                s(&h["pid"]),
-                joined(&h["devices"], ", "),
-                mins(f(&h["age"])),
-                mins(f(&h["idle_s"]))
-            );
-        }
-        let left = if !h["eta_s"].is_null() {
-            format!("~{} left", mins(f(&h["eta_s"])))
-        } else if truthy(&h["known"]) {
-            "past its usual duration".into()
-        } else {
-            "duration unknown".into()
-        };
-        let busy = if h["busy_pct"].is_null() { String::new() } else { format!(", GPU busy {}%", s(&h["busy_pct"])) };
-        return format!(
-            "{} pid {} ({}) {command}: holds {} for {} ({}), {left}, memory {} GB (needs ~{}){busy}{flags}",
-            s(&h["id"]),
-            s(&h["pid"]),
-            s(&h["who"]),
-            joined(&h["res"], "+"),
-            mins(f(&h["age"])),
-            s(&h["state"]),
-            s(&h["mem_gb"]),
-            s(&h["need_gb"])
-        );
-    }
+fn job_line(j: &Value, at: f64, names: &HashMap<String, String>) -> String {
+    let agent = as_text(&j["agent"]);
+    let who = names.get(&agent).cloned().unwrap_or(agent);
+    let since = at - j["since"].as_f64().unwrap_or(at);
     format!(
-        "pid {} ({}) {command}: holds {} for {}, RSS {}, GPU memory {}{flags}",
-        s(&h["pid"]),
-        s(&h["who"]),
-        joined(&h["devices"], ", "),
-        mins(f(&h["age"])),
-        gib(f(&h["rss"])),
-        gib(f(&h["gpu_mem"]))
+        "pid {} ({who}) {}, {} for {}",
+        j["pid"],
+        chars(&as_text(&j["cmd"]), 80),
+        as_text(&j["device"]),
+        mins(since)
     )
 }
 
-pub fn blocker_text(w: &Value, snap: &Value) -> String {
-    if truthy(&w["blocked_by"]) {
-        return s(&w["blocked_by"]);
-    }
-    match w["kind"].as_str() {
-        Some("bench") => "a running bench".into(),
-        Some("memory") => {
-            let top: Vec<String> =
-                top_memory().iter().map(|(pid, comm, r)| format!("{comm} {pid} {}", gib(*r as f64))).collect();
-            format!(
-                "free memory ({} free, CLAUDE_QUEUE_MIN_MEM_GB wanted; biggest: {})",
-                gib(f(&snap["mem_free"])),
-                top.join(", ")
-            )
+/// The queue tool's text from a status reply.
+pub fn describe(snap: &Value, names: &HashMap<String, String>) -> String {
+    let at = snap["t"].as_f64().unwrap_or_else(now);
+    let mut lines = vec![];
+    match snap.get("holder") {
+        Some(Value::Null) => lines.push("Nobody holds the GPU/NPU turn.".to_string()),
+        Some(h) => {
+            lines.push(format!("{} holds the turn: {}", as_text(&h["id"]), job_line(h, at, names)));
+            if h["ended"] == true {
+                lines.push("Its processes are gone; the turn passes on in a few seconds.".into());
+            }
         }
-        _ => match snap["holders"].as_array().into_iter().flatten().find(|h| h["pid"] == w["blocker"]) {
-            Some(h) => holder_line(h),
-            None => format!("pid {} (gone now)", s(&w["blocker"])),
-        },
+        None => {
+            return "Another daemon (claude-queue's cqd) holds the queue socket; seimei's queue starts once it stops."
+                .into();
+        }
     }
-}
-
-/// The queue tool's text.
-pub fn describe(snap: &Value) -> String {
-    let mut lines: Vec<String> = vec![];
-    if snap["grants_open"] == false {
-        lines.push(
-            "GRANTS CLOSED: cqd saw a GPU/NPU fault in the kernel log. Check dmesg; the user reopens them with `cq \
-             grants on`."
-                .into(),
-        );
-    }
-    if truthy(&snap["bench"]) {
-        lines.push("A bench is running: queued GPU/NPU opens wait for it.".into());
-    }
-    let holders = snap["holders"].as_array().cloned().unwrap_or_default();
-    if holders.is_empty() {
-        lines.push("No queued command holds the GPU/NPU turn.".into());
-    } else {
-        lines.push("GPU/NPU turn held by:".into());
-        lines.extend(holders.iter().map(|h| format!("- {}", holder_line(h))));
-    }
-    let waits = snap["waits"].as_array().cloned().unwrap_or_default();
-    if waits.is_empty() {
+    let waiters = snap["waiters"].as_array().cloned().unwrap_or_default();
+    if waiters.is_empty() {
         lines.push("Nothing waits.".into());
     } else {
-        lines.push("Waiting:".into());
-        for w in &waits {
-            let pos = if w.get("pos").is_some() { format!("#{} ", s(&w["pos"])) } else { String::new() };
-            let eta =
-                if w["eta_s"].is_null() { String::new() } else { format!(", starts in ~{}", mins(f(&w["eta_s"]))) };
-            lines.push(format!(
-                "- {pos}pid {} ({}) {}: waited {}{eta}, blocked by {}",
-                s(&w["pid"]),
-                s(&w["who"]),
-                chars(&s(&w["command"]), 80),
-                mins(f(&w["waited"])),
-                blocker_text(w, snap)
-            ));
-        }
-    }
-    let frozen: Vec<String> = snap["frozen"].as_array().into_iter().flatten().map(s).collect();
-    if !frozen.is_empty() {
-        lines.push(format!("Frozen by a bench: {}.", frozen.join(", ")));
-    }
-    let headroom =
-        if snap.get("headroom").is_some() { format!(", headroom {} GB", s(&snap["headroom"])) } else { String::new() };
-    lines.push(format!(
-        "{} memory free{headroom}. {} desktop processes outside the queue (desktop, browsers, open_app) use the GPU \
-         too; they never block the queue.",
-        gib(f(&snap["mem_free"])),
-        s(&snap["outside"])
-    ));
-    for h in snap["hogs"].as_array().into_iter().flatten() {
-        lines.push(format!(
-            "Idle memory hog: {} holds {} GB, idle {} min.",
-            s(&h["name"]),
-            s(&h["rss_gb"]),
-            s(&h["idle_min"])
-        ));
-    }
-    if !truthy(&snap["cqd"]) {
-        lines.push("(cqd is not running: this view comes from /proc, without ETAs.)".into());
-    }
-    if holders.iter().any(|h| h["stuck"] == true) {
-        lines.push(format!(
-            "A stuck holder is usually an app restarted from an agent's shell. It keeps the turn until it quits; ask \
-             the user before closing a window they use. Restart it outside the queue with open_app or `{}`.",
-            launch()
-        ));
+        lines.push("Waiting, in order:".into());
+        lines.extend(waiters.iter().map(|w| format!("- {}", job_line(w, at, names))));
     }
     lines.join("\n")
 }
 
-/// How an agent starts a desktop app outside the queue (SEIMEI_INIT says which init runs).
+/// How an agent starts a desktop app outside the queue.
 pub fn launch() -> &'static str {
-    seimei_queue::cgroup::launch(util::systemd())
-}
-
-/// queue_history's text: one line per past job.
-pub fn history_text(rows: &[Value]) -> String {
-    if rows.is_empty() {
-        return "No matching jobs.".into();
+    let set = |v: &str| std::env::var_os(v).is_some_and(|v| !v.is_empty());
+    if util::systemd() {
+        "env -u LD_PRELOAD systemd-run --user --collect <app>"
+    } else if set("NIRI_SOCKET") {
+        "env -u LD_PRELOAD niri msg action spawn -- <app>"
+    } else if set("HYPRLAND_INSTANCE_SIGNATURE") {
+        "env -u LD_PRELOAD hyprctl dispatch exec <app>"
+    } else if set("SWAYSOCK") {
+        "env -u LD_PRELOAD swaymsg exec <app>"
+    } else {
+        "env -u LD_PRELOAD setsid -f <app>"
     }
-    let lines: Vec<String> = (rows.iter())
-        .map(|x| {
-            use chrono::TimeZone;
-            let when = chrono::Local
-                .timestamp_opt(f(&x["since"]) as i64, 0)
-                .single()
-                .map(|t| t.format("%m-%d %H:%M").to_string())
-                .unwrap_or_default();
-            let class = x.get("class").map_or("batch".into(), s);
-            let mut line = format!("{when} {} [{class}] ran {}", s(&x["agent"]), mins(f(&x["dur"])));
-            if truthy(&x["wait"]) {
-                line += &format!(", waited {}", mins(f(&x["wait"])));
-            }
-            line += &format!(", peaks anon {} GB, GTT {} GB", s(&x["peak_anon_gb"]), s(&x["peak_gtt_gb"]));
-            let hits: Vec<String> = x["contaminated"].as_array().into_iter().flatten().map(s).collect();
-            if !hits.is_empty() {
-                line += &format!(", CONTAMINATED: {}", hits.join("; "));
-            }
-            line + &format!(": {}", s(&x["key"]))
-        })
-        .collect();
-    lines.join("\n")
 }
 
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
@@ -511,90 +187,57 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
 
 /// One tool call.
 pub async fn call(tool: &str, a: &Value, session: &dyn Session) -> Value {
-    let not_running = || text("cqd is not running.", true);
-    // queue_control asks the guard itself, with the job a kill would stop.
-    if tool != "queue_control"
-        && let Some(no) = ask_guard(session, "queue", tool, a, None, &[], "desktop").await
-    {
-        return no;
-    }
+    let Some(snap) = blocking(|| ask(&json!({"op": "status"}))).await else {
+        return text("The queue is not running (seimei serve is down, or the queue plugin is off).", true);
+    };
     match tool {
         "queue" => {
-            let names = names(session.state());
-            text(&blocking(move || describe(&snapshot(&names))).await, false)
-        }
-        "queue_control" => {
-            let Some(action) = a["action"].as_str() else { return text("action is required", true) };
-            let mut action = action.to_string();
-            if action == "revoke" && truthy(&a["kill"]) {
-                let snap = blocking(|| snapshot(&HashMap::new())).await;
-                let t = &a["target"];
-                let h = (snap["holders"].as_array().into_iter().flatten())
-                    .find(|h| *t == h["id"] || *t == json!(s(&h["pid"])) || *t == h["agent"]);
-                let what = match h {
-                    Some(h) => format!(
-                        "{} {}",
-                        s(if h.get("agent").is_some() { &h["agent"] } else { &h["who"] }),
-                        chars(&s(&h["command"]), 80)
-                    ),
-                    None => s(t),
-                };
-                let about = seimei_core::guard::About {
-                    what: format!("stop the GPU/NPU job {what}"),
-                    detail: "SIGTERM to the whole command (its scope)".into(),
-                    ..Default::default()
-                };
-                if let Some(no) = ask_guard(session, "queue", tool, a, Some(about), &[], "desktop").await {
-                    return no;
-                }
-                action = "kill".into();
-            } else if let Some(no) = ask_guard(session, "queue", tool, a, None, &[], "desktop").await {
+            if let Some(no) = ask_guard(session, "queue", tool, a, None, &[], "desktop").await {
                 return no;
             }
-            let req = json!({"op": "control", "action": action, "target": a["target"], "to": a["to"]});
-            match blocking(move || cqd(&req)).await {
-                None => not_running(),
-                Some(r) => text(&r.to_string(), r.get("error").is_some()),
-            }
+            let names = names(session.state());
+            text(&describe(&snap, &names), false)
         }
-        "queue_policy" => {
-            let mut req = json!({"op": "policy"});
-            if truthy(&a["key"]) {
-                req["key"] = a["key"].clone();
+        "queue_stop" => {
+            let h = &snap["holder"];
+            if h.is_null() {
+                return text("Nobody holds the turn.", true);
             }
-            if let Some(v) = a.get("value") {
-                req["value"] = v.clone();
+            let about = seimei_core::guard::About {
+                what: format!("stop the GPU/NPU job {} {}", as_text(&h["agent"]), chars(&as_text(&h["cmd"]), 80)),
+                detail: "SIGTERM to the whole command (its scope)".into(),
+                ..Default::default()
+            };
+            if let Some(no) = ask_guard(session, "queue", tool, a, Some(about), &[], "desktop").await {
+                return no;
             }
-            match blocking(move || cqd(&req)).await {
-                None => not_running(),
-                Some(r) => text(&serde_json::to_string_pretty(&r).unwrap_or_default(), r.get("error").is_some()),
-            }
-        }
-        "queue_history" => {
-            let n = a["n"].as_i64().filter(|n| *n != 0).unwrap_or(10);
-            let req = json!({"op": "history", "key": a["key"], "agent": a["agent"], "n": n});
-            match blocking(move || cqd(&req)).await {
-                None => not_running(),
-                Some(r) => text(&history_text(r["rows"].as_array().map_or(&[][..], |v| v)), false),
+            let req = json!({"op": "stop", "id": h["id"]});
+            match blocking(move || ask(&req)).await {
+                Some(r) if r["ok"] == true => {
+                    text(&format!("Sent SIGTERM to {} processes of {}.", r["stopped"], as_text(&h["id"])), false)
+                }
+                Some(r) => text(&format!("Could not stop it: {}", as_text(&r["error"])), true),
+                None => text("The queue stopped answering.", true),
             }
         }
         _ => text(&format!("no such tool: {tool}"), true),
     }
 }
 
-/// The host side: the env and wrap of every session, the watch triggers, the watcher and the app API.
+/// The host side: the env and wrap of every session, the gate and the watch triggers.
 pub struct Queue {
     lib: PathBuf,
+    gate: Arc<Gate>,
     told: Mutex<HashSet<String>>,
 }
 
 impl Queue {
     pub fn new(cfg: &toml::Table) -> Queue {
         let lib = cfg.get("lib").and_then(|l| l.as_str()).filter(|l| !l.is_empty()).unwrap_or(DEFAULT_LIB);
-        Queue { lib: PathBuf::from(seimei_core::paths::expand(lib)), told: Mutex::default() }
+        Queue { lib: PathBuf::from(seimei_core::paths::expand(lib)), gate: Arc::default(), told: Mutex::default() }
     }
 
-    /// Run a session's commands through claude-queue, like `claude-queue <name>`, so benches freeze it.
+    /// Run a session's commands through claude-queue's prefix and shim, like `claude-queue <name>`.
     pub fn env(&self, name: &str) -> Vec<(String, String)> {
         if !self.lib.join("queue-prefix").exists() {
             return vec![];
@@ -610,7 +253,7 @@ impl Queue {
         ]
     }
 
-    /// A session opened in a terminal stays pausable by benches, like it was under seimei.
+    /// A session opened in a terminal stays queued, as it was under seimei.
     pub fn wrap(&self, name: &str, argv: Vec<String>) -> Vec<String> {
         if argv.first().is_some_and(|a| a == "claude") {
             return [vec!["claude-queue".into(), name.into()], argv[1..].to_vec()].concat();
@@ -627,24 +270,37 @@ impl Queue {
 
     /// Every watch tick while a rule uses one of its triggers.
     pub async fn watch(&self, watches: &Watches, state: &Path) {
-        let state = state.to_path_buf();
-        let snap = blocking(move || snapshot(&names(&state))).await;
-        let empty = |k: &str| snap[k].as_array().is_none_or(|v| v.is_empty());
-        if empty("holders") && empty("waits") {
+        let snap = self.gate.state.lock().unwrap().status(now());
+        let at = now();
+        let waiters = snap["waiters"].as_array().cloned().unwrap_or_default();
+        if snap["holder"].is_null() && waiters.is_empty() {
             watches.fire("queue_free", "the queue", "nothing holds or waits for the GPU/NPU turn");
         }
+        let names = names(state);
         for r in watches.rules().iter().filter(|r| r["trigger"] == "queue_wait") {
             let limit = wait_minutes(r["target"].as_str().unwrap_or("")).unwrap_or(10.0) * 60.0;
-            for w in snap["waits"].as_array().into_iter().flatten() {
-                let tag = format!("{}:{}:{}", s(&r["id"]), s(&w["pid"]), s(&w["since"]));
-                if f(&w["waited"]) >= limit && !self.told.lock().unwrap().contains(&tag) {
-                    self.told.lock().unwrap().insert(tag);
-                    let detail =
-                        format!("pid {} waited {} for {}", s(&w["pid"]), mins(f(&w["waited"])), blocker_text(w, &snap));
-                    watches.fire_rule(r, &s(&w["who"]), &detail);
+            for w in waiters.iter().filter(|w| at - w["since"].as_f64().unwrap_or(at) >= limit) {
+                let tag = format!("{}:{}:{}", as_text(&r["id"]), w["pid"], w["since"]);
+                if self.told.lock().unwrap().insert(tag) {
+                    watches.fire_rule(r, &as_text(&w["agent"]), &format!("waits: {}", job_line(w, at, &names)));
                 }
             }
         }
+    }
+
+    /// Waits past WAIT_NEWS not told yet: (line, key).
+    pub fn news(&self, snap: &Value, names: &HashMap<String, String>) -> Vec<(String, String)> {
+        let at = snap["t"].as_f64().unwrap_or_else(now);
+        let mut out = vec![];
+        for w in snap["waiters"].as_array().into_iter().flatten() {
+            let key = format!("queue:{}:{}", w["pid"], w["since"]);
+            if at - w["since"].as_f64().unwrap_or(at) >= WAIT_NEWS && self.told.lock().unwrap().insert(key.clone()) {
+                let holder =
+                    if snap["holder"].is_null() { "nobody".into() } else { job_line(&snap["holder"], at, names) };
+                out.push((format!("GPU queue: {} waits, behind {holder}", job_line(w, at, names)), key));
+            }
+        }
+        out
     }
 }
 
@@ -653,153 +309,5 @@ fn wait_minutes(target: &str) -> Option<f64> {
     match strip(target) {
         "" | "*" => Some(10.0),
         t => t.parse().ok().filter(|m: &f64| m.is_finite()),
-    }
-}
-
-/// Relays cqd's events (long waits, memory blocks, idle or detached holders, desktop apps moved out of the queue, GPU
-/// faults) to the dispatcher. While cqd is down it tells once per wait when a queued GPU/NPU open has waited too long.
-pub struct Watcher {
-    pub names: Box<dyn Fn() -> HashMap<String, String> + Send + Sync>,
-    /// A line for the dispatcher: (text, urgent, key).
-    pub notify: Notify,
-    told: Mutex<HashSet<String>>,
-    /// Agents with a "detached" line out: taken back once none of their jobs is detached.
-    detached: Mutex<HashSet<String>>,
-}
-
-/// A wait this long is news; memory waits are granted anyway after CLAUDE_QUEUE_MEM_WAIT (600 s), so they count sooner.
-fn news(kind: &str) -> f64 {
-    let (var, default) =
-        if kind == "memory" { ("SEIMEI_QUEUE_MEMORY_WAIT", 300.0) } else { ("SEIMEI_QUEUE_WAIT", 600.0) };
-    std::env::var(var).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
-}
-
-impl Watcher {
-    pub fn new(names: Box<dyn Fn() -> HashMap<String, String> + Send + Sync>, notify: Notify) -> Arc<Watcher> {
-        Arc::new(Watcher { names, notify, told: Mutex::default(), detached: Mutex::default() })
-    }
-
-    /// Waits past their time, from devgate's records (cqd is down): (line, key) for each one not told yet. Blocking.
-    pub fn check(&self) -> Vec<(String, String)> {
-        let wdir = runtime_dir().join("waits");
-        let at = now();
-        let mut due = HashSet::new();
-        for e in std::fs::read_dir(&wdir).into_iter().flatten().flatten() {
-            let name = e.file_name().to_string_lossy().into_owned();
-            if !name.starts_with(|c: char| c.is_ascii_digit()) {
-                continue;
-            }
-            let parts: Vec<String> = read(e.path()).split_whitespace().map(String::from).collect();
-            let st = name.parse::<i32>().map_or(vec![], stat);
-            if parts.len() < 5 || st.get(19) != Some(&parts[0]) {
-                // A waiter killed mid-wait leaves its record behind.
-                let young = e
-                    .metadata()
-                    .ok()
-                    .and_then(|m| m.modified().ok())
-                    .and_then(|t| t.elapsed().ok())
-                    .is_some_and(|d| d.as_secs() <= 60);
-                if !name.ends_with(".new") || !young {
-                    let _ = std::fs::remove_file(e.path());
-                }
-                continue;
-            }
-            let key = format!("{name}:{}:{}", parts[0], parts[1]);
-            let since: f64 = parts[1].parse().unwrap_or(at);
-            if !self.told.lock().unwrap().contains(&key) && at - since >= news(&parts[2]) {
-                due.insert(key);
-            }
-        }
-        if due.is_empty() {
-            return vec![];
-        }
-        let snap = snapshot(&(self.names)());
-        let mut out = vec![];
-        for w in snap["waits"].as_array().into_iter().flatten() {
-            let pid = s(&w["pid"]);
-            let parts: Vec<String> = read(wdir.join(&pid)).split_whitespace().take(2).map(String::from).collect();
-            let key = format!("{pid}:{}", parts.join(":"));
-            if due.contains(&key) && self.told.lock().unwrap().insert(key.clone()) {
-                out.push((
-                    format!(
-                        "claude-queue: pid {pid} ({}) {} has waited {} for its GPU/NPU turn, blocked by {}",
-                        s(&w["who"]),
-                        chars(&s(&w["command"]), 60),
-                        mins(f(&w["waited"])),
-                        blocker_text(w, &snap)
-                    ),
-                    format!("queue:{key}"),
-                ));
-            }
-        }
-        out
-    }
-
-    /// One cqd event. Events are keyed per job, so a repeat replaces the earlier note; "detached" ones per agent, taken
-    /// back when a snapshot shows none of its jobs detached any more.
-    pub fn relay(&self, ev: &Value) {
-        if ev["type"] == "snap" {
-            let held: HashSet<&str> = (ev["snap"]["holders"].as_array().into_iter().flatten())
-                .filter(|h| h["state"] == "detached")
-                .filter_map(|h| h["agent"].as_str())
-                .collect();
-            let gone: Vec<String> = {
-                let mut d = self.detached.lock().unwrap();
-                let gone = d.iter().filter(|a| !held.contains(a.as_str())).cloned().collect();
-                d.retain(|a| held.contains(a.as_str()));
-                gone
-            };
-            for agent in gone {
-                (self.notify)("", false, &format!("cqd:detached:{agent}"));
-            }
-            return;
-        }
-        if ev["type"] != "event" || ev["event"] == "cqd_restart" {
-            return;
-        }
-        let mut line = s(&ev["text"]);
-        let agent = ev["agent"].as_str().unwrap_or("");
-        if let Some(who) = (self.names)().get(agent) {
-            line = format!("{line} [{agent} = {who}]");
-        }
-        let key = if ev["event"] == "detached" {
-            self.detached.lock().unwrap().insert(agent.into());
-            format!("cqd:detached:{agent}")
-        } else {
-            format!("cqd:{}", s(&ev["key"]))
-        };
-        (self.notify)(&format!("claude-queue: {line}"), ev["level"] == "wake", &key);
-    }
-
-    /// Follows cqd's watch stream until it ends; false when cqd is not there.
-    async fn stream(self: &Arc<Self>) -> bool {
-        let Ok(sock) = tokio::net::UnixStream::connect(cqd_sock()).await else { return false };
-        let (rd, mut wr) = sock.into_split();
-        if wr.write_all(b"{\"op\": \"watch\"}\n").await.is_err() {
-            return true;
-        }
-        let mut lines = tokio::io::BufReader::with_capacity(1 << 22, rd).lines();
-        while let Ok(Some(line)) = lines.next_line().await {
-            if let Ok(ev) = serde_json::from_str::<Value>(&line) {
-                self.relay(&ev);
-            }
-        }
-        true
-    }
-
-    /// Follows cqd's event stream for good, reconnecting when cqd restarts.
-    pub async fn run(self: Arc<Self>) {
-        loop {
-            if self.stream().await {
-                // cqd restarted: reconnect.
-                tokio::time::sleep(Duration::from_secs(2)).await;
-                continue;
-            }
-            let me = self.clone();
-            for (line, key) in blocking(move || me.check()).await {
-                (self.notify)(&line, true, &key);
-            }
-            tokio::time::sleep(Duration::from_secs(30)).await;
-        }
     }
 }

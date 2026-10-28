@@ -3,7 +3,7 @@
 [server]
 port = 8417                         # --dev uses port + 1
 origin = "http://localhost:8417"    # where the app and the web reach seimei (a tunnel's https URL); also the passkey domain
-# web = false                       # no phone server: the agent queue and the plugins only
+# web = false                       # no phone server: the plugins only
 
 [dispatcher]
 # model = "opus"                    # default: [models] work
@@ -40,7 +40,7 @@ enabled = []
 #   desktop  the desktop (niri, sway, Hyprland, KDE Plasma, GNOME or X11): windows, workspaces, screenshots, input (uinput), AT-SPI
 #   browser  Firefox or a Chromium browser through the extension in plugins/browser/extension/
 #   music    Quod Libet and the session's media players (MPRIS)
-#   queue    claude-queue / cqd: every session's commands take GPU turns through it
+#   queue    GPU turns: every session's GPU and NPU commands take turns (claude-queue's shim and prefix)
 
 # [plugins.desktop]
 # backend = "niri"     # niri, sway, hyprland, kde, gnome or x11 (any EWMH window manager); found from the session when
@@ -77,9 +77,6 @@ enabled = []
 # command = "codex"
 # args = ["app-server"]
 # protocol = "codex"
-
-[queue]
-# mode = "shadow"                   # the agent queue: off, shadow (beside claude-queue's cqd), on (after the cutover)
 
 [asr]
 # Dictation (docs/asr.md): the app's and the page's mic, and dictate on the laptop through <state>/asr.sock.

@@ -4,7 +4,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use crate::cqd;
+use crate::fake_queue::fake_queue;
 use crate::live::{self, Checks, pool_with, transcript, until, work};
 use seimei_core::approvals::Approvals;
 use seimei_core::events::EventLog;
@@ -19,12 +19,11 @@ async fn queue_plugin_live() {
     let c = Checks::default();
     let work = work("t82p4");
     let state = live::state("plugintest");
-    let cqd_sock = state.join("cqd.sock");
     // Set before the session starts; the plugin inherits it through Claude Code.
     let mut env = crate::env::Env::lock();
-    env.set("SEIMEI_CQD_SOCK", &cqd_sock);
+    env.set("CLAUDE_QUEUE_DIR", &state);
     let cases: Value = serde_json::from_str(include_str!("../../../../plugins/queue/tests/cases.json")).unwrap();
-    let seen = cqd::fake_cqd(cqd_sock, cases["describe"][0]["cqd"].clone());
+    let seen = fake_queue(state.join("cqd.sock"), cases["describe"][0]["snap"].clone());
     let events = Arc::new(EventLog::open(&state.join("events.jsonl")).unwrap());
     let approvals = Arc::new(Approvals::new(events.clone()));
     // No claude-queue prefix: lib is an empty folder.
@@ -47,9 +46,8 @@ async fn queue_plugin_live() {
         }
     });
 
-    let task = "Use your tools, one call at a time: 1) mcp__queue__queue; 2) mcp__queue__queue_control with action \
-                revoke, target L3 and kill true. Then reply with the first line the queue tool returned and, quoted, \
-                what queue_control said.";
+    let task = "Use your tools, one call at a time: 1) mcp__queue__queue; 2) mcp__queue__queue_stop. Then reply with \
+                the first line the queue tool returned and, quoted, what queue_stop said.";
     let w = pool
         .summon(Summon {
             name: "qtest".into(),
@@ -71,9 +69,9 @@ async fn queue_plugin_live() {
     println!("report: {}", w.rec().summary.chars().take(800).collect::<String>());
 
     let ops: Vec<Value> = seen.lock().unwrap().clone();
-    c.check("the plugin read the fake cqd", ops.iter().any(|r| r["op"] == "status"), &ops);
+    c.check("the plugin read the fake gate", ops.iter().any(|r| r["op"] == "status"), &ops);
     let said = std::fs::read_to_string(transcript(&work, &w.rec().session_id)).unwrap_or_default();
-    c.check("queue's text reached the session", said.contains("GRANTS CLOSED: cqd saw a GPU/NPU fault"), "");
+    c.check("queue's text reached the session", said.contains("L3 holds the turn: pid 4242"), "");
     let all = cards.lock().unwrap().clone();
     let kill = all.iter().find(|c| c["action"] == "desktop");
     c.check(
@@ -87,7 +85,7 @@ async fn queue_plugin_live() {
     );
     c.check("no other card (the plugin's tools need none)", all.len() == 1, &all);
     c.check("the deny reached the session", said.contains("The user denied it; nothing changed."), "");
-    c.check("cqd never saw a kill", !ops.iter().any(|r| r["action"] == "kill"), &ops);
+    c.check("the gate never saw a stop", !ops.iter().any(|r| r["op"] == "stop"), &ops);
     let _ = std::fs::remove_dir_all(&state);
     c.done();
 }

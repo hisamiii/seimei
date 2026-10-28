@@ -1,5 +1,4 @@
-//! tests/cases.json: the queue tool's text,
-//! queue_history's, wrap, env and the queue_wait target check.
+//! tests/cases.json: the queue tool's text, wrap, env and the queue_wait target check.
 
 #[path = "../../../crates/core/tests/it/env.rs"]
 mod env;
@@ -7,7 +6,7 @@ mod env;
 use std::collections::HashMap;
 use std::path::Path;
 
-use seimei_plugin_queue::{Queue, describe, from_cqd, history_text, launch};
+use seimei_plugin_queue::{Queue, describe};
 use serde_json::Value;
 
 fn report(fails: &[String], total: usize) {
@@ -33,16 +32,8 @@ fn queue_cases() {
         }
     };
     for c in doc["describe"].as_array().unwrap() {
-        let snap = if c.get("cqd").is_some() { from_cqd(&c["cqd"], &names) } else { c["snap"].clone() };
-        let got = describe(&snap);
-        // The case holds the systemd launcher; the text names this machine's.
-        let want =
-            c["want"].as_str().unwrap().replace("env -u LD_PRELOAD systemd-run --user --collect <app>", launch());
-        check(c["name"].to_string(), got == want, got);
-    }
-    for c in doc["history"].as_array().unwrap() {
-        let got = history_text(c["rows"].as_array().unwrap());
-        check(format!("history {}", c["rows"]), got == c["want"], got);
+        let got = describe(&c["snap"], &names);
+        check(c["name"].to_string(), got == c["want"], got);
     }
 
     let d = std::env::temp_dir().join(format!("seimei-queue-{}", std::process::id()));

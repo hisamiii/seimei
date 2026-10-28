@@ -1839,31 +1839,14 @@
    "action": null
   },
   {
-   "tool": "mcp__queue__queue_control",
-   "input": {
-    "action": "revoke",
-    "target": "x",
-    "kill": true
-   },
+   "tool": "mcp__queue__queue_stop",
+   "input": {},
    "cwd": "/home/tester",
    "action": "card"
   },
   {
-   "tool": "mcp__queue__queue_control",
-   "input": {
-    "action": "revoke",
-    "target": "x"
-   },
-   "cwd": "/home/tester",
-   "action": null
-  },
-  {
-   "tool": "mcp__queue__queue_control",
-   "input": {
-    "action": "revoke",
-    "target": "x",
-    "kill": false
-   },
+   "tool": "mcp__queue__queue",
+   "input": {},
    "cwd": "/home/tester",
    "action": null
   },

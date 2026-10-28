@@ -8,7 +8,7 @@ mod live;
 mod access;
 mod acp_tools;
 mod browser_host;
-mod cqd;
+mod fake_queue;
 mod live_acp;
 mod live_dispatcher;
 mod live_plugin;

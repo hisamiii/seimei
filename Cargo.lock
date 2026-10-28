@@ -1943,7 +1943,6 @@ dependencies = [
  "seimei-plugin-desktop",
  "seimei-plugin-music",
  "seimei-plugin-queue",
- "seimei-queue",
  "seimei-server",
  "serde",
  "serde_json",
@@ -2016,11 +2015,9 @@ dependencies = [
 name = "seimei-plugin-queue"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "libc",
  "regex",
  "seimei-core",
- "seimei-queue",
  "serde_json",
  "tokio",
  "toml",
@@ -2036,16 +2033,6 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-util",
-]
-
-[[package]]
-name = "seimei-queue"
-version = "0.1.0"
-dependencies = [
- "libc",
- "regex",
- "serde_json",
- "tokio",
 ]
 
 [[package]]

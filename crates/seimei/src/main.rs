@@ -73,7 +73,6 @@ usage: seimei [COMMAND] [OPTIONS]
   logout-all                    end every session
   lockdown                      end every session, remove every passkey, unpair every phone
   screen-password [--clear]     the screen lock password the desktop plugin types
-  queue scheduler [--help]      the agent queue alone, with claude-queue's cqd flags
 
 Config: ~/.config/seimei/config.toml. Docs: docs/config.md in the source.
 ";
@@ -266,7 +265,6 @@ struct Config {
     server: Server,
     host: Host,
     sessions: Sessions,
-    queue: Queue,
     dispatcher: toml::Table,
     approvals: toml::Table,
     plugins: toml::Table,
@@ -307,22 +305,8 @@ struct Sessions {
     terminal: Option<String>,
 }
 
-#[derive(serde::Deserialize, Default)]
-#[serde(default)]
-struct Queue {
-    mode: Option<String>,
-}
-
 fn main() {
     tune_alloc();
-    let argv: Vec<String> = std::env::args().skip(1).collect();
-    if argv.first().map(String::as_str) == Some("queue") {
-        // The agent queue's own commands; `scheduler` runs it alone, with claude-queue's cqd flags.
-        match argv.get(1).map(String::as_str) {
-            Some("scheduler") => seimei_queue::scheduler_main(&argv[2..]),
-            _ => die("usage: seimei queue scheduler [--help]"),
-        }
-    }
     let a = args();
     if a.command == "plugin" {
         // Claude Code starts it for a session: an MCP server on stdin and stdout.
@@ -361,13 +345,7 @@ fn main() {
     if a.command != "serve" {
         return account(&Auth::new(&state, &origin), &a, &state);
     }
-    // Never inside an agent's queue slice: a bench would freeze seimei with its agents (docs/queue/DESIGN.md).
-    if !a.dev
-        && let Err(e) = seimei_queue::host::leave_queue_for_serve()
-    {
-        die(&e);
-    }
-    // `[server] web = false`: the queue and the plugins without the phone server.
+    // `[server] web = false`: the plugins without the phone server.
     let web_on = cfg.server.web;
 
     let (origins, auth): (HashSet<String>, Option<Arc<Auth>>) = if a.dev {
@@ -395,17 +373,6 @@ fn main() {
         rt.block_on(tokio::net::TcpListener::bind(("127.0.0.1", port)))
             .unwrap_or_else(|e| die(&format!("port {port}: {e}")))
     });
-    // The agent queue, on a thread of its own; a dev instance never runs it.
-    let queue = if a.dev {
-        None
-    } else {
-        let mode = seimei_queue::host::mode(cfg.queue.mode.as_deref()).unwrap_or_else(|e| {
-            eprintln!("seimei: {e}; the queue stays off");
-            seimei_queue::host::Mode::Off
-        });
-        seimei_queue::host::start(mode, &state)
-    };
-
     let events = Arc::new(EventLog::open(&state.join("events.jsonl")).unwrap_or_else(|e| die(&format!("events: {e}"))));
     let push = Push::new(
         events.clone(),
@@ -498,18 +465,6 @@ fn main() {
         });
         tokio::spawn(push.run());
         tokio::spawn(app.uploads.clone().run());
-        // A queue thread that stops ticking (a deadlock, safe mode) is said once in the log.
-        if let Some(q) = queue {
-            tokio::spawn(async move {
-                loop {
-                    tokio::time::sleep(Duration::from_secs(10)).await;
-                    if q.stale() > 30.0 || q.safe.load(std::sync::atomic::Ordering::Relaxed) {
-                        eprintln!("seimei: queue: the scheduler stopped ticking ({:.0} s ago)", q.stale());
-                        break;
-                    }
-                }
-            });
-        }
         let (d, pool, ev) = (app.dispatcher.clone(), app.pool.clone(), events.clone());
         tokio::spawn(update::restart_when_idle(
             state.clone(),

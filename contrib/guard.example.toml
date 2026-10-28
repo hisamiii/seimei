@@ -248,8 +248,7 @@
 
 # The queue: stopping a running GPU/NPU job.
 #[[rule]]
-#tool    = "mcp__queue__queue_control"
-#input   = { action = "^revoke$", kill = true }
+#tool    = "mcp__queue__queue_stop"
 #action  = "card"
 #message = "stop a GPU/NPU job"
 

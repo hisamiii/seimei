@@ -1,4 +1,4 @@
-//! A fake cqd for the plugin tests, so nothing reaches the real one (it steers the user's GPU jobs).
+//! A fake queue gate for the plugin tests, so nothing reaches the real one (it steers the user's GPU jobs).
 #![allow(dead_code)]
 
 use std::io::{BufRead, BufReader, Write};
@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
 
-/// A cqd at sock that answers status with `status` and records every request.
-pub fn fake_cqd(sock: PathBuf, status: Value) -> Arc<Mutex<Vec<Value>>> {
+/// A gate at sock that answers status with `status` and records every request.
+pub fn fake_queue(sock: PathBuf, status: Value) -> Arc<Mutex<Vec<Value>>> {
     let seen = Arc::new(Mutex::new(vec![]));
     let listener = UnixListener::bind(&sock).unwrap();
     let log = seen.clone();
@@ -24,8 +24,7 @@ pub fn fake_cqd(sock: PathBuf, status: Value) -> Arc<Mutex<Vec<Value>>> {
             log.lock().unwrap().push(req.clone());
             let reply = match req["op"].as_str() {
                 Some("status") => status.clone(),
-                Some("control") => json!({"ok": true, "did": req["action"]}),
-                Some("history") => json!({"rows": []}),
+                Some("stop") => json!({"ok": true, "stopped": 1}),
                 _ => json!({"error": "unknown op"}),
             };
             let _ = (&conn).write_all(format!("{reply}\n").as_bytes());

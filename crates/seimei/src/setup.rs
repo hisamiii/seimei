@@ -222,7 +222,7 @@ usr1() {
 }
 
 # The highest cgroup this user owns. seimei gets a leaf of its own under it: started from a shikigami's command, it
-# would sit in that command's claude-queue slice and freeze with it whenever a bench freezes the agents.
+# would sit in that command's claude-queue slice, and stopping that command would stop seimei.
 user_cgroup() {
 	local d top=
 	d=$(sed -n 's/^0:://p' /proc/$$/cgroup)
