@@ -209,6 +209,7 @@ impl<T> Pending<T> {
         (exp >= now()).then_some(v)
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.items.len()
     }
@@ -880,6 +881,7 @@ impl Auth {
     }
 
     /// Open passkey challenges and device nonces, for the cap's test.
+    #[cfg(test)]
     pub fn pending(&self) -> (usize, usize) {
         let g = self.lock();
         (g.challenges.len(), g.nonces.len())

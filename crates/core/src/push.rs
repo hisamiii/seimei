@@ -403,6 +403,7 @@ impl Stream {
     }
 
     /// The tags queued for a phone without an open socket.
+    #[cfg(test)]
     pub fn waiting(&self, dev: &str) -> Vec<String> {
         self.inner
             .lock()
