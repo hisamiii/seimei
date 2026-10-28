@@ -28,7 +28,7 @@ use crate::aliases::Aliases;
 use crate::approvals::Approvals;
 use crate::archive::Archive;
 use crate::cost::Cost;
-use crate::dispatcher::{NO_CONNECTORS, hook, result_text, summarize};
+use crate::dispatcher::{NO_CONNECTORS, OFF_TOOLS, hook, result_text, summarize};
 use crate::events::EventLog;
 use crate::guard::{Guard, HOOK_TIMEOUT};
 use crate::metrics::{self, WorkerEvents};
@@ -80,24 +80,6 @@ const SHELLS_DONE: &str = "seimei: your background commands have finished. Check
      with your report.";
 /// An ACP agent's text chunks are one event; this long without another, what came so far is said.
 const CHUNK_PAUSE: Duration = Duration::from_millis(500);
-/// Built-in tools a shikigami has no use for: scheduling, notebooks, worktree switching, remote triggers, design sync,
-/// and talking to other sessions or the user directly (its report and ask go through seimei).
-const OFF_TOOLS: [&str; 14] = [
-    "AskUserQuestion",
-    "Workflow",
-    "NotebookEdit",
-    "CronCreate",
-    "CronDelete",
-    "CronList",
-    "RemoteTrigger",
-    "PushNotification",
-    "DesignSync",
-    "EnterWorktree",
-    "ExitWorktree",
-    "ScheduleWakeup",
-    "SendMessage",
-    "ListAgents",
-];
 /// The only skills a shikigami sees (the rest, like the claude.ai document bundle, only fill its context).
 const SKILLS: [&str; 2] = ["code-review", "simplify"];
 /// A worker cut off by a restart is resumed with this; one resumed this often within the window stays interrupted
@@ -519,7 +501,9 @@ impl Worker {
             mcp_servers: plugins.servers(&r.name, Some(&self.id), Some(&groups)),
             mcp_config_file: Some(plugins.config_file(&self.id)),
             // Workers talk to the user through their report and ask, never to other sessions directly.
-            disallowed_tools: OFF_TOOLS.iter().map(|t| t.to_string()).collect(),
+            disallowed_tools: (OFF_TOOLS.iter().chain(&["AskUserQuestion", "SendMessage", "ListAgents"]))
+                .map(|t| t.to_string())
+                .collect(),
             skills: Some(SKILLS.iter().map(|s| s.to_string()).collect()),
             env: self.env(),
             effort: r.effort.clone().filter(|e| !e.is_empty()),

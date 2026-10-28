@@ -40,6 +40,7 @@ static OPTION: LazyLock<Regex> = LazyLock::new(|| re(r"^\s*(?:❯\s*)?(\d+)\.\s+
 static WANT: LazyLock<Regex> = LazyLock::new(|| re(r"Do you want to (proceed|make this edit|create)"));
 
 /// The kitty window a session runs in.
+#[derive(Clone)]
 pub struct Window {
     to: String,
     key: String,
@@ -134,7 +135,7 @@ fn run(w: &Window, cmd: &str, args: &[&str], data: Option<&str>, limit: Duration
 
 /// The same off the async threads.
 async fn rc(w: &Window, cmd: &str, args: &[&str], data: Option<&str>) -> Result<String, String> {
-    let w = Window { to: w.to.clone(), key: w.key.clone(), id: w.id.clone() };
+    let w = w.clone();
     let (cmd, data) = (cmd.to_string(), data.map(String::from));
     let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
     tokio::task::spawn_blocking(move || {

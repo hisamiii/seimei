@@ -41,11 +41,9 @@ const HOLD: Duration = Duration::from_secs(30 * 60);
 /// Tokens at which the dispatcher's context compacts (CLAUDE_CODE_AUTO_COMPACT_WINDOW); config [dispatcher]
 /// compact_window.
 const COMPACT_WINDOW: i64 = 400_000;
-/// Built-in tools the dispatcher has no use for: it delegates through summon (subagents would be invisible to the
-/// user) and pings through notify. Agent is still called Task in some CLI versions.
-const OFF_TOOLS: [&str; 14] = [
-    "Agent",
-    "Task",
+/// Built-in tools no session of seimei's has a use for: scheduling, notebooks, worktree switching, remote triggers,
+/// design sync, and pushes (seimei pings through notify).
+pub const OFF_TOOLS: [&str; 11] = [
     "Workflow",
     "NotebookEdit",
     "CronCreate",
@@ -57,7 +55,6 @@ const OFF_TOOLS: [&str; 14] = [
     "EnterWorktree",
     "ExitWorktree",
     "ScheduleWakeup",
-    "LSP",
 ];
 /// Sessions seimei starts leave out the user's claude.ai connectors (Gmail, Drive, Docs).
 pub const NO_CONNECTORS: (&str, &str) = ("ENABLE_CLAUDEAI_MCP_SERVERS", "false");
@@ -626,7 +623,8 @@ impl Dispatcher {
             setting_sources: Some(vec!["user".into(), "project".into(), "local".into()]),
             system_prompt: SystemPrompt::Preset { append: Some(self.prompt()) },
             env,
-            disallowed_tools: OFF_TOOLS.iter().map(|t| t.to_string()).collect(),
+            // It delegates through summon: subagents would be invisible to the user. Agent is still Task in some CLIs.
+            disallowed_tools: OFF_TOOLS.iter().chain(&["Agent", "Task", "LSP"]).map(|t| t.to_string()).collect(),
             skills: Some(vec![]),
             sdk_mcp_servers: vec!["seimei".into()],
             mcp_servers: plugins.servers("seimei", None, None),
