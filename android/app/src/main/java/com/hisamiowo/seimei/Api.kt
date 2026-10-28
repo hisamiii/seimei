@@ -32,8 +32,8 @@ class Api(server: String) {
     @Volatile
     var token: String? = null
 
-    /** The password sign-in's browser session (name=value): held until the phone is paired, or until it locks again
-     *  when the password opened it (the lock screen's Log in). */
+    /** The password sign-in's browser session (name=value), held until the phone is paired.
+     * When the lock screen's Log in opened it, it is held until the app locks again. */
     @Volatile
     private var cookie: String? = null
 
@@ -67,8 +67,8 @@ class Api(server: String) {
     }
 
     /**
-     * A call as the web page makes it (the password sign-in): with the server's own Origin, keeping the session cookie
-     * it sets. The server checks the Origin against its configured one, so [base] must be that address.
+     * A call as the web page makes it (the password sign-in): with the server's own Origin, keeping the session cookie it sets.
+     * The server checks the Origin against its configured one, so [base] must be that address.
      */
     suspend fun postAsPage(path: String, body: JSONObject = JSONObject()): JSONObject = withContext(Dispatchers.IO) {
         val req = request(path).header("Origin", base.trimEnd('/')).post(body.toString().toRequestBody(JSON)).build()
@@ -159,8 +159,8 @@ class Api(server: String) {
     private var current: okhttp3.Call? = null
 
     /**
-     * Closes the event stream's connection now. Cancelling its coroutine alone waits for the blocked read to
-     * return, which takes until the server next writes; meanwhile the server would think the app is on screen.
+     * Closes the event stream's connection now.
+     * Cancelling the coroutine alone waits for the blocked read, until the server next writes; meanwhile the server thinks the app is on screen.
      */
     fun closeStream() {
         current?.cancel()

@@ -84,12 +84,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 
-// The Tasks lane, as on the web page (tasks.js): two views behind one connected button group. Now: what needs the
-// user (a question, a job to look over, their own tasks), what runs and how far, and each shikigami's next. All
-// tasks: one quiet row per project with a one-line summary; a project opens in place, its done items fold into
-// "N done", paused projects wait behind one row, and done work sits in the Archived row: what is older than a
-// day leaves the board, projects with only done items fold away into it. The user ticks their own tasks (with Undo);
-// a task with a shikigami opens its page.
+// The Tasks lane, as on the web page (tasks.js). Now: what needs the user, what runs and how far, and each shikigami's next.
+// All tasks: one row per project; done items fold into "N done", and work done over a day ago goes to the Archived row.
 
 /** One step of a shikigami's plan for its task: pending, in_progress or completed. */
 data class Step(val title: String, val state: String)
@@ -168,8 +164,7 @@ fun now(b: Board): Now {
         ts.filter { it.state == "running" }, nextOf(ts))
 }
 
-/** A project's summary, in words a person would say: (text, tone) with tone "warn" for what needs the user, "run"
- * for what runs. */
+/** A project's summary in words a person would say: (text, tone), tone "warn" for what needs the user, "run" for what runs. */
 fun summary(p: Project): List<Pair<String, String>> {
     val ts = p.live
     fun n(f: (Task) -> Boolean) = ts.count(f)
@@ -337,8 +332,7 @@ private fun LazyListScope.allItems(vm: Seimei, b: Board, doneShown: List<String>
     if (done > 0) item(key = "archived") { archived() }
 }
 
-/** The archive, in the Agents archive's form: every done item, today's from the board and older ones from the
- * server, by the day it was done, searchable. */
+/** The archive, in the Agents archive's form: every done item (today's from the board, older from the server) by day, searchable. */
 @Composable
 private fun TaskArchive(vm: Seimei, b: Board?) {
     val close = {
@@ -498,8 +492,8 @@ private fun Tick(vm: Seimei, t: Task, modifier: Modifier) {
     }
 }
 
-/** Step progress of a running task: the done part as the wavy indicator (amplitude 3, wavelength 40, 4 thick
- *  in a 10 tall box, travelling one wavelength per 1.2 s), a 4dp gap, the flat track, and the count in words. */
+/** Step progress of a running task: the done part as the wavy indicator, a 4dp gap, the flat track, and the count in words.
+ * The wave: amplitude 3, wavelength 40, 4 thick in a 10 tall box, one wavelength per 1.2 s. */
 @Composable
 private fun StepBar(t: Task) {
     val cs = MaterialTheme.colorScheme

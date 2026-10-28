@@ -1,10 +1,8 @@
 #!/bin/sh
-# publish.sh: build a signed release APK and put it where the web page's Phone app sheet offers it.
+# publish.sh minor|patch|major|X.Y.Z: build a signed release APK where the web page's Phone app sheet offers it. SEIMEI_FLAVOR=fcm|foss picks the push flavor.
+# publish.sh release OUT: a foss build with no server built in, at the last published version, written to OUT for a GitHub release; the page keeps its APK.
 # The signing key is made once and kept outside the repo. Back it up: updates only install over the same key.
-# Usage: publish.sh minor | patch | major | X.Y.Z  (minor for features, patch for fix-only releases).
-# The version name is semver; the version code just counts up. SEIMEI_FLAVOR=fcm|foss picks the push flavor.
-# publish.sh release OUT: the build for a GitHub release instead, foss with no server built in (the first run asks),
-# at the version published last, written to OUT; what the page offers stays as it is.
+# The version name is semver (minor for features, patch for fixes); the version code counts up.
 set -eu
 out=
 case "${1:-}" in

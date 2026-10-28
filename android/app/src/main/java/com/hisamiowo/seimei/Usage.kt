@@ -64,7 +64,7 @@ fun tokens(n: Long): String = when {
 /** Cents only below $100: past that they are noise. */
 fun usd(n: Double): String = if (n >= 100) "$" + "%,d".format(Locale.US, Math.round(n)) else "$" + "%.2f".format(Locale.US, n)
 
-/** claude-opus-5-5 as Opus 5.5. */
+/** A model id as its product name: the vendor prefix goes, "opus-5-5" reads as "Opus 5.5". */
 fun modelName(k: String): String = k.removePrefix("claude-").replace(Regex("-(\\d+)-(\\d+)$"), " $1.$2").replace(Regex("-(\\d+)$"), " $1")
     .replaceFirstChar { it.uppercase() }
 

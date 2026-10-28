@@ -436,8 +436,8 @@ val SpringEasing = Easing { t ->
     k[i] + (k[i + 1] - k[i]) * (x - i)
 }
 
-/** A tile in its owner's identity shape. A working one morphs between that shape and the soft burst and turns slowly,
- * as on the web (final.css): the morph is its activity indicator. */
+/** A tile in its owner's identity shape, as on the web (final.css).
+ * A working one morphs between that shape and the soft burst and turns slowly: the morph is its activity indicator. */
 @Composable
 fun ShapeTile(name: String, size: Dp, bg: Color, working: Boolean = false, content: @Composable () -> Unit) {
     val me = SHAPES.getValue(shapeOf(name))
@@ -570,7 +570,7 @@ fun ContextRing(pct: Int?, onClick: () -> Unit) {
 fun blocked(pg: Page): String? {
     if (pg.kind == "worker") return null
     val ask = pg.ask
-    // Without kitty a message still goes through seimei (SendMessage), an answer does not.
+    // Without the terminal a message still goes through seimei (SendMessage), an answer does not.
     pg.reach?.let { if (pg.via != "seimei" || ask != null) return if (ask != null) "Answer on the server" else it }
     if (ask != null && !ask.optBoolean("answerable")) return "Answer on the server"
     if (pg.row.str("status") == "waiting" && ask == null) return "${pg.row.str("waiting_text").ifEmpty { "Waiting on the server" }}. Answer it there."

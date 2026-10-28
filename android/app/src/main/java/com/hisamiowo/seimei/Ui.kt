@@ -333,8 +333,7 @@ class MainActivity : ComponentActivity() {
 /** The seiman (the launcher icon's glyph), in onPrimaryContainer. */
 @Composable
 fun Glyph(size: Dp) {
-    // The drawable is the adaptive icon's 108-unit layer and the glyph spans its middle 60: drawn 1.8x, the glyph
-    // fills size (the rest is transparent).
+    // The drawable is the adaptive icon's 108-unit layer and the glyph spans its middle 60, so drawn 1.8x the glyph fills size.
     Box(Modifier.size(size), contentAlignment = Alignment.Center) {
         Icon(painterResource(R.drawable.ic_seimei_monochrome), null, Modifier.requiredSize(size * 1.8f),
             tint = MaterialTheme.colorScheme.onPrimaryContainer)
@@ -488,8 +487,8 @@ object CodeFormat : VisualTransformation {
 }
 
 /**
- * The lock screen, bottom-aligned: the seiman and "seimei", Use fingerprint, "or", then the password and
- * Log in (as the web page logs in; the phone's key stays for the next time).
+ * The lock screen, bottom-aligned: the seiman and "seimei", Use fingerprint, "or", then the password and Log in.
+ * The password logs in as the web page does; the phone's key stays for the next time.
  */
 @Composable
 fun LockScreen(vm: Seimei, activity: Activity) {
@@ -613,8 +612,7 @@ fun AppScreen(vm: Seimei) {
                 }
             }
         }
-        // The bottom container: composer and navigation bar on surface-container, 24 corners on top
-        // (the sheet shows in its corners)
+        // The bottom container: composer and navigation bar on surface-container, 24 corners on top (the sheet shows in its corners)
         Column(Modifier.onSizeChanged { vm.barPx = it.height }.background(MaterialTheme.colorScheme.surfaceContainerLow)
             .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
             .background(MaterialTheme.colorScheme.surfaceContainer)) {
@@ -625,8 +623,8 @@ fun AppScreen(vm: Seimei) {
         }
     }
     }
-    // Forward and backward: a page comes in from the right and goes back out to it. Predictive back
-    // has already taken the page away when it commits, so that exit only finishes it.
+    // Forward and backward: a page comes in from the right and goes back out to it.
+    // Predictive back has already taken the page away when it commits, so that exit only finishes it.
     AnimatedContent(vm.page, transitionSpec = {
         if (still) fadeIn(tween(150)) togetherWith fadeOut(tween(150))
         else if (targetState != null) (slideInHorizontally(tween(300, easing = EMPHASIZED_DECEL)) { it / 8 } + fadeIn(tween(300))) togetherWith
@@ -683,9 +681,8 @@ private fun Lanes(vm: Seimei, still: Boolean) {
     }
 }
 
-/** Predictive back for a screen: while the gesture runs it shrinks toward 90% and leans to the swipe
- *  edge with the 8dp margin and rounded corners; on commit it leaves on emphasized accelerate, on cancel it comes back.
- *  The returned modifier draws that; onBack runs once the gesture commits. */
+/** Predictive back for a screen: during the gesture it shrinks toward 90% and leans to the swipe edge (8dp margin, rounded corners).
+ * On commit it leaves on emphasized accelerate and onBack runs; on cancel it comes back. */
 @Composable
 fun predictiveBack(enabled: Boolean = true, onBack: () -> Unit): Modifier {
     val back = remember { Animatable(0f) }
@@ -811,8 +808,8 @@ fun dotColor(s: String): Color = when (s) {
 }
 
 /**
- * The navigation bar: 64 tall on the bottom container, a 56 x 32 primary pill under the selected
- * icon (on-primary), the label in text, the others in text-3; what needs the user is a warn badge on the pill's corner.
+ * The navigation bar: 64 tall on the bottom container, a 56 x 32 primary pill under the selected icon (on-primary).
+ * The selected label in text, the others in text-3; what needs the user is a warn badge on the pill's corner.
  */
 @Composable
 fun NavBar(vm: Seimei) {

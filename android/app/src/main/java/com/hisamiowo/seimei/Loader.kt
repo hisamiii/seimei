@@ -23,8 +23,8 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
-// The M3 loading indicator, the same as web/loading.css: a shape that morphs through seven and turns. Generated from
-// it (48 points per shape, so any two interpolate); the easing is the expressive spatial spring as a linear() fit.
+// The M3 loading indicator, the same as web/loading.css: a shape that morphs through seven and turns.
+// Generated from it (48 points per shape, so any two interpolate); the easing is the expressive spatial spring as a linear() fit.
 private val LOADER_SHAPES = arrayOf(
     // soft-burst
     floatArrayOf(0.500f, 0.170f, 0.551f, 0.110f, 0.626f, 0.028f, 0.682f, 0.061f, 0.686f, 0.177f, 0.703f, 0.236f, 0.793f, 0.207f, 0.894f, 0.197f, 0.896f, 0.271f, 0.828f, 0.364f, 0.830f, 0.412f, 0.933f, 0.443f, 1.000f, 0.500f, 0.933f, 0.557f, 0.830f, 0.588f, 0.828f, 0.636f, 0.896f, 0.729f, 0.894f, 0.803f, 0.793f, 0.793f, 0.703f, 0.764f, 0.686f, 0.823f, 0.682f, 0.939f, 0.626f, 0.972f, 0.551f, 0.890f, 0.500f, 0.830f, 0.449f, 0.890f, 0.374f, 0.972f, 0.318f, 0.939f, 0.314f, 0.823f, 0.297f, 0.764f, 0.207f, 0.793f, 0.106f, 0.803f, 0.104f, 0.729f, 0.172f, 0.636f, 0.170f, 0.588f, 0.067f, 0.557f, 0.000f, 0.500f, 0.067f, 0.443f, 0.170f, 0.412f, 0.172f, 0.364f, 0.104f, 0.271f, 0.106f, 0.197f, 0.207f, 0.207f, 0.297f, 0.236f, 0.314f, 0.177f, 0.318f, 0.061f, 0.374f, 0.028f, 0.449f, 0.110f),

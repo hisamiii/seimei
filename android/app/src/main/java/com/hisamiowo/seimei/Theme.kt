@@ -90,8 +90,8 @@ fun themeTokens(ctx: Context, name: String, dark: Boolean, accent: String?): Tok
     if (name == "material-you" && dynamicColors) materialTokens(ctx, if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx), dark)
     else fixedTokens(ctx, if (name in THEMES && name != "material-you") name else "catppuccin", dark, accent)
 
-/** The wallpaper's seed for Material You, as the web page rebuilds it: Android's primary key color (tone 50 of the
- * accent palette), whose hue is the seed's. Null before Android 12. */
+/** The wallpaper's seed for Material You, as the web page rebuilds it: Android's primary key color (accent tone 50), whose hue is the seed's.
+ * Null before Android 12. */
 fun wallpaperSeed(ctx: Context): String? =
     if (dynamicColors) hexOf(Color(ctx.getColor(android.R.color.system_accent1_500))) else null
 

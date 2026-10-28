@@ -34,8 +34,8 @@ class TasksTest {
     @Test
     fun projectsInOrder() {
         val b = board(raw)
-        // A question first, then running work, then the rest as the server keeps them; projects without tasks drop out, and
-        // those with only done items fold away into the Archived row
+        // A question first, then running work, then the rest in the server's order.
+        // Projects without tasks drop out; those with only done items fold into the Archived row.
         assertEquals(listOf("asky", "busy", "held", "mine", "work"), b.projects.map { it.name })
         assertEquals(listOf("over"), b.folded)
         assertEquals(3, b.done.size)

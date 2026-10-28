@@ -58,7 +58,7 @@ object Push {
     @Volatile
     var lockAt = Long.MAX_VALUE
 
-    /** What a notification's Allow/Deny may act through: never a stored secret, only the unlocked session (audit P2). */
+    /** What a notification's Allow/Deny may act through: never a stored secret, only the unlocked session. */
     fun session(): Api? = live?.takeIf { System.currentTimeMillis() < lockAt }
 
     fun start(ctx: Context) {
@@ -73,8 +73,8 @@ object Push {
 
     fun cancel(ctx: Context, tag: String) = ctx.getSystemService(NotificationManager::class.java).cancel(tag, 0)
 
-    /** Turns one of the server's data messages into a notification: one per kind, replaced by later ones, withdrawn on
-     * cancel. Every way of delivery ends here. */
+    /** Turns one of the server's data messages into a notification: one per kind, replaced by later ones, withdrawn on cancel.
+     * Every way of delivery ends here. */
     fun show(ctx: Context, d: Map<String, String>) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         // A kind from a newer server than this app knows still shows, on the Pings channel.
@@ -108,9 +108,8 @@ object Push {
             .setVisibility(Notification.VISIBILITY_PRIVATE).setPublicVersion(public)
         d["group"]?.let { n.setGroup(it) }
         val aid = d["aid"]
-        // Each card gets its own Allow and Deny, plus Always allow when it has a rule to remember, else a note that goes
-        // with a deny ("Keep planning" on a plan card; at most three actions): only on an unlocked phone (API 31+),
-        // only while the app's session is unlocked.
+        // Each card gets Allow and Deny, plus Always allow when it has a rule to remember, else a deny note ("Keep planning" on a plan card).
+        // At most three actions, and only on an unlocked phone (API 31+) while the app's session is unlocked.
         val unlocked = Build.VERSION.SDK_INT >= 31 && session() != null
         if (aid != null && unlocked) {
             val perm = d["perm"] == "1"
@@ -177,8 +176,8 @@ object Push {
         "urgent" to "seimei: urgent")
 }
 
-/** Allow, Deny or a note on an approval notification: settles that one card through the unlocked session. After the app's process
- * died or its session locked, it asks to open the app instead (Android blocks starting an activity from here). */
+/** Allow, Deny or a note on an approval notification: settles that one card through the unlocked session.
+ * With no live process or a locked session it asks to open the app: Android blocks starting an activity from here. */
 class Decide : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         val aid = intent.getStringExtra("aid") ?: return
@@ -208,8 +207,8 @@ class Decide : BroadcastReceiver() {
     }
 }
 
-/** Reply on the reply ping: the typed text goes to the chat as the user's message through the unlocked session, then
- * the same notification shows what was sent. On failure it keeps the text, so nothing typed is lost. */
+/** Reply on the reply ping: the text goes to the chat through the unlocked session, and the notification shows what was sent.
+ * On failure it keeps the text, so nothing typed is lost. */
 class Reply : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         val text = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(KEY)?.toString()?.trim().orEmpty()

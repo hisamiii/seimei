@@ -7,9 +7,9 @@ import org.json.JSONException
 import org.json.JSONObject
 
 /**
- * Conversations kept on the phone, so the chat and every agent page show at once (after a cold start too) and only
- * fetch what is new. Each is a file of its raw events (the last [keep]) and where to go on from: the chat and each
- * page are drawn from these again, as from the server. App-private and never backed up; unpairing clears it.
+ * Conversations kept on the phone, so the chat and every agent page show at once, even after a cold start, and fetch only what is new.
+ * Each is a file of its raw events (the last [keep]) and where to go on from; the views draw from these as from the server.
+ * App-private and never backed up; unpairing clears it.
  */
 class Store(dir: File) {
     private val root = File(dir, "conversations")
@@ -59,12 +59,11 @@ class Store(dir: File) {
 
         fun pageKey(kind: String, id: String) = "$kind-$id"
 
-        /** The last [n] of [events], as stored. */
         fun tail(events: List<JSONObject>, n: Int): JSONArray = JSONArray().also { a -> events.takeLast(n).forEach { a.put(it) } }
 
         /**
-         * What of [new] [have] does not hold yet: an event with an id already held is skipped, so a delta that overlaps
-         * the stream does no harm. Events without an id (a session's tool results) always count as new.
+         * What of [new] [have] does not hold yet: an event whose id is already held is skipped, so a delta that overlaps the stream does no harm.
+         * Events without an id (a session's tool results) always count as new.
          */
         fun fresh(have: List<JSONObject>, new: List<JSONObject>): List<JSONObject> {
             val ids = have.mapNotNullTo(HashSet()) { it.opt("id")?.toString() }

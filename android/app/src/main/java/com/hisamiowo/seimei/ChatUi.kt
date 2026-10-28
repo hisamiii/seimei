@@ -141,9 +141,8 @@ fun ChatTab(vm: Seimei, lane: String) {
     val traj = lane == "t"
     val rows = (if (traj) vm.trail else vm.items).asReversed()
     val scope = rememberCoroutineScope()
-    // The list keeps its first visible row in place when rows are added below it, so after a burst of new rows
-    // the first visible index says nothing about where the reader is. Whether they follow the end is judged only
-    // while the list scrolls (their finger, or our own jump to the end).
+    // Rows added below keep the first visible row in place, so after a burst the first visible index says nothing about the reader.
+    // Whether they follow the end is judged only while the list scrolls (their finger, or a jump to the end).
     var follow by remember { mutableStateOf(true) }
     LaunchedEffect(state) {
         snapshotFlow { Triple(state.isScrollInProgress, state.firstVisibleItemIndex, state.firstVisibleItemScrollOffset) }
@@ -333,7 +332,6 @@ fun AnchorChip(a: Anchor, vm: Seimei, onUser: Boolean = false) {
 /** Swipe left to reply: the row follows the finger, the reply icon shows behind it, and past the mark it replies. */
 @Composable
 fun SwipeReply(onReply: () -> Unit, content: @Composable () -> Unit) {
-    // How far the row has moved left.
     var dx by remember { mutableFloatStateOf(0f) }
     val mark = with(LocalDensity.current) { 64.dp.toPx() }
     val haptic = LocalHapticFeedback.current
@@ -826,7 +824,7 @@ fun EvLine(name: String, rest: String, small: String, failed: Boolean = false, s
     }
 }
 
-/** "opus" reads as the product name it is: "Opus · high". */
+/** The model as its product name ("opus" as "Opus"), then the effort. */
 fun modelLine(w: Item.Worker) = listOf(w.model.replaceFirstChar { it.uppercase() }, w.effort).filter { it.isNotEmpty() }.joinToString(" · ")
 
 /** The first sentence of a failure, without its period. */
@@ -977,7 +975,7 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
     var note by remember(a.aid) { mutableStateOf("") }
     // seimei's AskUserQuestion: the options are the answers, the note writes one, Skip leaves it
     val question = a.action == "question"
-    // A permission card carries Claude Code's choices; a guard card is Approve/Deny.
+    // A permission card carries the agent's choices; a guard card is Approve/Deny.
     val perm = a.options.isNotEmpty()
     // The subtitle names what it touches, not the title again: the session a command names, the file an edit writes.
     val sub = when {
@@ -1055,7 +1053,7 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
             }
         }
         if (a.outcome == null && noting) {
-            // The note goes to the agent with a deny, like the terminal's "tell Claude what to do differently".
+            // The note goes to the agent with a deny, like the note the agent's own terminal prompt takes.
             val focus = remember { FocusRequester() }
             LaunchedEffect(Unit) { focus.requestFocus() }
             TextField(note, { note = it }, Modifier.fillMaxWidth().focusRequester(focus), placeholder = { Text(if (question) "Answer ${a.who}" else "Note for ${a.who}") }, minLines = 2, maxLines = 5,
@@ -1122,8 +1120,8 @@ fun Picture(vm: Seimei, name: String, modifier: Modifier, crop: Boolean = false,
         contentScale = if (crop) ContentScale.Crop else ContentScale.Fit)
 }
 
-/** A picture full screen: the thumbnail at once, the original once loaded. Pinch or double-tap to zoom, drag to
- *  look around, tap to close (when not zoomed); Save puts the original in Pictures/seimei. */
+/** A picture full screen: the thumbnail at once, the original once loaded; Save puts the original in Pictures/seimei.
+ * Pinch or double-tap to zoom, drag to look around, tap to close when not zoomed. */
 @Composable
 fun Zoom(vm: Seimei, name: String, close: () -> Unit) {
     val thumb by produceState<ImageBitmap?>(null, name) { value = vm.image(name) }

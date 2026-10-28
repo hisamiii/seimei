@@ -10,8 +10,8 @@ sealed interface Item {
     val key: String
 
     data class Day(override val key: String, val t: Double) : Item
-    /** anchor: the message this one answers, when something sits between them; reply: the event id "Reply in chat"
-     *  answers (a message of seimei's in the trajectory), 0 for none. */
+    /** anchor: the message this one answers, when something sits between them.
+     * reply: the event id that "Reply in chat" answers (a message of seimei's in the trajectory), 0 for none. */
     data class Msg(override val key: String, val role: String, val text: String, val images: List<String>, val t: Double,
                    val files: List<FileRef> = emptyList(), val anchor: Anchor? = null, val reply: Long = 0) : Item
     /** A run of trajectory events, as one line in the chat; goto is the key of the first one. */
@@ -26,7 +26,7 @@ sealed interface Item {
         /** An "asks" card that something later settled: "Answered" or "Closed". */
         val settled: String? = null,
     ) : Item
-    /** A card: Approve/Deny from the guard and plugins, or (with options) a permission prompt of Claude Code's.
+    /** A card: Approve/Deny from the guard and plugins, or (with options) a permission prompt of the agent's.
      * expires is 0 for a shikigami's permission card, which waits. done is the approval_done event once settled. */
     data class Approval(
         override val key: String, val aid: String, val who: String, val action: String, val target: String,

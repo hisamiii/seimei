@@ -21,8 +21,8 @@ import java.io.IOException
 import kotlin.coroutines.resume
 
 /**
- * Notifications without Google: through the phone's UnifiedPush app (ntfy and the like), which hands seimei an
- * endpoint; messages come encrypted for this phone. With no push app, the background connection (Listen) instead.
+ * Notifications without Google: the phone's UnifiedPush app (ntfy and the like) gives an endpoint, and messages come encrypted for this phone.
+ * With no push app, the background connection (Listen) instead.
  */
 object Delivery {
     const val available = true

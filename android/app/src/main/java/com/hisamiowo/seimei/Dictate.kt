@@ -70,8 +70,8 @@ import kotlin.math.log10
 import kotlin.math.sqrt
 
 /**
- * Dictation in the composer (docs/asr.md): tap the mic, talk, tap the square; seimei transcribes it with the open
- * chat's words and the text lands in the draft at the cursor. Nothing is sent on its own.
+ * Dictation in the composer (docs/asr.md): tap the mic, talk, tap the square; the text lands in the draft at the cursor.
+ * seimei transcribes it with the open chat's words; nothing is sent on its own.
  * One recording at a time, for whichever composer started it ([target]: "chat", or the page's "w:<id>" / "s:<pid>").
  */
 class Dictation(val vm: Seimei) {
@@ -143,7 +143,7 @@ class Dictation(val vm: Seimei) {
                 vm.snack = "Couldn't open the microphone"
                 return@launch
             }
-            // Dropped with ×, or stopped: the square, or the 2 minute cap.
+            // Dropped with x, or stopped: the square, or the 2 minute cap.
             if (state != State.RECORDING && state != State.TRANSCRIBING) return@launch
             if (pcm.size() < RATE / 2) {
                 state = State.IDLE
@@ -158,7 +158,7 @@ class Dictation(val vm: Seimei) {
         if (state == State.RECORDING) state = State.TRANSCRIBING
     }
 
-    /** ×: drop the recording. */
+    /** x: drop the recording. */
     fun drop() {
         if (state != State.RECORDING) return
         state = State.IDLE
@@ -239,8 +239,7 @@ private class Tint(val range: TextRange?, val color: androidx.compose.ui.graphic
 }
 
 /**
- * The composer's text field: [text] and [onChange] as before, plus the dictated text of [target] inserted at the
- * cursor and tinted for 2 s.
+ * The composer's text field: [text] and [onChange], plus [target]'s dictated text inserted at the cursor and tinted for 2 s.
  */
 @Composable
 fun DraftField(
@@ -316,7 +315,7 @@ fun MicSlot(d: Dictation, target: String, enabled: Boolean, hint: () -> JSONObje
     }
 }
 
-/** The field while recording: × to drop, the level, the time, the square to stop. */
+/** The field while recording: x to drop, the level, the time, the square to stop. */
 @Composable
 fun RecordingBar(d: Dictation, modifier: Modifier) {
     val cs = MaterialTheme.colorScheme

@@ -56,14 +56,14 @@ android {
         buildConfigField("String", "SERVER", "\"${project.findProperty("seimei.server") ?: ""}\"")
         // Debug builds may use a key without the fingerprint when the phone has none (emulators); release never does.
         buildConfigField("boolean", "TEST_KEY", "false")
-        // The app updates itself from the paired server. Store builds pass -Pseimei.updater=false: F-Droid and Play
-        // update the app themselves.
+        // The app updates itself from the paired server.
+        // Store builds pass -Pseimei.updater=false: F-Droid and Play update the app themselves.
         buildConfigField("boolean", "UPDATER", "${project.findProperty("seimei.updater") ?: "true"}")
         firebase("com.hisamiowo.seimei")
     }
 
-    // How notifications reach the phone: fcm through Firebase (own builds with a google-services.json), foss through
-    // UnifiedPush, or a background connection when the phone has no push app. Same app id, so one replaces the other.
+    // How notifications reach the phone: fcm through Firebase (needs a google-services.json), foss through UnifiedPush or a background connection.
+    // Same app id, so one replaces the other.
     flavorDimensions += "push"
     productFlavors {
         create("fcm") { dimension = "push" }

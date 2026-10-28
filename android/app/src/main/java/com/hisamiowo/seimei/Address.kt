@@ -15,9 +15,9 @@ sealed interface Address {
 const val HTTPS_ONLY = "Needs an https address"
 
 /**
- * The origin in what the user typed: https:// unless given, no path, no login. The server checks a browser login's
- * Origin against the one in its config, so this must come out exactly as that would. Plain http only reaches this
- * phone's own localhost (the tests, through adb reverse).
+ * The origin in what the user typed: https:// unless given, no path, no login.
+ * The server checks a browser login's Origin against its config, so this must come out exactly as that would.
+ * Plain http only reaches this phone's own localhost (the tests, through adb reverse).
  */
 fun address(typed: String): Address {
     val t = typed.trim()

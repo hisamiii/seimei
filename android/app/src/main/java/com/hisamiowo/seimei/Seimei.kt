@@ -71,7 +71,7 @@ class Page(val kind: String, val id: String) {
     var live by mutableStateOf<JSONObject?>(null)
     /** Why the app cannot type into this session, or null. */
     var reach by mutableStateOf<String?>(null)
-    /** How a message reaches it: "kitty" (typed), "seimei" (the dispatcher's SendMessage), or null. */
+    /** How a message reaches it: typed into its terminal window, "seimei" (the dispatcher's SendMessage), or null. */
     var via by mutableStateOf<String?>(null)
     var note by mutableStateOf<String?>(null)
     var draft by mutableStateOf("")
@@ -296,8 +296,8 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Pairs with a code from the web page, or with the password: then the phone logs in as the page would, asks for a
-     * code itself and ends that session once paired. Either way the phone keeps only its own key.
+     * Pairs with a code from the web page, or with the password: then the phone logs in as the page would, asks for a code and ends that session.
+     * Either way the phone keeps only its own key.
      */
     fun pair(activity: Activity, name: String, code: String = "", password: String = "") {
         val server = pairServer ?: return
@@ -402,8 +402,8 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * The lock screen's other way in: seimei's password, as the web page logs in. That session stands in
-     * for the phone's key until the app locks again; the key and the pairing stay as they are.
+     * The lock screen's other way in: seimei's password, as the web page logs in.
+     * That session stands in for the phone's key until the app locks again; the key and the pairing stay as they are.
      */
     fun passwordLogin(password: String) {
         if (authBusy || phase != Phase.Locked || password.isEmpty()) return
@@ -508,8 +508,8 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         if (accent != null) { prefs.accent = accent; this.accent = accent }
     }
 
-    /** Hands the server this phone's wallpaper seed, so the web page's Material You matches it. Only when it
-     * changed: a new wallpaper restarts the app's screen, which comes back through here. */
+    /** Hands the server this phone's wallpaper seed, so the web page's Material You matches it.
+     * Only when it changed: a new wallpaper restarts the app's screen, which comes back through here. */
     private fun sendSeed() {
         val seed = wallpaperSeed(getApplication()) ?: return
         if (seed == prefs.seedSent) return
@@ -1242,8 +1242,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         "The server didn't answer"
     }
 
-    /** Take over (a shikigami goes on as the user's own session) or Hand off (a session becomes a shikigami once
-     * the card in the chat is approved): one tap each way. */
+    /** Take over (a shikigami goes on as the user's own session) or Hand off (a session becomes a shikigami once its chat card is approved). */
     fun handoff(pg: Page) {
         val worker = pg.kind == "worker"
         viewModelScope.launch {
@@ -1582,8 +1581,8 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         return Attachment.Photo(Base64.getEncoder().encodeToString(bytes), bmp.asImageBitmap())
     }
 
-    /** A picture from the server, fetched with the login token: the chat-sized thumbnail (kept in a small cache),
-     *  or the original for the full-screen view (not cached: it can be big). */
+    /** A picture from the server, fetched with the login token: the chat-sized thumbnail, kept in a small cache.
+     * Or the original for the full-screen view, not cached since it can be big. */
     suspend fun image(name: String, full: Boolean = false): ImageBitmap? {
         if (!full) images.get(name)?.let { return it }
         val cap = if (full) 4096 else 2048

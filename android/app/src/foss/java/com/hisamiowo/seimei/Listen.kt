@@ -20,8 +20,8 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /**
- * The background connection, for phones without a push app: a foreground service holding one websocket to the
- * server, which sends it what it would push. Android requires the lasting notification that says so.
+ * The background connection, for phones without a push app: a foreground service with one websocket, on which the server sends what it would push.
+ * Android requires the lasting notification that says so.
  */
 class Listen : Service() {
     companion object {

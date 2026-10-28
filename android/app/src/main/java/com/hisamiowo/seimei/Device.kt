@@ -90,8 +90,8 @@ class Prefs(ctx: Context) {
 val b64url: Base64.Encoder = Base64.getUrlEncoder().withoutPadding()
 
 /**
- * The phone's identity: an EC P-256 key in the Android keystore. It never leaves the secure hardware,
- * and each use needs a fresh fingerprint, so a stolen unlocked phone still cannot open seimei.
+ * The phone's identity: an EC P-256 key in the Android keystore.
+ * It never leaves the secure hardware, and each use needs a fresh fingerprint, so a stolen unlocked phone still cannot open seimei.
  */
 object DeviceKey {
     private const val ALIAS = "seimei-device"

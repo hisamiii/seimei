@@ -51,8 +51,8 @@ sealed interface Updating {
 }
 
 /**
- * Updates through the system package installer, never silently: the session asks the user to confirm, and Android
- * checks that the APK carries the same signing key before it installs over this one.
+ * Updates through the system package installer, never silently: the session asks the user to confirm.
+ * Android checks that the APK carries the same signing key before it installs over this one.
  */
 object Updater {
     var state by mutableStateOf<Updating>(Updating.Idle)
