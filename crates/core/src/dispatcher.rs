@@ -597,7 +597,7 @@ impl Dispatcher {
                 (Some(saved), None)
             } else {
                 // The transcript only exists after the first message, so a fresh id is kept until then.
-                let sid = if saved.is_empty() { new_id() } else { saved };
+                let sid = if saved.is_empty() { crate::util::uuid4() } else { saved };
                 let _ = std::fs::write(&file, format!("{sid}\n"));
                 (None, Some(sid))
             };
@@ -703,13 +703,6 @@ impl Dispatcher {
             delay = (delay * 2).min(Duration::from_secs(60));
         }
     }
-}
-
-fn new_id() -> String {
-    let b = crate::util::random_bytes(16);
-    let h = crate::util::hex(&b);
-    // A version 4 UUID.
-    format!("{}-{}-4{}-{:x}{}-{}", &h[..8], &h[8..12], &h[13..16], (b[8] & 0x3) | 0x8, &h[17..20], &h[20..32])
 }
 
 /// What Claude Code asks of seimei's session: permission cards, the guard's hooks, seimei's own tools.
@@ -864,7 +857,7 @@ impl Turns {
                         After::Idle => self.idle_due = Some(Instant::now() + IDLE_COMPACT),
                     },
                 },
-                _ = sleep_until(notes_due.unwrap_or_else(far)), if notes_due.is_some() => {
+                _ = sleep_until(notes_due.unwrap_or_else(crate::util::far)), if notes_due.is_some() => {
                     // Notes waited HOLD with no turn to ride on: they go now, as a turn of their own.
                     self.notes_due = None;
                     if !self.notes.is_empty() {
@@ -877,7 +870,7 @@ impl Turns {
                         }
                     }
                 }
-                _ = sleep_until(idle_due.unwrap_or_else(far)), if idle_due.is_some() => {
+                _ = sleep_until(idle_due.unwrap_or_else(crate::util::far)), if idle_due.is_some() => {
                     self.idle_due = None;
                     self.idle_compact(client).await;
                 }
@@ -1307,10 +1300,6 @@ impl Turns {
             self.events.add(ev);
         }
     }
-}
-
-fn far() -> Instant {
-    Instant::now() + Duration::from_secs(86400 * 365)
 }
 
 fn write(client: &Client, c: Content) -> Result<(), String> {

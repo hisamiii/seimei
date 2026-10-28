@@ -159,11 +159,7 @@ fn secret(prompt: &str) -> String {
 
 fn date(t: &Value, with_time: bool) -> String {
     let Some(secs) = t.as_f64() else { return "never".into() };
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    let s = secs as i64; // time_t on every 64-bit target, glibc and musl
-    unsafe { libc::localtime_r(&s, &mut tm) };
-    let d = format!("{:04}-{:02}-{:02}", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday);
-    if with_time { format!("{d} {:02}:{:02}", tm.tm_hour, tm.tm_min) } else { d }
+    seimei_core::util::local_time(secs, if with_time { "%Y-%m-%d %H:%M" } else { "%Y-%m-%d" })
 }
 
 /// Recovery lives on the server: these never go through the web page.

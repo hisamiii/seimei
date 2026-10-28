@@ -218,6 +218,32 @@ pub fn chars(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
 }
 
+/// A unix time in this machine's time zone, formatted with chrono's strftime codes ("%H:%M"); "?" when out of range.
+pub fn local_time(t: f64, fmt: &str) -> String {
+    use chrono::{Local, TimeZone};
+    Local.timestamp_opt(t as i64, 0).single().map_or_else(|| "?".into(), |t| t.format(fmt).to_string())
+}
+
+/// Appends one line to a file, made 0600 when new.
+pub fn append_line(path: &Path, line: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut f = std::fs::OpenOptions::new().create(true).append(true).mode(0o600).open(path)?;
+    f.write_all(format!("{line}\n").as_bytes())
+}
+
+/// A version 4 UUID.
+pub fn uuid4() -> String {
+    let b = random_bytes(16);
+    let h = hex(&b);
+    format!("{}-{}-4{}-{:x}{}-{}", &h[..8], &h[8..12], &h[13..16], (b[8] & 0x3) | 0x8, &h[17..20], &h[20..32])
+}
+
+/// A deadline that never comes, for a select! branch that is off.
+pub fn far() -> tokio::time::Instant {
+    tokio::time::Instant::now() + std::time::Duration::from_secs(86400 * 365)
+}
+
 /// A JSON value as text: a string as it is, null as nothing, anything else as JSON.
 pub fn as_text(v: &serde_json::Value) -> String {
     match v {
@@ -251,16 +277,9 @@ pub fn truthy(v: &serde_json::Value) -> bool {
     }
 }
 
-/// A shell word as Python's shlex.quote writes it: as it is when only safe characters, else single-quoted.
+/// A shell word, quoted only when it needs to be. A NUL byte, which no shell word can hold, quotes as an empty word.
 pub fn sh_quote(s: &str) -> String {
-    let safe = |c: char| c.is_ascii_alphanumeric() || "_@%+=:,./-".contains(c);
-    if s.is_empty() {
-        "''".into()
-    } else if s.chars().all(safe) {
-        s.into()
-    } else {
-        format!("'{}'", s.replace('\'', "'\"'\"'"))
-    }
+    shlex::try_quote(s).map_or_else(|_| "''".into(), |q| q.into_owned())
 }
 
 /// A string as Python's repr() shows it: single quotes, unless only double quotes avoid escaping.
@@ -318,12 +337,13 @@ mod tests {
     }
 
     #[test]
-    fn quote_like_python() {
+    fn shell_words() {
         assert_eq!(sh_quote(""), "''");
         assert_eq!(sh_quote("app-tester"), "app-tester");
         assert_eq!(sh_quote("/home/me/src"), "/home/me/src");
         assert_eq!(sh_quote("shikigami x"), "'shikigami x'");
-        assert_eq!(sh_quote("it's"), "'it'\"'\"'s'");
+        // Read back as one word by a shell's own rules
+        assert_eq!(shlex::split(&sh_quote("it's $HOME")).unwrap(), ["it's $HOME"]);
     }
 
     #[test]

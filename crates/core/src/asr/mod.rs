@@ -15,6 +15,8 @@ use std::time::{Duration, Instant};
 use base64::Engine;
 use serde_json::{Value, json};
 
+use crate::paths::{expand, home};
+use crate::util::append_line;
 use vocab::{Dict, Tagged};
 
 const URL: &str = "https://openrouter.ai/api/v1/audio/transcriptions";
@@ -48,24 +50,13 @@ pub struct Sources {
     pub auto: bool,
 }
 
-fn home() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
-}
-
-fn expand(p: &str) -> PathBuf {
-    match p.strip_prefix("~/") {
-        Some(rest) => home().join(rest),
-        None => PathBuf::from(p),
-    }
-}
-
 impl Config {
     pub fn from_toml(t: Option<&toml::Value>) -> Config {
         let s = |k: &str, d: &str| t.and_then(|t| t.get(k)).and_then(|v| v.as_str()).unwrap_or(d).to_string();
         let src = t.and_then(|t| t.get("sources"));
         let on = |k: &str| src.and_then(|s| s.get(k)).and_then(|v| v.as_bool()).unwrap_or(true);
         Config {
-            key_file: expand(&s("key_file", "~/.config/dictate/or-key")),
+            key_file: expand(&s("key_file", "~/.config/seimei/openrouter-key")).into(),
             model: s("model", "microsoft/mai-transcribe-2"),
             fallback: s("fallback", "mistralai/voxtral-mini-transcribe-3-0"),
             language: s("language", "en"),
@@ -124,29 +115,10 @@ pub struct Asr {
     sent: Mutex<()>,
 }
 
-/// The files of dictate's that seed `<state>/asr/` on the first start: (dictate's path, seimei's name).
-fn seeds() -> Vec<(PathBuf, &'static str)> {
-    let h = home();
-    vec![
-        (h.join(".config/dictate/words.txt"), "words.txt"),
-        (h.join(".config/dictate/fixes"), "fixes"),
-        (h.join(".local/state/dictate/misses.log"), "misses.log"),
-        (h.join(".local/share/dictate/words-auto.txt"), "words-auto.txt"),
-        (h.join(".local/share/dictate/en_US.dic"), "en_US.dic"),
-        (h.join(".local/share/dictate/en-20k.txt"), "en-20k.txt"),
-    ]
-}
-
 impl Asr {
     pub fn new(cfg: Config, state: &Path) -> Arc<Asr> {
         let dir = state.join("asr");
         let _ = std::fs::create_dir_all(&dir);
-        for (from, name) in seeds() {
-            let to = dir.join(name);
-            if !to.exists() && from.exists() {
-                let _ = std::fs::copy(&from, &to);
-            }
-        }
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))
             .pool_idle_timeout(Duration::from_secs(300))
@@ -345,7 +317,7 @@ impl Asr {
             text.replace('\t', " "),
             found.join(", ")
         );
-        let _ = append(&self.dir.join("misses.log"), &line);
+        let _ = append_line(&self.dir.join("misses.log"), &line);
     }
 
     /// The text as dictated and as sent: the words the user changed are candidates for fixes (never applied alone).
@@ -365,7 +337,7 @@ impl Asr {
         if std::fs::metadata(&p).is_ok_and(|m| m.len() > SENT_MAX) {
             let _ = std::fs::rename(&p, self.dir.join("sent.jsonl.1"));
         }
-        let _ = append(&p, &line.to_string());
+        let _ = append_line(&p, &line.to_string());
     }
 
     /// Fetch missing dictionaries, then rebuild the auto list between 2 and 6 at night, or once it is 30 h old.
@@ -422,13 +394,6 @@ impl Asr {
             t0.elapsed().as_secs_f64()
         );
     }
-}
-
-fn append(path: &Path, line: &str) -> std::io::Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-    let mut f = std::fs::OpenOptions::new().create(true).append(true).mode(0o600).open(path)?;
-    f.write_all(format!("{line}\n").as_bytes())
 }
 
 #[cfg(test)]

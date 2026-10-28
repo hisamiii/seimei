@@ -4,7 +4,6 @@
 use std::path::Path;
 use std::time::Duration;
 
-use chrono::{Local, TimeZone};
 use serde_json::Value;
 
 use crate::util::{now, read_json};
@@ -35,8 +34,7 @@ pub fn note(state: &Path) -> String {
     if now() - num(&d["updated"]) > RECENT {
         return String::new();
     }
-    let at = Local.timestamp_opt(num(&d["started"]) as i64, 0).single().map(|t| t.format("%H:%M").to_string());
-    let at = at.unwrap_or_default();
+    let at = crate::util::local_time(num(&d["started"]), "%H:%M");
     match d["state"].as_str() {
         Some("done") => {
             let result = if d.get("result").is_some() { &d["result"] } else { &d["rev"] };

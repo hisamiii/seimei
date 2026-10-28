@@ -22,7 +22,7 @@ seimei reads `~/.config/seimei/config.toml`. Every key is optional; `config.exam
 | `[plugins]` | `enabled` | `[]` | the plugins to load; `[plugins.<name>]` tables configure them ([plugins.md](plugins.md)) |
 | `[agents.<name>]` | `command`, `args`, `env` | none | an ACP agent a shikigami can run on (summon's `harness = "acp:<name>"`); it keeps its own login and model |
 | | `protocol` | `acp` | `codex` for `codex app-server` |
-| `[asr]` | `key_file` | `~/.config/dictate/or-key` | the OpenRouter key for dictation ([asr.md](asr.md)); without one the mic is not shown |
+| `[asr]` | `key_file` | `~/.config/seimei/openrouter-key` | the OpenRouter key for dictation ([asr.md](asr.md)); without one the mic is not shown |
 | | `model`, `fallback` | `microsoft/mai-transcribe-2`, `mistralai/voxtral-mini-transcribe-3-0` | the transcription models; the fallback gets the call when the first fails |
 | | `language` | `en` | |
 | | `vocab_max` | 100 | terms sent with a clip at most (MAI got worse with 150) |

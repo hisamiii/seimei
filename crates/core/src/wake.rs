@@ -3,7 +3,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::{Local, TimeZone};
 use serde_json::json;
 
 use crate::events::EventLog;
@@ -40,7 +39,7 @@ fn clocks() -> (f64, f64) {
 }
 
 fn hm(t: f64) -> String {
-    Local.timestamp_opt(t as i64, 0).single().map(|t| t.format("%H:%M").to_string()).unwrap_or_default()
+    crate::util::local_time(t, "%H:%M")
 }
 
 /// Checks the clocks every tick; after a suspend the page and the dispatcher hear how long, and what was in flight.

@@ -5,24 +5,17 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use chrono::{Local, TimeZone};
+use chrono::Local;
 use serde_json::{Map, Value, json};
 
 use crate::cost::Cost;
 use crate::events::EventLog;
-use crate::util::{now, read_json, write_json};
+use crate::util::{append_line, local_time, now, read_json, write_json};
 
 const NAMES: [(&str, &str); 2] = [("five_hour", "5-hour"), ("seven_day", "Weekly")];
 const WARN_AT: [f64; 2] = [0.8, 0.95];
 const FIVE: f64 = 5.0 * 3600.0;
 const TOP: usize = 10;
-
-fn append_line(path: &Path, line: &str) -> std::io::Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-    let mut f = std::fs::OpenOptions::new().create(true).append(true).mode(0o600).open(path)?;
-    f.write_all(format!("{line}\n").as_bytes())
-}
 
 fn name(key: &str) -> &str {
     NAMES.iter().find(|n| n.0 == key).map_or(key, |n| n.1)
@@ -33,10 +26,6 @@ fn today() -> String {
 }
 
 /// A Unix time in local time, as `fmt` (strftime) writes it.
-fn local(t: f64, fmt: &str) -> String {
-    Local.timestamp_opt(t as i64, 0).single().map_or_else(|| "?".into(), |t| t.format(fmt).to_string())
-}
-
 pub struct Usage {
     path: PathBuf,
     /// rate-limits.jsonl: every reading as it came, with its time and session, so the windows' course can be shown.
@@ -150,7 +139,7 @@ impl Usage {
             WARN_AT.iter().copied().filter(|&l| used >= l && !at.iter().any(|a| a.as_f64() == Some(l))).collect();
         if !new.is_empty() {
             at.extend(new.iter().map(|l| json!(l)));
-            let when = resets.map_or_else(|| "later".into(), |r| local(r, "%H:%M"));
+            let when = resets.map_or_else(|| "later".into(), |r| local_time(r, "%H:%M"));
             let text = format!("{} {}% used, resets {when}", name(key), (used * 100.0).round());
             let clock = resets.map_or_else(|| json!([]), |r| json!([[r, when]]));
             if let Some(ev) = &self.events {
@@ -209,13 +198,13 @@ impl Usage {
         let snap = self.snapshot();
         let mut lines = vec![];
         for (key, w) in snap["windows"].as_object().into_iter().flatten() {
-            let resets = w["resets_at"].as_f64().map_or_else(|| "?".into(), |r| local(r, "%a %H:%M"));
+            let resets = w["resets_at"].as_f64().map_or_else(|| "?".into(), |r| local_time(r, "%a %H:%M"));
             let stale = if w["stale"] == true { " (reset since the last reading)" } else { "" };
             let used = (w["utilization"].as_f64().unwrap_or(0.0) * 100.0).round();
             lines.push(format!("{} window: {used}% used, resets {resets}{stale}", name(key)));
         }
         match snap["updated"].as_f64() {
-            Some(t) => lines.push(format!("Last reading {} (readings come with session turns).", local(t, "%H:%M"))),
+            Some(t) => lines.push(format!("Last reading {} (readings come with session turns).", local_time(t, "%H:%M"))),
             None => lines.push("No reading yet; one arrives with the next session start or limit change.".into()),
         }
         let mut sessions: Vec<(&String, &Value)> =
@@ -245,7 +234,7 @@ impl Usage {
     fn spend(&self, c: &Cost, names: &HashMap<String, String>) -> Vec<String> {
         c.refresh();
         let at = now();
-        let hm = |t: f64| local(t, "%H:%M");
+        let hm = |t: f64| local_time(t, "%H:%M");
         let mut lines = vec![String::new(), "At API prices (this server only, each API call counted once):".into()];
         let (five, history) = {
             let d = self.data.lock().unwrap();

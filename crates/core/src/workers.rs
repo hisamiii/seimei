@@ -37,7 +37,7 @@ use crate::sessions::{self, Own};
 use crate::tasks::{Board, Fields};
 use crate::transcripts::{brief, project_of, transcript};
 use crate::usage::Usage;
-use crate::util::{as_text, chars, hex, now, random_bytes, read_json, sh_quote, write_json};
+use crate::util::{as_text, chars, far, hex, now, random_bytes, read_json, sh_quote, uuid4, write_json};
 
 const PROMPT: &str = "\
 # You are a shikigami
@@ -213,12 +213,6 @@ pub fn first_line(text: &str, n: usize) -> String {
 fn capitalize(s: &str) -> String {
     let mut it = s.chars();
     it.next().map(|c| c.to_uppercase().chain(it.flat_map(char::to_lowercase)).collect()).unwrap_or_default()
-}
-
-fn new_uuid() -> String {
-    let b = random_bytes(16);
-    let h = hex(&b);
-    format!("{}-{}-4{}-{:x}{}-{}", &h[..8], &h[8..12], &h[13..16], (b[8] & 0x3) | 0x8, &h[17..20], &h[20..32])
 }
 
 /// Project and context use from its transcript, as the user's sessions show them.
@@ -1688,10 +1682,6 @@ pub fn acp_mode(mode: &str, tool: &str, own: &[String]) -> Mode {
     }
 }
 
-fn far() -> Instant {
-    Instant::now() + Duration::from_secs(86400 * 365)
-}
-
 /// What a shikigami's Claude Code asks of seimei: permission cards, the guard's hooks, its own tools.
 struct Side {
     w: Arc<Worker>,
@@ -2248,7 +2238,7 @@ impl Pool {
         let subagents = if s.subagents.is_empty() { crate::plan::get().quick.clone() } else { s.subagents.clone() };
         let cwd = path.display().to_string();
         let mut rec = json!({"id": hex(&random_bytes(4)), "name": name, "task": s.task, "cwd": cwd, "model": model,
-            "effort": s.effort, "context_cap": s.context, "subagents": subagents, "session_id": new_uuid(),
+            "effort": s.effort, "context_cap": s.context, "subagents": subagents, "session_id": uuid4(),
             "state": "starting", "created": at, "updated": at, "summary": ""});
         if let Some(m) = &s.mode {
             rec["mode"] = json!(m);
