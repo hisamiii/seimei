@@ -1,5 +1,5 @@
-# The offline checks a contributor runs (CONTRIBUTING.md): Rust tests and clippy, the app's unit tests and build,
-# and a syntax check of the web page. The live tests (tests/live.sh) need a Claude login and stay local.
+# The offline checks a contributor runs (CONTRIBUTING.md): Rust tests and clippy, the app's unit tests and build, and a syntax check of the web page.
+# The live tests (tests/live.sh) need an agent login and stay local.
 name: ci
 
 on:

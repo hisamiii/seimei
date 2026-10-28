@@ -22,8 +22,8 @@ debug = "line-tables-only"
 opt-level = 1
 debug = false
 
-# Release binaries are what `seimei update` installs: small and whole-program optimized. Panics still unwind: tokio
-# catches a panicking task or request handler and the server lives on, where abort would end every running shikigami.
+# Release binaries are what `seimei update` installs: small and whole-program optimized.
+# Panics still unwind: tokio catches a panicking task or request handler and the server lives on, where abort would end every running shikigami.
 [profile.release]
 strip = true
 lto = "fat"

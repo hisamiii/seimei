@@ -537,7 +537,7 @@ pub fn run(read_secret: impl Fn(&str) -> String, builtins: &[seimei_core::plugin
                 "Without https, passkeys and notifications do not work, and the password crosses the network in clear."
             );
         }
-        let about = ask("How should the prompts call this machine (e.g. \"desktop, an Arch box\")", "computer");
+        let about = ask("How should the prompts call this machine (e.g. \"desktop, a Linux workstation\")", "computer");
         println!(
             "\nYour Claude plan sets the defaults: max (opus, up to 1m of context) or pro (sonnet and 200k, so the \
              5-hour window lasts). Other plans and API keys: pick the closer one and edit [models] later."
