@@ -44,7 +44,8 @@ In bypass nothing asks, except Claude Code's own safety checks: those it still r
 ## Command line
 
 ```
-seimei                       serve (the default)
+seimei, seimei serve         run the server (the default)
+seimei --model NAME          serve with this dispatcher model for this run only
 seimei setup                 the first run: config, password, service (safe to run again)
 seimei update [--check]      install the latest signed release over this binary
 seimei version
@@ -77,4 +78,6 @@ Without it, a message from the page reaches the session through the dispatcher's
 
 - seimei uses your Claude Code login, however you configured it (`claude login`, an API key, `apiKeyHelper`): the sessions get seimei's environment as is.
 - `CLAUDE_CONFIG_DIR` is honored for Claude Code's config dir (sessions registry, transcripts).
+- `SEIMEI_CLAUDE` is the Claude Code executable to run (default: `claude` on PATH); the tests point it at a fake.
+- `SEIMEI_WEB` serves the web page from a folder instead of the copy built into the binary: edit `web/` and reload, no rebuild.
 - `SEIMEI_INIT=systemd` or `openrc` overrides the PID 1 check: which service `seimei setup` writes, and how the queue plugin tells agents to start desktop apps (`systemd-run`; without systemd the compositor's spawn on niri, Hyprland or sway, else `setsid -f`).

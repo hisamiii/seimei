@@ -1,6 +1,6 @@
 # Instructions for seimei
 
-Conventions for anyone (human or agent) changing this repo. Adapted from yet-another-halo-engine's AGENTS.md. Read this before writing code or docs.
+Conventions for anyone (human or agent) changing this repo. Read this before writing code or docs.
 
 ## The project
 
@@ -8,7 +8,7 @@ seimei runs Claude Code from a phone: one permanent dispatcher session and worke
 
 Layout:
 
-- `crates/`: the Rust workspace. `proto` (the stream-json client for Claude Code, ACP and Codex), `core` (state, login, push, the guard; `core/src/plugins/`: the plugin host; `core/data/tools.json`: seimei's own MCP tools), `server` (HTTP routes), `seimei` (the binary; `src/lib.rs` lists the plugins built in).
+- `crates/`: the Rust workspace. `proto` (the stream-json client for Claude Code, ACP and Codex), `core` (state, login, push, the guard; `core/src/plugins/`: the plugin host; `core/data/tools.json`: seimei's own MCP tools), `server` (HTTP routes), `queue` (the agent queue's scheduler, a port of claude-queue's cqd; see docs/queue/DESIGN.md), `seimei` (the binary; `src/lib.rs` lists the plugins built in).
 - `plugins/`: the plugins, each self-contained (its crate, manifest, prompt, tools, tests and connector): `desktop`, `browser` (with the extension in `plugins/browser/extension/`), `music`, `queue`, `discord` (with its Vencord connector, GPL, in `plugins/discord/vencord/`), and `template`, the one to copy for a plugin of your own.
 - `web/`: the web page, built into the binary. Plain JS and CSS, no build step.
 - `android/`: the app (Kotlin).
@@ -69,7 +69,7 @@ Docs live in `docs/`, indexed in `docs/README.md`: `architecture.md` (processes,
 
 ## Tests
 
-- `cargo test --workspace`: the offline suite, the case files included. `tests/live.sh NAME`: the ignored live tests (headless Claude Code sessions on haiku, dsh, Codex) in a scrubbed environment. `tests/qa/start.sh`: the QA server on :8431 for checking the web page by hand. A crate's integration tests are one binary, `tests/it/main.rs` with a module per file (a new file is a new `mod` line there); a test that sets environment variables does it through `env::Env::lock()`, which holds the lock and puts them back.
+- `cargo test --workspace`: the offline suite, the case files included. `tests/live.sh NAME`: the ignored live tests (headless Claude Code sessions on haiku, dsh, Codex) in a scrubbed environment. `tests/qa/start.sh`: the QA server on :8431 for checking the web page by hand. A crate's integration tests are one binary, `tests/it/main.rs` with a module per file (a new file is a new `mod` line there), except a test that needs a process of its own (`crates/seimei/tests/desktop.rs` has its own main) or stands alone (`crates/server/tests/`); a test that sets environment variables does it through `env::Env::lock()`, which holds the lock and puts them back.
 - Headless only: no visible windows, no on-screen emulator (`-no-window` is fine), no real cards or notifications on the user's phone.
 - Test sessions use the test config dir (`~/.local/share/seimei-test/claude`), never the user's. Log it in once with `CLAUDE_CONFIG_DIR=<dir> claude /login`.
 - Shut down what a test started: the QA server (`tests/qa/stop.sh`), gradle, the emulator.

@@ -1,4 +1,5 @@
-# Optional: copy to ~/.config/seimei/config.toml. These are the defaults.
+# Optional: copy to ~/.config/seimei/config.toml. Values shown set are the defaults; commented ones show the form, and
+# their defaults come from elsewhere (your plan, the terminal found on this machine).
 
 [server]
 port = 8417                         # --dev uses port + 1
@@ -6,22 +7,22 @@ origin = "http://localhost:8417"    # where the app and the web reach seimei (a 
 # web = false                       # no phone server: the agent queue and the plugins only
 
 [dispatcher]
-model = "opus"
+# model = "opus"                    # default: [models] work
 cwd = "~"
-compact_window = 400000             # tokens at which its context compacts
+# compact_window = 400000           # tokens at which its context compacts; default: what the plan's model holds
 
-# What your plan affords; `seimei setup` writes these for Max or Pro.
+# What your plan affords; `seimei setup` writes these for Max or Pro (the Max values shown).
 [models]
-work = "opus"                       # for real work, and a shikigami's model when none is picked
-routine = "sonnet"                  # for routine jobs
-quick = "haiku"                     # for lookups, and every shikigami's own subagents
-context = "1m"                      # the most context a shikigami gets: 200k, 256k, 400k or 1m
+# work = "opus"                     # for real work, and a shikigami's model when none is picked
+# routine = "sonnet"                # for routine jobs
+# quick = "haiku"                   # for lookups, and every shikigami's own subagents
+# context = "1m"                    # the most context a shikigami gets: 200k, 256k, 400k or 1m
 
 [host]
 about = "computer"                  # how the prompts name this machine, e.g. "desktop (an Arch box running niri)"
 
 [sessions]
-terminal = "kitty -d {cwd} --title {title}"   # opens a session for the user (a release, a loan); the command follows
+# terminal = "kitty -d {cwd} --title {title}"   # opens a session for the user (a release, a loan); default: the one setup found
 
 # Permission modes, by Claude Code's names: default, acceptEdits, plan, auto, dontAsk or bypassPermissions. Whatever
 # Claude Code would ask in a terminal becomes a card on the phone, with the terminal's choices. The shikigami mode is

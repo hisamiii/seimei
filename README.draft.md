@@ -26,7 +26,7 @@ The Android app is `seimei.apk` on the release page; on first run it asks for yo
 
 ## Plugins
 
-Off until you enable them in setup or config: the desktop (windows, screenshots, keyboard and mouse), music, the browser (an extension for Firefox), Discord (a Vesktop plugin) and claude-queue. Each has its own cards. See [docs/plugins.md](docs/plugins.md).
+Off until you enable them in setup or config: the desktop (windows, screenshots, keyboard and mouse), music, the browser (an extension for Firefox and Chromium browsers) and claude-queue. Each has its own cards. See [docs/plugins.md](docs/plugins.md).
 
 ## Safety
 
@@ -47,8 +47,8 @@ State lives in `~/.local/share/seimei/` (only you can read it), config in `~/.co
 
 ## Docs
 
-[docs/config.md](docs/config.md) (every option), [docs/security.md](docs/security.md), [docs/plugins.md](docs/plugins.md), [docs/architecture.md](docs/architecture.md).
+[docs/install.md](docs/install.md), [docs/reach.md](docs/reach.md) (HTTPS for the phone), [docs/config.md](docs/config.md) (every option), [docs/security.md](docs/security.md), [docs/plugins.md](docs/plugins.md), [docs/troubleshooting.md](docs/troubleshooting.md), [docs/architecture.md](docs/architecture.md).
 
 ## License
 
-MIT (LICENSE), except `discord/`: it builds into Vencord, so that one folder is GPL-3.0-or-later (discord/LICENSE).
+MIT (LICENSE).
