@@ -12,7 +12,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use regex::Regex;
 use serde_json::{Value, json};
@@ -68,11 +68,10 @@ impl Builtin for Queue {
 
     /// cqd's events go to the dispatcher and the pages.
     fn start(self: Arc<Self>, host: Arc<Host>) {
-        let (state, h, events) = (host.state.clone(), host.clone(), host.events.clone());
+        let (state, h) = (host.state.clone(), host.clone());
         let watcher = Watcher::new(
             Box::new(move || names(&state)),
             Box::new(move |line, urgent, key| (h.notify)(line, urgent, key)),
-            Box::new(move |snap| events.flash(snap)),
         );
         tokio::spawn(watcher.run());
     }
@@ -540,14 +539,9 @@ pub fn describe(snap: &Value) -> String {
     lines.join("\n")
 }
 
-/// How an agent starts a desktop app outside the queue: a transient systemd unit, or niri's spawn without systemd.
+/// How an agent starts a desktop app outside the queue (SEIMEI_INIT says which init runs).
 pub fn launch() -> &'static str {
-    static SYSTEMD: LazyLock<bool> = LazyLock::new(util::systemd);
-    if *SYSTEMD {
-        "env -u LD_PRELOAD systemd-run --user --collect <app>"
-    } else {
-        "env -u LD_PRELOAD niri msg action spawn -- <app>"
-    }
+    seimei_queue::cgroup::launch(util::systemd())
 }
 
 /// queue_history's text: one line per past job.
@@ -735,13 +729,9 @@ pub struct Watcher {
     pub names: Box<dyn Fn() -> HashMap<String, String> + Send + Sync>,
     /// A line for the dispatcher: (text, urgent, key).
     pub notify: Notify,
-    /// A transient app event: {"type": "queue", "snap": cqd's snapshot}.
-    pub flash: Box<dyn Fn(Value) + Send + Sync>,
     told: Mutex<HashSet<String>>,
     /// Agents with a "detached" line out: taken back once none of their jobs is detached.
     detached: Mutex<HashSet<String>>,
-    /// At most one snapshot a second; one that comes sooner waits for the end of the second (newest wins).
-    pending: Mutex<(Option<Value>, Option<Instant>, bool)>,
 }
 
 /// A wait this long is news; memory waits are granted anyway after CLAUDE_QUEUE_MEM_WAIT (600 s), so they count sooner.
@@ -752,13 +742,8 @@ fn news(kind: &str) -> f64 {
 }
 
 impl Watcher {
-    pub fn new(
-        names: Box<dyn Fn() -> HashMap<String, String> + Send + Sync>,
-        notify: Notify,
-        flash: Box<dyn Fn(Value) + Send + Sync>,
-    ) -> Arc<Watcher> {
-        let pending = Mutex::new((None, None, false));
-        Arc::new(Watcher { names, notify, flash, told: Mutex::default(), detached: Mutex::default(), pending })
+    pub fn new(names: Box<dyn Fn() -> HashMap<String, String> + Send + Sync>, notify: Notify) -> Arc<Watcher> {
+        Arc::new(Watcher { names, notify, told: Mutex::default(), detached: Mutex::default() })
     }
 
     /// Waits past their time, from devgate's records (cqd is down): (line, key) for each one not told yet. Blocking.
@@ -819,19 +804,9 @@ impl Watcher {
         out
     }
 
-    fn flash_pending(&self) {
-        let mut p = self.pending.lock().unwrap();
-        p.2 = false;
-        if let Some(snap) = p.0.take() {
-            p.1 = Some(Instant::now());
-            drop(p);
-            (self.flash)(json!({"type": "queue", "snap": snap}));
-        }
-    }
-
     /// One cqd event. Events are keyed per job, so a repeat replaces the earlier note; "detached" ones per agent, taken
     /// back when a snapshot shows none of its jobs detached any more.
-    pub fn relay(self: &Arc<Self>, ev: &Value) {
+    pub fn relay(&self, ev: &Value) {
         if ev["type"] == "snap" {
             let held: HashSet<&str> = (ev["snap"]["holders"].as_array().into_iter().flatten())
                 .filter(|h| h["state"] == "detached")
@@ -845,29 +820,6 @@ impl Watcher {
             };
             for agent in gone {
                 (self.notify)("", false, &format!("cqd:detached:{agent}"));
-            }
-            let wait = {
-                let mut p = self.pending.lock().unwrap();
-                p.0 = Some(ev["snap"].clone());
-                let since = p.1.map_or(Duration::MAX, |t| t.elapsed());
-                if since >= Duration::from_secs(1) {
-                    None
-                } else if p.2 {
-                    return;
-                } else {
-                    p.2 = true;
-                    Some(Duration::from_secs(1) - since)
-                }
-            };
-            match wait {
-                None => self.flash_pending(),
-                Some(d) => {
-                    let me = self.clone();
-                    tokio::spawn(async move {
-                        tokio::time::sleep(d).await;
-                        me.flash_pending();
-                    });
-                }
             }
             return;
         }

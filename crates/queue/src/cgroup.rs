@@ -16,6 +16,23 @@ pub fn systemd() -> bool {
     })
 }
 
+/// How an agent starts a desktop app outside the queue: a transient systemd unit, else the compositor's own spawn
+/// (the app then starts in the compositor's cgroup), else a detached process the scheduler moves out of the queue.
+pub fn launch(systemd: bool) -> &'static str {
+    let set = |v: &str| std::env::var_os(v).is_some_and(|v| !v.is_empty());
+    if systemd {
+        "env -u LD_PRELOAD systemd-run --user --collect <app>"
+    } else if set("NIRI_SOCKET") {
+        "env -u LD_PRELOAD niri msg action spawn -- <app>"
+    } else if set("HYPRLAND_INSTANCE_SIGNATURE") {
+        "env -u LD_PRELOAD hyprctl dispatch exec <app>"
+    } else if set("SWAYSOCK") {
+        "env -u LD_PRELOAD swaymsg exec <app>"
+    } else {
+        "env -u LD_PRELOAD setsid -f <app>"
+    }
+}
+
 /// Without systemd: the user-owned subtree of the elogind session we run in (logind.conf
 /// DelegateSessionCgroups=yes puts the session's processes in /<session>/session and gives the user
 /// /<session>/delegated). CLAUDE_QUEUE_CGROOT overrides it. Empty when there is none.

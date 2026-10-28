@@ -77,4 +77,4 @@ Without it, a message from the page reaches the session through the dispatcher's
 
 - seimei uses your Claude Code login, however you configured it (`claude login`, an API key, `apiKeyHelper`): the sessions get seimei's environment as is.
 - `CLAUDE_CONFIG_DIR` is honored for Claude Code's config dir (sessions registry, transcripts).
-- `SEIMEI_INIT=systemd` or `openrc` overrides the PID 1 check: which service `seimei setup` writes, and how the queue plugin tells agents to start desktop apps (`systemd-run`, or `niri msg action spawn` without systemd).
+- `SEIMEI_INIT=systemd` or `openrc` overrides the PID 1 check: which service `seimei setup` writes, and how the queue plugin tells agents to start desktop apps (`systemd-run`; without systemd the compositor's spawn on niri, Hyprland or sway, else `setsid -f`).

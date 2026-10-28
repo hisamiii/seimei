@@ -754,11 +754,7 @@ impl Daemon {
                 q.cg = format!("/{unit}"); // rescanned next tick
             }
         }
-        let hint = if systemd() {
-            "`env -u LD_PRELOAD systemd-run --user --collect <app>`"
-        } else {
-            "`env -u LD_PRELOAD niri msg action spawn -- <app>`"
-        };
+        let hint = format!("`{}`", crate::cgroup::launch(systemd()));
         self.event(
             "desktop_moved",
             &format!("desktop:{top}"),
