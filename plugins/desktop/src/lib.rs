@@ -72,8 +72,8 @@ pub const PLUGIN: Factory = Factory {
     manifest: include_str!("../plugin.toml"),
     // It depends on the window manager and the computer: Builtin::prompt makes it.
     prompt: "",
-    // One spec per window manager: variant() says which.
-    spec: include_str!("../tools.json"),
+    // One spec per window manager, which build.rs makes from tools.json: variant() says which.
+    spec: include_str!(concat!(env!("OUT_DIR"), "/tools.json")),
     hosted: true,
     make: |own, state| {
         let s = |k: &str| own.get(k).and_then(|v| v.as_str()).filter(|v| !v.is_empty());

@@ -23,6 +23,24 @@ const TOOLS: [&str; 13] = [
     "wl-paste", "ydotool",
 ];
 
+/// Each window manager's tools, in order.
+const SPEC_TOOLS: [(&str, &str); 6] = [
+    ("niri", "desktop screenshot niri niri_query open_app agent_display type_text press_keys click scroll ui_tree ui_action notifications clipboard_read unlock_screen restore_desktop"),
+    ("sway", "desktop screenshot sway sway_query open_app type_text press_keys click scroll ui_tree ui_action notifications clipboard_read unlock_screen restore_desktop"),
+    ("hyprland", "desktop screenshot hyprland hyprland_query open_app type_text press_keys click scroll ui_tree ui_action notifications clipboard_read unlock_screen restore_desktop"),
+    ("x11", "desktop screenshot x11 x11_query open_app type_text press_keys click scroll ui_tree ui_action unlock_screen restore_desktop"),
+    ("kde", "desktop screenshot kde kde_query open_app agent_display type_text press_keys click scroll ui_tree ui_action unlock_screen restore_desktop"),
+    ("gnome", "desktop screenshot gnome gnome_query open_app agent_display type_text press_keys click scroll ui_tree ui_action unlock_screen restore_desktop"),
+];
+
+const NIRI_PROMPT: &str = r#"## Desktop
+Drive the laptop with your desktop tools (start with desktop), not `niri msg`, grim or ydotool in Bash: niri can restart, and your shell keeps the old socket.
+- Work in the agent display (display: "agent" on the desktop tools, browser: "agent" on the browser tools): it has its own screen, keyboard and pointer, so the user's focus and mouse stay theirs. Touch the user's display only when the task is about something there; then focus stealing is fine, and apps you open go to the "seimei" workspace (open_app does that).
+- Closing a window you did not open, quitting niri and editing ~/.config/niri wait for the user's OK on their phone; ask in chat first when the reason is not obvious.
+- screenshot returns the image's path: Read it when you need to look (show=true puts it in the chat and returns the image).
+- Never type into a window you have not just looked at. Prefer keyboard shortcuts and typing over clicks.
+- The user has a stop key on the laptop. When they press it, your turn ends and desktop input is blocked for a minute: do not resume driving until they say so."#;
+
 struct T {
     root: PathBuf,
     home: PathBuf,
@@ -236,12 +254,20 @@ async fn end_to_end(t: &mut T, g: &Value) {
         Arc::new(Plugins::load_at(&cfg, &state, env!("CARGO_BIN_EXE_seimei"), &seimei::BUILTINS).about("laptop (Arch, niri)"));
     let desk = plugins.get::<DesktopPlugin>("desktop").unwrap().0.clone();
     assert_eq!(desk.b.ctx().run, t.run, "the plugin's desktop is not the test's");
-    let spec = &serde_json::from_str::<Value>(seimei_plugin_desktop::PLUGIN.spec).unwrap()["niri"];
-    t.check(
-        "desktop prompt",
-        plugins.prompt(None) == spec["prompt_about"].as_str().unwrap(),
-        &json!(plugins.prompt(None)),
-    );
+    let specs = serde_json::from_str::<Value>(seimei_plugin_desktop::PLUGIN.spec).unwrap();
+    for (wm, want) in SPEC_TOOLS {
+        let tools = specs[wm]["tools"].as_array().unwrap();
+        let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+        // Only a WM with the agent display has the display property, and then on the native tool too.
+        let display = |t: &Value| !t["inputSchema"]["properties"]["display"].is_null();
+        let agent = want.contains("agent_display");
+        let ok = names.join(" ") == want
+            && tools.iter().any(display) == agent
+            && tools.iter().any(|t| t["name"] == wm && display(t)) == agent;
+        t.check(&format!("{wm} spec"), ok, &json!(names));
+    }
+    let spec = &specs["niri"];
+    t.check("desktop prompt", plugins.prompt(None) == NIRI_PROMPT, &json!(plugins.prompt(None)));
     let env = plugins.servers("seimei", None, None)["desktop"]["env"].clone();
     t.check("SEIMEI_VARIANT", env["SEIMEI_VARIANT"] == "niri", &env);
     plugins.root("seimei", None, Some(std::process::id()));
