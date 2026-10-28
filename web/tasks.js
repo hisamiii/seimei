@@ -1,9 +1,7 @@
-// The Tasks lane, two views behind one connected button group. Now: what needs the user (a question, a job to look
-// over, their own tasks), what runs and how far, and each shikigami's next. All tasks: one quiet row per project
-// with a one-line summary; a project opens in place, its done items fold into "N done", paused projects wait
-// behind one row, and done work sits in the Archived row: what is older than a day leaves the board, projects
-// with only done items fold away into it. The user ticks their own tasks (with Undo); a task with a shikigami opens
-// its page. Live: the stream sends the whole board on every change.
+// The Tasks lane, two views behind one connected button group; the stream sends the whole board on every change.
+// Now: what needs the user, what runs and how far, and each shikigami's next.
+// All tasks: one row per project; done items fold into "N done", and work done over a day ago goes to the Archived row.
+// The user ticks their own tasks (with Undo); a task with a shikigami opens its page.
 import { $, el, svg, post, keep, snack, clock, plural, wearShape, getJSON, dayLabel } from './util.js';
 import { openWorker, marked } from './agents.js';
 

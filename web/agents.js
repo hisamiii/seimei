@@ -1,4 +1,4 @@
-// Shikigami and the user's own Claude sessions: the Agents list, and the full-screen page of one of them.
+// Shikigami and the user's own agent sessions: the Agents list, and the full-screen page of one of them.
 import { $, S, hooks, el, svg, clock, at as atTime, home, short, when, getJSON, snack, finePointer, toLogin, ICON, keep, wearShape, enter, leave } from './util.js';
 import { Renderer, doing as doingPhrase, elapsed, loader } from './chat.js';
 import { sheet, showSheet, closeSheet } from './sheet.js';
@@ -204,8 +204,8 @@ function row(x, q = '') {
   b.append(tile(x), txt);
   let held = false;
   b.addEventListener('click', () => { if (!held) openPage(x.kind, x.id); held = false; });
-  // Right-click, or a long press on touch: the row's menu. Only a finished or idle agent can be archived: one
-  // that works or asks always shows.
+  // Right-click, or a long press on touch: the row's menu.
+  // Only a finished or idle agent can be archived: one that works or asks always shows.
   if (x.state !== 'done' && x.state !== 'idle') return b;
   b.addEventListener('contextmenu', (e) => {
     e.preventDefault();
@@ -444,8 +444,8 @@ function head() {
   composerState();
 }
 
-// Take over: the shikigami goes on as the user's own session (their tap is the OK). Hand off: the session
-// becomes a shikigami once the user approves the card in the chat, as when seimei adopts one.
+// Take over: the shikigami goes on as the user's own session (their tap is the OK).
+// Hand off: the session becomes a shikigami once the user approves the card in the chat, as when seimei adopts one.
 async function handoff() {
   if (!P) return;
   const { kind, id, row } = P;
@@ -760,7 +760,7 @@ function details() {
   fact('Subagents', r.subagents);
   fact('Context', r.context != null && `${r.context}% used`);
   fact(P.kind === 'worker' ? 'Started' : 'Last active', cap(atTime(P.kind === 'worker' ? r.created : r.active).replace(/^at /, 'today at ')));
-  // What its run took (see crates/core/src/metrics.rs): fetched when the sheet opens, since pricing it takes the server a moment.
+  // What its run took (crates/core/src/metrics.rs): fetched when the sheet opens, since pricing it takes the server a moment.
   if (P.kind === 'worker') {
     const id = P.id;
     getJSON(`api/workers/${encodeURIComponent(id)}/metrics`).then((m) => {
@@ -1053,8 +1053,8 @@ async function openPage(kind, id) {
   }
 }
 
-// Forward and backward: the page comes in from the end edge and goes back out to it; focus goes to
-// its title, and back to the row that opened it on close
+// Forward and backward: the page comes in from the end edge and goes back out to it.
+// Focus goes to its title, and on close back to the row that opened it.
 let closing = null;
 let opener = null;
 function shown(reopen) {

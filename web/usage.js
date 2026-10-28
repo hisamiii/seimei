@@ -1,4 +1,4 @@
-// The Usage tab: Claude rate-limit windows, today's tokens, and the API-price equivalent; its ring is the tab's icon.
+// The Usage tab: the agent's rate-limit windows, today's tokens, and the API-price equivalent; its ring is the tab's icon.
 import { $, S, hooks, el, svg, clock, getJSON, home, ICON } from './util.js';
 
 const page = $('usage');

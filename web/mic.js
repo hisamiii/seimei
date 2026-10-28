@@ -1,6 +1,6 @@
-// Dictation in the composer (docs/asr.md): tap the mic, talk, tap the square. seimei transcribes it with the open
-// chat's words and the text lands at the cursor; nothing is sent on its own. The browser records in its own format
-// (MediaRecorder); the clip is resampled to the 16 kHz mono WAV the server takes.
+// Dictation in the composer (docs/asr.md): tap the mic, talk, tap the square; the text lands at the cursor.
+// seimei transcribes it with the open chat's words; nothing is sent on its own.
+// The browser records in its own format (MediaRecorder); the clip is resampled to the 16 kHz mono WAV the server takes.
 import { $, post, snack, say, toLogin } from './util.js';
 
 const input = $('input'), field = input.closest('.field'), mic = $('mic'), drop = $('mic-drop');

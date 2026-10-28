@@ -96,8 +96,8 @@ export function svg(path, size = 16) {
 export const clock = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 export const dayKey = (t) => new Date(t * 1000).toDateString();
 export const home = (p) => (p || '').replace(/^\/home\/[^/]+/, '~');
-// A shikigami's identity: one shape of the M3 Expressive library (m3x.css), the same for a name everywhere, and a
-// phase, so working tiles don't morph in step. The order and the salt keep each name on its shape.
+// A shikigami's identity: an M3 Expressive shape (m3x.css), the same for a name everywhere, and a phase so working tiles don't morph in step.
+// The order and the salt keep each name on its shape.
 const SHAPES = ['cookie4', 'cookie12', 'cookie6', 'sunny', 'cookie9', 'flower', 'clover8', 'clover4', 'puffy-diamond', 'gem', 'pentagon'];
 function nameHash(name) {
   let h = 0;
@@ -132,7 +132,6 @@ export const short = (t) => {
   return s < 60 ? 'now' : s < 3600 ? `${Math.floor(s / 60)}m` : s < 86400 ? `${Math.floor(s / 3600)}h` : `${Math.floor(s / 86400)}d`;
 };
 
-// A clock time today, a date before that.
 // "at 10:28 PM" today, "on 18 Oct at 10:28 PM" another day.
 export function at(t) {
   const d = new Date(t * 1000);
@@ -149,8 +148,8 @@ export function when(t) {
 export const toLogin = () => location.reload();
 
 // ---------- conversations kept in this browser ----------
-// The chat and the agent pages last seen, so the next visit draws them at once and fetches only what is new. The
-// login page clears them (logging out, or a session that ended, leads there).
+// The chat and the agent pages last seen, so the next visit draws them at once and fetches only what is new.
+// The login page clears them (logging out, or a session that ended, leads there).
 const KEEP = 'seimei.keep.';
 const PAGES = 20;
 const saves = {};
@@ -196,8 +195,8 @@ export async function post(path, body) {
 // A short note at the bottom for taps that could not do anything.
 let snackTimer = 0;
 // A short message at the bottom; action ({ label, run }) adds a button such as Undo.
-// The snackbar sits above whatever holds the bottom edge, never over the field: an agent page's composer, or the
-// composer and navigation bar (the rail layout has only the composer there).
+// It sits above whatever holds the bottom edge, never over the field: a page's composer, or the composer and navigation bar.
+// The rail layout has only the composer there.
 function snackPlace() {
   const s = $('snack');
   const page = document.querySelector('#spage:not([hidden]) .scomposer');

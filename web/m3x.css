@@ -5,7 +5,7 @@
    Colors stay the theme's own (theme.js sets them); this adds the shape scale, emphasized type and spring motion.
    The springs are linear() fits of the Compose MotionScheme.expressive() springs. */
 :root {
-  /* Shape scale (dp = CSS px). The ~30 radii in style.css would map onto these. */
+  /* Shape scale (dp = CSS px). */
   --shape-xs: 4px;
   --shape-sm: 8px;
   --shape-md: 12px;
@@ -51,16 +51,16 @@
 .morph { transition: border-radius var(--spring-fast-ms) var(--spring-fast); }
 .morph:active { border-radius: var(--shape-md); }
 
-/* No bare status dots: state reads as words, in the tone of the text or its container, or as the loading indicator
-   where something works. The nav badge (a count or a small badge on an icon) is not one of these and stays. */
+/* No bare status dots: state reads as words in the tone of the text or its container, or as the loading indicator.
+   The nav badge (a count or a small badge on an icon) is not one of these and stays. */
 .status .dot { display: none; }
 .status[data-s="working"] { color: var(--primary); }
 .status[data-s="starting"] { color: var(--warn); }
 .trig::before, .working::before, .agent time.fresh::before { content: none; }
 .agent time.fresh { color: var(--primary); font-weight: 500; }
 
-/* ===== approval-after ===== */
-/* M1, approval card: decisions in thumb reach, 48px targets, risk you can see before you tap. */
+/* ===== approval card ===== */
+/* Decisions in thumb reach, 48px targets, risk you can see before you tap. */
 .wcard.approval { border-radius: var(--shape-xl); padding: 16px; gap: 12px; }
 .wcard.approval .head { align-items: center; }
 /* A title alone centers on its tile; with a subtitle the two lines start at the tile's top */
@@ -104,8 +104,8 @@
 .wcard.approval .foot .btn.filled { flex: 1.4 1 auto; font-weight: var(--w-emph); }
 .wcard.approval .foot .btn.morph:active { border-radius: var(--shape-md); }
 
-/* ===== working-after ===== */
-/* M2, working state: a contained loading indicator where the reply will appear, and a Stop that changes shape, not just icon. */
+/* ===== working state ===== */
+/* A contained loading indicator where the reply will appear, and a Stop that changes shape, not just icon. */
 .working { gap: 12px; margin-top: 18px; font-size: 15px; font-weight: 500; color: var(--text-2); }
 .working::before { content: none; }
 .working .loader { width: 40px; height: 40px; }
@@ -117,8 +117,8 @@
 @keyframes stop-in { from { border-radius: 26px; transform: scale(.92); } }
 #stop .square { width: 16px; height: 16px; border-radius: var(--shape-xs); }
 
-/* ===== agents-after ===== */
-/* M3, agents list: each group a segmented list on a container, state told by tile shape and color, a real loading indicator for "working". */
+/* ===== agents list ===== */
+/* Each group a segmented list on a container; tile shape and color tell the state, a loading indicator shows "working". */
 .agroup { gap: 2px; margin-top: 20px; }
 .agroup h2 { padding: 0 16px 8px; font-size: 14px; font-weight: var(--w-emph); letter-spacing: 0; }
 .agroup .agent { background: var(--container); border-radius: var(--shape-xs); min-height: 64px; padding: 10px 16px 10px 10px; }
@@ -147,13 +147,13 @@
 .tile.done { border-radius: 50%; background: var(--container-high); }
 .agroup.done .agent { background: color-mix(in srgb, var(--container) 55%, var(--surface-low)); }
 
-/* ===== usage-after ===== */
-/* M4, usage: the two numbers you came for read first, M3X progress with a gap and no stop dot, lists as segmented groups. */
+/* ===== usage ===== */
+/* The two numbers you came for read first, M3X progress with a gap and no stop dot, lists as segmented groups. */
 .page .meter { border-radius: var(--shape-xl); padding: 18px 20px 16px; gap: 10px; background: var(--container); }
 .meter b { font-size: 16px; font-weight: var(--w-emph); }
 .meter .pct { font-size: 40px; line-height: 44px; font-weight: var(--w-emph); letter-spacing: -.01em; }
 
-/* Active part, a 4px gap, then the rest of the track (M3X linear progress, determinate; the stop dot is left out, see the no-dots rule) */
+/* Active part, a 4px gap, then the rest of the track (M3X determinate linear progress); no stop dot, as the no-dots rule says */
 .meter .bar-track { display: flex; height: 8px; background: none; overflow: visible; }
 .meter .bar-track i { flex: none; border-radius: var(--shape-full); }
 .meter .bar-track::after {
@@ -173,17 +173,15 @@
 .crow .amt { font-size: 22px; font-weight: var(--w-emph); }
 .crow b, .urow b { font-size: 15px; }
 
-/* ===== offline-after ===== */
-/* M5, offline on an empty chat: the away card replaces the empty-state hello instead of drawing over it.
-   The real fix is this one rule in web/style.css (or hiding #hello where app.js shows #away). */
+/* ===== offline ===== */
+/* Offline on an empty chat: the away card replaces the empty-state hello instead of drawing over it. */
 body.offline .hello, body.offline #fp-card { display: none; }
 
-/* ===== tasks-after ===== */
-/* Tasks tab, both directions (tasks-a-now.html, tasks-b-quiet.html, tasks-swipe.html): contained segmented groups,
-   48dp+ rows on the type scale, warm only for what needs the user, step progress as an M3X bar. */
+/* ===== tasks ===== */
+/* Contained segmented groups, 48dp+ rows on the type scale, warm only for what needs the user, step progress as an M3X bar. */
 .tasks { padding: 12px 12px 24px; }
 
-/* A: the Now / All switch, a connected button group */
+/* The Now / All switch, a connected button group */
 .tview { display: flex; gap: 2px; margin: 4px; }
 .tview button {
   flex: 1; min-height: 48px; border: 0; font: 500 16px var(--sans); color: var(--text-2); background: var(--container);
@@ -250,7 +248,7 @@ body.offline .hello, body.offline #fp-card { display: none; }
 .tall svg { flex: none; width: 24px; }
 .tall.quiet { background: var(--container); color: var(--text-2); margin-top: 12px; border-radius: var(--shape-lg-inc); }
 
-/* B: one segmented list. Project rows and an open project's items share its edges; items are set in by their text only. */
+/* All tasks: one segmented list. Project rows and an open project's items share its edges; items are set in by their text only. */
 .prow { display: flex; align-items: center; gap: 16px; width: 100%; min-height: 64px; padding: 12px 16px; border: 0; color: var(--text); text-align: left; font: inherit; }
 .prow .tl { font-weight: var(--w-emph); }
 .prow .sw, .tr .ts .sw { color: var(--warn); font-weight: 500; }
@@ -273,8 +271,7 @@ body.offline .hello, body.offline #fp-card { display: none; }
 .tr.swiping.armed::before { opacity: 1; }
 
 /* ===== showcase ===== */
-/* The showcase: what the sections above do not cover: chat event lines and the report, the question cards, notes,
-   trajectory, the shikigami page, login, offline, the sheets. */
+/* What the sections above do not cover: chat event lines and the report, question cards, notes, the trajectory, the shikigami page, login, offline, sheets. */
 
 /* ---------- Chat: notes are plain centered text, no pill ---------- */
 .note { background: none; padding: 0; border-radius: 0; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--text-3); }
@@ -431,7 +428,7 @@ body.offline .hello, body.offline #fp-card { display: none; }
 .menu { border-radius: var(--shape-lg); }
 .menu button { min-height: 48px; font-size: 14px; }
 
-/* ---------- On the type scale (12/14/16/20/22/28/34): what style.css and the earlier after CSS left between steps ---------- */
+/* ---------- On the type scale (12/14/16/20/22/28/34): what the rules above left between steps ---------- */
 code, .wcard.approval .body.cmd, .arow code, .report .rbody code { font-size: 14px; }
 .wcard.approval .choices.m3x-seg .choice small, .wcard.approval .choices.m3x-seg .choice code { font-size: 12px; }
 .wcard.approval .choices.m3x-seg .choice code { font-size: 12px; }
@@ -476,20 +473,20 @@ code, .wcard.approval .body.cmd, .arow code, .report .rbody code { font-size: 14
 
 /* Contrast and touch-target fixes */
 
-/* 12: 48 to touch. The lane tabs, event lines, Reply in chat, the fold, snackbar actions, menu and attach are 48;
-   the Now/All tasks group keeps its 40 look with a 48 hit area (its buttons clip nothing) */
+/* 48 to touch: the lane tabs, event lines, Reply in chat, the fold, snackbar actions, menu and attach.
+   The Now/All tasks group keeps its 40 look with a 48 hit area (its buttons clip nothing). */
 .ltab { height: 48px; }
 .evline, .reply-btn { min-height: 48px; }
 .snack button { min-height: 48px; padding: 0 16px; border-radius: 24px; }
 .snack:has(button) { padding: 4px 4px 4px 16px; }
 .icon-btn, .field .attach { width: 48px; height: 48px; }
-/* chips and the handoff keep their 40 look; their hit areas reach 48 past the clip of .sl */
+/* Chips and the handoff keep their 40 look; their hit areas reach 48 past the clip of .sl */
 .sbar .handoff.sl { overflow: visible; }
-/* one separator (round 2, N2): the line was a flex row, so a loose " · " lost its spaces and took the 6 gap each side */
+/* A block, not a flex row: in a flex row the dot separator loses its spaces and takes the 6 gap on each side */
 .sbar .sub { display: block; overflow: hidden; text-overflow: ellipsis; }
-/* tabular figures widen the spaces and the dot; one line of text, nothing to line up */
+/* Tabular figures widen the spaces and the dot; one line of text has nothing to line up */
 .urow span { font-variant-numeric: normal; }
-/* one chip (round 2, N3): tool chips take the model chip's 48 height, padding, corners and type; no hit area tricks */
+/* One chip style: tool chips take the model chip's 48 height, padding, corners and type; no hit area tricks */
 .chip { min-height: 48px; padding: 8px 8px 8px 12px; border-radius: var(--shape-md); font: 400 14px/20px var(--sans); color: var(--text-2); }
 .chip::before { content: none; }
 .chip svg:last-child { width: 20px; height: 20px; color: var(--text-3); }
@@ -500,20 +497,20 @@ code, .wcard.approval .body.cmd, .arow code, .report .rbody code { font-size: 14
 .tview button, .tseg button { position: relative; overflow: visible; }
 .tview button::before, .tseg button::before { content: ""; position: absolute; inset: -4px 0; }
 .tdots { gap: 0; }
-/* the swatches are 48 boxes around their 40 discs: the inline background shorthand would reset the clip, so it is
-   forced; the selected ring sits in the box, 2 clear and 2 ring as before */
+/* The swatches are 48 boxes around their 40 discs; the clip is forced since the inline background shorthand would reset it.
+   The selected ring sits in the box: 2 clear, then 2 ring. */
 .tdot { width: 48px; height: 48px; margin: 0; background-clip: content-box !important; padding: 4px; border: 0; box-sizing: border-box; }
 .tdot.on { box-shadow: inset 0 0 0 2px var(--text); }
 .tseed { width: 48px; height: 48px; }
 
-/* Nav: the active pill on primary (7.3:1 on the bar), its icon on-primary; the label stays as it was */
+/* Nav: the active pill on primary (7.3:1 on the bar), its icon on-primary; the label keeps its color */
 .nav-item.on .ind { background: var(--primary); color: var(--on-primary); }
 .nav-item.on .ring-ico .t { stroke: color-mix(in srgb, var(--on-primary) 30%, transparent); }
 .nav-item.on .ring-ico .f, #nav-usage.on[data-tone] .ring-ico .f { stroke: var(--on-primary); }
 
-/* 15: usage is neutral (round 3, R1): primary is for working (REVIEW 6). Meters, their percentages and the idle nav ring take
-   on-surface-variant on an outline-variant track, error only near the limit (90%+); the 5-hour note is plain supporting text.
-   The app has no outline-variant yet (theme.js maps no outlineVariant), so this mixes it from the theme's own outline */
+/* Usage is neutral, as primary is for working: meters, percentages and the idle nav ring are on-surface-variant on an outline-variant track.
+   Error only near the limit (90%+); the 5-hour note is plain supporting text.
+   theme.js maps no outlineVariant, so it is mixed from the theme's outline. */
 :root { --outline-variant: color-mix(in srgb, var(--outline) 45%, var(--surface)); }
 .note.warn { color: var(--text-2); }
 .meter, .meter.ok, .meter.warn { --tone: var(--text-2); }
@@ -524,8 +521,8 @@ code, .wcard.approval .body.cmd, .arow code, .report .rbody code { font-size: 14
 #nav-usage[data-tone="bad"] .ring-ico .f { stroke: var(--error); }
 #nav-usage.on .ring-ico .f { stroke: var(--on-primary); }
 
-/* Wavy progress on a running task's step bar (amplitude 3, wavelength 40, 4 thick, a 4 gap, the flat track); usage
-   meters are amounts and stay flat. The wave is a mask over the theme's primary, so accents and themes carry over */
+/* Wavy progress on a running task's step bar (amplitude 3, wavelength 40, 4 thick, a 4 gap, the flat track).
+   Usage meters are amounts and stay flat; the wave masks the theme's primary, so accents and themes carry over. */
 .tr.k-run .prog { height: 10px; align-items: center; }
 .tr.k-run .prog i { height: 10px; border-radius: 0; background: var(--primary);
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='10' viewBox='0 0 40 10'%3E%3Cpath d='M0 5 C 5 1.05 15 1.05 20 5 S 35 8.95 40 5' fill='none' stroke='%23000' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E") left center / 40px 10px repeat-x; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='10' viewBox='0 0 40 10'%3E%3Cpath d='M0 5 C 5 1.05 15 1.05 20 5 S 35 8.95 40 5' fill='none' stroke='%23000' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E") left center / 40px 10px repeat-x;
@@ -537,65 +534,62 @@ code, .wcard.approval .body.cmd, .arow code, .report .rbody code { font-size: 14
 /* Contrast: choice descriptions on the warm options */
 .qcard .qopt small { color: var(--on-warn-container); opacity: .82; }
 
-/* 8: sending, the contained indicator in the button, widths fixed by the row, not the label */
+/* Sending: the contained indicator in the button; the row fixes the widths, not the label */
 .btn.busy::before { content: none; }
 .wcard.approval .foot .btn.tonal { flex: 1 1 0; }
 .wcard.approval .foot .btn.filled { flex: 1.4 1 0; }
 .wcard.approval .choice.held:disabled { opacity: .38; }
 
-/* 19, 20: Tasks on the 16 grid; the toggle has room below it */
+/* Tasks on the 16 grid; the toggle has room below it */
 .tasks { padding-left: 0; padding-right: 0; }
 .tview { margin: 4px 0; }
 .tview + .tgrp { margin-top: 20px; }
 
-/* 22 */
 .archrow .cnt { flex: none; font-size: 14px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 
-/* 24: the choices as one segmented group */
+/* The choices as one segmented group */
 .qcard .qopts { display: flex; flex-direction: column; }
 
-/* 25: a settled command fades only when it overflows (one line here fits); its tile stays neutral */
+/* A settled command fades only when it overflows (one line here fits); its tile stays neutral */
 .wcard.approval.settled .body { -webkit-mask-image: none; mask-image: none; }
 .wcard.approval.settled .badge { background: var(--container-high); color: var(--text-2); }
 
-/* 26: one monospace */
+/* One monospace */
 .report .rbody code { font: 13px var(--mono); background: var(--container-high); border-radius: 6px; padding: .1em .35em; }
 
-/* 27: the note button round and tonal like Deny */
+/* The note button round and tonal like Deny */
 .wcard.approval .foot .btn.icon { border-radius: var(--shape-full); background: var(--tonal); color: var(--on-tonal); }
 
-/* 14 */
 .usage-h { color: var(--text-2); }
 
-/* 17: the buttons under the title */
+/* The buttons under the title */
 .card .actions { margin: 12px 0 0; gap: 8px; }
 
-/* 36 */
 .tct code { background: none; padding: 0; }
 .tcard { border: 0; box-shadow: none; }
 
-/* 37, 38: one card shape in chat; the failure line spans the column */
+/* One card shape in chat; the failure line spans the column */
 .card { border-radius: var(--shape-xl); }
 .report .evline { border-radius: var(--shape-xl) var(--shape-xl) var(--shape-xs) var(--shape-xs); }
 .report .rbody { border-radius: var(--shape-xs) var(--shape-xs) var(--shape-xl) var(--shape-xl); }
 .evline.failed { align-self: stretch; border-radius: var(--shape-xl); padding: 10px 12px 10px 20px; }
 .evline.failed > span { flex: 1; }
 
-/* 30: even sheet spacing, 14 under the title as between the blocks: no extra room before Today (15) or the version
-   line (16), and the same 14 between the line and each button (the block has its own 12 gap) */
+/* Even sheet spacing: 14 under the title and between the blocks, with no extra room before Today or the version line.
+   The same 14 between the line and each button (the block has its own 12 gap). */
 .alist > .aday:first-child { margin-top: 0; }
 #sheet-body .pblock { padding-top: 0; }
 #sheet-body .pblock .usage-note { margin: 0 0 2px; }
 
-/* 40: the fold as a row of the column, left aligned, nothing cut */
+/* The fold as a row of the column, left aligned, nothing cut */
 .fold { align-self: stretch; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px;
   max-width: none; padding: 12px 16px 12px 20px; border-radius: var(--shape-xl); text-align: left; font: 400 14px/20px var(--sans); }
 .fold span { white-space: normal; overflow: visible; text-overflow: clip; }
 .fold b { flex: none; }
 
 /* ===== expressive/shapes ===== */
-/* M3 Expressive shape library as clip-paths. From androidx MaterialShapes.kt,
-   120 points each so any two interpolate. */
+/* The M3 Expressive shape library as clip-paths, from androidx MaterialShapes.kt.
+   120 points each, so any two interpolate. */
 :root {
   --shape-circle: polygon(50.65% 0.03%, 53.27% 0.16%, 55.87% 0.38%, 58.46% 0.77%, 61.02% 1.28%, 63.56% 1.91%, 66.05% 2.70%, 68.52% 3.59%, 70.91% 4.65%, 73.27% 5.76%, 75.53% 7.08%, 77.78% 8.43%, 79.88% 9.99%, 81.96% 11.57%, 83.90% 13.33%, 85.80% 15.13%, 87.55% 17.07%, 89.24% 19.07%, 90.79% 21.17%, 92.25% 23.34%, 93.59% 25.59%, 94.80% 27.91%, 95.91% 30.27%, 96.86% 32.71%, 97.74% 35.18%, 98.40% 37.71%, 99.04% 40.25%, 99.42% 42.83%, 99.78% 45.43%, 99.90% 48.04%, 99.97% 50.65%, 99.84% 53.27%, 99.62% 55.87%, 99.23% 58.46%, 98.72% 61.02%, 98.09% 63.56%, 97.30% 66.05%, 96.41% 68.52%, 95.35% 70.91%, 94.24% 73.27%, 92.92% 75.53%, 91.57% 77.78%, 90.01% 79.88%, 88.43% 81.96%, 86.67% 83.90%, 84.87% 85.80%, 82.93% 87.55%, 80.93% 89.24%, 78.83% 90.79%, 76.66% 92.25%, 74.41% 93.59%, 72.09% 94.80%, 69.73% 95.91%, 67.29% 96.86%, 64.82% 97.74%, 62.29% 98.40%, 59.75% 99.04%, 57.17% 99.42%, 54.57% 99.78%, 51.96% 99.90%, 49.35% 99.97%, 46.73% 99.84%, 44.13% 99.62%, 41.54% 99.23%, 38.98% 98.72%, 36.44% 98.09%, 33.95% 97.30%, 31.48% 96.41%, 29.09% 95.35%, 26.73% 94.24%, 24.47% 92.92%, 22.22% 91.57%, 20.12% 90.01%, 18.04% 88.43%, 16.10% 86.67%, 14.20% 84.87%, 12.45% 82.93%, 10.76% 80.93%, 9.21% 78.83%, 7.75% 76.66%, 6.41% 74.41%, 5.20% 72.09%, 4.09% 69.73%, 3.14% 67.29%, 2.26% 64.82%, 1.60% 62.29%, 0.96% 59.75%, 0.58% 57.17%, 0.22% 54.57%, 0.10% 51.96%, 0.03% 49.35%, 0.16% 46.73%, 0.38% 44.13%, 0.77% 41.54%, 1.28% 38.98%, 1.91% 36.44%, 2.70% 33.95%, 3.59% 31.48%, 4.65% 29.09%, 5.76% 26.73%, 7.08% 24.47%, 8.43% 22.22%, 9.99% 20.12%, 11.57% 18.04%, 13.33% 16.10%, 15.13% 14.20%, 17.07% 12.45%, 19.07% 10.76%, 21.17% 9.21%, 23.34% 7.75%, 25.59% 6.41%, 27.91% 5.20%, 30.27% 4.09%, 32.71% 3.14%, 35.18% 2.26%, 37.71% 1.60%, 40.25% 0.96%, 42.83% 0.58%, 45.43% 0.22%, 48.04% 0.10%);
   --shape-cookie4: polygon(50.58% 6.04%, 52.89% 5.87%, 55.27% 5.44%, 57.78% 4.71%, 60.50% 3.59%, 63.45% 2.31%, 66.58% 1.14%, 69.79% 0.40%, 73.03% 0.05%, 76.26% 0.09%, 79.41% 0.56%, 82.47% 1.41%, 85.39% 2.61%, 88.14% 4.14%, 90.68% 5.99%, 92.95% 8.16%, 94.96% 10.57%, 96.66% 13.21%, 98.05% 16.04%, 99.05% 19.05%, 99.69% 22.17%, 99.95% 25.37%, 99.83% 28.59%, 99.25% 31.83%, 98.26% 35.01%, 97.01% 38.06%, 95.79% 40.89%, 94.87% 43.49%, 94.30% 45.93%, 94.01% 48.27%, 93.96% 50.58%, 94.13% 52.89%, 94.56% 55.27%, 95.29% 57.78%, 96.41% 60.50%, 97.69% 63.45%, 98.86% 66.58%, 99.60% 69.79%, 99.95% 73.03%, 99.91% 76.26%, 99.44% 79.41%, 98.59% 82.47%, 97.39% 85.39%, 95.86% 88.14%, 94.01% 90.68%, 91.84% 92.95%, 89.43% 94.96%, 86.79% 96.66%, 83.96% 98.05%, 80.95% 99.05%, 77.83% 99.69%, 74.63% 99.95%, 71.41% 99.83%, 68.17% 99.25%, 64.99% 98.26%, 61.94% 97.01%, 59.11% 95.79%, 56.51% 94.87%, 54.07% 94.30%, 51.73% 94.01%, 49.42% 93.96%, 47.11% 94.13%, 44.73% 94.56%, 42.22% 95.29%, 39.50% 96.41%, 36.55% 97.69%, 33.42% 98.86%, 30.21% 99.60%, 26.97% 99.95%, 23.74% 99.91%, 20.59% 99.44%, 17.53% 98.59%, 14.61% 97.39%, 11.86% 95.86%, 9.32% 94.01%, 7.05% 91.84%, 5.04% 89.43%, 3.34% 86.79%, 1.95% 83.96%, 0.95% 80.95%, 0.31% 77.83%, 0.05% 74.63%, 0.17% 71.41%, 0.75% 68.17%, 1.74% 64.99%, 2.99% 61.94%, 4.21% 59.11%, 5.13% 56.51%, 5.70% 54.07%, 5.99% 51.73%, 6.04% 49.42%, 5.87% 47.11%, 5.44% 44.73%, 4.71% 42.22%, 3.59% 39.50%, 2.31% 36.55%, 1.14% 33.42%, 0.40% 30.21%, 0.05% 26.97%, 0.09% 23.74%, 0.56% 20.59%, 1.41% 17.53%, 2.61% 14.61%, 4.14% 11.86%, 5.99% 9.32%, 8.16% 7.05%, 10.57% 5.04%, 13.21% 3.34%, 16.04% 1.95%, 19.05% 0.95%, 22.17% 0.31%, 25.37% 0.05%, 28.59% 0.17%, 31.83% 0.75%, 35.01% 1.74%, 38.06% 2.99%, 40.89% 4.21%, 43.49% 5.13%, 45.93% 5.70%, 48.27% 5.99%);
@@ -628,12 +622,12 @@ code, .wcard.approval .body.cmd, .arow code, .report .rbody code { font-size: 14
 .shape-puffy-diamond { clip-path: var(--shape-puffy-diamond); }
 
 /* ===== final ===== */
-/* The final set: the expressive moments on top of the showcase and the shape library. Expressive by shape, weight, colour and motion, never by size: every box keeps its showcase size and type
-   scale. Emphasized type is the baseline role one weight step up. */
+/* The expressive moments on top of the showcase and the shape library: by shape, weight, colour and motion, never by size.
+   Every box keeps its showcase size and type scale; emphasized type is the baseline role one weight step up. */
 :root { --title-m-emph: 700 16px/24px var(--sans); }
 
-/* 1. Needs you, the hero: its own corner set (28 outer, 8 inner) against the routine groups, the asker's library shape
-   on the tile, emphasized titles. Header, rows and tiles stay the showcase size. */
+/* Needs you, the hero: its own corner set (28 outer, 8 inner) against the routine groups, the asker's shape on the tile.
+   Emphasized titles; header, rows and tiles stay the showcase size. */
 .tgrp.needs > * { border-radius: var(--shape-sm); }
 .tgrp.needs > :first-child { border-top-left-radius: var(--shape-xl); border-top-right-radius: var(--shape-xl); }
 .tgrp.needs > :last-child { border-bottom-left-radius: var(--shape-xl); border-bottom-right-radius: var(--shape-xl); }
@@ -645,8 +639,8 @@ code, .wcard.approval .body.cmd, .arow code, .report .rbody code { font-size: 14
 .agroup.ask > .agent:last-child { border-bottom-left-radius: var(--shape-xl); border-bottom-right-radius: var(--shape-xl); }
 .agroup.ask .agent .top b { font: var(--title-m-emph); color: var(--on-warn-container); }
 
-/* 2. The decision on an approval card: Allow leads with its icon; under the finger it takes 12 corners and widens while
-   Deny gives way. The buttons keep the showcase 52. */
+/* The decision on an approval card: Allow leads with its icon; under the finger it takes 12 corners and widens while Deny gives way.
+   The buttons keep the showcase 52. */
 .wcard.approval .foot .btn.filled { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
 .wcard.approval .foot .btn { transition: border-radius var(--spring-fast-ms) var(--spring-fast), flex-grow var(--spring-fast-ms) var(--spring-fast), background-color var(--effects-fast-ms) var(--effects-fast); }
 .wcard.approval .foot .btn.morph:active { border-radius: var(--shape-md); }
@@ -655,8 +649,8 @@ code, .wcard.approval .body.cmd, .arow code, .report .rbody code { font-size: 14
 .wcard.approval .foot:has(.tonal:active) .btn.tonal { flex-grow: 1.3; }
 .wcard.approval .foot:has(.tonal:active) .btn.filled { flex-grow: 1.1; }
 
-/* 6. Shikigami tiles: a library shape is the shikigami's identity, the tone its state. A working one morphs between its
-   shape and the soft burst and turns slowly (the morph is its activity indicator); finished ones stay circles. */
+/* Shikigami tiles: a library shape is the identity, the tone its state; finished ones stay circles.
+   A working one morphs between its shape and the soft burst and turns slowly: the morph is its activity indicator. */
 .tile.sh { border-radius: 0; clip-path: var(--me); }
 .tile.sh.work { background: var(--primary); color: var(--on-primary); animation: morph 2.4s var(--spring) infinite alternate, turn 9s linear infinite; }
 .tile.sh.work .loader { display: none; }
@@ -667,8 +661,8 @@ code, .wcard.approval .body.cmd, .arow code, .report .rbody code { font-size: 14
 @keyframes morph { from { clip-path: var(--me); } to { clip-path: var(--shape-soft-burst); } }
 @keyframes turn { to { rotate: 1turn; } }
 
-/* 7. All clear: in Needs you's place, one row at a needs row's height on the done tone (primary is for working): a very
-   sunny tile that settles in, an emphasized title and since when. */
+/* All clear: in Needs you's place, one row at a needs row's height on the done tone (primary is for working).
+   A very sunny tile that settles in, an emphasized title and since when. */
 .allclear { display: flex; align-items: center; gap: 16px; min-height: 68px; box-sizing: border-box; margin: 16px 0 0; padding: 12px 16px;
   border-radius: var(--shape-xl); background: var(--ok-container); color: var(--on-ok-container); }
 .allclear .shape { flex: none; width: 40px; height: 40px; display: grid; place-items: center; background: var(--ok); color: var(--ok-container);
@@ -678,8 +672,8 @@ code, .wcard.approval .body.cmd, .arow code, .report .rbody code { font-size: 14
 .allclear .txt span { font: 400 14px/20px var(--sans); }
 @keyframes arrive { from { scale: .4; } }
 
-/* 8. Press: shape first (a corner step down), then a small squish toward the finger, both on the fast spatial spring;
-   the nav pill widens inside its item. Nothing at rest changes size. */
+/* Press: shape first (a corner step down), then a small squish toward the finger, both on the fast spatial spring.
+   The nav pill widens inside its item; nothing at rest changes size. */
 .fab, .btn, .nav-item .ind, .chip { transition: border-radius var(--spring-fast-ms) var(--spring-fast), scale var(--spring-fast-ms) var(--spring-fast), flex-grow var(--spring-fast-ms) var(--spring-fast), width var(--spring-fast-ms) var(--spring-fast); }
 .fab:active { border-radius: var(--shape-md); scale: .92; }
 .btn:active { scale: .96 1; }
@@ -695,12 +689,12 @@ code, .wcard.approval .body.cmd, .arow code, .report .rbody code { font-size: 14
 /* A snackbar sits above the composer (util.js snackPlace); the thread makes room under it */
 body.snacked .thread { padding-bottom: 104px; }
 body.snacked .tasks { padding-bottom: 96px; }
-/* A paired phone's row keeps the sheet's 12 gap; the Tasks project row (tasks-after) shares the class name */
+/* A paired phone's row keeps the sheet's 12 gap; the Tasks project row shares the class name */
 .sheet .alist .prow { gap: 12px; }
 /* A button that is a link (Download the app) reads as a button */
 a.btn { text-decoration: none; }
-/* Tasks: a row with a shikigami opens its page; a ticked task of yours is a check on the done tone; the paused
-   projects open under their row */
+/* Tasks: a row with a shikigami opens its page, a ticked task of yours is a check on the done tone.
+   The paused projects open under their row. */
 .tr.go { cursor: pointer; }
 .tt.you { padding: 0; border: 0; cursor: pointer; color: var(--ok); }
 .tt.you.done::before { display: none; }

@@ -25,8 +25,8 @@ export const toBottom = () => {
 export const following = () => pinned;
 log.addEventListener('scroll', () => { pinned = nearBottom(); jumpState(); }, { passive: true });
 
-// Jump to latest: while the reader is scrolled up, a small button above the composer says how many
-// rows came in below; it goes to the newest unanswered card when that sits above the view, else to the end
+// Jump to latest: while the reader is scrolled up, a button above the composer counts the rows that came in below.
+// It goes to the newest unanswered card above the view, else to the end.
 let missed = 0;
 const jump = el('button', 'jump sl');
 jump.type = 'button';
@@ -247,7 +247,7 @@ export const loader = (cls = '') => {
 // The question glyph of the Agents and Tasks ask tiles
 const ASK = 'M4 5h16v11H9l-5 4zM10 9.2a2 2 0 1 1 2.6 1.9c-.4.2-.6.5-.6.9M12 13.6v.1';
 const CHEV = 'M9.5 6l6 6-6 6';
-// "opus" reads as the product name it is: "Opus · high"
+// The model as its product name ("opus" as "Opus"), then the effort
 const model = (ev) => [ev.model && cap(ev.model), ev.effort].filter(Boolean).join(' · ');
 const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
 const oneSentence = (t) => (t || '').trim().split(/(?<=[.!?])\s/)[0].replace(/\.$/, '');
@@ -309,8 +309,8 @@ function workerCard(ev) {
   return card;
 }
 
-// Long card bodies get "Show more", right under the text (above a question's buttons). Watched for as long as the
-// card lives: a card drawn on a hidden tab has no size yet, and a new text size can clip a body or free it.
+// Long card bodies get "Show more", right under the text (above a question's buttons).
+// Watched while the card lives: a card drawn on a hidden tab has no size yet, and a new text size can clip a body or free it.
 const clipWatch = new ResizeObserver((entries) => {
   for (const { target: body } of entries) {
     const card = body.parentElement;
@@ -450,7 +450,7 @@ function approvalCard(ev) {
   buttons.push(deny, ok);
   foot.append(left);
   if (perm) {
-    // The note goes to the agent with a deny, like the terminal's "tell Claude what to do differently".
+    // The note goes to the agent with a deny, like the note the agent's own terminal prompt takes.
     const pen = el('button', 'btn icon sl morph');
     pen.type = 'button';
     pen.title = question ? 'Write an answer' : 'Add a note';
@@ -619,8 +619,7 @@ function resets(t) {
 // A system line repeated within this many seconds counts up on the first one instead of showing again.
 const REPEAT = 900;
 
-// Events in lane "t" happened on their own (see crates/core/src/events.rs): they render in the trajectory, and the chat folds
-// each run of them into one line.
+// Events in lane "t" happened on their own (crates/core/src/events.rs): the trajectory renders them, the chat folds each run into one line.
 const inTraj = (ev) => ev.lane === 't';
 
 // Texts of the user's and seimei's messages by event id, for reply anchors and quotes.
@@ -644,8 +643,9 @@ function foldLabel(ev) {
   return '';
 }
 
-// What the user can answer: seimei's messages and the report, question and approval cards. Each gets a reply button
-// on hover; a long press replies on touch. Event id -> the composer's quote and the lane it shows in.
+// What the user can answer: seimei's messages and the report, question and approval cards.
+// Each gets a reply button on hover; a long press replies on touch.
+// Event id -> the composer's quote and the lane it shows in.
 const quotable = new Map();
 const VERB = { done: 'finished' };
 
@@ -675,8 +675,8 @@ function anchor(text, id, lane) {
   return b;
 }
 
-// Turns events into nodes. One instance appends live; a fresh one renders older pages for prepending. The chat
-// and the trajectory share the open question cards (asks), so a report in one settles a card in the other.
+// One instance appends live; a fresh one renders older pages for prepending.
+// The chat and the trajectory share the open question cards (asks), so a report in one settles a card in the other.
 export class Renderer {
   constructor(target, before = null, { lane = 'c', asks = new Map() } = {}) {
     this.target = target;
@@ -1311,8 +1311,7 @@ $('composer').addEventListener('drop', (e) => {
   addFiles([...(e.dataTransfer?.files || [])]);
 });
 
-// Tap a message to see when it was sent; tap a shikigami card to open it; tap a picture to zoom; tap a fold line or
-// an anchor to go to what it names.
+// A tap on a message shows when it was sent; on a shikigami card opens it; on a picture zooms; on a fold line or an anchor goes to what it names.
 function onTap(e) {
   if (press?.fired) return;
   const goto = e.target.closest('[data-goto]');
@@ -1366,8 +1365,7 @@ function pressEnd() {
 for (const box of [thread, traj]) {
   box.addEventListener('pointerdown', pressStart);
   box.addEventListener('pointermove', pressMove);
-  // The press fired from a timer, which mobile browsers do not count as a gesture: focus again on the lift, so the
-  // keyboard comes up.
+  // The press fired from a timer, which mobile browsers do not count as a gesture: focus again on the lift so the keyboard comes up.
   box.addEventListener('pointerup', () => { if (press?.fired) input.focus(); pressEnd(); });
   box.addEventListener('pointercancel', pressEnd);
   box.addEventListener('contextmenu', (e) => { if (press?.fired) e.preventDefault(); });

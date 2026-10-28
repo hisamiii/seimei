@@ -1,7 +1,7 @@
-// Themes: each is a token file in themes/ (contrib/themes.py builds them); the page sets its tokens as CSS
-// variables on <html>. Light or dark follows the system unless pinned. Material You builds an M3 scheme from a seed:
-// the one the phone app sends from its wallpaper (api/theme), else one picked here. theme-boot.js puts the last tokens
-// back before the first paint.
+// Themes: each is a token file in themes/ (contrib/themes.py builds them); the page sets its tokens as CSS variables on <html>.
+// Light or dark follows the system unless pinned.
+// Material You builds an M3 scheme from a seed: the phone app's wallpaper (api/theme), else one picked here.
+// theme-boot.js puts the last tokens back before the first paint.
 
 const KEY = 'seimei.theme', VARS = 'seimei.themeVars', SEED = 'seimei.themeSeed';
 export const THEMES = ['catppuccin', 'rose-pine', 'gruvbox', 'nord', 'material-you'];

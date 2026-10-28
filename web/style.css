@@ -831,8 +831,8 @@ mark { background: color-mix(in srgb, var(--primary) 30%, transparent); color: i
 .mopt small { display: block; color: var(--text-3); font-size: 13.5px; margin-top: 2px; line-height: 1.4; }
 .mopt svg { flex: none; margin-top: 1px; color: var(--text-2); }
 
-/* Navigation rail from medium width (600, M3 window classes) and in short landscape: the bottom bar moves to the left edge and
-   the chat pane and its composer read as one surface beside it. */
+/* Navigation rail from medium width (600, M3 window classes) and in short landscape: the bottom bar moves to the left edge.
+   The chat pane and its composer read as one surface beside it. */
 @media (min-width: 600px), (orientation: landscape) and (max-height: 520px) {
   body { grid-template-columns: 88px minmax(0, 1fr); }
   body > .bar, .ltabs, body > main { grid-column: 2; }

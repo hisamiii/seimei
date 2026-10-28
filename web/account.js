@@ -1,5 +1,4 @@
-// The account menu: fingerprint login, the phone app and its pairing, this browser's notifications, the theme, the
-// activity log, and logging out.
+// The account menu: fingerprint login, the phone app and its pairing, this browser's notifications, the theme, the activity log, and logging out.
 import { deviceName, register, supported } from './passkey.js';
 import { $, el, clock, dayLabel, when, post, getJSON, toLogin, snack, ask } from './util.js';
 import { main, toBottom } from './chat.js';

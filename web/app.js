@@ -14,8 +14,7 @@ let raw = [];
 const KEEP_CHAT = 300;
 // A kept chat further behind than this is fetched anew instead of replayed through the stream.
 const REPLAY_MAX = 1000;
-// An older copy is not drawn at all: a night brings about a thousand events, and drawing a copy only to reload the
-// page would flash.
+// An older copy is not drawn: a night brings about a thousand events, and drawing a copy only to reload it would flash.
 const KEPT_FOR = 4 * 3600e3;
 const saveChat = () => keep.later('chat', () => ({ events: raw.slice(-KEEP_CHAT), at: Date.now() }));
 
@@ -50,8 +49,8 @@ function show(tab) {
   lift();
 }
 
-// The top bar fills with surface-container once its screen has moved off its rest: the chat off its end, Agents,
-// Usage and Tasks off their top (M3 app bars on scroll)
+// The top bar fills with surface-container once its screen has moved off its rest (M3 app bars on scroll).
+// The chat rests at its end; Agents, Usage and Tasks at their top.
 function lift() {
   const sc = pages[S.tab];
   const off = S.tab === 'chat' && S.lane !== 'k' ? !nearBottom() : sc.scrollTop > 0;
@@ -209,8 +208,7 @@ function connect() {
   };
   source.onerror = () => {
     lost();
-    // The browser retries on its own unless the server refused the request outright,
-    // and EventSource cannot see why, so ask whether the session is still valid.
+    // The browser retries unless the server refused outright, and EventSource cannot see why: ask whether the session is still valid.
     if (source.readyState === EventSource.CLOSED) {
       fetch('api/auth/me')
         .then((r) => (r.status === 401 ? location.reload() : setTimeout(connect, 10000)))
