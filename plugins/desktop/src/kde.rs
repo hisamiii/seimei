@@ -527,10 +527,6 @@ impl Backend for Kde {
             .collect())
     }
 
-    fn queries(&self) -> &'static [&'static str] {
-        &QUERIES
-    }
-
     fn query(&self, what: &str) -> Result<String, String> {
         let data = match what {
             "windows" => Value::Array(self.windows()?),
@@ -641,9 +637,8 @@ impl Backend for Kde {
         let (vdm, _) = c.bind("org_kde_plasma_virtual_desktop_management", 2)?;
         c.sync(|_, _, _| {})?;
         emit("up", Value::Null);
-        let (mut wins, mut spaces) = (self.windows()?, self.workspaces()?);
+        let mut wins = self.windows()?;
         emit("windows", Value::Array(wins.clone()));
-        emit("workspaces", Value::Array(spaces.clone()));
         c.wait_forever();
         // Window objects of this connection, so their changes (focus, title, desktop) arrive here too.
         let follow = |c: &mut Conn, uuid: &str| -> Result<(), String> {
@@ -673,14 +668,10 @@ impl Backend for Kde {
                 }
                 next = c.event_within(Duration::from_millis(50))?;
             }
-            let (now_wins, now_spaces) = (self.windows()?, self.workspaces()?);
-            if now_wins != wins {
-                wins = now_wins;
+            let now = self.windows()?;
+            if now != wins {
+                wins = now;
                 emit("windows", Value::Array(wins.clone()));
-            }
-            if now_spaces != spaces {
-                spaces = now_spaces;
-                emit("workspaces", Value::Array(spaces.clone()));
             }
         }
     }

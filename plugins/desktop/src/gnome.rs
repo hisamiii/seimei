@@ -193,10 +193,6 @@ impl Backend for Gnome {
         Ok(o.as_object().map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect()).unwrap_or_default())
     }
 
-    fn queries(&self) -> &'static [&'static str] {
-        &QUERIES
-    }
-
     fn query(&self, what: &str) -> Result<String, String> {
         let data = match what {
             "windows" => Value::Array(self.windows()?),
@@ -243,20 +239,15 @@ impl Backend for Gnome {
 
     /// The extension sends no signals: look every second and say what changed.
     fn events(&self, emit: Emit) -> Result<(), String> {
-        let (mut wins, mut spaces) = (self.windows()?, self.workspaces()?);
+        let mut wins = self.windows()?;
         emit("up", Value::Null);
         emit("windows", Value::Array(wins.clone()));
-        emit("workspaces", Value::Array(spaces.clone()));
         loop {
             std::thread::sleep(Duration::from_secs(1));
-            let (w, s) = (self.windows()?, self.workspaces()?);
+            let w = self.windows()?;
             if w != wins {
                 wins = w;
                 emit("windows", Value::Array(wins.clone()));
-            }
-            if s != spaces {
-                spaces = s;
-                emit("workspaces", Value::Array(spaces.clone()));
             }
         }
     }

@@ -64,10 +64,6 @@ impl<'a> Args<'a> {
         self.uint() as i32
     }
 
-    pub fn fixed(&mut self) -> f64 {
-        self.int() as f64 / 256.0
-    }
-
     pub fn bytes(&mut self) -> &'a [u8] {
         let n = self.uint() as usize;
         let v = self.b.get(self.at..self.at + n).unwrap_or(&[]);

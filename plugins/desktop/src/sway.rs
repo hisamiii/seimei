@@ -24,9 +24,7 @@ const GET_OUTPUTS: u32 = 3;
 const GET_TREE: u32 = 4;
 const GET_VERSION: u32 = 7;
 const GET_INPUTS: u32 = 100;
-const EVENT_WORKSPACE: u32 = 0x80000000;
 const EVENT_WINDOW: u32 = 0x80000003;
-const EVENT_INPUT: u32 = 0x80000015;
 const QUERIES: [&str; 6] = ["windows", "workspaces", "outputs", "inputs", "tree", "version"];
 static CON_ID: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"\[\s*con_id\s*=\s*"?(\d+)"?\s*\]"#).unwrap());
 
@@ -257,10 +255,6 @@ impl Backend for Sway {
         }))
     }
 
-    fn queries(&self) -> &'static [&'static str] {
-        &QUERIES
-    }
-
     fn query(&self, what: &str) -> Result<String, String> {
         let data = match what {
             "windows" => Value::Array(self.windows()?),
@@ -344,22 +338,13 @@ impl Backend for Sway {
 
     fn events(&self, emit: Emit) -> Result<(), String> {
         let mut s = UnixStream::connect(self.sock()?).map_err(|e| e.to_string())?;
-        send(&mut s, SUBSCRIBE, br#"["window", "workspace", "input"]"#)?;
+        send(&mut s, SUBSCRIBE, br#"["window"]"#)?;
         recv(&mut s)?;
         emit("up", Value::Null);
         emit("windows", Value::Array(self.windows()?));
-        emit("workspaces", Value::Array(self.workspaces()?));
         loop {
-            let (kind, body) = recv(&mut s)?;
-            if kind == EVENT_WINDOW {
+            if recv(&mut s)?.0 == EVENT_WINDOW {
                 emit("windows", Value::Array(self.windows()?));
-            } else if kind == EVENT_WORKSPACE {
-                emit("workspaces", Value::Array(self.workspaces()?));
-            } else if kind == EVENT_INPUT
-                && body["change"] == "xkb_layout"
-                && let Some(lay) = self.layouts()?
-            {
-                emit("layouts", lay);
             }
         }
     }

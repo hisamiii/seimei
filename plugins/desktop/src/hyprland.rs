@@ -27,19 +27,6 @@ const WINDOW_EVENTS: [&str; 8] = [
     "changefloatingmode",
     "activewindowv2",
 ];
-const WORKSPACE_EVENTS: [&str; 11] = [
-    "workspace",
-    "workspacev2",
-    "createworkspace",
-    "createworkspacev2",
-    "destroyworkspace",
-    "destroyworkspacev2",
-    "renameworkspace",
-    "focusedmon",
-    "focusedmonv2",
-    "moveworkspace",
-    "moveworkspacev2",
-];
 static ADDRESS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"address:(0x[0-9a-fA-F]+)").unwrap());
 
 pub struct Hyprland {
@@ -210,10 +197,6 @@ impl Backend for Hyprland {
         Ok(out)
     }
 
-    fn queries(&self) -> &'static [&'static str] {
-        &QUERIES
-    }
-
     fn query(&self, what: &str) -> Result<String, String> {
         if !QUERIES.contains(&what) {
             return Err(format!("what is one of {}", QUERIES.join(", ")));
@@ -276,29 +259,25 @@ impl Backend for Hyprland {
         let s = UnixStream::connect(self.dir()?.join(".socket2.sock")).map_err(|e| e.to_string())?;
         emit("up", Value::Null);
         emit("windows", Value::Array(self.windows()?));
-        emit("workspaces", Value::Array(self.workspaces()?));
-        let hex = |d: &str| id(d);
         for line in BufReader::new(s).lines() {
             let line = line.map_err(|e| e.to_string())?;
             let (kind, data) = line.split_once(">>").unwrap_or((&line, ""));
             if kind == "urgent" {
-                let wid = hex(data);
+                let wid = id(data);
                 self.urgent.lock().unwrap().insert(wid);
                 emit("urgent", json!([wid, true]));
             } else if WINDOW_EVENTS.contains(&kind) {
                 if kind == "activewindowv2" && !data.is_empty() && data != "," {
                     // Looking at a window clears its urgency.
-                    let wid = hex(data);
+                    let wid = id(data);
                     if self.urgent.lock().unwrap().remove(&wid) {
                         emit("urgent", json!([wid, false]));
                     }
                 }
                 if kind == "closewindow" {
-                    self.urgent.lock().unwrap().remove(&hex(data));
+                    self.urgent.lock().unwrap().remove(&id(data));
                 }
                 emit("windows", Value::Array(self.windows()?));
-            } else if WORKSPACE_EVENTS.contains(&kind) {
-                emit("workspaces", Value::Array(self.workspaces()?));
             }
         }
         Ok(())

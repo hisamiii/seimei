@@ -216,10 +216,6 @@ impl Backend for Niri {
         Ok(Some(self.ipc("KeyboardLayouts")?).filter(|v| !v.is_null()))
     }
 
-    fn queries(&self) -> &'static [&'static str] {
-        &QUERIES
-    }
-
     fn query(&self, what: &str) -> Result<String, String> {
         if !QUERIES.contains(&what) {
             return Err(format!("what is one of {}", QUERIES.join(", ")));
@@ -325,9 +321,6 @@ impl Backend for Niri {
                 "WindowOpenedOrChanged" => emit("opened", window(body["window"].clone())),
                 "WindowClosed" => emit("closed", body["id"].clone()),
                 "WindowUrgencyChanged" => emit("urgent", json!([body["id"], body["urgent"]])),
-                "WorkspacesChanged" => emit("workspaces", body["workspaces"].clone()),
-                "KeyboardLayoutsChanged" => emit("layouts", body["keyboard_layouts"].clone()),
-                "KeyboardLayoutSwitched" => emit("layout_idx", body["idx"].clone()),
                 _ => {}
             }
         }

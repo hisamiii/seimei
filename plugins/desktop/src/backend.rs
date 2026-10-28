@@ -62,7 +62,7 @@ pub type Env = Vec<(String, String)>;
 /// Windows seimei opened: closing them needs no card.
 pub type Ours = HashSet<i64>;
 /// What the event stream sends: ("windows", [window]), ("opened", window), ("closed", id), ("urgent", [id, bool]),
-/// ("workspaces", [workspace]), ("layouts", layouts), ("layout_idx", n), and ("up", null) once it is connected.
+/// and ("up", null) once it is connected.
 pub type Emit<'a> = &'a mut dyn FnMut(&str, Value);
 
 /// A window manager's names, for the prompt, errors and cards.
@@ -126,7 +126,6 @@ pub trait Backend: Send + Sync {
             env.iter().find(|(k, _)| k == "WAYLAND_DISPLAY").map(|(_, v)| v.as_str()).ok_or("no Wayland display")?;
         vinput::run(&socket_path(&self.ctx().run, wl), ops)
     }
-    fn queries(&self) -> &'static [&'static str];
     /// Read-only state as compact JSON.
     fn query(&self, what: &str) -> Result<String, String>;
 

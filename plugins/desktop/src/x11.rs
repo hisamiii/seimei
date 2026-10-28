@@ -205,10 +205,6 @@ impl Backend for X11 {
         Ok(vec![("screen".into(), json!({"x": 0, "y": 0, "width": w, "height": h, "scale": 1}))])
     }
 
-    fn queries(&self) -> &'static [&'static str] {
-        &QUERIES
-    }
-
     fn query(&self, what: &str) -> Result<String, String> {
         let data = match what {
             "windows" => Value::Array(self.windows()?),
@@ -346,12 +342,10 @@ impl Backend for X11 {
         let result = (|| {
             emit("up", Value::Null);
             emit("windows", Value::Array(self.windows()?));
-            emit("workspaces", Value::Array(self.workspaces()?));
             while rx.recv().is_ok() {
                 // A change often comes as several lines at once: take them together.
                 while rx.recv_timeout(Duration::from_millis(50)).is_ok() {}
                 emit("windows", Value::Array(self.windows()?));
-                emit("workspaces", Value::Array(self.workspaces()?));
             }
             Ok(())
         })();
