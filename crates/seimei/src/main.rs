@@ -408,6 +408,7 @@ fn main() {
     };
     let app = Arc::new(seimei_server::App::new(setup).unwrap_or_else(|e| die(&format!("workers: {e}"))));
     let _ = app.pool.agents.set(seimei_core::workers::agents_from(cfg.agents.as_ref()));
+    let _ = app.pool.deny_paths.set(seimei_core::permissions::deny_paths(&cfg.approvals));
     wire(&app);
 
     rt.block_on(async move {

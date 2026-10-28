@@ -490,6 +490,7 @@ impl Worker {
             effort: r.effort.clone().filter(|e| !e.is_empty()),
             extra_args: vec![("name".into(), Some(format!("shikigami {}", r.name)))],
             hooks: harness::hooks(&["done", "nudge", "style"]),
+            settings: Some(harness::settings(&self.pool().denied(), None)),
             resume,
             session_id,
             ..Options::default()
@@ -1478,6 +1479,8 @@ pub struct Pool {
     pub plugins: Arc<Plugins>,
     /// The ACP agents a shikigami can run on (config [agents]), set once at startup.
     pub agents: OnceLock<BTreeMap<String, Agent>>,
+    /// The paths no agent may read or edit (config [approvals] deny_paths), set once at startup.
+    pub deny_paths: OnceLock<Vec<String>>,
     batch: Mutex<Batch>,
     flushing: AtomicBool,
     hidden: Mutex<HashSet<String>>,
@@ -1526,6 +1529,7 @@ impl Pool {
                 terminal: parts.terminal,
                 plugins: parts.plugins,
                 agents: OnceLock::new(),
+                deny_paths: OnceLock::new(),
                 batch: Mutex::new(vec![]),
                 flushing: AtomicBool::new(false),
                 hidden: Mutex::new(HashSet::new()),
@@ -1535,6 +1539,11 @@ impl Pool {
         let me = Arc::downgrade(&pool);
         let _ = pool.plugins.own.set(Box::new(move |id, tool, args| Some(me.upgrade()?.get(id)?.call(tool, args))));
         Ok(pool)
+    }
+
+    /// The paths no agent may read or edit: config's, or seimei's own secrets when it was not read.
+    pub fn denied(&self) -> Vec<String> {
+        self.deny_paths.get().cloned().unwrap_or_else(|| crate::permissions::deny_paths(&toml::Table::new()))
     }
 
     /// Every worker, in workers.json's order.

@@ -158,7 +158,10 @@ impl App {
         let audit = Arc::new(Audit::new(state));
         let old = seimei_core::util::config_home().join("seimei/guard.toml");
         if old.exists() {
-            eprintln!("seimei: {} is no longer read: seimei has no guard any more", old.display());
+            eprintln!(
+                "seimei: {} is no longer read; config [approvals] deny_paths keeps paths from the agents",
+                old.display()
+            );
         }
         let parts = workers::Parts {
             events: events.clone(),

@@ -16,10 +16,10 @@ const USER_LAST: usize = 5;
 const USER_MAX: usize = 6000;
 const USER_ONE: usize = 2000;
 
-/// The dispatcher's own settings: a compaction hook that prints the checklist, which no shikigami and none of the user's sessions get.
-pub fn settings(path: &Path) -> String {
+/// The dispatcher's own settings: the deny rules, and a compaction hook that prints the checklist, which no shikigami and none of the user's sessions get.
+pub fn settings(path: &Path, deny: &[String]) -> String {
     let _ = std::fs::write(path, CHECKLIST);
-    crate::workers::harness::compact_settings(path)
+    crate::workers::harness::settings(deny, Some(path))
 }
 
 fn clip(text: &str, n: usize, more: &str) -> String {

@@ -603,7 +603,7 @@ impl Dispatcher {
             mcp_config_file: Some(plugins.config_file("seimei")),
             hooks: harness::hooks(&["style"]),
             // Only the dispatcher's compactions get the checklist.
-            settings: Some(crate::recall::settings(&checklist)),
+            settings: Some(crate::recall::settings(&checklist, &self.tools.pool.denied())),
             // A fixed name is a fixed address: peers reply to "seimei" across restarts.
             extra_args: vec![("name".into(), Some(self.cfg.name.clone()))],
             resume,

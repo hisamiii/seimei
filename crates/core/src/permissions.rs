@@ -63,6 +63,29 @@ pub fn configured(cfg: &toml::Table, key: &str) -> String {
     }
 }
 
+/// seimei's own secrets in its data folder, and in the dev server's: what [approvals] deny_paths holds by default.
+const SECRETS: [&str; 6] = ["auth.json", "unlock", "push-vapid.pem", "kitty-rc.conf", "signing/", "firebase/"];
+
+/// The paths no agent of seimei's may read or edit, from [approvals] deny_paths: absolute or under `~`, a folder with a trailing `/`.
+pub fn deny_paths(cfg: &toml::Table) -> Vec<String> {
+    let Some(v) = cfg.get("deny_paths") else {
+        let data = crate::util::data_dir();
+        let dirs = [data.clone(), data.join("dev")];
+        return dirs.iter().flat_map(|d| SECRETS.map(|s| format!("{}/{s}", d.display()))).collect();
+    };
+    let mut out = vec![];
+    for p in v.as_array().into_iter().flatten() {
+        match p.as_str().map(crate::paths::expand) {
+            Some(p) if p.starts_with('/') => out.push(p),
+            _ => eprintln!("WARNING seimei.permissions: [approvals] deny_paths: {p} is not an absolute path; left out"),
+        }
+    }
+    if !v.is_array() {
+        eprintln!("WARNING seimei.permissions: [approvals] deny_paths is not a list; no paths are denied");
+    }
+    out
+}
+
 /// Whether `mode` lets through no more than `ceiling`; unknown modes are never within.
 pub fn within(mode: &str, ceiling: &str) -> bool {
     rank(mode).is_some_and(|r| r <= rank(ceiling).unwrap_or(1))
@@ -358,4 +381,20 @@ async fn ask(approvals: &Approvals, who: &str, input: &Value) -> Decided {
     let mut updated = input.clone();
     updated["answers"] = Value::Object(answers);
     Decided { permission: Permission::Allow { updated_input: Some(updated), updated_permissions: None }, mode: None }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deny_paths_default_to_seimeis_secrets() {
+        let data = crate::util::data_dir().display().to_string();
+        let got = deny_paths(&toml::Table::new());
+        assert_eq!(got.len(), 12);
+        assert!(got.contains(&format!("{data}/auth.json")) && got.contains(&format!("{data}/dev/signing/")), "{got:?}");
+        let cfg: toml::Table = "deny_paths = [\"~/.ssh/\", \"/etc/key\", \"rel/x\"]".parse().unwrap();
+        let home = crate::paths::home().display().to_string();
+        assert_eq!(deny_paths(&cfg), [format!("{home}/.ssh/"), "/etc/key".to_string()]);
+    }
 }

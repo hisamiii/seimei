@@ -298,11 +298,25 @@ pub fn hooks(after: &[&str]) -> Vec<(String, Vec<HookMatcher>)> {
     ]
 }
 
-/// A --settings layer whose PreCompact command hook prints the file; the CLI appends that to the compactor's instructions.
+/// Read and Edit deny rules for paths: `//` starts an absolute path, and `**` takes in a folder's content.
+pub fn deny_rules(paths: &[String]) -> Vec<String> {
+    let mut out = vec![];
+    for p in paths {
+        let p = p.strip_suffix('/').map_or_else(|| p.clone(), |dir| format!("{dir}/**"));
+        out.extend(["Read", "Edit"].map(|tool| format!("{tool}(/{p})")));
+    }
+    out
+}
+
+/// A --settings layer: deny rules for paths, and with `compact` a PreCompact command hook that prints that file (the CLI appends it to the compactor's instructions).
 /// Only the session started with it gets it: ~/.claude stays as it is.
-pub fn compact_settings(path: &Path) -> String {
-    let quoted = shlex::try_quote(&path.display().to_string()).map(|q| q.into_owned()).unwrap_or_default();
-    json!({"hooks": {"PreCompact": [{"hooks": [{"type": "command", "command": format!("cat {quoted}")}]}]}}).to_string()
+pub fn settings(deny: &[String], compact: Option<&Path>) -> String {
+    let mut s = json!({"permissions": {"deny": deny_rules(deny)}});
+    if let Some(path) = compact {
+        let quoted = shlex::try_quote(&path.display().to_string()).map(|q| q.into_owned()).unwrap_or_default();
+        s["hooks"] = json!({"PreCompact": [{"hooks": [{"type": "command", "command": format!("cat {quoted}")}]}]});
+    }
+    s.to_string()
 }
 
 /// A hook's answer that adds context for the model after a tool call.
@@ -321,6 +335,17 @@ mod tests {
         let quoted = "bash -c x shell-snapshots/s.sh; eval 'echo '\\''hi'\\''' < /dev/null";
         assert_eq!(job_command(quoted), "echo 'hi'");
         assert_eq!(job_command("python3 server.py"), "python3 server.py", "a plain command stays");
+    }
+
+    #[test]
+    fn denied_paths_become_read_and_edit_rules() {
+        let rules = deny_rules(&["/d/auth.json".into(), "/d/signing/".into()]);
+        assert_eq!(
+            rules,
+            ["Read(//d/auth.json)", "Edit(//d/auth.json)", "Read(//d/signing/**)", "Edit(//d/signing/**)"]
+        );
+        let s: Value = serde_json::from_str(&settings(&["/d/unlock".into()], None)).unwrap();
+        assert_eq!(s, json!({"permissions": {"deny": ["Read(//d/unlock)", "Edit(//d/unlock)"]}}));
     }
 
     #[test]
