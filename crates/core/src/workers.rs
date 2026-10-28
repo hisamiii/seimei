@@ -739,7 +739,7 @@ struct Session {
     pool: Arc<Pool>,
     client: Option<Client>,
     /// Its agent, for a shikigami on one (harness acp:<agent>) instead of Claude Code.
-    acp: Option<AgentConn>,
+    acp: Option<acp::Client>,
     /// An ACP turn runs; messages sent meanwhile wait in queued for the next one.
     turn: bool,
     queued: Vec<String>,
@@ -776,71 +776,7 @@ async fn next(client: &mut Option<Client>) -> Option<Message> {
     }
 }
 
-/// A shikigami's agent: one that speaks ACP, or `codex app-server`. Both say the same events.
-enum AgentConn {
-    Acp(acp::Client),
-    Codex(codex::Client),
-}
-
-impl AgentConn {
-    async fn connect(protocol: &str, opts: acp::Options, handler: Arc<dyn acp::Handler>) -> Result<Self, acp::Error> {
-        Ok(match protocol {
-            "codex" => AgentConn::Codex(codex::Client::connect(opts, handler).await?),
-            _ => AgentConn::Acp(acp::Client::connect(opts, handler).await?),
-        })
-    }
-
-    async fn recv(&mut self) -> Option<acp::Event> {
-        match self {
-            AgentConn::Acp(c) => c.recv().await,
-            AgentConn::Codex(c) => c.recv().await,
-        }
-    }
-
-    fn drain(&mut self) {
-        match self {
-            AgentConn::Acp(c) => c.drain(),
-            AgentConn::Codex(c) => c.drain(),
-        }
-    }
-
-    fn pid(&self) -> Option<u32> {
-        match self {
-            AgentConn::Acp(c) => c.pid(),
-            AgentConn::Codex(c) => c.pid(),
-        }
-    }
-
-    fn session_id(&self) -> &str {
-        match self {
-            AgentConn::Acp(c) => &c.session_id,
-            AgentConn::Codex(c) => &c.session_id,
-        }
-    }
-
-    fn prompt_text(&self, text: &str) -> Result<(), acp::Error> {
-        match self {
-            AgentConn::Acp(c) => c.prompt_text(text),
-            AgentConn::Codex(c) => c.prompt_text(text),
-        }
-    }
-
-    fn cancel(&self) -> Result<(), acp::Error> {
-        match self {
-            AgentConn::Acp(c) => c.cancel(),
-            AgentConn::Codex(c) => c.cancel(),
-        }
-    }
-
-    async fn close(&mut self) {
-        match self {
-            AgentConn::Acp(c) => c.close().await,
-            AgentConn::Codex(c) => c.close().await,
-        };
-    }
-}
-
-async fn next_acp(client: &mut Option<AgentConn>) -> Option<acp::Event> {
+async fn next_acp(client: &mut Option<acp::Client>) -> Option<acp::Event> {
     match client {
         Some(c) => c.recv().await,
         None => std::future::pending().await,
@@ -1342,12 +1278,16 @@ impl Session {
             load: started.then(|| as_text(&r["session_id"])),
         };
         let handler: Arc<dyn acp::Handler> = Arc::new(AcpSide { w: self.w.clone() });
-        let mut c = AgentConn::connect(&a.protocol, opts, handler).await.map_err(|e| format!("{agent}: {e}"))?;
+        let c = match a.protocol.as_str() {
+            "codex" => codex::connect(opts, handler).await,
+            _ => acp::Client::connect(opts, handler).await,
+        };
+        let mut c = c.map_err(|e| format!("{agent}: {e}"))?;
         // Its log has the history a loaded session replays.
         c.drain();
         self.pool.plugins.root(&name, Some(&self.w.id), c.pid());
         if !started {
-            let sid = c.session_id().to_string();
+            let sid = c.session_id.clone();
             self.w.edit(|r| {
                 r.insert("session_id".into(), json!(sid));
                 r.insert("started".into(), json!(true));

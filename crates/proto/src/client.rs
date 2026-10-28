@@ -4,27 +4,25 @@ use std::collections::HashMap;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
-use std::process::{ExitStatus, Stdio};
+use std::process::ExitStatus;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::{ChildStdout, Command};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::AbortHandle;
-use tokio_util::sync::CancellationToken;
 
 use crate::message::{Message, short};
 use crate::options::Options;
+use crate::proc::Proc;
 
 pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 
 /// How long a control request waits for its answer.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
-/// After stdin closes, Claude Code gets this long to flush its transcript before SIGTERM, and again before SIGKILL.
-const GRACE: Duration = Duration::from_secs(5);
 
 #[derive(Debug)]
 pub enum Error {
@@ -149,10 +147,7 @@ pub struct Client {
     pending: Pending,
     next: AtomicU64,
     messages: mpsc::UnboundedReceiver<Message>,
-    /// Cancelled on close: the writer lets go of stdin, which tells Claude Code to finish.
-    stop: CancellationToken,
-    child: Option<Child>,
-    pid: Option<u32>,
+    proc: Proc,
     /// What `initialize` answered (commands, models, account, ...).
     pub init: Value,
 }
@@ -164,19 +159,12 @@ impl Client {
             write_private(path, &config).map_err(Error::Spawn)?;
         }
         let mut cmd = Command::new(opts.cli_path());
-        cmd.args(opts.argv())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .kill_on_drop(true)
-            // Its own process group: a stop reaches the tools it runs (Bash commands are its children).
-            .process_group(0);
+        cmd.args(opts.argv());
         // A parent session's variables go first, so the fixed ones below always hold.
         for k in &opts.env_remove {
             cmd.env_remove(k);
         }
-        cmd
-            .env_remove("CLAUDECODE")
+        cmd.env_remove("CLAUDECODE")
             // What the Python SDK sets: the session registers as an SDK session, as seimei's always have.
             .env("CLAUDE_CODE_ENTRYPOINT", "sdk-py");
         if let Some(cwd) = &opts.cwd {
@@ -188,25 +176,11 @@ impl Client {
         for (k, v) in &opts.env {
             cmd.env(k, v);
         }
-        let mut child = cmd.spawn().map_err(Error::Spawn)?;
-        let stdin = child.stdin.take().expect("piped stdin");
-        let stdout = child.stdout.take().expect("piped stdout");
-        let (out, out_rx) = mpsc::unbounded_channel();
+        let (proc, out, stdout) = Proc::spawn(&mut cmd).map_err(Error::Spawn)?;
         let (msg_tx, messages) = mpsc::unbounded_channel();
         let pending: Pending = Arc::default();
-        let stop = CancellationToken::new();
-        tokio::spawn(write(stdin, out_rx, stop.clone()));
         tokio::spawn(read(stdout, opts.max_line, handler, out.clone(), pending.clone(), msg_tx));
-        let mut client = Client {
-            out,
-            pending,
-            next: AtomicU64::new(0),
-            messages,
-            stop,
-            pid: child.id(),
-            child: Some(child),
-            init: Value::Null,
-        };
+        let mut client = Client { out, pending, next: AtomicU64::new(0), messages, proc, init: Value::Null };
         let mut req = json!({"subtype": "initialize", "hooks": opts.hooks_config()});
         if let Some(s) = &opts.skills {
             req["skills"] = json!(s);
@@ -223,7 +197,7 @@ impl Client {
 
     /// The process id from spawn time; None when it was gone before that.
     pub fn pid(&self) -> Option<u32> {
-        self.pid
+        self.proc.pid()
     }
 
     /// The next message; None once Claude Code has exited and everything it wrote was read.
@@ -285,66 +259,11 @@ impl Client {
         self.request(json!({"subtype": "get_context_usage"}), REQUEST_TIMEOUT).await
     }
 
-    /// Claude Code's own view of its MCP servers, as it answers.
-    pub async fn mcp_status(&self) -> Result<Value, Error> {
-        self.request(json!({"subtype": "mcp_status"}), REQUEST_TIMEOUT).await
-    }
-
-    /// Stop one background task (a subagent, a background shell).
-    pub async fn stop_task(&self, task_id: &str) -> Result<(), Error> {
-        self.request(json!({"subtype": "stop_task", "task_id": task_id}), REQUEST_TIMEOUT).await.map(|_| ())
-    }
-
     /// End the session: close stdin and give Claude Code time to write its transcript, then SIGTERM its process
     /// group, then SIGKILL. Returns how it exited.
     pub async fn close(&mut self) -> Option<ExitStatus> {
-        self.stop.cancel();
-        let mut child = self.child.take()?;
-        if let Ok(Ok(s)) = tokio::time::timeout(GRACE, child.wait()).await {
-            return Some(s);
-        }
-        self.signal(libc::SIGTERM);
-        if let Ok(Ok(s)) = tokio::time::timeout(GRACE, child.wait()).await {
-            return Some(s);
-        }
-        self.signal(libc::SIGKILL);
-        child.wait().await.ok()
+        self.proc.close().await
     }
-
-    fn signal(&self, sig: i32) {
-        if let Some(pid) = self.pid {
-            // SAFETY: killpg only sends a signal; the group is the child's own (process_group(0)).
-            unsafe {
-                libc::killpg(pid as i32, sig);
-            }
-        }
-    }
-}
-
-impl Drop for Client {
-    fn drop(&mut self) {
-        // kill_on_drop ends the child itself; its tools get the group's SIGKILL.
-        self.stop.cancel();
-        if self.child.is_some() {
-            self.signal(libc::SIGKILL);
-        }
-    }
-}
-
-pub(crate) async fn write(mut stdin: ChildStdin, mut rx: mpsc::UnboundedReceiver<String>, stop: CancellationToken) {
-    loop {
-        let line = tokio::select! {
-            _ = stop.cancelled() => break,
-            line = rx.recv() => match line { Some(l) => l, None => break },
-        };
-        if stdin.write_all(line.as_bytes()).await.is_err()
-            || stdin.write_all(b"\n").await.is_err()
-            || stdin.flush().await.is_err()
-        {
-            break;
-        }
-    }
-    // Dropping stdin is Claude Code's EOF.
 }
 
 pub(crate) enum Line {

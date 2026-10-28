@@ -148,8 +148,6 @@ class Fake:
             self.reply(rid)
         elif sub == "get_context_usage":
             self.reply(rid, {"totalTokens": self.usage["inputTokens"] + self.usage["outputTokens"]})
-        elif sub == "mcp_status":
-            self.reply(rid, {"mcpServers": [{"name": n, "status": "connected"} for n in sorted(self.sdk)]})
         else:
             self.reply(rid)
 

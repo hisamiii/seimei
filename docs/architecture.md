@@ -71,7 +71,7 @@ Production never runs from the working tree. `contrib/maintainer/deploy.sh [rev]
 
 ## Code map
 
-- `crates/proto`: talking to the agents. `client.rs` runs one Claude Code process over stream-json (`options.rs` is its command line, `message.rs` what it writes); `acp.rs` and `codex.rs` do the same for ACP agents and `codex app-server`.
+- `crates/proto`: talking to the agents. `client.rs` runs one Claude Code process over stream-json (`options.rs` is its command line, `message.rs` what it writes); `acp.rs` does the same for ACP agents, and `codex.rs` drives `codex app-server` through that same client; `proc.rs` owns the child process for all three.
 - `crates/core`, the sessions: `dispatcher.rs` (the permanent session, its prompt in `dispatcher.md`, routing of event turns), `workers.rs` (shikigami: summon, resume, hand-over), `tools.rs` (the dispatcher's MCP tools, schemas in `data/tools.json`), `sessions.rs`, `transcripts.rs`, `adopt.rs`, `kitty.rs` (the user's own sessions), `tasks.rs` (the board), `plan.rs`, `style.rs`, `recall.rs` (what survives a compaction).
 - `crates/core`, the checks: `guard.rs` (rules and the built-in denies, with `shell.rs` and `paths.rs` to read commands and paths), `permissions.rs` (Claude Code's prompts as cards), `approvals.rs` (cards waiting for the user).
 - `crates/core`, state and the user: `events.rs` (the log), `auth.rs`, `push.rs`, `files.rs` and `uploads.rs`, `usage.rs`, `cost.rs`, `metrics.rs`, `watches.rs`, `archive.rs`, `aliases.rs`, `wake.rs`, `deploys.rs`, `util.rs`.

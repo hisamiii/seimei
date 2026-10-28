@@ -185,7 +185,7 @@ async fn handshake_and_a_turn() {
     let o = options("turn");
     let mut c = Client::connect(o.clone(), Pick::new(None)).await.unwrap();
     assert_eq!(c.init["agentInfo"]["name"], "fake-acp");
-    assert_eq!(c.modes["currentModeId"], "ask");
+    assert_eq!(c.session["modes"]["currentModeId"], "ask");
     assert!(!c.session_id.is_empty());
     c.prompt_text("hello there").unwrap();
     assert_eq!(turn(&mut c).await, (vec![text("You said: hello there")], Ok("end_turn".into())));
