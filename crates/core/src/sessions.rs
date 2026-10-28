@@ -488,7 +488,8 @@ impl SessionEvents {
                 && st.ask.as_ref() != Some(t)
             {
                 let q = &ask["questions"][0];
-                let opts: Vec<String> = q["options"].as_array().into_iter().flatten().map(|o| as_text(&o["label"])).collect();
+                let opts: Vec<String> =
+                    q["options"].as_array().into_iter().flatten().map(|o| as_text(&o["label"])).collect();
                 let mut line = format!("{who} asks: {}", as_text(&q["question"]));
                 if !opts.is_empty() {
                     line += &format!(" Options: {}.", opts.join(" | "));

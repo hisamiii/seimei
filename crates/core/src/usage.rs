@@ -204,7 +204,9 @@ impl Usage {
             lines.push(format!("{} window: {used}% used, resets {resets}{stale}", name(key)));
         }
         match snap["updated"].as_f64() {
-            Some(t) => lines.push(format!("Last reading {} (readings come with session turns).", local_time(t, "%H:%M"))),
+            Some(t) => {
+                lines.push(format!("Last reading {} (readings come with session turns).", local_time(t, "%H:%M")))
+            }
             None => lines.push("No reading yet; one arrives with the next session start or limit change.".into()),
         }
         let mut sessions: Vec<(&String, &Value)> =

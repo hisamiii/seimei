@@ -191,7 +191,8 @@ impl Watches {
         let fill = |x: &Value| as_text(x).replace("{name}", name).replace("{detail}", &detail);
         for r in hits {
             let key = r["key"].as_str().filter(|k| !k.is_empty());
-            let n = self.push.ping(&fill(&r["title"]), &fill(&r["body"]), &as_text(&r["level"]), key, r["reply"] == true);
+            let n =
+                self.push.ping(&fill(&r["title"]), &fill(&r["body"]), &as_text(&r["level"]), key, r["reply"] == true);
             let repeat = crate::util::flag(&r["repeat"]);
             {
                 let mut rules = self.rules.lock().unwrap();
@@ -240,13 +241,19 @@ impl Watches {
             }
             Some("sessions") => {
                 for x in ev["list"].as_array().into_iter().flatten() {
-                    let sid = if crate::util::truthy(&x["session_id"]) { as_text(&x["session_id"]) } else { as_text(&x["pid"]) };
+                    let sid = if crate::util::truthy(&x["session_id"]) {
+                        as_text(&x["session_id"])
+                    } else {
+                        as_text(&x["pid"])
+                    };
                     let q = x["question"].as_str().unwrap_or("").to_string();
                     let status = as_text(&x["status"]);
                     let asks = if !q.is_empty() {
                         q
                     } else if status.starts_with("waiting") {
-                        Some(as_text(&x["waiting_text"])).filter(|t| !t.is_empty()).unwrap_or("Waiting on the server".into())
+                        Some(as_text(&x["waiting_text"]))
+                            .filter(|t| !t.is_empty())
+                            .unwrap_or("Waiting on the server".into())
                     } else {
                         String::new()
                     };
