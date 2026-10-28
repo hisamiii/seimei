@@ -9,8 +9,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use seimei_proto::BoxFuture;
-use seimei_proto::acp::{Error, Event, Handler, McpServer, Options, Outcome, PermissionRequest, PlanEntry, Update};
-use seimei_proto::codex::Client;
+use seimei_proto::acp::{
+    Client, Error, Event, Handler, McpServer, Options, Outcome, PermissionRequest, PlanEntry, Update,
+};
+use seimei_proto::codex;
 use serde_json::{Value, json};
 
 fn root() -> PathBuf {
@@ -100,9 +102,9 @@ fn last_text(ups: &[Update]) -> Value {
 #[tokio::test]
 async fn handshake_and_turns() {
     let o = options("turn");
-    let mut c = Client::connect(o.clone(), Pick::new(None)).await.unwrap();
+    let mut c = codex::connect(o.clone(), Pick::new(None)).await.unwrap();
     assert_eq!(c.init["userAgent"], "fake-codex/0.0.1");
-    assert_eq!(c.thread["approvalPolicy"], "untrusted");
+    assert_eq!(c.session["approvalPolicy"], "untrusted");
     assert!(!c.session_id.is_empty());
     c.prompt_text("hello there").unwrap();
     assert_eq!(turn(&mut c).await, (vec![text("You said: hello there")], vec![], Ok("end_turn".into())));
@@ -134,7 +136,7 @@ async fn handshake_and_turns() {
 async fn approvals_accepted_and_declined() {
     let o = options("perm");
     let pick = Pick::new(Some("allow_once"));
-    let mut c = Client::connect(o.clone(), pick.clone()).await.unwrap();
+    let mut c = codex::connect(o.clone(), pick.clone()).await.unwrap();
     c.prompt_text("!tool make test").unwrap();
     let (ups, unasked, end) = turn(&mut c).await;
     assert_eq!((unasked, end), (vec![], Ok("end_turn".into())));
@@ -160,7 +162,7 @@ async fn approvals_accepted_and_declined() {
     c.close().await;
 
     let pick = Pick::new(Some("reject_once"));
-    let mut c = Client::connect(o.clone(), pick.clone()).await.unwrap();
+    let mut c = codex::connect(o.clone(), pick.clone()).await.unwrap();
     c.prompt_text("!tool rm -rf build").unwrap();
     let (ups, _, end) = turn(&mut c).await;
     assert_eq!(end, Ok("end_turn".into()));
@@ -173,7 +175,7 @@ async fn approvals_accepted_and_declined() {
 async fn unasked_calls_and_interrupts() {
     let o = options("cancel");
     let pick = Pick::new(None);
-    let mut c = Client::connect(o.clone(), pick.clone()).await.unwrap();
+    let mut c = codex::connect(o.clone(), pick.clone()).await.unwrap();
     c.prompt_text("!unasked ls").unwrap();
     let (_, unasked, end) = turn(&mut c).await;
     assert_eq!((unasked, end), (vec!["ls".to_string()], Ok("end_turn".into())));
@@ -216,7 +218,7 @@ async fn mcp_servers_and_requests_turned_down() {
         args: vec!["plugin".into(), "shikigami".into()],
         env: vec![("SEIMEI_TOKEN".into(), "t".into())],
     }];
-    let mut c = Client::connect(o, Pick::new(Some("allow_once"))).await.unwrap();
+    let mut c = codex::connect(o, Pick::new(Some("allow_once"))).await.unwrap();
     c.prompt_text("!mcp").unwrap();
     let (ups, _, _) = turn(&mut c).await;
     let want = json!([{"name": "shikigami", "command": "/usr/bin/seimei", "args": ["plugin", "shikigami"],
@@ -233,27 +235,27 @@ async fn mcp_servers_and_requests_turned_down() {
 #[tokio::test]
 async fn resume_goes_on_with_a_thread() {
     let o = options("resume");
-    let mut c = Client::connect(o.clone(), Pick::new(None)).await.unwrap();
+    let mut c = codex::connect(o.clone(), Pick::new(None)).await.unwrap();
     let id = c.session_id.clone();
     c.close().await;
-    let mut c = Client::connect(Options { load: Some(id.clone()), ..o.clone() }, Pick::new(None)).await.unwrap();
+    let mut c = codex::connect(Options { load: Some(id.clone()), ..o.clone() }, Pick::new(None)).await.unwrap();
     assert_eq!(c.session_id, id);
     c.prompt_text("again").unwrap();
     assert_eq!(turn(&mut c).await.0, vec![text("You said: again")]);
     c.close().await;
-    let e = Client::connect(Options { load: Some("nope".into()), ..o }, Pick::new(None)).await.err().unwrap();
+    let e = codex::connect(Options { load: Some("nope".into()), ..o }, Pick::new(None)).await.err().unwrap();
     assert!(matches!(&e, Error::Refused(m) if m.contains("no rollout")), "{e}");
 }
 
 #[tokio::test]
 async fn a_server_that_dies_ends_its_turn() {
     let o = options("crash");
-    let mut c = Client::connect(o.clone(), Pick::new(None)).await.unwrap();
+    let mut c = codex::connect(o.clone(), Pick::new(None)).await.unwrap();
     c.prompt_text("!crash").unwrap();
     assert_eq!(turn(&mut c).await, (vec![text("Going down.")], vec![], Err("the agent exited".into())));
     assert_eq!(tokio::time::timeout(Duration::from_secs(5), c.recv()).await.unwrap(), None);
     assert!(c.close().await.is_some_and(|s| s.code() == Some(3)));
     let mut o = options("missing");
     o.cwd = o.cwd.join("not-here");
-    assert!(matches!(Client::connect(o, Pick::new(None)).await.err().unwrap(), Error::NoFolder(_)));
+    assert!(matches!(codex::connect(o, Pick::new(None)).await.err().unwrap(), Error::NoFolder(_)));
 }

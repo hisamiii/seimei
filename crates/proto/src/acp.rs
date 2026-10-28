@@ -19,6 +19,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::AbortHandle;
 
 use crate::client::{BoxFuture, Line, read_line};
+use crate::codex::Turn;
 use crate::proc::Proc;
 
 /// The protocol version this client speaks.
@@ -189,34 +190,61 @@ pub trait Handler: Send + Sync + 'static {
     }
 }
 
-enum Waiter {
+pub(crate) enum Waiter {
     Once(oneshot::Sender<Result<Value, String>>),
-    /// A prompt: its answer ends the turn in the event stream.
+    /// A prompt (ACP session/prompt, Codex turn/start): the reader ends or names the turn by its answer.
     Turn,
 }
 
-type Pending = Arc<Mutex<HashMap<u64, Waiter>>>;
-/// The agent's permission requests still open: their JSON-RPC id and task.
-type Inflight = Arc<Mutex<HashMap<String, (Value, AbortHandle)>>>;
-
-/// One ACP agent process over JSON-RPC on stdio. Dropping it kills the process.
-pub struct Client {
+/// The JSON-RPC side the client and its reader share.
+pub(crate) struct Rpc {
     out: mpsc::UnboundedSender<String>,
-    pending: Pending,
-    inflight: Inflight,
+    pub(crate) pending: Mutex<HashMap<u64, Waiter>>,
+    /// The agent's requests still open: their JSON-RPC id, task, and the answer a cancel gives.
+    pub(crate) inflight: Mutex<HashMap<String, (Value, AbortHandle, Value)>>,
     next: AtomicU64,
+}
+
+impl Rpc {
+    pub(crate) fn send(&self, msg: Value) -> Result<(), Error> {
+        self.out.send(msg.to_string()).map_err(|_| Error::Closed)
+    }
+
+    pub(crate) fn id(&self) -> u64 {
+        self.next.fetch_add(1, Ordering::Relaxed) + 1
+    }
+}
+
+/// One agent process over JSON-RPC on stdio: an ACP agent, or `codex app-server` from [`crate::codex::connect`].
+/// Dropping it kills the process.
+pub struct Client {
+    pub(crate) rpc: Arc<Rpc>,
     events: mpsc::UnboundedReceiver<Event>,
     proc: Proc,
+    /// The running turn of a Codex thread; None for an ACP agent.
+    pub(crate) codex: Option<Arc<Turn>>,
     pub session_id: String,
-    /// What `initialize` answered (agentCapabilities, agentInfo, authMethods).
+    /// What `initialize` answered (ACP: agentCapabilities, agentInfo, authMethods).
     pub init: Value,
-    /// The session's modes (currentModeId, availableModes), if the agent has any.
-    pub modes: Value,
+    /// What opening the session answered: ACP's modes (currentModeId, availableModes) if the agent has any, Codex's
+    /// thread settings without the thread (model, modelProvider, sandbox, ...).
+    pub session: Value,
 }
 
 impl Client {
     /// Start the agent, initialize it and open the session. A loaded session's history comes first from recv.
     pub async fn connect(opts: Options, handler: Arc<dyn Handler>) -> Result<Client, Error> {
+        let (mut c, stdout, events) = Client::start(&opts)?;
+        tokio::spawn(read(stdout, handler, c.rpc.clone(), events));
+        if let Err(e) = c.open(&opts).await {
+            c.close().await;
+            return Err(e);
+        }
+        Ok(c)
+    }
+
+    /// Start the agent's process in the session's folder; its reader gets its stdout and sends to the events.
+    pub(crate) fn start(opts: &Options) -> Result<(Client, ChildStdout, mpsc::UnboundedSender<Event>), Error> {
         if !opts.cwd.is_dir() {
             return Err(Error::NoFolder(opts.cwd.clone()));
         }
@@ -230,24 +258,17 @@ impl Client {
         }
         let (proc, out, stdout) = Proc::spawn(&mut cmd).map_err(Error::Spawn)?;
         let (ev_tx, events) = mpsc::unbounded_channel();
-        let (pending, inflight): (Pending, Inflight) = Default::default();
-        tokio::spawn(read(stdout, handler, out.clone(), pending.clone(), inflight.clone(), ev_tx));
-        let mut c = Client {
-            out,
-            pending,
-            inflight,
-            next: AtomicU64::new(0),
+        let rpc = Arc::new(Rpc { out, pending: Mutex::default(), inflight: Mutex::default(), next: AtomicU64::new(0) });
+        let c = Client {
+            rpc,
             events,
             proc,
+            codex: None,
             session_id: String::new(),
             init: Value::Null,
-            modes: Value::Null,
+            session: Value::Null,
         };
-        if let Err(e) = c.open(&opts).await {
-            c.close().await;
-            return Err(e);
-        }
-        Ok(c)
+        Ok((c, stdout, ev_tx))
     }
 
     async fn open(&mut self, opts: &Options) -> Result<(), Error> {
@@ -277,11 +298,11 @@ impl Client {
             }
             None => {
                 let r = self.request("session/new", params).await?;
-                self.session_id = r["sessionId"].as_str().unwrap_or("").to_string();
+                self.session_id = s(&r["sessionId"]);
                 r
             }
         };
-        self.modes = r["modes"].clone();
+        self.session = r;
         Ok(())
     }
 
@@ -300,44 +321,48 @@ impl Client {
         while self.events.try_recv().is_ok() {}
     }
 
-    /// Start a turn with these content blocks; its updates and then its TurnEnd come from recv.
-    pub fn prompt(&self, content: Vec<Value>) -> Result<(), Error> {
-        let n = self.id();
-        self.pending.lock().unwrap().insert(n, Waiter::Turn);
-        let params = json!({"sessionId": self.session_id, "prompt": content});
-        self.send(json!({"jsonrpc": "2.0", "id": n, "method": "session/prompt", "params": params})).inspect_err(|_| {
-            self.pending.lock().unwrap().remove(&n);
+    /// Start a turn; its updates and then its TurnEnd come from recv.
+    pub fn prompt_text(&self, text: &str) -> Result<(), Error> {
+        if let Some(turn) = &self.codex {
+            return turn.start(&self.rpc, &self.session_id, text);
+        }
+        let rpc = &self.rpc;
+        let n = rpc.id();
+        rpc.pending.lock().unwrap().insert(n, Waiter::Turn);
+        let params = json!({"sessionId": self.session_id, "prompt": [{"type": "text", "text": text}]});
+        rpc.send(json!({"jsonrpc": "2.0", "id": n, "method": "session/prompt", "params": params})).inspect_err(|_| {
+            rpc.pending.lock().unwrap().remove(&n);
         })
     }
 
-    pub fn prompt_text(&self, text: &str) -> Result<(), Error> {
-        self.prompt(vec![json!({"type": "text", "text": text})])
-    }
-
-    /// Stop the running turn: the agent ends it with stop reason cancelled. Open permission requests are answered
-    /// cancelled, as the protocol asks.
+    /// Stop the running turn: it ends with stop reason cancelled. Open permission requests are answered cancelled
+    /// first, as the protocol asks.
     pub fn cancel(&self) -> Result<(), Error> {
-        let open: Vec<(Value, AbortHandle)> = self.inflight.lock().unwrap().drain().map(|(_, v)| v).collect();
-        for (id, task) in open {
+        let open: Vec<_> = self.rpc.inflight.lock().unwrap().drain().map(|(_, v)| v).collect();
+        for (id, task, answer) in open {
             task.abort();
-            let _ = self.send(json!({"jsonrpc": "2.0", "id": id, "result": {"outcome": {"outcome": "cancelled"}}}));
+            let _ = self.rpc.send(json!({"jsonrpc": "2.0", "id": id, "result": answer}));
+        }
+        if let Some(turn) = &self.codex {
+            return turn.cancel(&self.rpc);
         }
         let params = json!({"sessionId": self.session_id});
-        self.send(json!({"jsonrpc": "2.0", "method": "session/cancel", "params": params}))
+        self.rpc.send(json!({"jsonrpc": "2.0", "method": "session/cancel", "params": params}))
     }
 
-    /// Switch the session to one of the modes it offered.
+    /// Switch an ACP session to one of the modes it offered.
     pub async fn set_mode(&self, mode: &str) -> Result<(), Error> {
         self.request("session/set_mode", json!({"sessionId": self.session_id, "modeId": mode})).await.map(|_| ())
     }
 
     /// A request to the agent; its result.
     pub async fn request(&self, method: &str, params: Value) -> Result<Value, Error> {
-        let n = self.id();
+        let rpc = &self.rpc;
+        let n = rpc.id();
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().unwrap().insert(n, Waiter::Once(tx));
-        if self.send(json!({"jsonrpc": "2.0", "id": n, "method": method, "params": params})).is_err() {
-            self.pending.lock().unwrap().remove(&n);
+        rpc.pending.lock().unwrap().insert(n, Waiter::Once(tx));
+        if rpc.send(json!({"jsonrpc": "2.0", "id": n, "method": method, "params": params})).is_err() {
+            rpc.pending.lock().unwrap().remove(&n);
             return Err(Error::Closed);
         }
         match tokio::time::timeout(REQUEST_TIMEOUT, rx).await {
@@ -345,18 +370,10 @@ impl Client {
             Ok(Ok(Err(e))) => Err(Error::Refused(e)),
             Ok(Err(_)) => Err(Error::Closed),
             Err(_) => {
-                self.pending.lock().unwrap().remove(&n);
+                rpc.pending.lock().unwrap().remove(&n);
                 Err(Error::Timeout(method.into()))
             }
         }
-    }
-
-    fn id(&self) -> u64 {
-        self.next.fetch_add(1, Ordering::Relaxed) + 1
-    }
-
-    fn send(&self, msg: Value) -> Result<(), Error> {
-        self.out.send(msg.to_string()).map_err(|_| Error::Closed)
     }
 
     /// End the session: close stdin, give the agent time to finish, then SIGTERM its process group, then SIGKILL.
@@ -432,14 +449,7 @@ pub(crate) fn error_text(e: &Value) -> String {
     }
 }
 
-async fn read(
-    stdout: ChildStdout,
-    handler: Arc<dyn Handler>,
-    out: mpsc::UnboundedSender<String>,
-    pending: Pending,
-    inflight: Inflight,
-    events: mpsc::UnboundedSender<Event>,
-) {
+async fn read(stdout: ChildStdout, handler: Arc<dyn Handler>, rpc: Arc<Rpc>, events: mpsc::UnboundedSender<Event>) {
     let mut r = BufReader::with_capacity(1 << 16, stdout);
     let mut buf = Vec::new();
     // The open tool calls as their updates left them: a permission request may name only the id.
@@ -484,14 +494,16 @@ async fn read(
                     (Some(_), None) => {}
                     (Some("session/request_permission"), Some(id)) => {
                         asked.insert(s(&v["params"]["toolCall"]["toolCallId"]));
-                        permission(id.clone(), &v["params"], &calls, &handler, &out, &inflight);
+                        permission(id.clone(), &v["params"], &calls, &handler, &rpc);
                     }
                     (Some(m), Some(id)) => {
                         let err = json!({"code": -32601, "message": format!("Method not found: {m}")});
-                        let _ = out.send(json!({"jsonrpc": "2.0", "id": id, "error": err}).to_string());
+                        let _ = rpc.send(json!({"jsonrpc": "2.0", "id": id, "error": err}));
                     }
                     (None, Some(id)) => {
-                        let Some(w) = id.as_u64().and_then(|n| pending.lock().unwrap().remove(&n)) else { continue };
+                        let Some(w) = id.as_u64().and_then(|n| rpc.pending.lock().unwrap().remove(&n)) else {
+                            continue;
+                        };
                         let res = match v.get("error").filter(|e| !e.is_null()) {
                             Some(e) => Err(error_text(e)),
                             None => Ok(v.get("result").cloned().unwrap_or(Value::Null)),
@@ -514,24 +526,17 @@ async fn read(
         }
     }
     // The agent is gone: a turn still running ends, requests fail (their senders drop).
-    let turns = pending.lock().unwrap().drain().filter(|(_, w)| matches!(w, Waiter::Turn)).count();
+    let turns = rpc.pending.lock().unwrap().drain().filter(|(_, w)| matches!(w, Waiter::Turn)).count();
     for _ in 0..turns {
         let _ = events.send(Event::TurnEnd(Err("the agent exited".into())));
     }
-    for (_, (_, task)) in inflight.lock().unwrap().drain() {
+    for (_, (_, task, _)) in rpc.inflight.lock().unwrap().drain() {
         task.abort();
     }
 }
 
 /// The agent asks to run a tool: the handler decides on a task of its own, which a cancel aborts (and answers).
-fn permission(
-    id: Value,
-    p: &Value,
-    calls: &HashMap<String, ToolCall>,
-    handler: &Arc<dyn Handler>,
-    out: &mpsc::UnboundedSender<String>,
-    inflight: &Inflight,
-) {
+fn permission(id: Value, p: &Value, calls: &HashMap<String, ToolCall>, handler: &Arc<dyn Handler>, rpc: &Arc<Rpc>) {
     let options = p["options"]
         .as_array()
         .into_iter()
@@ -544,19 +549,19 @@ fn permission(
     tool.id = asked.id;
     let req = PermissionRequest { tool, options };
     let key = id.to_string();
-    let (h, out2, open, id2, key2) = (handler.clone(), out.clone(), inflight.clone(), id.clone(), key.clone());
-    let mut slot = inflight.lock().unwrap();
+    let (h, rpc2, id2, key2) = (handler.clone(), rpc.clone(), id.clone(), key.clone());
+    let mut slot = rpc.inflight.lock().unwrap();
     let task = tokio::spawn(async move {
         let outcome = h.permission(req).await;
         // Answered here only if a cancel has not answered it already.
-        if open.lock().unwrap().remove(&key2).is_none() {
+        if rpc2.inflight.lock().unwrap().remove(&key2).is_none() {
             return;
         }
         let o = match outcome {
             Outcome::Selected(opt) => json!({"outcome": "selected", "optionId": opt}),
             Outcome::Cancelled => json!({"outcome": "cancelled"}),
         };
-        let _ = out2.send(json!({"jsonrpc": "2.0", "id": id2, "result": {"outcome": o}}).to_string());
+        let _ = rpc2.send(json!({"jsonrpc": "2.0", "id": id2, "result": {"outcome": o}}));
     });
-    slot.insert(key, (id, task.abort_handle()));
+    slot.insert(key, (id, task.abort_handle(), json!({"outcome": {"outcome": "cancelled"}})));
 }

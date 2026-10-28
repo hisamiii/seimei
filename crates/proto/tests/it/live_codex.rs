@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use seimei_proto::BoxFuture;
-use seimei_proto::acp::{Event, Handler, McpServer, Options, Outcome, PermissionRequest, Update};
-use seimei_proto::codex::Client;
+use seimei_proto::acp::{Client, Event, Handler, McpServer, Options, Outcome, PermissionRequest, Update};
+use seimei_proto::codex;
 
 const CODE: &str = "pong-5813";
 
@@ -59,7 +59,7 @@ async fn codex_live() {
         ..Options::default()
     };
     let asked = Arc::new(Decline::default());
-    let mut c = Client::connect(opts, asked.clone()).await.expect("codex app-server starts");
+    let mut c = codex::connect(opts, asked.clone()).await.expect("codex app-server starts");
     let mut fails = vec![];
     let mut check = |name: &str, ok: bool, detail: &dyn std::fmt::Debug| {
         println!("{} {name} {detail:?}", if ok { "PASS" } else { "FAIL" });

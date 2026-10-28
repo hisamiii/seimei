@@ -1,40 +1,28 @@
-//! A client for `codex app-server`: Codex's own JSON-RPC over stdio, driven the way [`crate::acp::Client`] drives an
-//! ACP agent, so a shikigami runs on either through the same [`Event`]s and [`Handler`].
+//! A client for `codex app-server`: Codex's own JSON-RPC over stdio, driven through the same [`Client`] as an ACP
+//! agent, so a shikigami runs on either through the same [`Event`]s and [`Handler`].
 //!
-//! [`Client::connect`] starts the server, sends `initialize` (then `initialized`) and opens a thread: `thread/start`,
-//! or `thread/resume` to go on with an earlier one (nothing is replayed). The thread's id is the session id. A prompt
+//! [`connect`] starts the server, sends `initialize` (then `initialized`) and opens a thread: `thread/start`, or
+//! `thread/resume` to go on with an earlier one (nothing is replayed). The thread's id is the session id. A prompt
 //! is `turn/start`; the turn's items come out as updates and `turn/completed` ends it. Codex asks before a command or
 //! a file change (approval policy untrusted); those requests go to the handler as permission requests with an accept
 //! and a decline option. The MCP servers seimei grants are added to the thread's config, approved: seimei granted
 //! them already.
 
 use std::collections::{HashMap, HashSet};
-use std::process::ExitStatus;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use serde_json::{Map, Value, json};
 use tokio::io::BufReader;
-use tokio::process::{ChildStdout, Command};
-use tokio::sync::{mpsc, oneshot};
-use tokio::task::AbortHandle;
+use tokio::process::ChildStdout;
+use tokio::sync::mpsc;
 
 use crate::acp::{
-    Error, Event, Handler, Options, Outcome, PermissionOption, PermissionRequest, PlanEntry, ToolCall, Update,
-    error_text,
+    Client, Error, Event, Handler, Options, Outcome, PermissionOption, PermissionRequest, PlanEntry, Rpc, ToolCall,
+    Update, Waiter, error_text,
 };
 use crate::client::{Line, read_line};
-use crate::proc::Proc;
 
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_LINE: usize = 16 << 20;
-
-enum Waiter {
-    Once(oneshot::Sender<Result<Value, String>>),
-    /// turn/start: its answer names the turn, or fails it.
-    Turn,
-}
 
 /// The turn that runs: its id once known, and a cancel that came before it was.
 #[derive(Default)]
@@ -44,197 +32,105 @@ struct TurnState {
     cancel: bool,
 }
 
-struct Shared {
-    out: mpsc::UnboundedSender<String>,
-    pending: Mutex<HashMap<u64, Waiter>>,
-    /// Codex's approval requests still open: their JSON-RPC id, task, and the answer a cancel gives.
-    inflight: Mutex<HashMap<String, (Value, AbortHandle, Value)>>,
-    turn: Mutex<TurnState>,
+/// The turns of a Codex thread, which the client and its reader share.
+#[derive(Default)]
+pub(crate) struct Turn {
+    state: Mutex<TurnState>,
     thread: Mutex<String>,
-    next: AtomicU64,
 }
 
-impl Shared {
-    fn send(&self, msg: Value) -> Result<(), Error> {
-        self.out.send(msg.to_string()).map_err(|_| Error::Closed)
-    }
-
-    fn id(&self) -> u64 {
-        self.next.fetch_add(1, Ordering::Relaxed) + 1
-    }
-
-    /// The running turn is known by now: a cancel that waited for its id goes out.
-    fn turn_known(&self, id: &str) {
-        let mut t = self.turn.lock().unwrap();
-        if !t.running || t.id.is_some() {
-            return;
-        }
-        t.id = Some(id.to_string());
-        if t.cancel {
-            let _ = self.interrupt(id);
-        }
-    }
-
-    fn interrupt(&self, turn: &str) -> Result<(), Error> {
-        let thread = self.thread.lock().unwrap().clone();
-        let n = self.id();
-        // Its answer is of no interest: the turn ends with turn/completed (interrupted).
-        let params = json!({"threadId": thread, "turnId": turn});
-        self.send(json!({"jsonrpc": "2.0", "id": n, "method": "turn/interrupt", "params": params}))
-    }
-}
-
-/// One `codex app-server` process over JSON-RPC on stdio, with one thread as its session.
-pub struct Client {
-    shared: Arc<Shared>,
-    events: mpsc::UnboundedReceiver<Event>,
-    proc: Proc,
-    pub session_id: String,
-    /// What `initialize` answered.
-    pub init: Value,
-    /// What thread/start or thread/resume answered, without the thread (model, modelProvider, sandbox, ...).
-    pub thread: Value,
-}
-
-impl Client {
-    /// Starts the process, initializes it and starts or resumes the thread named in opts.
-    pub async fn connect(opts: Options, handler: Arc<dyn Handler>) -> Result<Client, Error> {
-        if !opts.cwd.is_dir() {
-            return Err(Error::NoFolder(opts.cwd.clone()));
-        }
-        let mut cmd = Command::new(&opts.program);
-        cmd.args(&opts.args).current_dir(&opts.cwd).env("PWD", &opts.cwd);
-        for k in &opts.env_remove {
-            cmd.env_remove(k);
-        }
-        for (k, v) in &opts.env {
-            cmd.env(k, v);
-        }
-        let (proc, out, stdout) = Proc::spawn(&mut cmd).map_err(Error::Spawn)?;
-        let (ev_tx, events) = mpsc::unbounded_channel();
-        let shared = Arc::new(Shared {
-            out,
-            pending: Mutex::default(),
-            inflight: Mutex::default(),
-            turn: Mutex::default(),
-            thread: Mutex::default(),
-            next: AtomicU64::new(0),
-        });
-        let cwd = opts.cwd.display().to_string();
-        tokio::spawn(read(stdout, handler, shared.clone(), ev_tx, cwd));
-        let mut c = Client { shared, events, proc, session_id: String::new(), init: Value::Null, thread: Value::Null };
-        if let Err(e) = c.open(&opts).await {
-            c.close().await;
-            return Err(e);
-        }
-        Ok(c)
-    }
-
-    async fn open(&mut self, opts: &Options) -> Result<(), Error> {
-        let info = json!({"name": "seimei", "title": "seimei", "version": env!("CARGO_PKG_VERSION")});
-        self.init = self.request("initialize", json!({"clientInfo": info, "capabilities": {}})).await?;
-        self.shared.send(json!({"jsonrpc": "2.0", "method": "initialized"}))?;
-        let mut config = Map::new();
-        for m in &opts.mcp_servers {
-            let env: Map<String, Value> = m.env.iter().map(|(k, v)| (k.clone(), json!(v))).collect();
-            let server =
-                json!({"command": m.command, "args": m.args, "env": env, "default_tools_approval_mode": "approve"});
-            config.insert(format!("mcp_servers.{}", m.name), server);
-        }
-        let mut params = json!({"cwd": opts.cwd, "approvalPolicy": "untrusted", "config": config});
-        let mut r = match &opts.load {
-            Some(id) => {
-                params["threadId"] = json!(id);
-                params["excludeTurns"] = json!(true);
-                self.request("thread/resume", params).await?
-            }
-            None => self.request("thread/start", params).await?,
-        };
-        self.session_id = r["thread"]["id"].as_str().unwrap_or("").to_string();
-        if self.session_id.is_empty() {
-            return Err(Error::Refused("the thread has no id".into()));
-        }
-        self.shared.thread.lock().unwrap().clone_from(&self.session_id);
-        if let Some(o) = r.as_object_mut() {
-            o.remove("thread");
-        }
-        self.thread = r;
-        Ok(())
-    }
-
-    pub fn pid(&self) -> Option<u32> {
-        self.proc.pid()
-    }
-
-    /// The next event; None once the process has exited and everything it wrote was read.
-    pub async fn recv(&mut self) -> Option<Event> {
-        self.events.recv().await
-    }
-
-    /// Drops the events already read but not taken, such as the tail of a cancelled turn.
-    pub fn drain(&mut self) {
-        while self.events.try_recv().is_ok() {}
-    }
-
-    /// Start a turn; its updates and then its TurnEnd come from recv.
-    pub fn prompt_text(&self, text: &str) -> Result<(), Error> {
-        let s = &self.shared;
-        let n = s.id();
-        *s.turn.lock().unwrap() = TurnState { running: true, ..TurnState::default() };
-        s.pending.lock().unwrap().insert(n, Waiter::Turn);
+impl Turn {
+    /// turn/start: its answer names the turn, or fails it.
+    pub(crate) fn start(&self, rpc: &Rpc, thread: &str, text: &str) -> Result<(), Error> {
+        let n = rpc.id();
+        *self.state.lock().unwrap() = TurnState { running: true, ..TurnState::default() };
+        rpc.pending.lock().unwrap().insert(n, Waiter::Turn);
         let input = json!([{"type": "text", "text": text, "text_elements": []}]);
-        let params = json!({"threadId": self.session_id, "input": input});
-        s.send(json!({"jsonrpc": "2.0", "id": n, "method": "turn/start", "params": params})).inspect_err(|_| {
-            s.pending.lock().unwrap().remove(&n);
-            s.turn.lock().unwrap().running = false;
+        let params = json!({"threadId": thread, "input": input});
+        rpc.send(json!({"jsonrpc": "2.0", "id": n, "method": "turn/start", "params": params})).inspect_err(|_| {
+            rpc.pending.lock().unwrap().remove(&n);
+            self.state.lock().unwrap().running = false;
         })
     }
 
-    /// Stop the running turn: open approvals are answered cancel, then the turn is interrupted (once its id is
-    /// known), and ends with stop reason cancelled.
-    pub fn cancel(&self) -> Result<(), Error> {
-        let s = &self.shared;
-        let open: Vec<_> = s.inflight.lock().unwrap().drain().map(|(_, v)| v).collect();
-        for (id, task, answer) in open {
-            task.abort();
-            let _ = s.send(json!({"jsonrpc": "2.0", "id": id, "result": answer}));
-        }
-        let mut t = s.turn.lock().unwrap();
+    /// Interrupt the running turn once its id is known; it ends with stop reason cancelled.
+    pub(crate) fn cancel(&self, rpc: &Rpc) -> Result<(), Error> {
+        let mut t = self.state.lock().unwrap();
         if !t.running {
             return Ok(());
         }
         t.cancel = true;
         match t.id.clone() {
-            Some(id) => s.interrupt(&id),
+            Some(id) => self.interrupt(rpc, &id),
             None => Ok(()),
         }
     }
 
-    /// One JSON-RPC request; Err(Closed) when the process is gone.
-    pub async fn request(&self, method: &str, params: Value) -> Result<Value, Error> {
-        let s = &self.shared;
-        let n = s.id();
-        let (tx, rx) = oneshot::channel();
-        s.pending.lock().unwrap().insert(n, Waiter::Once(tx));
-        if s.send(json!({"jsonrpc": "2.0", "id": n, "method": method, "params": params})).is_err() {
-            s.pending.lock().unwrap().remove(&n);
-            return Err(Error::Closed);
+    /// The running turn is known by now: a cancel that waited for its id goes out.
+    fn known(&self, rpc: &Rpc, id: &str) {
+        let mut t = self.state.lock().unwrap();
+        if !t.running || t.id.is_some() {
+            return;
         }
-        match tokio::time::timeout(REQUEST_TIMEOUT, rx).await {
-            Ok(Ok(Ok(v))) => Ok(v),
-            Ok(Ok(Err(e))) => Err(Error::Refused(e)),
-            Ok(Err(_)) => Err(Error::Closed),
-            Err(_) => {
-                s.pending.lock().unwrap().remove(&n);
-                Err(Error::Timeout(method.into()))
-            }
+        t.id = Some(id.to_string());
+        if t.cancel {
+            let _ = self.interrupt(rpc, id);
         }
     }
 
-    /// End the session: close stdin, give the server time to finish, then SIGTERM its process group, then SIGKILL.
-    pub async fn close(&mut self) -> Option<ExitStatus> {
-        self.proc.close().await
+    fn interrupt(&self, rpc: &Rpc, turn: &str) -> Result<(), Error> {
+        let thread = self.thread.lock().unwrap().clone();
+        let n = rpc.id();
+        // Its answer is of no interest: the turn ends with turn/completed (interrupted).
+        let params = json!({"threadId": thread, "turnId": turn});
+        rpc.send(json!({"jsonrpc": "2.0", "id": n, "method": "turn/interrupt", "params": params}))
     }
+}
+
+/// Starts `codex app-server`, initializes it and starts or resumes the thread named in opts.
+pub async fn connect(opts: Options, handler: Arc<dyn Handler>) -> Result<Client, Error> {
+    let (mut c, stdout, events) = Client::start(&opts)?;
+    let turn = Arc::new(Turn::default());
+    c.codex = Some(turn.clone());
+    let cwd = opts.cwd.display().to_string();
+    tokio::spawn(read(stdout, handler, c.rpc.clone(), turn.clone(), events, cwd));
+    if let Err(e) = open(&mut c, &opts, &turn).await {
+        c.close().await;
+        return Err(e);
+    }
+    Ok(c)
+}
+
+async fn open(c: &mut Client, opts: &Options, turn: &Turn) -> Result<(), Error> {
+    let info = json!({"name": "seimei", "title": "seimei", "version": env!("CARGO_PKG_VERSION")});
+    c.init = c.request("initialize", json!({"clientInfo": info, "capabilities": {}})).await?;
+    c.rpc.send(json!({"jsonrpc": "2.0", "method": "initialized"}))?;
+    let mut config = Map::new();
+    for m in &opts.mcp_servers {
+        let env: Map<String, Value> = m.env.iter().map(|(k, v)| (k.clone(), json!(v))).collect();
+        let server =
+            json!({"command": m.command, "args": m.args, "env": env, "default_tools_approval_mode": "approve"});
+        config.insert(format!("mcp_servers.{}", m.name), server);
+    }
+    let mut params = json!({"cwd": opts.cwd, "approvalPolicy": "untrusted", "config": config});
+    let mut r = match &opts.load {
+        Some(id) => {
+            params["threadId"] = json!(id);
+            params["excludeTurns"] = json!(true);
+            c.request("thread/resume", params).await?
+        }
+        None => c.request("thread/start", params).await?,
+    };
+    c.session_id = s(&r["thread"]["id"]);
+    if c.session_id.is_empty() {
+        return Err(Error::Refused("the thread has no id".into()));
+    }
+    turn.thread.lock().unwrap().clone_from(&c.session_id);
+    if let Some(o) = r.as_object_mut() {
+        o.remove("thread");
+    }
+    c.session = r;
+    Ok(())
 }
 
 fn s(v: &Value) -> String {
@@ -327,7 +223,8 @@ struct Items {
 async fn read(
     stdout: ChildStdout,
     handler: Arc<dyn Handler>,
-    shared: Arc<Shared>,
+    rpc: Arc<Rpc>,
+    turn: Arc<Turn>,
     events: mpsc::UnboundedSender<Event>,
     cwd: String,
 ) {
@@ -411,18 +308,18 @@ async fn read(
                             }
                         }
                     }
-                    (Some("turn/started"), None) => shared.turn_known(&s(&p["turn"]["id"])),
+                    (Some("turn/started"), None) => turn.known(&rpc, &s(&p["turn"]["id"])),
                     (Some("turn/plan/updated"), None) => up(Update::Plan(plan(p))),
                     (Some("turn/completed"), None) => {
-                        let turn = &p["turn"];
-                        let end = match turn["status"].as_str() {
+                        let ended = &p["turn"];
+                        let end = match ended["status"].as_str() {
                             Some("interrupted") => Ok("cancelled".into()),
                             Some("failed") => {
-                                Err(turn["error"]["message"].as_str().unwrap_or("the turn failed").into())
+                                Err(ended["error"]["message"].as_str().unwrap_or("the turn failed").into())
                             }
                             _ => Ok("end_turn".into()),
                         };
-                        *shared.turn.lock().unwrap() = TurnState::default();
+                        *turn.state.lock().unwrap() = TurnState::default();
                         it = Items::default();
                         let _ = events.send(Event::TurnEnd(end));
                     }
@@ -431,10 +328,10 @@ async fn read(
                         if matches!(m, "item/commandExecution/requestApproval" | "item/fileChange/requestApproval") {
                             it.asked.insert(s(&p["itemId"]));
                         }
-                        request(m, id.clone(), p, &it.calls, &cwd, &handler, &shared);
+                        request(m, id.clone(), p, &it.calls, &cwd, &handler, &rpc);
                     }
                     (None, Some(id)) => {
-                        let Some(w) = id.as_u64().and_then(|n| shared.pending.lock().unwrap().remove(&n)) else {
+                        let Some(w) = id.as_u64().and_then(|n| rpc.pending.lock().unwrap().remove(&n)) else {
                             continue;
                         };
                         let res = match v.get("error").filter(|e| !e.is_null()) {
@@ -445,9 +342,9 @@ async fn read(
                             (Waiter::Once(tx), res) => {
                                 let _ = tx.send(res);
                             }
-                            (Waiter::Turn, Ok(r)) => shared.turn_known(&s(&r["turn"]["id"])),
+                            (Waiter::Turn, Ok(r)) => turn.known(&rpc, &s(&r["turn"]["id"])),
                             (Waiter::Turn, Err(e)) => {
-                                *shared.turn.lock().unwrap() = TurnState::default();
+                                *turn.state.lock().unwrap() = TurnState::default();
                                 let _ = events.send(Event::TurnEnd(Err(e)));
                             }
                         }
@@ -460,11 +357,11 @@ async fn read(
         }
     }
     // The server is gone: a turn still running ends, requests fail (their senders drop).
-    shared.pending.lock().unwrap().clear();
-    if std::mem::take(&mut *shared.turn.lock().unwrap()).running {
+    rpc.pending.lock().unwrap().clear();
+    if std::mem::take(&mut *turn.state.lock().unwrap()).running {
         let _ = events.send(Event::TurnEnd(Err("the agent exited".into())));
     }
-    for (_, (_, task, _)) in shared.inflight.lock().unwrap().drain() {
+    for (_, (_, task, _)) in rpc.inflight.lock().unwrap().drain() {
         task.abort();
     }
 }
@@ -494,10 +391,10 @@ fn request(
     calls: &HashMap<String, ToolCall>,
     cwd: &str,
     handler: &Arc<dyn Handler>,
-    shared: &Arc<Shared>,
+    rpc: &Arc<Rpc>,
 ) {
     let answer = |result: Value| {
-        let _ = shared.send(json!({"jsonrpc": "2.0", "id": id, "result": result}));
+        let _ = rpc.send(json!({"jsonrpc": "2.0", "id": id, "result": result}));
     };
     let item = s(&p["itemId"]);
     let mut tool = calls.get(&item).cloned().unwrap_or_else(|| ToolCall { id: item.clone(), ..ToolCall::default() });
@@ -535,7 +432,7 @@ fn request(
         "mcpServer/elicitation/request" => return answer(json!({"action": "decline", "content": null, "_meta": null})),
         _ => {
             let err = json!({"code": -32601, "message": format!("Method not found: {method}")});
-            let _ = shared.send(json!({"jsonrpc": "2.0", "id": id, "error": err}));
+            let _ = rpc.send(json!({"jsonrpc": "2.0", "id": id, "error": err}));
             return;
         }
     };
@@ -544,8 +441,8 @@ fn request(
         PermissionOption { id: "decline".into(), name: "Decline".into(), kind: "reject_once".into() },
     ];
     let key = id.to_string();
-    let (h, sh, id2, key2) = (handler.clone(), shared.clone(), id.clone(), key.clone());
-    let mut slot = shared.inflight.lock().unwrap();
+    let (h, sh, id2, key2) = (handler.clone(), rpc.clone(), id.clone(), key.clone());
+    let mut slot = rpc.inflight.lock().unwrap();
     let task = tokio::spawn(async move {
         let mut decision = "accept";
         for tool in asks {
