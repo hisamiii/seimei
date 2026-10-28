@@ -14,7 +14,7 @@ use crate::events::EventLog;
 use crate::kitty;
 use crate::paths::home;
 use crate::transcripts::{brief, claude_dir, project_of, rows_from, summary, text_of, time_of, transcript};
-use crate::util::{chars, now};
+use crate::util::{as_text, chars, now};
 use crate::workers::Pool;
 
 /// What peek and the timeline read from the end of a transcript.
@@ -63,14 +63,6 @@ impl Live {
     }
 }
 
-fn s(v: &Value) -> String {
-    match v {
-        Value::String(s) => s.clone(),
-        Value::Null => String::new(),
-        v => v.to_string(),
-    }
-}
-
 /// The pid runs and is the same process (pids get reused).
 pub fn alive(rec: &Value) -> bool {
     let Some(pid) = rec["pid"].as_i64() else { return false };
@@ -79,7 +71,7 @@ pub fn alive(rec: &Value) -> bool {
         return false;
     };
     // A procStart that is there but null matches nothing, like Python's str(None).
-    rec.get("procStart").is_none_or(|v| !v.is_null() && s(v) == start)
+    rec.get("procStart").is_none_or(|v| !v.is_null() && as_text(v) == start)
 }
 
 /// "40s ago", "3 min ago", "2 h ago", "1 d ago".
@@ -128,19 +120,19 @@ pub fn live(own: &Own) -> Vec<Live> {
         let path = transcript_of(&rec);
         let sid = match &path {
             Some(p) => p.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
-            None => s(&rec["sessionId"]),
+            None => as_text(&rec["sessionId"]),
         };
         let active = path.as_deref().map_or(0.0, mtime).max(rec["updatedAt"].as_f64().unwrap_or(0.0) / 1000.0);
         let mut status = rec["status"].as_str().unwrap_or("?").to_string();
         if let Some(job) = rec["parkedJobId"].as_str().filter(|j| !j.is_empty()) {
             status = format!("parked (moved to background job {job})");
         } else if status == "waiting" && rec["waitingFor"].as_str().is_some_and(|w| !w.is_empty()) {
-            status = format!("waiting: {}", s(&rec["waitingFor"]));
+            status = format!("waiting: {}", as_text(&rec["waitingFor"]));
         }
-        let kind = own.get(&sid).or_else(|| own.get(&s(&rec["sessionId"]))).cloned().unwrap_or_else(|| {
+        let kind = own.get(&sid).or_else(|| own.get(&as_text(&rec["sessionId"]))).cloned().unwrap_or_else(|| {
             let k = rec["kind"].as_str().unwrap_or("?");
             let k = if k == "bg" { "background" } else { k };
-            let sdk = s(&rec["entrypoint"]).starts_with("sdk");
+            let sdk = as_text(&rec["entrypoint"]).starts_with("sdk");
             format!("{k}{}", if sdk { " (SDK)" } else { "" })
         });
         out.push(Live {
@@ -150,7 +142,7 @@ pub fn live(own: &Own) -> Vec<Live> {
             status,
             since: rec["statusUpdatedAt"].as_f64().unwrap_or(0.0) / 1000.0,
             active,
-            cwd: s(&rec["cwd"]),
+            cwd: as_text(&rec["cwd"]),
             kind,
             rec,
         });
@@ -201,7 +193,7 @@ pub fn peek(path: &Path, count: usize) -> Value {
     let mut pending: Vec<(String, String, String, Value)> = vec![];
     for row in &rows {
         let content = &row["message"]["content"];
-        let t = s(&row["timestamp"]);
+        let t = as_text(&row["timestamp"]);
         if row["type"] == "user" {
             let results = tool_results(content);
             for b in &results {
@@ -217,10 +209,10 @@ pub fn peek(path: &Path, count: usize) -> Value {
                 if b["type"] == "text" && b["text"].as_str().is_some_and(|x| !x.trim().is_empty()) {
                     texts.push((t.clone(), b["text"].as_str().unwrap_or("").trim().to_string()));
                 } else if b["type"] == "tool_use" {
-                    let id = s(&b["id"]);
+                    let id = as_text(&b["id"]);
                     pending.retain(|p| p.0 != id);
                     let inp = if b["input"].is_object() { b["input"].clone() } else { json!({}) };
-                    pending.push((id, t.clone(), s(&b["name"]), inp));
+                    pending.push((id, t.clone(), as_text(&b["name"]), inp));
                 }
             }
         }
@@ -264,7 +256,7 @@ pub fn timeline(path: &Path, start: Option<u64>, events: usize) -> Value {
     let (rows, next) = rows_from(path, from);
     let mut out = vec![];
     for row in &rows {
-        let (t, uid) = (time_of(row), s(&row["uuid"]));
+        let (t, uid) = (time_of(row), as_text(&row["uuid"]));
         let content = &row["message"]["content"];
         if row["type"] == "user" {
             let results = tool_results(content);
@@ -458,12 +450,12 @@ impl SessionEvents {
         let pids: Vec<i64> = rows.iter().filter_map(|r| r["pid"].as_i64()).collect();
         for r in rows {
             let Some(pid) = r["pid"].as_i64() else { continue };
-            let name = s(&r["name"]);
+            let name = as_text(&r["name"]);
             let who = format!("session \"{name}\"");
-            let path = transcript(&s(&r["session_id"]), &s(&r["cwd"]));
+            let path = transcript(&as_text(&r["session_id"]), &as_text(&r["cwd"]));
             let ask = r["ask_detail"].clone();
             let tid = ask["tool_id"].as_str().map(String::from);
-            let status = s(&r["status"]);
+            let status = as_text(&r["status"]);
             let fresh = self.seen.get(&pid).is_none_or(|st| st.path != path);
             if fresh {
                 // A new session, or one continued into a new transcript: start from here.
@@ -496,8 +488,8 @@ impl SessionEvents {
                 && st.ask.as_ref() != Some(t)
             {
                 let q = &ask["questions"][0];
-                let opts: Vec<String> = q["options"].as_array().into_iter().flatten().map(|o| s(&o["label"])).collect();
-                let mut line = format!("{who} asks: {}", s(&q["question"]));
+                let opts: Vec<String> = q["options"].as_array().into_iter().flatten().map(|o| as_text(&o["label"])).collect();
+                let mut line = format!("{who} asks: {}", as_text(&q["question"]));
                 if !opts.is_empty() {
                     line += &format!(" Options: {}.", opts.join(" | "));
                 }
@@ -512,7 +504,7 @@ impl SessionEvents {
                 let d = &r["doing"];
                 let p = d["tool_id"].as_str().or(r["waiting_for"].as_str()).unwrap_or("?").to_string();
                 if Some(&p) != st.perm.as_ref() {
-                    let mut what = format!("{} {}", s(&d["tool"]), s(&d["what"])).trim().to_string();
+                    let mut what = format!("{} {}", as_text(&d["tool"]), as_text(&d["what"])).trim().to_string();
                     if what.is_empty() {
                         what = prompt_on_screen(pid)
                             .or_else(|| r["waiting_for"].as_str().filter(|w| !w.is_empty()).map(String::from))
@@ -525,7 +517,7 @@ impl SessionEvents {
             }
             st.perm = perm;
             if was == "busy" && status == "idle" {
-                let line = s(&r["line"]);
+                let line = as_text(&r["line"]);
                 let tail = if line.is_empty() { String::new() } else { format!(": {}", chars(&line, 200)) };
                 out.push((format!("{who} finished a turn{tail}"), false, Some(format!("finished:{pid}"))));
             }
@@ -552,7 +544,7 @@ fn row_lines(row: &Value, st: &mut Seen, who: &str, was: &str, out: &mut Vec<Lin
     let content = &row["message"]["content"];
     if row["type"] == "assistant" {
         for b in content.as_array().into_iter().flatten().filter(|b| b["type"] == "tool_use") {
-            let id = s(&b["id"]);
+            let id = as_text(&b["id"]);
             if st.tools.insert(id.clone(), b["name"].as_str().unwrap_or("?").into()).is_none() {
                 st.order.push_back(id);
             }

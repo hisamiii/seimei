@@ -18,7 +18,7 @@ use crate::approvals::Approvals;
 use crate::kitty;
 use crate::sessions;
 use crate::transcripts::{brief, transcript};
-use crate::util::{chars, now, read_json, write_json};
+use crate::util::{as_text, chars, now, read_json, write_json};
 use crate::workers::{Adoption, Pool, Worker};
 
 const SHELLS: [&str; 5] = ["bash", "zsh", "fish", "sh", "dash"];
@@ -136,14 +136,6 @@ async fn end_left(kids: &[(i64, String)]) {
     }
 }
 
-fn str_of(v: &Value) -> String {
-    match v {
-        Value::String(s) => s.clone(),
-        Value::Null => String::new(),
-        v => v.to_string(),
-    }
-}
-
 /// A background session of Claude Code's daemon: `claude stop <its job id>` ends it and keeps its conversation.
 fn background(s: &Value) -> bool {
     !s["job"].is_null() && s["job"] != "" && s["job"] != false
@@ -173,8 +165,8 @@ fn find<'a>(rows: &'a [Value], key: &str) -> Option<&'a Value> {
     let low = key.to_lowercase();
     (rows.iter().find(|s| s["name"] == key))
         .or_else(|| rows.iter().find(|s| s["name"].as_str().is_some_and(|n| n.to_lowercase() == low)))
-        .or_else(|| rows.iter().find(|s| str_of(&s["pid"]) == key))
-        .or_else(|| rows.iter().find(|s| background(s) && str_of(&s["job"]) == key))
+        .or_else(|| rows.iter().find(|s| as_text(&s["pid"]) == key))
+        .or_else(|| rows.iter().find(|s| background(s) && as_text(&s["job"]) == key))
 }
 
 fn idle(s: &Value) -> bool {
@@ -201,13 +193,13 @@ impl Wish {
 
     fn of(v: &Value) -> Wish {
         Wish {
-            name: str_of(&v["name"]),
-            model: str_of(&v["model"]),
-            effort: str_of(&v["effort"]),
-            context: str_of(&v["context"]),
+            name: as_text(&v["name"]),
+            model: as_text(&v["model"]),
+            effort: as_text(&v["effort"]),
+            context: as_text(&v["context"]),
             close_window: v["close_window"] == true,
-            project: str_of(&v["project"]),
-            task_id: str_of(&v["task_id"]),
+            project: as_text(&v["project"]),
+            task_id: as_text(&v["task_id"]),
         }
     }
 }
@@ -309,12 +301,12 @@ impl Adopter {
             s = hit.and_then(|pid| rows.iter().find(|r| r["pid"] == json!(pid)).cloned());
         }
         let Some(s) = s else { return Ok(format!("No session of the user's is named \"{key}\".")) };
-        let (name, pid) = (str_of(&s["name"]), s["pid"].as_i64().unwrap_or(0));
+        let (name, pid) = (as_text(&s["name"]), s["pid"].as_i64().unwrap_or(0));
         let bg = background(&s);
         if s["kind"] != "interactive" && !bg {
             return Ok(format!(
                 "{name} is a {} session; only interactive and background ones can be adopted.",
-                str_of(&s["kind"])
+                as_text(&s["kind"])
             ));
         }
         let pending = self.waiting.lock().unwrap().contains_key(&pid);
@@ -328,7 +320,7 @@ impl Adopter {
         let ends = if bg {
             format!(
                 "its background job ({}) is stopped with claude stop, which keeps the conversation,",
-                str_of(&s["job"])
+                as_text(&s["job"])
             )
         } else {
             format!("its Claude Code (pid {pid}) ends")
@@ -380,7 +372,7 @@ impl Adopter {
     }
 
     async fn at_idle(self: Arc<Self>, n: u64, s: Value, wish: Wish, end: f64) {
-        let (name, pid) = (str_of(&s["name"]), s["pid"].as_i64().unwrap_or(0));
+        let (name, pid) = (as_text(&s["name"]), s["pid"].as_i64().unwrap_or(0));
         let (mut shell, mut told): (Option<f64>, bool) = (None, false);
         let notify = |line: &str, urgent: bool| self.pool.notify(line, urgent, None);
         let mut finished = false;
@@ -449,7 +441,7 @@ impl Adopter {
                 "{first}t opens in a terminal window on the server ({shown}, in {}) as your session named {name}. It \
                  stops reporting to seimei and is never resumed by it; tap Hand off on its session page to give \
                  it back.",
-                str_of(&w.get("cwd"))
+                as_text(&w.get("cwd"))
             );
             let what = json!({"action": "command", "target": format!("give shikigami {name} to you as your own session"),
                 "detail": detail});
@@ -473,7 +465,7 @@ impl Adopter {
 
     /// End the session's process and go on with its conversation as a shikigami.
     pub async fn adopt(&self, s: &Value, interrupt: bool, wish: &Wish) -> Result<String, String> {
-        let (name, pid) = (str_of(&s["name"]), s["pid"].as_i64().unwrap_or(0));
+        let (name, pid) = (as_text(&s["name"]), s["pid"].as_i64().unwrap_or(0));
         let bg = background(s);
         let win = if bg { None } else { kitty::window(pid).ok() };
         let shell = if bg { 0 } else { ppid(pid) };
@@ -496,7 +488,7 @@ impl Adopter {
                 }
             }
         }
-        let path = transcript(&str_of(&s["session_id"]), &str_of(&s["cwd"]));
+        let path = transcript(&as_text(&s["session_id"]), &as_text(&s["cwd"]));
         let tokens = match path {
             Some(p) => tokio::task::spawn_blocking(move || brief(&p).ok()).await.ok().flatten(),
             None => None,
@@ -519,8 +511,8 @@ impl Adopter {
         };
         let a = Adoption {
             name: if wish.name.is_empty() { name.clone() } else { wish.name.clone() },
-            session_id: str_of(&s["session_id"]),
-            cwd: str_of(&s["cwd"]),
+            session_id: as_text(&s["session_id"]),
+            cwd: as_text(&s["cwd"]),
             model,
             effort,
             context,
@@ -611,7 +603,7 @@ impl Adopter {
 /// End the user's Claude Code: a background job through `claude stop`, else SIGTERM (SIGKILL after 15 s).
 async fn end(s: &Value, pid: i64, bg: bool) -> Result<(), String> {
     if bg {
-        let job = str_of(&s["job"]);
+        let job = as_text(&s["job"]);
         let j = job.clone();
         let err = tokio::task::spawn_blocking(move || stop_job(&j)).await.map_err(|e| e.to_string())?;
         if !err.is_empty() {

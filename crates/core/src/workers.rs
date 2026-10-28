@@ -37,7 +37,7 @@ use crate::sessions::{self, Own};
 use crate::tasks::{Board, Fields};
 use crate::transcripts::{brief, project_of, transcript};
 use crate::usage::Usage;
-use crate::util::{chars, hex, now, random_bytes, read_json, sh_quote, write_json};
+use crate::util::{as_text, chars, hex, now, random_bytes, read_json, sh_quote, write_json};
 
 const PROMPT: &str = "\
 # You are a shikigami
@@ -221,10 +221,6 @@ fn new_uuid() -> String {
     format!("{}-{}-4{}-{:x}{}-{}", &h[..8], &h[8..12], &h[13..16], (b[8] & 0x3) | 0x8, &h[17..20], &h[20..32])
 }
 
-fn str_of(v: &Value) -> String {
-    v.as_str().unwrap_or("").to_string()
-}
-
 /// Project and context use from its transcript, as the user's sessions show them.
 fn brief_of(r: &Value) -> Value {
     let (sid, cwd) = (r["session_id"].as_str().unwrap_or(""), r["cwd"].as_str().unwrap_or(""));
@@ -309,11 +305,11 @@ impl Worker {
     }
 
     pub fn name(&self) -> String {
-        str_of(&self.get("name"))
+        as_text(&self.get("name"))
     }
 
     pub fn state(&self) -> String {
-        str_of(&self.get("state"))
+        as_text(&self.get("state"))
     }
 
     fn edit<R>(&self, f: impl FnOnce(&mut Map<String, Value>) -> R) -> R {
@@ -444,13 +440,13 @@ impl Worker {
 
     fn options(&self) -> Options {
         let r = self.rec();
-        let sid = str_of(&r["session_id"]);
+        let sid = as_text(&r["session_id"]);
         let (resume, session_id) = if r["started"] == true { (Some(sid), None) } else { (None, Some(sid)) };
         let hook = |id: &str, timeout| HookMatcher { matcher: None, callbacks: vec![id.into()], timeout };
         let (plugins, groups) = (&self.pool().plugins, self.granted());
         Options {
-            cwd: Some(PathBuf::from(str_of(&r["cwd"]))),
-            model: Some(str_of(&r["model"])),
+            cwd: Some(PathBuf::from(as_text(&r["cwd"]))),
+            model: Some(as_text(&r["model"])),
             permission_mode: Some(self.mode()),
             // Whatever Claude Code would ask in a terminal becomes a card (in bypass only its safety checks ask: blocked).
             can_use_tool: true,
@@ -459,14 +455,14 @@ impl Worker {
             setting_sources: Some(vec!["user".into(), "project".into(), "local".into()]),
             system_prompt: SystemPrompt::Preset { append: Some(self.prompt()) },
             sdk_mcp_servers: vec!["shikigami".into()],
-            mcp_servers: plugins.servers(&str_of(&r["name"]), Some(&self.id), Some(&groups)),
+            mcp_servers: plugins.servers(&as_text(&r["name"]), Some(&self.id), Some(&groups)),
             mcp_config_file: Some(plugins.config_file(&self.id)),
             // Workers talk to the user through their report and ask, never to other sessions directly.
             disallowed_tools: OFF_TOOLS.iter().map(|t| t.to_string()).collect(),
             skills: Some(SKILLS.iter().map(|s| s.to_string()).collect()),
             env: self.env(),
             effort: r["effort"].as_str().filter(|e| !e.is_empty()).map(String::from),
-            extra_args: vec![("name".into(), Some(format!("shikigami {}", str_of(&r["name"]))))],
+            extra_args: vec![("name".into(), Some(format!("shikigami {}", as_text(&r["name"]))))],
             hooks: vec![
                 ("PreToolUse".into(), vec![hook("pre", Some(HOOK_TIMEOUT))]),
                 ("PostToolUseFailure".into(), vec![hook("failed", None)]),
@@ -548,7 +544,7 @@ impl Worker {
         {
             return true;
         }
-        let sid = str_of(&self.get("session_id"));
+        let sid = as_text(&self.get("session_id"));
         sessions::live(&Own::new()).iter().any(|s| s.rec["sessionId"] == json!(sid) || s.session_id == sid)
     }
 
@@ -586,7 +582,7 @@ impl Worker {
             self.to_laptop(&name, &["--name", &name]).await?
         };
         let r = self.rec();
-        let path = transcript(&str_of(&r["session_id"]), &str_of(&r["cwd"]));
+        let path = transcript(&as_text(&r["session_id"]), &as_text(&r["cwd"]));
         let offset = path.as_deref().and_then(|p| std::fs::metadata(p).ok()).map_or(0, |m| m.len());
         let window = win.as_ref().map_or_else(|| r["laptop_window"].clone(), |w| w["id"].clone());
         let at = path.as_ref().map(|p| p.display().to_string());
@@ -992,7 +988,7 @@ impl Session {
             let handler: Arc<dyn Handler> = Arc::new(Side { w: self.w.clone() });
             let client = Client::connect(self.w.options(), handler).await.map_err(|e| e.to_string())?;
             // Its plugins run under this process: their session token is good only from there.
-            let name = str_of(&self.w.get("name"));
+            let name = as_text(&self.w.get("name"));
             self.w.pool().plugins.root(&name, Some(&self.w.id), client.pid());
             self.client = Some(client);
             self.w.edit(|r| r.insert("started".into(), json!(true)));
@@ -1052,7 +1048,7 @@ impl Session {
             if let Some(c) = &self.client {
                 c.set_model(Some(&m)).await.map_err(|e| e.to_string())?;
             }
-            changed.push(format!("model {} → {m}", str_of(&r["model"])));
+            changed.push(format!("model {} → {m}", as_text(&r["model"])));
             self.w.edit(|r| r.insert("model".into(), json!(m)));
         }
         let now_effort =
@@ -1122,9 +1118,9 @@ impl Session {
                 let kind = s.data["task_type"].as_str().unwrap_or("");
                 if !kind.contains("bash") && !kind.contains("shell") {
                     let what = s.data["description"].as_str().filter(|d| !d.is_empty()).unwrap_or("a subagent");
-                    self.tasks.insert(str_of(&s.data["task_id"]), what.into());
+                    self.tasks.insert(as_text(&s.data["task_id"]), what.into());
                 } else {
-                    self.shells.insert(str_of(&s.data["task_id"]));
+                    self.shells.insert(as_text(&s.data["task_id"]));
                 }
             }
             Message::System(s) if s.subtype == "task_notification" => {
@@ -1154,7 +1150,7 @@ impl Session {
             }
             Message::RateLimit(info) => {
                 if let Some(d) = self.pool.dispatcher.get() {
-                    d.rate_limit(&info, &self.w.name(), &str_of(&self.w.get("session_id")));
+                    d.rate_limit(&info, &self.w.name(), &as_text(&self.w.get("session_id")));
                 }
             }
             _ => {}
@@ -1332,7 +1328,7 @@ impl Session {
         let a = (self.pool.agents.get().and_then(|m| m.get(agent)).cloned())
             .ok_or(format!("no ACP agent {agent} in config [agents]"))?;
         let r = self.w.rec();
-        let name = str_of(&r["name"]);
+        let name = as_text(&r["name"]);
         let started = r["started"] == true;
         let groups = self.w.granted();
         let plugins = &self.pool.plugins;
@@ -1345,11 +1341,11 @@ impl Session {
         let opts = acp::Options {
             program: a.command.into(),
             args: a.args,
-            cwd: PathBuf::from(str_of(&r["cwd"])),
+            cwd: PathBuf::from(as_text(&r["cwd"])),
             env,
             env_remove: vec![],
             mcp_servers: mcp,
-            load: started.then(|| str_of(&r["session_id"])),
+            load: started.then(|| as_text(&r["session_id"])),
         };
         let handler: Arc<dyn acp::Handler> = Arc::new(AcpSide { w: self.w.clone() });
         let mut c = AgentConn::connect(&a.protocol, opts, handler).await.map_err(|e| format!("{agent}: {e}"))?;
@@ -1443,7 +1439,7 @@ impl Session {
     /// for a card, stops the turn; the agent hears why with its next message.
     async fn unasked(&mut self, t: acp::ToolCall) {
         let (tool, input) = claude_shaped(&t);
-        let (name, cwd) = (self.w.name(), str_of(&self.w.get("cwd")));
+        let (name, cwd) = (self.w.name(), as_text(&self.w.get("cwd")));
         let hook = json!({"tool_name": tool, "tool_input": input, "cwd": cwd, "session_id": self.w.get("session_id")});
         let Some(why) = self.pool.guard.unasked(&name, Some(&self.w.id), &hook, Some(&t.id)).await else { return };
         let said = format!("The guard stopped this turn: the agent ran a call without asking, and {why}.");
@@ -1610,7 +1606,7 @@ impl acp::Handler for AcpSide {
             let reject = pick("reject_once").map_or(acp::Outcome::Cancelled, acp::Outcome::Selected);
             let Some(allow) = pick("allow_once") else { return reject };
             let (tool, input) = claude_shaped(&req.tool);
-            let (name, cwd) = (w.name(), str_of(&w.get("cwd")));
+            let (name, cwd) = (w.name(), as_text(&w.get("cwd")));
             let hook = json!({"tool_name": tool, "tool_input": input, "cwd": cwd, "session_id": w.get("session_id")});
             let said = pool.guard.pre(&name, Some(&w.id), &hook, Some(&req.tool.id)).await;
             match said["hookSpecificOutput"]["permissionDecision"].as_str() {
@@ -2185,7 +2181,7 @@ impl Pool {
     /// Its task on the board: the one seimei named, or a new one (project from its folder unless given).
     fn file(&self, w: &Worker, title: &str, project: Option<&str>, link: Option<&str>) -> Result<(), String> {
         let r = w.rec();
-        let cwd = str_of(&r["cwd"]);
+        let cwd = as_text(&r["cwd"]);
         let project = project.map(String::from).or_else(|| project_of(&format!("{cwd}/x"))).unwrap_or_else(|| {
             if Path::new(&cwd) == home() {
                 "home".into()
@@ -2195,7 +2191,7 @@ impl Pool {
         });
         let mut board = self.board.lock().unwrap();
         board
-            .attach(&w.id, &str_of(&r["name"]), &str_of(&r["task"]), &project, title, link)
+            .attach(&w.id, &as_text(&r["name"]), &as_text(&r["task"]), &project, title, link)
             .map_err(|e| e.to_string())?;
         Ok(())
     }
@@ -2285,7 +2281,7 @@ impl Pool {
 
     /// A new worker on its record, with its log.
     fn add_worker(&self, rec: Value) -> Result<Arc<Worker>, String> {
-        let id = str_of(&rec["id"]);
+        let id = as_text(&rec["id"]);
         let log = EventLog::open(&self.dir.join(format!("{id}.jsonl"))).map_err(|e| e.to_string())?;
         let w = Arc::new(Worker {
             id,
@@ -2303,7 +2299,7 @@ impl Pool {
 
     /// The command that resumes a shikigami's session in a terminal, as the plugins run it (claude-queue).
     pub fn resume_argv(&self, w: &Worker) -> Vec<String> {
-        let sid = str_of(&w.get("session_id"));
+        let sid = as_text(&w.get("session_id"));
         self.plugins.wrap(&w.name(), vec!["claude".into(), "--resume".into(), sid])
     }
 
@@ -2313,7 +2309,7 @@ impl Pool {
         argv.extend(extra.iter().map(|a| a.to_string()));
         let words: Vec<String> = argv.iter().map(|a| sh_quote(a)).collect();
         let term =
-            self.terminal.replace("{cwd}", &sh_quote(&str_of(&w.get("cwd")))).replace("{title}", &sh_quote(title));
+            self.terminal.replace("{cwd}", &sh_quote(&as_text(&w.get("cwd")))).replace("{title}", &sh_quote(title));
         let cmd = format!("{term} {}", words.join(" "));
         match self.plugins.windows() {
             Some(d) => d.spawn(&cmd, false).await,
@@ -2399,7 +2395,7 @@ impl Pool {
             }
             Some(old) => {
                 let gone = &old["released"];
-                if let Some(path) = transcript(&a.session_id, &str_of(&r["cwd"])) {
+                if let Some(path) = transcript(&a.session_id, &as_text(&r["cwd"])) {
                     // What the user and the session did on the server, so the page reads on without a gap.
                     let start =
                         if gone["path"] == json!(path.display().to_string()) { gone["offset"].as_u64() } else { None };
@@ -2440,7 +2436,7 @@ impl Pool {
             let r = w.rec();
             r["state"] == "released"
                 && (r["session_id"] == json!(session_id)
-                    || now.is_some() && transcript(&str_of(&r["session_id"]), &str_of(&r["cwd"])) == now)
+                    || now.is_some() && transcript(&as_text(&r["session_id"]), &as_text(&r["cwd"])) == now)
         })
     }
 
@@ -2504,7 +2500,7 @@ impl Pool {
             let text = if said.is_empty() { RESUME.to_string() } else { format!("{RESUME}. {said}") };
             w.send(&text, None, vec![]).await
         } else {
-            let task = str_of(&w.get("task"));
+            let task = as_text(&w.get("task"));
             w.send(&task, Some("(its task again: seimei restarted before it began)"), vec![]).await
         };
         match sent {

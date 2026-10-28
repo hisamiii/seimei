@@ -218,6 +218,15 @@ pub fn chars(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
 }
 
+/// A JSON value as text: a string as it is, null as nothing, anything else as JSON.
+pub fn as_text(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Null => String::new(),
+        v => v.to_string(),
+    }
+}
+
 /// A yes or no from a tool call or a page: true, a non-zero number, or "true", "yes" or "1" (models send strings at
 /// times, and "false" must stay false).
 pub fn flag(v: &serde_json::Value) -> bool {

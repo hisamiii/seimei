@@ -36,7 +36,7 @@ use seimei_core::tools::Tools;
 use seimei_core::transcripts::brief;
 use seimei_core::uploads::Uploads;
 use seimei_core::usage::Usage;
-use seimei_core::util::{flag, now, read_json, truthy, write_json};
+use seimei_core::util::{as_text, flag, now, read_json, truthy, write_json};
 use seimei_core::watches::Watches;
 use seimei_core::workers::{self, Pool};
 use serde_json::{Value, json};
@@ -489,14 +489,6 @@ fn body(bytes: &Bytes) -> Result<Value, Response> {
     }
 }
 
-fn s(v: &Value, k: &str) -> String {
-    match &v[k] {
-        Value::String(s) => s.clone(),
-        Value::Null => String::new(),
-        other => other.to_string(),
-    }
-}
-
 fn agent(headers: &HeaderMap) -> String {
     headers.get(header::USER_AGENT).and_then(|h| h.to_str().ok()).unwrap_or("").to_string()
 }
@@ -549,7 +541,7 @@ fn logged_in(app: &App, how: &str, headers: &HeaderMap) -> Response {
 
 async fn login_password(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> Response {
     let b = attempt!(body(&bytes));
-    let (good, wait) = auth(&app).check_password(&s(&b, "password")).await;
+    let (good, wait) = auth(&app).check_password(&as_text(&b["password"])).await;
     if good {
         return logged_in(&app, "password", &headers);
     }
@@ -599,7 +591,7 @@ async fn register(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> Respo
         return r;
     }
     let b = attempt!(body(&bytes));
-    let name = s(&b, "name");
+    let name = as_text(&b["name"]);
     if let Err(e) = auth(&app).register_verify(&b["credential"], &name) {
         return json_status(
             StatusCode::BAD_REQUEST,
@@ -636,9 +628,9 @@ async fn pair(State(app): Shared, headers: HeaderMap) -> Response {
 
 async fn claim(State(app): Shared, bytes: Bytes) -> Response {
     let b = attempt!(body(&bytes));
-    match auth(&app).claim(&s(&b, "code"), &s(&b, "name"), &s(&b, "public_key")) {
+    match auth(&app).claim(&as_text(&b["code"]), &as_text(&b["name"]), &as_text(&b["public_key"])) {
         Ok(device) => {
-            let name = auth(&app).device(&device).map(|d| s(&d, "name")).unwrap_or_default();
+            let name = auth(&app).device(&device).map(|d| as_text(&d["name"])).unwrap_or_default();
             App::alarm(
                 &app.events,
                 &app.push,
@@ -656,7 +648,7 @@ async fn claim(State(app): Shared, bytes: Bytes) -> Response {
 
 async fn device_challenge(State(app): Shared, bytes: Bytes) -> Response {
     let b = attempt!(body(&bytes));
-    match auth(&app).device_challenge(&s(&b, "device")) {
+    match auth(&app).device_challenge(&as_text(&b["device"])) {
         Ok(nonce) => ok(json!({"nonce": nonce})),
         Err(_) => json_status(StatusCode::UNAUTHORIZED, json!({"error": "unknown device"})),
     }
@@ -664,7 +656,7 @@ async fn device_challenge(State(app): Shared, bytes: Bytes) -> Response {
 
 async fn device_login(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> Response {
     let b = attempt!(body(&bytes));
-    match auth(&app).device_login(&s(&b, "device"), &s(&b, "nonce"), &s(&b, "signature"), &agent(&headers)) {
+    match auth(&app).device_login(&as_text(&b["device"]), &as_text(&b["nonce"]), &as_text(&b["signature"]), &agent(&headers)) {
         Ok(token) => ok(json!({"token": token})),
         Err(_) => json_status(StatusCode::UNAUTHORIZED, json!({"error": "login failed"})),
     }
@@ -705,7 +697,7 @@ async fn theme_get(State(app): Shared) -> Response {
 
 async fn theme_set(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> Response {
     let b = attempt!(body(&bytes));
-    let seed = s(&b, "seed").to_lowercase();
+    let seed = as_text(&b["seed"]).to_lowercase();
     if seed.len() != 7 || !seed.starts_with('#') || !seed[1..].bytes().all(|c| c.is_ascii_hexdigit()) {
         return json_status(StatusCode::BAD_REQUEST, json!({"error": "seed is #rrggbb"}));
     }
@@ -919,7 +911,7 @@ async fn push_token(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> Res
         out["ws"] = json!(secret);
         Some(json!({"ws": push_mod::secret_hash(&secret)}))
     } else {
-        Some(json!(seimei_core::util::cut(&s(&b, "token"), 4096))).filter(|t| t != "")
+        Some(json!(seimei_core::util::cut(&as_text(&b["token"]), 4096))).filter(|t| t != "")
     };
     if !rec.as_ref().is_some_and(|r| r.get("ws").is_some()) {
         app.push.stream.drop_device(&dev);
@@ -1012,7 +1004,7 @@ async fn push_ws(
 /// The app tells which view it shows (chat, another tab, an agent's page): replies skip only the chat.
 async fn presence(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> Response {
     let b = attempt!(body(&bytes));
-    let view = seimei_core::util::chars(&s(&b, "view"), 20);
+    let view = seimei_core::util::chars(&as_text(&b["view"]), 20);
     let dev = app.auth.as_ref().and_then(|a| a.device_of(&headers).or_else(|| a.browser_of(&headers)));
     if !view.is_empty() {
         app.push.shows(dev.as_deref(), &view);
@@ -1175,7 +1167,7 @@ const MAX_FILES: usize = 10;
 
 async fn send(State(app): Shared, bytes: Bytes) -> Response {
     let b = attempt!(body(&bytes));
-    let said = s(&b, "text").trim().to_string();
+    let said = as_text(&b["text"]).trim().to_string();
     let list = |k: &str| match &b[k] {
         Value::Null => Some(vec![]),
         Value::Array(a) => Some(a.clone()),
@@ -1208,7 +1200,7 @@ async fn send(State(app): Shared, bytes: Bytes) -> Response {
             Err(e) => return text(StatusCode::BAD_REQUEST, &seimei_core::util::chars(&e, 200)),
         }
     }
-    let cid = Some(seimei_core::util::chars(&s(&b, "cid"), 40)).filter(|c| !c.is_empty());
+    let cid = Some(seimei_core::util::chars(&as_text(&b["cid"]), 40)).filter(|c| !c.is_empty());
     // A reply: the message of seimei's or the card (a report, a question, an approval) this one answers.
     let reply = match &b["reply"] {
         Value::Number(n) => n.as_i64(),
@@ -1235,8 +1227,8 @@ async fn decide(State(app): Shared, UrlPath(aid): UrlPath<String>, bytes: Bytes)
         Some("deny") => false,
         _ => return bad_request(),
     };
-    let option = Some(seimei_core::util::chars(&s(&b, "option"), 40)).filter(|o| !o.is_empty() && b["option"] != false);
-    let note = Some(seimei_core::util::chars(s(&b, "note").trim(), 2000)).filter(|n| !n.is_empty());
+    let option = Some(seimei_core::util::chars(&as_text(&b["option"]), 40)).filter(|o| !o.is_empty() && b["option"] != false);
+    let note = Some(seimei_core::util::chars(as_text(&b["note"]).trim(), 2000)).filter(|n| !n.is_empty());
     if !app.approvals.decide(&aid, approve, option, note) {
         return text(StatusCode::CONFLICT, "already answered or expired");
     }
@@ -1266,7 +1258,7 @@ fn worker_of(app: &App, id: &str) -> Result<Arc<seimei_core::workers::Worker>, R
 async fn worker_send(State(app): Shared, UrlPath(id): UrlPath<String>, bytes: Bytes) -> Response {
     let w = attempt!(worker_of(&app, &id));
     let b = attempt!(body(&bytes));
-    let shown = s(&b, "text").trim().to_string();
+    let shown = as_text(&b["text"]).trim().to_string();
     let infos = attempt!(attached(&app, &b["files"]));
     let mut said = shown.clone();
     if !infos.is_empty() {
@@ -1311,7 +1303,7 @@ async fn worker_stop(State(app): Shared, UrlPath(id): UrlPath<String>) -> Respon
 async fn worker_tune(State(app): Shared, UrlPath(id): UrlPath<String>, bytes: Bytes) -> Response {
     let w = attempt!(worker_of(&app, &id));
     let b = attempt!(body(&bytes));
-    let pick = |k: &str| Some(s(&b, k)).filter(|v| !v.is_empty());
+    let pick = |k: &str| Some(as_text(&b[k])).filter(|v| !v.is_empty());
     let tuned = async {
         if let Some(mode) = pick("mode").filter(|m| *m != w.mode()) {
             w.set_mode(&mode).await?;
@@ -1455,7 +1447,7 @@ async fn session_send(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes: 
     let (sess, _) = attempt!(user_session(&app, &pid).await);
     let b = attempt!(body(&bytes));
     let lines = attempt!(attachment_lines(&app, &b["files"]));
-    let said = format!("{}{lines}", s(&b, "text").trim());
+    let said = format!("{}{lines}", as_text(&b["text"]).trim());
     if said.trim().is_empty() || said.chars().count() > 20000 {
         return text(StatusCode::BAD_REQUEST, "text, up to 20000 characters");
     }
@@ -1494,12 +1486,12 @@ async fn session_answer(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes
         return json_status(StatusCode::CONFLICT, json!({"error": "Answer this one on the server"}));
     }
     let q = &ask["questions"][0];
-    let question = s(q, "question");
+    let question = as_text(&q["question"]);
     let options: Vec<String> =
-        q["options"].as_array().into_iter().flatten().filter(|o| o.is_object()).map(|o| s(o, "label")).collect();
+        q["options"].as_array().into_iter().flatten().filter(|o| o.is_object()).map(|o| as_text(&o["label"])).collect();
     let done = if b.get("text").is_some() {
         let lines = attempt!(attachment_lines(&app, &b["files"]));
-        let said = format!("{}{lines}", s(&b, "text").trim());
+        let said = format!("{}{lines}", as_text(&b["text"]).trim());
         if said.trim().is_empty() {
             return text(StatusCode::BAD_REQUEST, "text");
         }

@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 use crate::events::EventLog;
 use crate::plugins::Plugins;
 use crate::push::Push;
-use crate::util::{chars, hex, now, random_bytes, read_json, write_json};
+use crate::util::{as_text, chars, hex, now, random_bytes, read_json, write_json};
 
 pub const TRIGGERS: [(&str, &str); 6] = [
     ("shikigami_done", "a shikigami (target: its name, or * for any) finishes its task"),
@@ -65,14 +65,6 @@ pub struct Watches {
     sessions: Mutex<HashMap<String, (String, String)>>,
     /// Their triggers come on top of TRIGGERS.
     pub plugins: OnceLock<Arc<Plugins>>,
-}
-
-fn s(v: &Value) -> String {
-    match v {
-        Value::String(s) => s.clone(),
-        Value::Null => String::new(),
-        v => v.to_string(),
-    }
 }
 
 impl Watches {
@@ -149,14 +141,14 @@ impl Watches {
             .map(|r| {
                 let mut line = format!(
                     "{}: {} {} -> {} ping \"{}\"",
-                    s(&r["id"]),
-                    s(&r["trigger"]),
-                    s(&r["target"]),
-                    s(&r["level"]),
-                    s(&r["title"])
+                    as_text(&r["id"]),
+                    as_text(&r["trigger"]),
+                    as_text(&r["target"]),
+                    as_text(&r["level"]),
+                    as_text(&r["title"])
                 );
                 if crate::util::truthy(&r["key"]) {
-                    line += &format!(" (key {})", s(&r["key"]));
+                    line += &format!(" (key {})", as_text(&r["key"]));
                 }
                 if crate::util::flag(&r["reply"]) {
                     line += ", reply";
@@ -177,7 +169,7 @@ impl Watches {
             (rules.iter())
                 .filter(|r| r["trigger"] == trigger)
                 .filter(|r| {
-                    let t = s(&r["target"]);
+                    let t = as_text(&r["target"]);
                     t.is_empty() || t == "*" || t.to_lowercase() == name.to_lowercase()
                 })
                 .cloned()
@@ -190,16 +182,16 @@ impl Watches {
     pub fn fire_rule(&self, rule: &Value, name: &str, detail: &str) {
         let hit = self.rules.lock().unwrap().iter().find(|r| r["id"] == rule["id"]).cloned();
         if let Some(r) = hit {
-            self.ping(&s(&r["trigger"]), name, detail, vec![r]);
+            self.ping(&as_text(&r["trigger"]), name, detail, vec![r]);
         }
     }
 
     fn ping(&self, trigger: &str, name: &str, detail: &str, hits: Vec<Value>) {
         let detail = chars(detail, 300);
-        let fill = |x: &Value| s(x).replace("{name}", name).replace("{detail}", &detail);
+        let fill = |x: &Value| as_text(x).replace("{name}", name).replace("{detail}", &detail);
         for r in hits {
             let key = r["key"].as_str().filter(|k| !k.is_empty());
-            let n = self.push.ping(&fill(&r["title"]), &fill(&r["body"]), &s(&r["level"]), key, r["reply"] == true);
+            let n = self.push.ping(&fill(&r["title"]), &fill(&r["body"]), &as_text(&r["level"]), key, r["reply"] == true);
             let repeat = crate::util::flag(&r["repeat"]);
             {
                 let mut rules = self.rules.lock().unwrap();
@@ -211,7 +203,7 @@ impl Watches {
             let done = if repeat { "" } else { "; the rule is done" };
             (self.tell)(&format!(
                 "watch {} fired ({trigger} {name}): pinged the user \"{}\" to {n} phone(s){done}",
-                s(&r["id"]),
+                as_text(&r["id"]),
                 fill(&r["title"])
             ));
         }
@@ -222,15 +214,15 @@ impl Watches {
         match ev["type"].as_str() {
             Some("workers") => {
                 for w in ev["list"].as_array().into_iter().flatten() {
-                    let (name, state, id) = (s(&w["name"]), s(&w["state"]), s(&w["id"]));
+                    let (name, state, id) = (as_text(&w["name"]), as_text(&w["state"]), as_text(&w["id"]));
                     let was = self.workers.lock().unwrap().insert(id, state.clone());
                     if was.is_none_or(|was| was == state) {
                         continue;
                     }
                     let detail = if state == "asking" {
-                        s(&w["question"])
+                        as_text(&w["question"])
                     } else if crate::util::truthy(&w["summary"]) {
-                        s(&w["summary"])
+                        as_text(&w["summary"])
                     } else {
                         String::new()
                     };
@@ -248,19 +240,19 @@ impl Watches {
             }
             Some("sessions") => {
                 for x in ev["list"].as_array().into_iter().flatten() {
-                    let sid = if crate::util::truthy(&x["session_id"]) { s(&x["session_id"]) } else { s(&x["pid"]) };
+                    let sid = if crate::util::truthy(&x["session_id"]) { as_text(&x["session_id"]) } else { as_text(&x["pid"]) };
                     let q = x["question"].as_str().unwrap_or("").to_string();
-                    let status = s(&x["status"]);
+                    let status = as_text(&x["status"]);
                     let asks = if !q.is_empty() {
                         q
                     } else if status.starts_with("waiting") {
-                        Some(s(&x["waiting_text"])).filter(|t| !t.is_empty()).unwrap_or("Waiting on the server".into())
+                        Some(as_text(&x["waiting_text"])).filter(|t| !t.is_empty()).unwrap_or("Waiting on the server".into())
                     } else {
                         String::new()
                     };
                     let was = self.sessions.lock().unwrap().insert(sid, (status.clone(), asks.clone()));
                     let Some((was_status, was_asks)) = was else { continue };
-                    let name = s(&x["name"]);
+                    let name = as_text(&x["name"]);
                     if !asks.is_empty() && was_asks.is_empty() {
                         self.fire("session_asks", &name, asks.lines().next().unwrap_or(""));
                     }
@@ -289,9 +281,9 @@ impl Watches {
         for r in gone {
             (self.tell)(&format!(
                 "watch {} ({} {}) expired without firing",
-                s(&r["id"]),
-                s(&r["trigger"]),
-                s(&r["target"])
+                as_text(&r["id"]),
+                as_text(&r["trigger"]),
+                as_text(&r["target"])
             ));
         }
     }
