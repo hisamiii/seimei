@@ -1280,12 +1280,7 @@ impl Guard {
 
     /// PostToolUseFailure: the outcome goes into the audit log; repeated failures reach the dispatcher.
     pub fn failed(&self, worker: Option<&str>, inp: &Value, tool_use_id: Option<&str>) -> Value {
-        let error = match &inp["error"] {
-            Value::String(s) => s.clone(),
-            Value::Null => String::new(),
-            v => v.to_string(),
-        };
-        let error = crate::util::chars(&error, 300);
+        let error = crate::util::chars(&crate::util::as_text(&inp["error"]), 300);
         self.audit(json!({"event": "failed", "id": tool_use_id, "error": error}));
         if let Some(w) = worker {
             let tool = inp["tool_name"].as_str().unwrap_or("?").to_string();

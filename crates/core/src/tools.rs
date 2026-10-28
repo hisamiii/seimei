@@ -21,7 +21,7 @@ use crate::tasks::Board;
 use crate::transcripts::{project_of, transcript};
 use crate::uploads::Uploads;
 use crate::usage::Usage;
-use crate::util::{chars, flag, now, truthy};
+use crate::util::{as_text, chars, flag, now, truthy};
 use crate::watches::{DEFAULT_HOURS, NewRule, TRIGGERS, Watches, mins};
 use crate::workers::{ACTIVE, EFFORTS, MODELS, Pool, Summon, Worker};
 
@@ -88,11 +88,7 @@ where
 
 /// An argument as text: strings as they are, other values as JSON, missing as "".
 fn arg(a: &Value, k: &str) -> String {
-    match &a[k] {
-        Value::String(v) => v.clone(),
-        Value::Null => String::new(),
-        v => v.to_string(),
-    }
+    as_text(&a[k])
 }
 
 /// Why a summon call cannot go ahead (a pick missing or not one of the choices), or "".
@@ -387,7 +383,7 @@ impl Tools {
             );
         }
         let opt = |k: &str| Some(arg(a, k)).filter(|s| !s.is_empty());
-        let tools = (a["tools"].as_array().into_iter().flatten()).map(|t| arg(&json!({"t": t}), "t")).collect();
+        let tools = (a["tools"].as_array().into_iter().flatten()).map(as_text).collect();
         let s = Summon {
             name: arg(a, "name"),
             task: arg(a, "task"),

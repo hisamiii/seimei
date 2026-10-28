@@ -192,11 +192,7 @@ fn diff(path: &str, old: &str, new: &str) -> String {
 
 /// The card's action, title words and detail for a tool call.
 pub fn describe(tool: &str, inp: &Value, reason: Option<&str>) -> Value {
-    let s = |k: &str| match &inp[k] {
-        Value::String(v) => v.clone(),
-        Value::Null => String::new(),
-        v => v.to_string(),
-    };
+    let s = |k: &str| crate::util::as_text(&inp[k]);
     let path = ["file_path", "notebook_path", "path"].iter().map(|k| s(k)).find(|p| !p.is_empty()).unwrap_or_default();
     let card =
         |action: &str, target: &str, detail: String| json!({"action": action, "target": target, "detail": detail});

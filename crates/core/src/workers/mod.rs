@@ -760,22 +760,14 @@ impl Worker {
         let text = crate::tools::text;
         match name {
             "ask" => {
-                let q = match &a["question"] {
-                    Value::String(s) => s.trim().to_string(),
-                    Value::Null => String::new(),
-                    v => v.to_string(),
-                };
+                let q = as_text(&a["question"]).trim().to_string();
                 self.set("asking", |r| r.question = Some(q.clone()));
                 self.pool().report(self, "asking", &q);
                 text("Asked. The answer arrives as your next message; end your turn now.", false)
             }
             "board" => {
                 let (name, state) = (self.name(), self.state());
-                let id = match &a["id"] {
-                    Value::String(s) => Some(s.clone()),
-                    Value::Null => None,
-                    v => Some(v.to_string()),
-                };
+                let id = (!a["id"].is_null()).then(|| as_text(&a["id"]));
                 let pool = self.pool();
                 let mut board = pool.board.lock().unwrap();
                 let got = match (a["action"].as_str(), id) {
@@ -1194,12 +1186,7 @@ impl Session {
     /// Its own todo list, mirrored onto its task: a TaskCreate gets its id from the result; a TaskUpdate applies now.
     fn step(&mut self, id: &str, name: &str, input: &Value) {
         if name == "TaskCreate" {
-            let subject = match &input["subject"] {
-                Value::String(s) => s.trim().to_string(),
-                Value::Null => String::new(),
-                v => v.to_string(),
-            };
-            self.steps.insert(id.into(), subject);
+            self.steps.insert(id.into(), as_text(&input["subject"]).trim().to_string());
         } else if name == "TaskUpdate" && !input["taskId"].is_null() {
             let sid = match &input["taskId"] {
                 Value::String(s) => s.trim_start_matches('#').to_string(),
