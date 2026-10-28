@@ -1,5 +1,6 @@
 package com.hisamiowo.seimei
 
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.animation.core.Animatable
 import androidx.activity.BackEventCompat
 import androidx.activity.compose.PredictiveBackHandler
@@ -595,8 +596,12 @@ fun AppScreen(vm: Seimei) {
     }
     LaunchedEffect(vm.tab, vm.page == null) { snacks.currentSnackbarData?.dismiss() }
     val still = reducedMotion()
+    // From medium width (600dp, M3 window classes) the navigation moves to a rail on the left edge.
+    val wide = LocalConfiguration.current.screenWidthDp >= 600
     Box(Modifier.fillMaxSize()) {
-    Column(Modifier.fillMaxSize().imePadding()) {
+    Row(Modifier.fillMaxSize()) {
+    if (wide) NavRail(vm)
+    Column(Modifier.weight(1f).fillMaxHeight().imePadding()) {
         Header(vm)
         // The page sheet of final/: surface-low under the header, 28 corners on top
         Box(Modifier.weight(1f).clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)).background(MaterialTheme.colorScheme.surfaceContainerLow)) {
@@ -619,8 +624,10 @@ fun AppScreen(vm: Seimei) {
             .background(MaterialTheme.colorScheme.surfaceContainer)) {
             if (vm.tab == "chat" && vm.lane != "k") Composer(vm)
             // The keyboard covers the bottom of the screen: while typing, the navigation bar steps aside.
-            if (!WindowInsets.isImeVisible) NavBar(vm)
+            if (!wide && !WindowInsets.isImeVisible) NavBar(vm)
+            else if (wide) Spacer(Modifier.navigationBarsPadding())
         }
+    }
     }
     // Forward and backward (BEHAVIOR.md 1): a page comes in from the right and goes back out to it. Predictive back
     // has already taken the page away when it commits, so that exit only finishes it.
@@ -813,48 +820,61 @@ fun dotColor(s: String): Color = when (s) {
  */
 @Composable
 fun NavBar(vm: Seimei) {
+    Row(Modifier.fillMaxWidth().navigationBarsPadding().height(64.dp).padding(horizontal = 8.dp).selectableGroup()) {
+        for (tab in TABS) NavItem(vm, tab, Modifier.weight(1f).fillMaxHeight())
+    }
+}
+
+/** The navigation rail from medium width (600dp, M3 window classes): the same items down the left edge. */
+@Composable
+fun NavRail(vm: Seimei) {
+    Column(Modifier.fillMaxHeight().width(88.dp).background(MaterialTheme.colorScheme.surface).statusBarsPadding().navigationBarsPadding()
+        .padding(top = 88.dp).selectableGroup(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        for (tab in TABS) NavItem(vm, tab, Modifier.fillMaxWidth().height(64.dp))
+    }
+}
+
+/** One destination: the pill with its icon and badge, then the label. */
+@Composable
+private fun NavItem(vm: Seimei, tab: String, modifier: Modifier) {
     val (working, asks) = agentCounts(vm)
     val cs = MaterialTheme.colorScheme
     val x = LocalTokens.current
-    Row(Modifier.fillMaxWidth().navigationBarsPadding().height(64.dp).padding(horizontal = 8.dp).selectableGroup()) {
-        for (tab in TABS) {
-            val on = vm.tab == tab
-            val press = remember { MutableInteractionSource() }
-            val pressed by press.collectIsPressedAsState()
-            // Under the finger the pill widens inside its item (final/ 8)
-            val pill by animateDpAsState(if (pressed) 64.dp else 56.dp, spring(dampingRatio = .9f, stiffness = 1400f), label = "pill")
-            val label = if (tab == "chat") "seimei" else TITLES[tab]!!
-            Column(
-                Modifier.weight(1f).fillMaxHeight()
-                    .selectable(on, interactionSource = press, indication = null, role = Role.Tab) { vm.show(tab) }
-                    .padding(vertical = 6.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Box(Modifier.size(pill, 32.dp).clip(RoundedCornerShape(16.dp)).background(if (on) cs.primary else Color.Transparent)
-                    .indication(press, ripple()), contentAlignment = Alignment.Center) {
-                    val tint = if (on) cs.onPrimary else x.text3
-                    if (tab == "usage") UsageRing(vm, on) else Icon(if (tab == "chat") Icons.chat else Icons.agents, null, Modifier.size(24.dp), tint = tint)
-                    val badge = when {
-                        // What needs the user counts first, in orange; otherwise how many work.
-                        tab == "agents" && asks > 0 -> "$asks" to x.warn
-                        tab == "agents" && working > 0 -> "$working" to cs.primary
-                        tab == "chat" && vm.tab != "chat" && (vm.unread || vm.waiting > 0) -> "" to cs.primary
-                        else -> null
-                    }
-                    badge?.let { (n, c) ->
-                        val big = n.isNotEmpty()
-                        Box(Modifier.align(Alignment.TopStart).offset(x = (pill - 56.dp) / 2 + 34.dp, y = if (big) (-1).dp else 4.dp)
-                            .size(if (big) 16.dp else 8.dp).clip(CircleShape).background(c), contentAlignment = Alignment.Center) {
-                            if (big) Text(if (n.length > 2) "99+" else n, color = if (c == x.warn) x.onWarn else cs.onPrimary,
-                                fontSize = 11.sp, lineHeight = 16.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
+    val on = vm.tab == tab
+    val press = remember { MutableInteractionSource() }
+    val pressed by press.collectIsPressedAsState()
+    // Under the finger the pill widens inside its item (final/ 8)
+    val pill by animateDpAsState(if (pressed) 64.dp else 56.dp, spring(dampingRatio = .9f, stiffness = 1400f), label = "pill")
+    val label = if (tab == "chat") "seimei" else TITLES[tab]!!
+    Column(
+        modifier
+            .selectable(on, interactionSource = press, indication = null, role = Role.Tab) { vm.show(tab) }
+            .padding(vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Box(Modifier.size(pill, 32.dp).clip(RoundedCornerShape(16.dp)).background(if (on) cs.primary else Color.Transparent)
+            .indication(press, ripple()), contentAlignment = Alignment.Center) {
+            val tint = if (on) cs.onPrimary else x.text3
+            if (tab == "usage") UsageRing(vm, on) else Icon(if (tab == "chat") Icons.chat else Icons.agents, null, Modifier.size(24.dp), tint = tint)
+            val badge = when {
+                // What needs the user counts first, in orange; otherwise how many work.
+                tab == "agents" && asks > 0 -> "$asks" to x.warn
+                tab == "agents" && working > 0 -> "$working" to cs.primary
+                tab == "chat" && vm.tab != "chat" && (vm.unread || vm.waiting > 0) -> "" to cs.primary
+                else -> null
+            }
+            badge?.let { (n, c) ->
+                val big = n.isNotEmpty()
+                Box(Modifier.align(Alignment.TopStart).offset(x = (pill - 56.dp) / 2 + 34.dp, y = if (big) (-1).dp else 4.dp)
+                    .size(if (big) 16.dp else 8.dp).clip(CircleShape).background(c), contentAlignment = Alignment.Center) {
+                    if (big) Text(if (n.length > 2) "99+" else n, color = if (c == x.warn) x.onWarn else cs.onPrimary,
+                        fontSize = 11.sp, lineHeight = 16.sp, fontWeight = FontWeight.SemiBold)
                 }
-                Text(label, color = if (on) x.text else x.text3, fontSize = 12.sp, lineHeight = 16.sp,
-                    fontWeight = if (on) FontWeight.Bold else FontWeight.Medium,
-                    letterSpacing = .24.sp, maxLines = 1)
             }
         }
+        Text(label, color = if (on) x.text else x.text3, fontSize = 12.sp, lineHeight = 16.sp,
+            fontWeight = if (on) FontWeight.Bold else FontWeight.Medium,
+            letterSpacing = .24.sp, maxLines = 1)
     }
 }
