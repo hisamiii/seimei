@@ -23,6 +23,45 @@ def mix(a, b, t):
     return "#" + "".join(f"{round(x * t + y * (1 - t)):02x}" for x, y in zip(rgb(a), rgb(b)))
 
 
+def luminance(h):
+    lin = [c / 255 / 12.92 if c / 255 <= .04045 else ((c / 255 + .055) / 1.055) ** 2.4 for c in rgb(h)]
+    return .2126 * lin[0] + .7152 * lin[1] + .0722 * lin[2]
+
+
+def contrast(a, b):
+    la, lb = sorted([luminance(a), luminance(b)], reverse=True)
+    return (la + .05) / (lb + .05)
+
+
+# What must stay readable: (text or mark, what it sits on, WCAG minimum). 4.5 for text, 3 for marks and outlines.
+# crates/server/tests/themes.rs checks every theme file against the same list.
+SURFACES = ["surface", "surface-low", "container", "container-high", "container-highest"]
+LEGIBLE = ([(t, SURFACES, 4.5) for t in ("text", "text-2")] + [("text-3", ["surface", "surface-low", "container"], 4.5)]
+           + [(f"on-{r}", [r], 4.5) for r in ("primary", "primary-container", "tonal", "warn", "warn-container",
+                                                "ok-container", "error-container")]
+           + [("primary", ["surface", "surface-low"], 3), ("outline", ["surface"], 3)]
+           + [(r, ["surface-low"], 3) for r in ("warn", "error", "ok")])
+
+
+def legible(t):
+    """Moves each color that fails LEGIBLE a little at a time away from what it sits on (toward black or white); a
+    color that is already black or white moves the ground instead (white text on a light primary darkens the primary)."""
+    for _ in range(3):
+        for fg, grounds, least in LEGIBLE:
+            for bg in grounds:
+                if fg not in t or bg not in t:
+                    continue
+                for _ in range(60):
+                    if contrast(t[fg], t[bg]) >= least:
+                        break
+                    away = "#000000" if luminance(t[bg]) > luminance(t[fg]) else "#ffffff"
+                    if t[fg] != away:
+                        t[fg] = mix(away, t[fg], .04)
+                    else:
+                        t[bg] = mix("#ffffff" if away == "#000000" else "#000000", t[bg], .04)
+    return t
+
+
 def extras(t, dark):
     """The tones built on the theme's own: status containers, the snack's accent, the asking card. theme.js and
     Theme.kt use the same rules for Material You."""
@@ -54,7 +93,7 @@ def side(p, dark):
     t.update(extras(t, dark))
     t.update(p.get("exact", {}))
     t["tints"] = p["tints"]
-    return t
+    return legible(t)
 
 
 MOCHA_TINTS = ["#89b4fa", "#a6e3a1", "#94e2d5", "#cba6f7", "#f5c2e7", "#b4befe", "#f9e2af", "#74c7ec", "#eba0ac", "#fab387"]
@@ -127,15 +166,21 @@ THEMES = {
 }
 
 
+def accented(side_tokens, acc, keys):
+    """An accent's own tokens, made legible against the side it goes on."""
+    t = legible({**side_tokens, **acc})
+    return {k: t[k] for k in keys}
+
+
 def build() -> dict[str, dict]:
     out = {}
     for key, t in THEMES.items():
         f = {"name": t["name"], "dark": side(t["dark"], True), "light": side(t["light"], False)}
         if key == "catppuccin":
             f["accent"] = "mauve"
-            f["accents"] = {mode: {n: (accent(c, t[mode], mode == "dark") if not (mode == "dark" and n == "mauve") else
-                                       {k: f["dark"][k] for k in ("primary", "on-primary", "primary-container",
-                                                                  "on-primary-container", "inverse-primary", "tint")})
+            keys = ("primary", "on-primary", "primary-container", "on-primary-container", "inverse-primary", "tint")
+            f["accents"] = {mode: {n: (accented(f[mode], accent(c, t[mode], mode == "dark"), keys)
+                                       if not (mode == "dark" and n == "mauve") else {k: f["dark"][k] for k in keys})
                                    for n, c in CAT_ACCENTS[mode].items()} for mode in ("dark", "light")}
         out[key] = f
     # Material You: the tokens come from an M3 scheme; the file names it and lends the fixed tones M3 has no role for.

@@ -58,14 +58,14 @@
   "inverse-primary": "#c9a6f8",
   "tint": "#e9e6f5",
   "tonal": "#d6dbf1",
-  "on-tonal": "#59639d",
-  "ok": "#40a02b",
-  "warn": "#fe640b",
+  "on-tonal": "#525b91",
+  "ok": "#3b9427",
+  "warn": "#c74e0b",
   "error": "#d20f39",
   "text": "#4c4f69",
-  "text-2": "#5c5f77",
-  "text-3": "#6c6f85",
-  "outline": "#9ca0b0",
+  "text-2": "#54576d",
+  "text-3": "#64677b",
+  "outline": "#848896",
   "warn-container": "#f1ddd4",
   "on-warn-container": "#7f3206",
   "ok-container": "#d6e6d9",
@@ -204,7 +204,7 @@
   },
   "light": {
    "rosewater": {
-    "primary": "#dc8a78",
+    "primary": "#9f6456",
     "on-primary": "#ffffff",
     "primary-container": "#ece1e1",
     "on-primary-container": "#794c42",
@@ -212,7 +212,7 @@
     "tint": "#eeebed"
    },
    "flamingo": {
-    "primary": "#dd7878",
+    "primary": "#ad5e5e",
     "on-primary": "#ffffff",
     "primary-container": "#ecdee1",
     "on-primary-container": "#7a4242",
@@ -220,7 +220,7 @@
     "tint": "#eeeaed"
    },
    "pink": {
-    "primary": "#ea76cb",
+    "primary": "#a95493",
     "on-primary": "#ffffff",
     "primary-container": "#eeddee",
     "on-primary-container": "#814170",
@@ -244,7 +244,7 @@
     "tint": "#ede3ea"
    },
    "maroon": {
-    "primary": "#e64553",
+    "primary": "#d43f4d",
     "on-primary": "#ffffff",
     "primary-container": "#eed5db",
     "on-primary-container": "#7f262e",
@@ -252,7 +252,7 @@
     "tint": "#eee7eb"
    },
    "peach": {
-    "primary": "#fe640b",
+    "primary": "#c74e0b",
     "on-primary": "#ffffff",
     "primary-container": "#f1dad0",
     "on-primary-container": "#8c3706",
@@ -260,7 +260,7 @@
     "tint": "#f0e9e7"
    },
    "yellow": {
-    "primary": "#df8e1d",
+    "primary": "#a06715",
     "on-primary": "#ffffff",
     "primary-container": "#ece1d2",
     "on-primary-container": "#7b4e10",
@@ -268,7 +268,7 @@
     "tint": "#eeebe8"
    },
    "green": {
-    "primary": "#40a02b",
+    "primary": "#358323",
     "on-primary": "#ffffff",
     "primary-container": "#d3e4d5",
     "on-primary-container": "#235818",
@@ -276,7 +276,7 @@
     "tint": "#e4ece9"
    },
    "teal": {
-    "primary": "#179299",
+    "primary": "#148187",
     "on-primary": "#ffffff",
     "primary-container": "#cce2e6",
     "on-primary-container": "#0d5054",
@@ -284,7 +284,7 @@
     "tint": "#e2ebef"
    },
    "sky": {
-    "primary": "#04a5e5",
+    "primary": "#047cad",
     "on-primary": "#ffffff",
     "primary-container": "#c9e5f2",
     "on-primary-container": "#025b7e",
@@ -292,7 +292,7 @@
     "tint": "#e1ecf4"
    },
    "sapphire": {
-    "primary": "#209fb5",
+    "primary": "#1a7d8e",
     "on-primary": "#ffffff",
     "primary-container": "#cee4eb",
     "on-primary-container": "#125764",
@@ -308,7 +308,7 @@
     "tint": "#e2e9f5"
    },
    "lavender": {
-    "primary": "#7287fd",
+    "primary": "#5d6ece",
     "on-primary": "#ffffff",
     "primary-container": "#dbe0f6",
     "on-primary-container": "#3f4a8b",
