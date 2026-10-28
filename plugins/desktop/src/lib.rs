@@ -910,28 +910,29 @@ impl Desktop {
             };
             Ok::<_, String>((data, mime.to_string(), note))
         };
-        match shot.await {
-            Ok((data, mime, note)) => self.deliver(&data, &mime, note, args),
-            Err(e) => text(&e, true),
-        }
+        self.deliver(shot.await, args)
     }
 
-    /// A screenshot as the tool returns it: a path to Read, or the image in the chat with show=true.
-    fn deliver(&self, data: &[u8], mime: &str, mut note: String, args: &Value) -> Value {
+    /// A screenshot (data, type, note) as the tool returns it: a path to Read, or the image in the chat with show=true.
+    fn deliver(&self, shot: Result<(Vec<u8>, String, String), String>, args: &Value) -> Value {
+        let (data, mime, mut note) = match shot {
+            Ok(s) => s,
+            Err(e) => return text(&e, true),
+        };
         if truthy(&args["show"]) {
             let files = seimei_core::files::Files::new(&self.state);
-            let name = match files.save(data) {
+            let name = match files.save(&data) {
                 Ok((name, _)) => name,
                 Err(e) => return text(&e, true),
             };
             let caption = chars(&if truthy(&args["caption"]) { as_text(&args["caption"]) } else { String::new() }, 300);
             self.system(json!({"type": "image", "file": name, "caption": caption}), None);
             note += " Shown to the user.";
-            return json!({"content": [{"type": "image", "data": b64(data), "mimeType": mime},
+            return json!({"content": [{"type": "image", "data": b64(&data), "mimeType": mime},
                                       {"type": "text", "text": note}]});
         }
         // A path, not the pixels: an image in every result was 8% of the dispatcher's context growth.
-        match shot_file(&self.state.join("shots"), data, mime) {
+        match shot_file(&self.state.join("shots"), &data, &mime) {
             Ok(path) => text(&format!("{}\n{note}", path.display()), false),
             Err(e) => text(&e, true),
         }
@@ -1030,9 +1031,7 @@ impl Desktop {
         if !truthy(&args["go"]) {
             return text(&layout::describe(&plan), false);
         }
-        let card = json!({"action": "desktop", "target": format!("bring back your desktop ({} windows)", plan.len()),
-                          "detail": layout::describe(&plan)});
-        match session.card(card).await {
+        match session.card(layout::card(&plan)).await {
             Err(e) => text(&e, true),
             Ok(o) if o == "expired" => text("No answer in 10 minutes; not restored.", false),
             Ok(o) if o != "approved" => text(&format!("The user {o} the restore."), false),

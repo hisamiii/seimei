@@ -510,10 +510,7 @@ impl Desktop {
                 match tool {
                     "screenshot" => {
                         let a = args.clone();
-                        return match self.blocking(move |d| d.agent_shot(&up, &a)).await {
-                            Ok((data, mime, note)) => self.deliver(&data, &mime, note, args),
-                            Err(e) => text(&e, true),
-                        };
+                        return self.deliver(self.blocking(move |d| d.agent_shot(&up, &a)).await, args);
                     }
                     "clipboard_read" => return self.clipboard(Some(up), session).await,
                     "ui_tree" | "ui_action" => self.a11y_tool(tool, args, Some(up.b.clone())).await,

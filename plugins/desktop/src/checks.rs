@@ -52,11 +52,7 @@ fn in_config(path: &str, conf: &Path, home: &Path) -> bool {
 
 /// A word of a command names something under the WM's config (relative words too, after a cd there).
 fn shell_path(word: &str, in_conf: bool, conf: &Path, home: &Path) -> bool {
-    let w = word.trim_matches(|c| c == '"' || c == '\'');
-    let w = match w.strip_prefix("${HOME}").or_else(|| w.strip_prefix("$HOME")) {
-        Some(rest) if rest.is_empty() || rest.starts_with('/') => format!("{}{rest}", home.display()),
-        _ => w.to_string(),
-    };
+    let w = expand(word.trim_matches(|c| c == '"' || c == '\''), home);
     if w.is_empty() || w.starts_with('-') || w == "/dev/null" {
         return false;
     }
