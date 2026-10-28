@@ -41,7 +41,6 @@ use seimei_core::permissions::configured;
 use seimei_core::plugins::Plugins;
 use seimei_core::push::{Fcm, Push, WebPush};
 use seimei_core::util::{config_file, data_dir};
-use serde_json::Value;
 
 const COMMANDS: [&str; 13] = [
     "serve",
@@ -157,8 +156,8 @@ fn secret(prompt: &str) -> String {
     line.trim_end_matches(['\n', '\r']).to_string()
 }
 
-fn date(t: &Value, with_time: bool) -> String {
-    let Some(secs) = t.as_f64() else { return "never".into() };
+fn date(t: Option<f64>, with_time: bool) -> String {
+    let Some(secs) = t else { return "never".into() };
     seimei_core::util::local_time(secs, if with_time { "%Y-%m-%d %H:%M" } else { "%Y-%m-%d" })
 }
 
@@ -198,11 +197,10 @@ fn account(auth: &Auth, a: &Args, state: &std::path::Path) {
                 auth.clear_passkeys();
                 println!("All passkeys removed.");
             }
-            let data = auth.data();
-            let keys = data["passkeys"].as_array().cloned().unwrap_or_default();
+            let keys = auth.passkeys();
             for k in &keys {
-                let name = k["name"].as_str().filter(|n| !n.is_empty()).unwrap_or("unnamed");
-                println!("{name:30} added {}, last used {}", date(&k["created"], false), date(&k["used"], true));
+                let name = if k.name.is_empty() { "unnamed" } else { &k.name };
+                println!("{name:30} added {}, last used {}", date(Some(k.created), false), date(k.used, true));
             }
             if keys.is_empty() {
                 println!("No passkeys.");
@@ -210,7 +208,7 @@ fn account(auth: &Auth, a: &Args, state: &std::path::Path) {
         }
         "pair" => {
             let (code, exp) = auth.pair_code();
-            let t = date(&serde_json::json!(exp), true);
+            let t = date(Some(exp), true);
             println!("Pairing code: {code} (type it into the seimei app before {})", &t[11..]);
         }
         "devices" => {
@@ -223,8 +221,8 @@ fn account(auth: &Auth, a: &Args, state: &std::path::Path) {
                     "{}  {:24} paired {}, last login {}",
                     d["id"].as_str().unwrap_or(""),
                     d["name"].as_str().unwrap_or(""),
-                    date(&d["created"], false),
-                    date(&d["used"], true)
+                    date(d["created"].as_f64(), false),
+                    date(d["used"].as_f64(), true)
                 );
             }
             if list.is_empty() {

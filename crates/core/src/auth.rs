@@ -1,8 +1,8 @@
 //! Login: a password set on the server, passkeys added after the first login, cookie sessions, and paired phones
-//! running the seimei app, which sign a challenge with a key kept in the phone's keystore. auth.json stays JSON in
-//! memory, so fields this side does not know survive a save.
+//! running the seimei app, which sign a challenge with a key kept in the phone's keystore. Fields of auth.json this
+//! side does not know survive a save (the `other` maps).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
@@ -12,6 +12,7 @@ use openssl::hash::MessageDigest;
 use openssl::nid::Nid;
 use openssl::pkey::{PKey, Public};
 use openssl::sign::Verifier;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use url::Url;
 use webauthn_rs::prelude::*;
@@ -72,9 +73,94 @@ pub struct Auth {
     alarm: Mutex<Option<Alarm>>,
 }
 
+/// auth.json.
+#[derive(Default, Serialize, Deserialize)]
+#[serde(default)]
+struct Data {
+    password: Option<Password>,
+    /// By the hash of their token.
+    sessions: BTreeMap<String, Session>,
+    passkeys: Vec<Key>,
+    devices: Vec<Device>,
+    /// Open pairing codes.
+    pairing: Vec<Code>,
+    #[serde(flatten)]
+    other: Map<String, Value>,
+}
+
+/// The scrypt hash of the password and its parameters.
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+struct Password {
+    n: u64,
+    r: u64,
+    p: u64,
+    salt: String,
+    hash: String,
+}
+
+/// A logged-in browser or phone.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Session {
+    pub created: f64,
+    pub exp: f64,
+    /// "password", "passkey" or "device".
+    pub how: String,
+    pub agent: String,
+    /// The paired phone it belongs to; None for a browser.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device: Option<String>,
+    /// A browser's Web Push subscription.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub push: Option<Value>,
+    #[serde(flatten)]
+    pub other: Map<String, Value>,
+}
+
+/// A passkey as py_webauthn stored it: the credential id and its COSE public key, both base64url.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Key {
+    pub id: String,
+    pub public_key: String,
+    pub sign_count: u64,
+    pub name: String,
+    pub created: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub used: Option<f64>,
+    pub backup_eligible: bool,
+    #[serde(flatten)]
+    pub other: Map<String, Value>,
+}
+
+/// A paired phone: its keystore key (DER, base64url) and its push record.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Device {
+    pub id: String,
+    pub name: String,
+    pub public_key: String,
+    pub created: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub used: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub push: Option<Value>,
+    #[serde(flatten)]
+    pub other: Map<String, Value>,
+}
+
+/// A pairing code: only its hash is kept.
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+struct Code {
+    hash: String,
+    exp: f64,
+}
+
 #[derive(Default)]
 struct Inner {
-    data: Map<String, Value>,
+    data: Data,
     mtime: Option<u128>,
     /// The tripwire: what this server made or found at startup.
     known: Option<Ids>,
@@ -161,27 +247,15 @@ fn key(token: &str) -> String {
     sha256_hex(token.as_bytes())
 }
 
-fn strs(v: &Value, field: &str) -> HashSet<String> {
-    v.as_array().into_iter().flatten().filter_map(|x| x[field].as_str().map(String::from)).collect()
-}
-
 impl Inner {
-    fn arr(&mut self, k: &str) -> &mut Vec<Value> {
-        self.data.entry(k).or_insert(json!([])).as_array_mut().expect("a list")
-    }
-
-    fn sessions(&mut self) -> &mut Map<String, Value> {
-        self.data.entry("sessions").or_insert(json!({})).as_object_mut().expect("a map")
-    }
-
     fn ids(&self) -> Ids {
         let d = &self.data;
         Ids {
-            sessions: d["sessions"].as_object().map(|m| m.keys().cloned().collect()).unwrap_or_default(),
-            devices: strs(&d["devices"], "id"),
-            passkeys: strs(&d["passkeys"], "id"),
-            pairing: strs(&d["pairing"], "hash"),
-            password: d.get("password").and_then(|p| p["hash"].as_str()).map(String::from),
+            sessions: d.sessions.keys().cloned().collect(),
+            devices: d.devices.iter().map(|x| x.id.clone()).collect(),
+            passkeys: d.passkeys.iter().map(|x| x.id.clone()).collect(),
+            pairing: d.pairing.iter().map(|x| x.hash.clone()).collect(),
+            password: d.password.as_ref().map(|p| p.hash.clone()),
         }
     }
 
@@ -189,8 +263,8 @@ impl Inner {
         self.known.as_mut().expect("loaded")
     }
 
-    fn device(&self, id: &str) -> Option<&Value> {
-        self.data["devices"].as_array()?.iter().find(|d| d["id"] == id)
+    fn device(&self, id: &str) -> Option<&Device> {
+        self.data.devices.iter().find(|d| d.id == id)
     }
 
     fn alarm(&mut self, title: &str, text: &str) {
@@ -243,19 +317,15 @@ impl Auth {
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_nanos());
         if mtime != g.mtime || g.known.is_none() {
-            let mut data = match mtime {
-                Some(_) => std::fs::read(&self.path)
-                    .ok()
-                    .and_then(|b| serde_json::from_slice::<Map<String, Value>>(&b).ok())
-                    .unwrap_or_default(),
-                None => Map::new(),
+            let bytes = mtime.and_then(|_| std::fs::read(&self.path).ok());
+            g.data = match bytes.map(|b| serde_json::from_slice(&b)) {
+                Some(Ok(data)) => data,
+                Some(Err(e)) => {
+                    eprintln!("seimei: auth.json: {e}");
+                    Data::default()
+                }
+                None => Data::default(),
             };
-            for (k, v) in
-                [("passkeys", json!([])), ("sessions", json!({})), ("devices", json!([])), ("pairing", json!([]))]
-            {
-                data.entry(k).or_insert(v);
-            }
-            g.data = data;
             g.mtime = mtime;
             if g.known.is_none() {
                 g.known = Some(g.ids());
@@ -288,9 +358,9 @@ impl Auth {
             }
         }
         if !what.is_empty() {
-            g.sessions().retain(|k, _| !forged_sessions.contains(k));
-            g.arr("devices").retain(|x| !x["id"].as_str().is_some_and(|i| forged_devices.contains(i)));
-            g.arr("passkeys").retain(|x| !x["id"].as_str().is_some_and(|i| forged_passkeys.contains(i)));
+            g.data.sessions.retain(|k, _| !forged_sessions.contains(k));
+            g.data.devices.retain(|x| !forged_devices.contains(&x.id));
+            g.data.passkeys.retain(|x| !forged_passkeys.contains(&x.id));
             self.save(g);
             g.alarm(
                 "Login data was forged",
@@ -332,12 +402,7 @@ impl Auth {
     }
 
     pub fn has_password(&self) -> bool {
-        self.lock().data.contains_key("password")
-    }
-
-    /// The raw state, for the CLI's listings.
-    pub fn data(&self) -> Map<String, Value> {
-        self.lock().data.clone()
+        self.lock().data.password.is_some()
     }
 
     // ---------- password ----------
@@ -348,7 +413,7 @@ impl Auth {
         let (n, r, p) = self.scrypt;
         let hash = hex(&scrypt(password, &salt, self.scrypt));
         let mut g = self.lock();
-        g.data.insert("password".into(), json!({"n": n, "r": r, "p": p, "salt": hex(&salt), "hash": hash}));
+        g.data.password = Some(Password { n, r, p, salt: hex(&salt), hash: hash.clone() });
         g.known().password = Some(hash);
         self.save(&mut g);
     }
@@ -358,7 +423,7 @@ impl Auth {
         let _one = self.password_lock.lock().await;
         let (pw, locked_until) = {
             let g = self.lock();
-            (g.data.get("password").cloned(), g.locked_until)
+            (g.data.password.clone(), g.locked_until)
         };
         let t = now();
         if t < locked_until {
@@ -367,9 +432,9 @@ impl Auth {
         let mut ok = false;
         let mut stale = false;
         if let Some(pw) = pw {
-            let params = (pw["n"].as_u64().unwrap_or(0), pw["r"].as_u64().unwrap_or(0), pw["p"].as_u64().unwrap_or(0));
-            let salt = unhex(pw["salt"].as_str().unwrap_or("")).unwrap_or_default();
-            let want = unhex(pw["hash"].as_str().unwrap_or("")).unwrap_or_default();
+            let params = (pw.n, pw.r, pw.p);
+            let salt = unhex(&pw.salt).unwrap_or_default();
+            let want = unhex(&pw.hash).unwrap_or_default();
             let given = password.to_string();
             let digest = tokio::task::spawn_blocking(move || scrypt(&given, &salt, params)).await.unwrap_or_default();
             ok = same(&digest, &want);
@@ -404,13 +469,11 @@ impl Auth {
         let t = now();
         let life = if device.is_some() { DEVICE_SESSION_HOURS * 3600.0 } else { SESSION_DAYS * 86400.0 };
         let mut g = self.lock();
-        g.sessions().retain(|_, s| s["exp"].as_f64().unwrap_or(0.0) >= t);
+        g.data.sessions.retain(|_, s| s.exp >= t);
         g.known().sessions.insert(key(&token));
-        let mut s = json!({"created": t, "exp": t + life, "how": how, "agent": chars(agent, 200)});
-        if let Some(d) = device {
-            s["device"] = json!(d);
-        }
-        g.sessions().insert(key(&token), s);
+        let (how, agent, device) = (how.into(), chars(agent, 200), device.map(String::from));
+        let s = Session { created: t, exp: t + life, how, agent, device, ..Session::default() };
+        g.data.sessions.insert(key(&token), s);
         self.save(&mut g);
         token
     }
@@ -427,14 +490,14 @@ impl Auth {
     }
 
     /// The session record of a request, if it is logged in.
-    pub fn current(&self, headers: &HeaderMap) -> Option<Value> {
+    pub fn current(&self, headers: &HeaderMap) -> Option<Session> {
         let token = self.token(headers)?;
         let g = self.lock();
-        let s = g.data["sessions"].get(key(&token))?;
-        if s["exp"].as_f64().unwrap_or(0.0) <= now() {
+        let s = g.data.sessions.get(&key(&token))?;
+        if s.exp <= now() {
             return None;
         }
-        if let Some(d) = s.get("device").and_then(Value::as_str)
+        if let Some(d) = &s.device
             && g.device(d).is_none()
         {
             return None;
@@ -449,14 +512,14 @@ impl Auth {
 
     /// The paired phone a request comes from, if any.
     pub fn device_of(&self, headers: &HeaderMap) -> Option<String> {
-        self.current(headers)?.get("device")?.as_str().map(String::from)
+        self.current(headers)?.device
     }
 
     /// Logs out the session of this request; unknown tokens are ignored.
     pub fn end_session(&self, headers: &HeaderMap) {
         if let Some(token) = self.token(headers) {
             let mut g = self.lock();
-            if g.sessions().remove(&key(&token)).is_some() {
+            if g.data.sessions.remove(&key(&token)).is_some() {
                 self.save(&mut g);
             }
         }
@@ -465,16 +528,14 @@ impl Auth {
     /// A browser session that logged in within REAUTH_SECONDS: needed to add a passkey or pair a phone.
     pub fn recent(&self, headers: &HeaderMap) -> bool {
         self.current(headers).is_some_and(|s| {
-            s.get("device").is_none()
-                && Self::bearer(headers).is_none()
-                && s["created"].as_f64().unwrap_or(0.0) > now() - REAUTH_SECONDS
+            s.device.is_none() && Self::bearer(headers).is_none() && s.created > now() - REAUTH_SECONDS
         })
     }
 
     /// Logs out every browser and phone. Passkeys and paired phones stay.
     pub fn end_all_sessions(&self) {
         let mut g = self.lock();
-        g.data.insert("sessions".into(), json!({}));
+        g.data.sessions.clear();
         self.save(&mut g);
     }
 
@@ -505,22 +566,27 @@ impl Auth {
     }
 
     pub fn passkey_count(&self) -> usize {
-        self.lock().data["passkeys"].as_array().map(Vec::len).unwrap_or(0)
+        self.lock().data.passkeys.len()
     }
 
-    /// A stored passkey as webauthn-rs sees it. auth.json keeps what py_webauthn returned: the credential id and its
-    /// COSE public key; the backup flag was never stored, so it may only go up (allow_backup_eligible_upgrade).
-    fn stored_passkey(rec: &Value) -> Option<Passkey> {
-        let id = b64url_decode(rec["id"].as_str()?)?;
-        let cose = b64url_decode(rec["public_key"].as_str()?)?;
+    /// The stored passkeys, for the CLI's listing.
+    pub fn passkeys(&self) -> Vec<Key> {
+        self.lock().data.passkeys.clone()
+    }
+
+    /// A stored passkey as webauthn-rs sees it. py_webauthn never stored the backup flag, so it may only go up
+    /// (allow_backup_eligible_upgrade).
+    fn stored_passkey(rec: &Key) -> Option<Passkey> {
+        let id = b64url_decode(&rec.id)?;
+        let cose = b64url_decode(&rec.public_key)?;
         let value: serde_cbor_2::Value = serde_cbor_2::from_slice(&cose).ok()?;
         let cred = Credential {
             cred_id: id.into(),
             cred: COSEKey::try_from(&value).ok()?,
-            counter: rec["sign_count"].as_u64().unwrap_or(0) as u32,
+            counter: rec.sign_count as u32,
             transports: None,
             user_verified: true,
-            backup_eligible: rec["backup_eligible"].as_bool().unwrap_or(false),
+            backup_eligible: rec.backup_eligible,
             backup_state: false,
             registration_policy: webauthn_rs_proto::UserVerificationPolicy::Required,
             extensions: Default::default(),
@@ -535,7 +601,7 @@ impl Auth {
         let w = self.webauthn()?;
         let exclude: Vec<CredentialID> = {
             let g = self.lock();
-            strs(&g.data["passkeys"], "id").iter().filter_map(|i| b64url_decode(i)).map(Into::into).collect()
+            g.data.passkeys.iter().filter_map(|k| b64url_decode(&k.id)).map(Into::into).collect()
         };
         let user = Uuid::from_bytes(*b"seimei-owner\0\0\0\0");
         let (opts, state) = w
@@ -572,9 +638,15 @@ impl Auth {
         cbor_cose(&cred.cred, &mut cose).ok_or_else(|| AuthError("unsupported key type".into()))?;
         let id = b64url(cred.cred_id.as_ref());
         let mut g = self.lock();
-        g.arr("passkeys").push(json!({"id": id, "public_key": b64url(&cose), "sign_count": cred.counter,
-                                      "name": chars(name, 100), "created": now(),
-                                      "backup_eligible": cred.backup_eligible}));
+        g.data.passkeys.push(Key {
+            id: id.clone(),
+            public_key: b64url(&cose),
+            sign_count: cred.counter.into(),
+            name: chars(name, 100),
+            created: now(),
+            backup_eligible: cred.backup_eligible,
+            ..Key::default()
+        });
         g.known().passkeys.insert(id);
         self.save(&mut g);
         Ok(())
@@ -597,7 +669,7 @@ impl Auth {
         let id = credential["id"].as_str().unwrap_or("").to_string();
         let rec = {
             let g = self.lock();
-            g.data["passkeys"].as_array().and_then(|a| a.iter().find(|k| k["id"] == id.as_str()).cloned())
+            g.data.passkeys.iter().find(|k| k.id == id).cloned()
         };
         let Challenge::Login(state) = self.take_challenge(credential)? else {
             return err("unknown or expired challenge");
@@ -613,12 +685,10 @@ impl Auth {
             return err("user verification is required");
         }
         let mut g = self.lock();
-        if let Some(k) = g.arr("passkeys").iter_mut().find(|k| k["id"] == id.as_str()) {
-            k["sign_count"] = json!(res.counter());
-            k["used"] = json!(now());
-            if res.backup_eligible() {
-                k["backup_eligible"] = json!(true);
-            }
+        if let Some(k) = g.data.passkeys.iter_mut().find(|k| k.id == id) {
+            k.sign_count = res.counter().into();
+            k.used = Some(now());
+            k.backup_eligible |= res.backup_eligible();
         }
         self.save(&mut g);
         Ok(())
@@ -626,7 +696,7 @@ impl Auth {
 
     pub fn clear_passkeys(&self) {
         let mut g = self.lock();
-        g.data.insert("passkeys".into(), json!([]));
+        g.data.passkeys.clear();
         self.save(&mut g);
     }
 
@@ -637,8 +707,8 @@ impl Auth {
         let t = now();
         let code = random_string(CODE_ALPHABET, CODE_LEN);
         let mut g = self.lock();
-        g.arr("pairing").retain(|c| c["exp"].as_f64().unwrap_or(0.0) > t);
-        g.arr("pairing").push(json!({"hash": key(&code), "exp": t + PAIR_SECONDS}));
+        g.data.pairing.retain(|c| c.exp > t);
+        g.data.pairing.push(Code { hash: key(&code), exp: t + PAIR_SECONDS });
         g.known().pairing.insert(key(&code));
         self.save(&mut g);
         (format!("{}-{}", &code[..4], &code[4..]), t + PAIR_SECONDS)
@@ -659,20 +729,13 @@ impl Auth {
         let t = now();
         let code: String = code.to_uppercase().chars().filter(|c| c.is_alphanumeric()).collect();
         let mut g = self.lock();
-        let open: Vec<Value> = g.data["pairing"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|c| c["exp"].as_f64().unwrap_or(0.0) > t)
-            .cloned()
-            .collect();
+        let mut open: Vec<Code> = g.data.pairing.iter().filter(|c| c.exp > t).cloned().collect();
         let want = key(&code);
-        let Some(i) = open.iter().position(|c| same(c["hash"].as_str().unwrap_or("").as_bytes(), want.as_bytes()))
-        else {
+        let Some(i) = open.iter().position(|c| same(c.hash.as_bytes(), want.as_bytes())) else {
             g.claim_failures += 1;
             if g.claim_failures >= MAX_CLAIM_FAILURES {
                 g.claim_failures = 0;
-                g.data.insert("pairing".into(), json!([]));
+                g.data.pairing.clear();
                 self.save(&mut g);
             }
             return err("wrong or expired code");
@@ -681,18 +744,17 @@ impl Auth {
         g.claim_failures = 0;
         let trimmed = chars(name.trim(), 60);
         let id = token_urlsafe(12);
-        let device = json!({"id": id, "name": if trimmed.is_empty() { "phone".into() } else { trimmed },
-                            "public_key": public_key, "created": t});
-        let mut rest = open;
-        rest.remove(i);
-        g.data.insert("pairing".into(), Value::Array(rest));
-        g.arr("devices").push(device);
+        let name = if trimmed.is_empty() { "phone".into() } else { trimmed };
+        let device = Device { id: id.clone(), name, public_key: public_key.into(), created: t, ..Device::default() };
+        open.remove(i);
+        g.data.pairing = open;
+        g.data.devices.push(device);
         g.known().devices.insert(id.clone());
         self.save(&mut g);
         Ok(id)
     }
 
-    pub fn device(&self, id: &str) -> Option<Value> {
+    pub fn device(&self, id: &str) -> Option<Device> {
         self.lock().device(id).cloned()
     }
 
@@ -717,7 +779,7 @@ impl Auth {
         if owner != device {
             return err("unknown or expired challenge");
         }
-        let key = Self::public_key(rec["public_key"].as_str().unwrap_or(""))?;
+        let key = Self::public_key(&rec.public_key)?;
         let sig = b64url_decode(signature).ok_or_else(|| AuthError("bad signature".into()))?;
         let mut v = Verifier::new(MessageDigest::sha256(), &key).map_err(|_| AuthError("bad signature".into()))?;
         let msg = [DEVICE_LOGIN, nonce.as_bytes()].concat();
@@ -726,8 +788,8 @@ impl Auth {
         }
         {
             let mut g = self.lock();
-            if let Some(d) = g.arr("devices").iter_mut().find(|d| d["id"] == device) {
-                d["used"] = json!(now());
+            if let Some(d) = g.data.devices.iter_mut().find(|d| d.id == device) {
+                d.used = Some(now());
             }
         }
         Ok(self.new_session("device", agent, Some(device)))
@@ -736,13 +798,10 @@ impl Auth {
     /// For the page: no keys, no push records.
     pub fn devices(&self) -> Vec<Value> {
         let g = self.lock();
-        g.data["devices"]
-            .as_array()
-            .into_iter()
-            .flatten()
+        (g.data.devices.iter())
             .map(|d| {
-                json!({"id": d["id"], "name": d["name"], "created": d["created"], "used": d.get("used"),
-                       "push": d.get("push").is_some_and(|p| !p.is_null() && p != "")})
+                json!({"id": d.id, "name": d.name, "created": d.created, "used": d.used,
+                       "push": d.push.as_ref().is_some_and(|p| p != "")})
             })
             .collect()
     }
@@ -754,24 +813,18 @@ impl Auth {
         }
         let mut g = self.lock();
         let mut changed = false;
-        for d in g.arr("devices").iter_mut() {
+        for d in g.data.devices.iter_mut() {
             // A phone paired again keeps its token; the old pairing must not get the same pushes twice.
-            let cur = d.get("push").cloned();
-            let want = if d["id"] == device {
+            let want = if d.id == device {
                 rec.clone()
-            } else if cur.is_some() && cur == rec {
+            } else if d.push.is_some() && d.push == rec {
                 None
             } else {
-                cur.clone()
+                d.push.clone()
             };
             let want = want.filter(|w| !w.is_null() && w != "");
-            if cur != want {
-                match want {
-                    Some(w) => d["push"] = w,
-                    None => {
-                        d.as_object_mut().map(|o| o.remove("push"));
-                    }
-                }
+            if d.push != want {
+                d.push = want;
                 changed = true;
             }
         }
@@ -783,11 +836,12 @@ impl Auth {
     /// Phones and browsers with a push record: a browser's id is "b:" and its session's key.
     pub fn push_devices(&self) -> Vec<Value> {
         let g = self.lock();
-        let phones = g.data["devices"].as_array().into_iter().flatten().filter(|d| d.get("push").is_some()).cloned();
+        let phones = (g.data.devices.iter().filter(|d| d.push.is_some()))
+            .map(|d| json!({"id": d.id, "name": d.name, "push": d.push}));
         let t = now();
-        let browsers = (g.data["sessions"].as_object().into_iter().flatten())
-            .filter(|(_, s)| s.get("push").is_some() && s["exp"].as_f64().unwrap_or(0.0) > t)
-            .map(|(k, s)| json!({"id": format!("b:{k}"), "push": s["push"]}));
+        let browsers = (g.data.sessions.iter())
+            .filter(|(_, s)| s.push.is_some() && s.exp > t)
+            .map(|(k, s)| json!({"id": format!("b:{k}"), "push": s.push}));
         phones.chain(browsers).collect()
     }
 
@@ -795,18 +849,15 @@ impl Auth {
     pub fn browser_of(&self, headers: &HeaderMap) -> Option<String> {
         let token = self.token(headers)?;
         let s = self.current(headers)?;
-        (s.get("device").is_none()).then(|| format!("b:{}", key(&token)))
+        s.device.is_none().then(|| format!("b:{}", key(&token)))
     }
 
     /// A browser's push subscription (a Web Push endpoint and keys); None stops it. It ends with the session.
     pub fn set_browser_push(&self, browser: &str, rec: Option<Value>) {
         let Some(k) = browser.strip_prefix("b:") else { return };
         let mut g = self.lock();
-        let Some(s) = g.sessions().get_mut(k).and_then(Value::as_object_mut) else { return };
-        let changed = match rec {
-            Some(r) => s.insert("push".into(), r.clone()) != Some(r),
-            None => s.remove("push").is_some(),
-        };
+        let Some(s) = g.data.sessions.get_mut(k) else { return };
+        let changed = std::mem::replace(&mut s.push, rec.clone()) != rec;
         if changed {
             self.save(&mut g);
         }
@@ -815,20 +866,20 @@ impl Auth {
     /// After a leak: every session ends, every passkey and phone goes. The password stays (change it with passwd).
     pub fn lockdown(&self) {
         let mut g = self.lock();
-        for (k, v) in [("sessions", json!({})), ("passkeys", json!([])), ("devices", json!([])), ("pairing", json!([]))]
-        {
-            g.data.insert(k.into(), v);
-        }
+        g.data.sessions.clear();
+        g.data.passkeys.clear();
+        g.data.devices.clear();
+        g.data.pairing.clear();
         self.save(&mut g);
     }
 
     /// Unpairs a phone and ends its sessions; false when no such phone was paired.
     pub fn revoke(&self, device: &str) -> bool {
         let mut g = self.lock();
-        let before = g.arr("devices").len();
-        g.arr("devices").retain(|d| d["id"] != device);
-        g.sessions().retain(|_, s| s.get("device").and_then(Value::as_str) != Some(device));
-        let gone = g.arr("devices").len() < before;
+        let before = g.data.devices.len();
+        g.data.devices.retain(|d| d.id != device);
+        g.data.sessions.retain(|_, s| s.device.as_deref() != Some(device));
+        let gone = g.data.devices.len() < before;
         self.save(&mut g);
         gone
     }
@@ -948,7 +999,7 @@ mod tests {
         cose.extend([0x22, 0x58, 0x20]);
         cose.extend(y);
         let rec = json!({"id": b64url(b"cred"), "public_key": b64url(&cose), "sign_count": 4});
-        let pk = Auth::stored_passkey(&rec).expect("loads");
+        let pk = Auth::stored_passkey(&serde_json::from_value(rec).unwrap()).expect("loads");
         let cred: Credential = pk.into();
         assert_eq!(cred.counter, 4);
         let mut back = vec![];
@@ -1006,7 +1057,7 @@ mod tests {
         assert!(a.claim("AAAA-AAAA", "x", &public).is_err());
         let (code, _) = a.pair_code();
         let dev = a.claim(&code.to_lowercase(), "  Pixel  ", &public).unwrap();
-        assert_eq!(a.device(&dev).unwrap()["name"], "Pixel");
+        assert_eq!(a.device(&dev).unwrap().name, "Pixel");
         assert!(a.claim(&code, "again", &public).is_err(), "single use");
         let nonce = a.device_challenge(&dev).unwrap();
         let mut s = openssl::sign::Signer::new(MessageDigest::sha256(), &k).unwrap();
@@ -1017,6 +1068,42 @@ mod tests {
         assert!(!a.recent(&headers(&token)), "a phone cannot pair further phones");
         assert!(a.revoke(&dev));
         assert!(!a.session(&headers(&token)));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_old_file_loads_and_keeps_its_fields() {
+        let dir = std::env::temp_dir().join(format!("seimei-auth-{}-old", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (salt, t) = (random_bytes(16), now());
+        let hash = hex(&scrypt("correct horse battery", &salt, (1 << 10, 8, 1)));
+        // As the untyped code wrote it, plus fields this side does not know.
+        let mut old = json!({
+            "password": {"n": 1024, "r": 8, "p": 1, "salt": hex(&salt), "hash": hash},
+            "sessions": {},
+            "passkeys": [{"id": "cred", "public_key": "k", "sign_count": 3, "name": "mac", "created": t,
+                          "backup_eligible": false}],
+            "devices": [{"id": "D1", "name": "Pixel", "public_key": "pk", "created": t, "used": t, "push": {"ws": "h"},
+                         "label": "kept"}],
+            "pairing": [],
+            "later": {"kept": true},
+        });
+        old["sessions"][key("web")] = json!({"created": t, "exp": t + 999.0, "how": "password", "agent": "ua",
+                                             "push": {"endpoint": "e", "expirationTime": null}});
+        old["sessions"][key("app")] =
+            json!({"created": t, "exp": t + 999.0, "how": "device", "agent": "app", "device": "D1"});
+        std::fs::write(dir.join("auth.json"), old.to_string()).unwrap();
+        let mut a = Auth::new(&dir, "http://localhost:8418");
+        a.scrypt = (1 << 10, 8, 1);
+        assert!(a.check_password("correct horse battery").await.0);
+        assert!(a.browser_of(&headers("web")).is_some());
+        assert_eq!(a.device_of(&headers("app")).as_deref(), Some("D1"));
+        assert_eq!(a.push_devices().len(), 2);
+        a.pair_code();
+        let mut back: Value = serde_json::from_slice(&std::fs::read(dir.join("auth.json")).unwrap()).unwrap();
+        back["pairing"] = json!([]);
+        assert_eq!(back, old);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

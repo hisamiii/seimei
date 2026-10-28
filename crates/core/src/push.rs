@@ -786,7 +786,7 @@ impl Push {
         if kind != "Push" {
             return None;
         }
-        let rec = self.auth.as_ref()?.device(dev)?.get("push")?.clone();
+        let rec = self.auth.as_ref()?.device(dev)?.push?;
         let want = rec.get("ws")?.as_str()?.to_string();
         same(want.as_bytes(), secret_hash(secret).as_bytes()).then(|| dev.to_string())
     }

@@ -630,7 +630,7 @@ async fn claim(State(app): Shared, bytes: Bytes) -> Response {
     let b = attempt!(body(&bytes));
     match auth(&app).claim(&as_text(&b["code"]), &as_text(&b["name"]), &as_text(&b["public_key"])) {
         Ok(device) => {
-            let name = auth(&app).device(&device).map(|d| as_text(&d["name"])).unwrap_or_default();
+            let name = auth(&app).device(&device).map(|d| d.name).unwrap_or_default();
             App::alarm(
                 &app.events,
                 &app.push,
@@ -702,7 +702,7 @@ async fn theme_set(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> Resp
         return json_status(StatusCode::BAD_REQUEST, json!({"error": "seed is #rrggbb"}));
     }
     let from = match app.auth.as_ref().and_then(|a| a.device_of(&headers)) {
-        Some(d) => auth(&app).device(&d).map(|d| d["name"].clone()).unwrap_or(Value::Null),
+        Some(d) => auth(&app).device(&d).map(|d| json!(d.name)).unwrap_or(Value::Null),
         None => json!("browser"),
     };
     let rec = json!({"seed": seed, "from": from, "at": now()});
@@ -888,7 +888,7 @@ fn this_phone(app: &App, headers: &HeaderMap) -> Result<String, Response> {
 /// What the app needs to register (the VAPID key) and how this phone is reached now.
 async fn push_info(State(app): Shared, headers: HeaderMap) -> Response {
     let dev = attempt!(this_phone(&app, &headers));
-    let rec = auth(&app).device(&dev).and_then(|d| d.get("push").cloned()).filter(|r| !r.is_null());
+    let rec = auth(&app).device(&dev).and_then(|d| d.push);
     ok(json!({"vapid": app.push.webpush.public(), "way": rec.as_ref().map(Push::way),
               "sending": rec.as_ref().is_some_and(|r| app.push.can_send(r))}))
 }
@@ -923,7 +923,7 @@ async fn push_token(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> Res
 
 async fn push_test(State(app): Shared, headers: HeaderMap) -> Response {
     let dev = attempt!(this_phone(&app, &headers));
-    if auth(&app).device(&dev).and_then(|d| d.get("push").cloned()).is_none() {
+    if auth(&app).device(&dev).and_then(|d| d.push).is_none() {
         return text(StatusCode::CONFLICT, "this phone has no notifications registered");
     }
     app.push.test(&dev);
