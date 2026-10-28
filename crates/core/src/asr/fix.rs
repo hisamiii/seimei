@@ -205,7 +205,10 @@ mod tests {
     use super::*;
 
     fn dict() -> Dict {
-        let dir = std::env::temp_dir().join(format!("seimei-asr-fix-{}", std::process::id()));
+        // A folder per call: the tests run in parallel and each one removes its folder after loading.
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("seimei-asr-fix-{}-{n}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut w = String::from("bus\nme\nthe\non\nstill\nholds\ncheck\nbuild\nwhether\nis\nback\nand\nlow\nmany\n");
         for i in 0..1100 {
