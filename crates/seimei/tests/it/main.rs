@@ -5,6 +5,7 @@ mod env;
 #[path = "../../../core/tests/it/live.rs"]
 mod live;
 
+mod access;
 mod acp_tools;
 mod browser_host;
 mod cqd;
