@@ -10,8 +10,8 @@ use serde_json::{Value, json};
 
 use crate::aliases::Aliases;
 use crate::events::EventLog;
-use crate::kitty;
 use crate::paths::home;
+use crate::terminal;
 use crate::transcripts::{
     brief, input_of, project_of, prompt_text, rows_from, summary, text_of, time_of, tool_results,
 };
@@ -303,7 +303,7 @@ static SCREEN_ASKS: LazyLock<Mutex<ScreenAsks>> = LazyLock::new(Default::default
 pub fn screen_ask(rec: &Value) -> Option<Value> {
     let pid = rec["pid"].as_i64()?;
     let at = rec["statusUpdatedAt"].as_f64().unwrap_or(0.0);
-    if rec["status"] != "waiting" || kitty::reachable(pid).is_some() {
+    if rec["status"] != "waiting" || terminal::reachable(pid).is_some() {
         return None;
     }
     if let Some((t, ask)) = SCREEN_ASKS.lock().unwrap().get(&pid)
@@ -311,7 +311,7 @@ pub fn screen_ask(rec: &Value) -> Option<Value> {
     {
         return ask.clone();
     }
-    let ask = kitty::screen_sync(pid).ok().and_then(|text| kitty::question(&text));
+    let ask = terminal::screen_sync(pid).ok().and_then(|text| terminal::question(&text));
     let mut cache = SCREEN_ASKS.lock().unwrap();
     if cache.len() >= 100 {
         let first = cache.keys().next().copied();
@@ -358,7 +358,7 @@ pub fn listing(own: &Own) -> Vec<Value> {
             "doing": b["doing"], "model": model, "effort": b["effort"], "ask_detail": ask,
             // A background session's daemon job (the harness's stop and attach take it), and the process start (pid reuse).
             "job": if rec["kind"] == "bg" { rec["jobId"].clone() } else { Value::Null },
-            "proc_start": rec["procStart"], "reach": kitty::reachable(s.pid)}));
+            "proc_start": rec["procStart"], "reach": terminal::reachable(s.pid)}));
     }
     out
 }
@@ -538,7 +538,7 @@ fn row_lines(row: &Value, st: &mut Seen, who: &str, was: &str, out: &mut Vec<Lin
 
 /// The prompt's tool and command from the session's window: the transcript gets the call only once it runs.
 fn prompt_on_screen(pid: i64) -> Option<String> {
-    kitty::screen_sync(pid).ok().and_then(|t| kitty::permission(&t))
+    terminal::screen_sync(pid).ok().and_then(|t| terminal::permission(&t))
 }
 
 /// A hint when systemd-oomd killed something just now.

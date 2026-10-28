@@ -37,7 +37,7 @@ pub fn terminal_default(env_terminal: Option<&str>, installed: impl Fn(&str) -> 
 }
 
 /// The remote control password file seimei types with, for the terminal's own config to include.
-pub fn kitty_rc_text(password: &str) -> String {
+pub fn remote_control_text(password: &str) -> String {
     format!(
         "# seimei's kitty remote control: only reading the screen and typing, with this password.\n\
          remote_control_password \"{password}\" ls send-text send-key get-text\n"
@@ -439,7 +439,7 @@ fn write_file(path: &Path, text: &str, mode: u32) {
 }
 
 /// The page types into the user's own sessions through the terminal's remote control, when they run in a terminal that has it.
-fn kitty_bridge(state: &Path) {
+fn terminal_bridge(state: &Path) {
     let rc = state.join("kitty-rc.conf");
     if rc.exists() {
         println!("\n{} exists; the kitty bridge is set up.", rc.display());
@@ -458,7 +458,7 @@ fn kitty_bridge(state: &Path) {
     ) {
         return;
     }
-    let text = kitty_rc_text(&seimei_core::util::token_urlsafe(24));
+    let text = remote_control_text(&seimei_core::util::token_urlsafe(24));
     let written = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -595,7 +595,7 @@ pub fn run(read_secret: impl Fn(&str) -> String, builtins: &[seimei_core::plugin
         }
     }
 
-    kitty_bridge(&state);
+    terminal_bridge(&state);
 
     let exe = std::env::current_exe().unwrap_or_else(|e| fail(&format!("this binary: {e}")));
     browser_host(&state, &exe);
@@ -681,7 +681,7 @@ mod tests {
         let max: toml::Table = super::config_text(1, "o", "a", "max", "t", &[]).parse().unwrap();
         assert_eq!(max["dispatcher"]["model"].as_str(), Some("opus"));
         assert_eq!(max["models"]["context"].as_str(), Some("1m"));
-        let rc = super::kitty_rc_text("pw");
+        let rc = super::remote_control_text("pw");
         assert!(rc.lines().any(|l| l == "remote_control_password \"pw\" ls send-text send-key get-text"), "{rc}");
     }
 }

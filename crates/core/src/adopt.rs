@@ -12,8 +12,8 @@ use std::time::Duration;
 use serde_json::{Map, Value, json};
 
 use crate::approvals::Approvals;
-use crate::kitty;
 use crate::sessions;
+use crate::terminal;
 use crate::transcripts::brief;
 use crate::util::{as_text, chars, children, now, read_json, save_json, stat_field};
 use crate::workers::{Adoption, Pool, Worker, harness};
@@ -403,7 +403,7 @@ impl Adopter {
     pub async fn adopt(&self, s: &Value, interrupt: bool, wish: &Wish) -> Result<String, String> {
         let (name, pid) = (as_text(&s["name"]), s["pid"].as_i64().unwrap_or(0));
         let bg = harness::background(s);
-        let win = if bg { None } else { kitty::window(pid).ok() };
+        let win = if bg { None } else { terminal::window(pid).ok() };
         let shell = if bg { 0 } else { ppid(pid) };
         let shell = if SHELLS.contains(&comm(shell).as_str()) { shell } else { 0 };
         let interrupted = interrupt && !idle(s) && self.interrupt(pid, bg, &win).await?;
@@ -452,12 +452,12 @@ impl Adopter {
 
     /// Stop the turn in flight: a background session needs nothing, since its stop ends the turn too.
     /// Otherwise Esc, like the user at the keyboard (SIGINT without the window), then a wait for it to settle.
-    async fn interrupt(&self, pid: i64, bg: bool, win: &Option<kitty::Window>) -> Result<bool, String> {
+    async fn interrupt(&self, pid: i64, bg: bool, win: &Option<terminal::Window>) -> Result<bool, String> {
         if bg {
             return Ok(true);
         }
         match win {
-            Some(w) if kitty::reachable(pid).is_none() => kitty::key(w, "escape").await?,
+            Some(w) if terminal::reachable(pid).is_none() => terminal::key(w, "escape").await?,
             _ => kill(pid, libc::SIGINT),
         }
         for _ in 0..SETTLE * 2 {
@@ -524,11 +524,11 @@ fn ended_jobs(kids: &[(i64, String)]) -> Vec<String> {
 }
 
 /// Close the session's window when asked; what became of it, for the report.
-async fn close_window(win: &Option<kitty::Window>, shell: i64, bg: bool, close: bool) -> String {
+async fn close_window(win: &Option<terminal::Window>, shell: i64, bg: bool, close: bool) -> String {
     match win {
         Some(w) if close && shell != 0 => {
             // The shell the session ran in is at its prompt now: exit closes the window.
-            if kitty::text(w, "exit\n").await.is_ok() {
+            if terminal::text(w, "exit\n").await.is_ok() {
                 tokio::time::sleep(Duration::from_millis(1500)).await;
             }
             if alive(shell) {

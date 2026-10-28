@@ -27,7 +27,7 @@ use seimei_core::dispatcher::{self, Dispatcher};
 use seimei_core::events::{Event, EventLog};
 use seimei_core::files::{Files, MAX_MODEL_BYTES};
 use seimei_core::guard::Guard;
-use seimei_core::kitty;
+use seimei_core::terminal;
 use seimei_core::metrics::WorkerEvents;
 use seimei_core::push::{self as push_mod, Push};
 use seimei_core::sessions::{self, Live, Watcher};
@@ -1395,7 +1395,7 @@ async fn session(
         let ask = if b["ask"].is_null() { sessions::screen_ask(&rec) } else { Some(b["ask"].clone()) };
         let live = (b["doing"]["tool"] == "Bash")
             .then(|| json!({"tool_id": b["doing"]["tool_id"], "output": sessions::running_output(spid, 4)}));
-        Ok::<_, String>((tl, b, ask, live, kitty::reachable(spid)))
+        Ok::<_, String>((tl, b, ask, live, terminal::reachable(spid)))
     })
     .await;
     let (mut tl, b, ask, live, reach) = match read {
@@ -1448,12 +1448,12 @@ async fn session_send(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes: 
         return text(StatusCode::BAD_REQUEST, "text, up to 20000 characters");
     }
     let pid = sess.pid;
-    let typed = tokio::task::spawn_blocking(move || kitty::reachable(pid).is_none()).await.unwrap_or(false);
+    let typed = tokio::task::spawn_blocking(move || terminal::reachable(pid).is_none()).await.unwrap_or(false);
     if via(&sess, typed) == Some("seimei") {
         app.dispatcher.relay(&sess.name, &sess.address(), said.trim());
         return ok(json!({"ok": true, "via": "seimei"}));
     }
-    match kitty::type_message(sess.pid, said.trim()).await {
+    match terminal::type_message(sess.pid, said.trim()).await {
         Ok(()) => ok(json!({"ok": true})),
         Err(e) => conflict(e),
     }
@@ -1492,7 +1492,7 @@ async fn session_answer(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes
             return text(StatusCode::BAD_REQUEST, "text");
         }
         let other = ask["other"].as_i64().filter(|&o| o != 0).unwrap_or(options.len() as i64 + 1);
-        kitty::answer_text(sess.pid, &question, other, said.trim()).await
+        terminal::answer_text(sess.pid, &question, other, said.trim()).await
     } else {
         let n = match &b["option"] {
             Value::Null => Some(0),
@@ -1503,7 +1503,7 @@ async fn session_answer(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes
         let Some(n) = n.filter(|&n| n >= 1 && n <= options.len() as i64) else {
             return text(StatusCode::BAD_REQUEST, "option");
         };
-        kitty::answer(sess.pid, &question, n, &options[n as usize - 1]).await
+        terminal::answer(sess.pid, &question, n, &options[n as usize - 1]).await
     };
     match done {
         Ok(()) => ok(json!({"ok": true})),

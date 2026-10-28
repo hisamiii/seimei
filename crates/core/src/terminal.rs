@@ -1,9 +1,8 @@
-//! Typing into the user's own Claude sessions, on their tap in the app: kitty remote control, one window at a time.
+//! Typing into the user's own agent sessions, on their tap in the app: kitty remote control, one window at a time.
 //!
-//! kitty.conf allows remote control only with seimei's password (in kitty-rc.conf, mode 600, a guard secret), and
-//! that password only for ls, send-text, send-key and get-text. The window, its kitty's socket and public key come
-//! from the session process's own environment, so text goes to exactly that session's window. Before typing, the
-//! screen is read: nothing is sent into a prompt or dialog it was not meant for.
+//! kitty.conf allows remote control only with seimei's password (in kitty-rc.conf, mode 600, a guard secret), and that password only for ls, send-text, send-key and get-text.
+//! The window, its kitty's socket and public key come from the session process's own environment, so text goes to exactly that session's window.
+//! Before typing, the screen is read: nothing is sent into a prompt or dialog it was not meant for.
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -157,13 +156,13 @@ fn plain(line: &str) -> String {
     ESC.replace_all(line, "").into_owned()
 }
 
-/// The last n non-blank rows: Claude Code draws inline and leaves blank rows between its blocks.
+/// The last n non-blank rows: the agent's TUI draws inline and leaves blank rows between its blocks.
 fn rows(text: &str, n: usize) -> Vec<&str> {
     let all: Vec<&str> = text.split(['\n', '\r']).filter(|r| !plain(r).trim().is_empty()).collect();
     all[all.len().saturating_sub(n)..].to_vec()
 }
 
-/// The line without its faint text: Claude Code draws placeholders and hints faint or grey.
+/// The line without its faint text: the agent's TUI draws placeholders and hints faint or grey.
 fn bright(line: &str) -> String {
     let (mut out, mut faint, mut pos) = (String::new(), false, 0);
     for m in SGR.captures_iter(line) {
@@ -230,8 +229,8 @@ fn question_rows(text: &str) -> Option<Vec<String>> {
     Some(rs[head..].to_vec())
 }
 
-/// The single-select question open on screen, shaped like a transcript's AskUserQuestion, or None. Claude Code does
-/// not always write a pending question to the transcript, but it is always on screen.
+/// The single-select question open on screen, shaped like a transcript's AskUserQuestion, or None.
+/// The agent does not always write a pending question to the transcript, but it is always on screen.
 pub fn question(text: &str) -> Option<Value> {
     static BOX: LazyLock<Regex> = LazyLock::new(|| re(r"^\s*[☐☒✔]\s*"));
     static OTHER: LazyLock<Regex> = LazyLock::new(|| re(r"^Type something\.?$"));
@@ -311,8 +310,9 @@ pub fn visible(text: &str, question: &str, n: i64, label: &str) -> bool {
     block.contains(&q) && option.is_match(&block)
 }
 
-/// Type the text and press Enter. Typed, not pasted: Claude Code hands a long paste to the model as pasted content,
-/// which reads as maybe not the user's own words. Line breaks go in as shift+Enter.
+/// Type the text and press Enter.
+/// Typed, not pasted: the agent hands a long paste to the model as pasted content, which reads as maybe not the user's own words.
+/// Line breaks go in as shift+Enter.
 async fn type_text(w: &Window, text: &str) -> Result<(), String> {
     let lines: Vec<&str> = text.split('\n').collect();
     for (i, line) in lines.iter().enumerate() {
