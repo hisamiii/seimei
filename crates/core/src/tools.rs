@@ -550,9 +550,6 @@ impl Tools {
             "alias" => self.alias(a),
             "watch" => self.watch(a),
             "session_peek" => self.session_peek(a),
-            _ if SERVER["tools"].as_array().into_iter().flatten().any(|t| t["name"] == name) => {
-                text(&format!("{name} is not in the Rust server yet."), true)
-            }
             _ => text(&format!("Tool '{name}' not found"), true),
         }
     }
