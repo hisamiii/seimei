@@ -46,6 +46,25 @@ use tokio_stream::wrappers::ReceiverStream;
 const CSP: &str = "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; font-src 'self'; \
                    connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 const HEARTBEAT: Duration = Duration::from_secs(15);
+
+/// The handler's early return: Ok gives the value, Err is the response.
+macro_rules! attempt {
+    ($e:expr) => {
+        match $e {
+            Ok(x) => x,
+            Err(r) => return r,
+        }
+    };
+}
+
+fn conflict(e: impl std::fmt::Display) -> Response {
+    json_status(StatusCode::CONFLICT, json!({"error": e.to_string()}))
+}
+
+fn bad_request() -> Response {
+    text(StatusCode::BAD_REQUEST, "400: Bad Request")
+}
+
 /// Request body caps: before login, for a message with pictures, and for the rest.
 const PUBLIC_BODY: usize = 64 << 10;
 const SEND_BODY: usize = 40 << 20;
@@ -466,7 +485,7 @@ async fn guard(State(app): Shared, req: Request, next: Next) -> Response {
 fn body(bytes: &Bytes) -> Result<Value, Response> {
     match serde_json::from_slice::<Value>(bytes) {
         Ok(v @ Value::Object(_)) => Ok(v),
-        _ => Err(text(StatusCode::BAD_REQUEST, "400: Bad Request")),
+        _ => Err(bad_request()),
     }
 }
 
@@ -529,10 +548,7 @@ fn logged_in(app: &App, how: &str, headers: &HeaderMap) -> Response {
 }
 
 async fn login_password(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> Response {
-    let b = match body(&bytes) {
-        Ok(b) => b,
-        Err(r) => return r,
-    };
+    let b = attempt!(body(&bytes));
     let (good, wait) = auth(&app).check_password(&s(&b, "password")).await;
     if good {
         return logged_in(&app, "password", &headers);
@@ -582,10 +598,7 @@ async fn register(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> Respo
     if let Err(r) = fresh_login(&app, &headers) {
         return r;
     }
-    let b = match body(&bytes) {
-        Ok(b) => b,
-        Err(r) => return r,
-    };
+    let b = attempt!(body(&bytes));
     let name = s(&b, "name");
     if let Err(e) = auth(&app).register_verify(&b["credential"], &name) {
         return json_status(
@@ -622,10 +635,7 @@ async fn pair(State(app): Shared, headers: HeaderMap) -> Response {
 }
 
 async fn claim(State(app): Shared, bytes: Bytes) -> Response {
-    let b = match body(&bytes) {
-        Ok(b) => b,
-        Err(r) => return r,
-    };
+    let b = attempt!(body(&bytes));
     match auth(&app).claim(&s(&b, "code"), &s(&b, "name"), &s(&b, "public_key")) {
         Ok(device) => {
             let name = auth(&app).device(&device).map(|d| s(&d, "name")).unwrap_or_default();
@@ -645,10 +655,7 @@ async fn claim(State(app): Shared, bytes: Bytes) -> Response {
 }
 
 async fn device_challenge(State(app): Shared, bytes: Bytes) -> Response {
-    let b = match body(&bytes) {
-        Ok(b) => b,
-        Err(r) => return r,
-    };
+    let b = attempt!(body(&bytes));
     match auth(&app).device_challenge(&s(&b, "device")) {
         Ok(nonce) => ok(json!({"nonce": nonce})),
         Err(_) => json_status(StatusCode::UNAUTHORIZED, json!({"error": "unknown device"})),
@@ -656,10 +663,7 @@ async fn device_challenge(State(app): Shared, bytes: Bytes) -> Response {
 }
 
 async fn device_login(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> Response {
-    let b = match body(&bytes) {
-        Ok(b) => b,
-        Err(r) => return r,
-    };
+    let b = attempt!(body(&bytes));
     match auth(&app).device_login(&s(&b, "device"), &s(&b, "nonce"), &s(&b, "signature"), &agent(&headers)) {
         Ok(token) => ok(json!({"token": token})),
         Err(_) => json_status(StatusCode::UNAUTHORIZED, json!({"error": "login failed"})),
@@ -700,10 +704,7 @@ async fn theme_get(State(app): Shared) -> Response {
 }
 
 async fn theme_set(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> Response {
-    let b = match body(&bytes) {
-        Ok(b) => b,
-        Err(r) => return r,
-    };
+    let b = attempt!(body(&bytes));
     let seed = s(&b, "seed").to_lowercase();
     if seed.len() != 7 || !seed.starts_with('#') || !seed[1..].bytes().all(|c| c.is_ascii_hexdigit()) {
         return json_status(StatusCode::BAD_REQUEST, json!({"error": "seed is #rrggbb"}));
@@ -738,10 +739,7 @@ async fn tasks_archive(State(app): Shared, Query(q): Query<HashMap<String, Strin
 
 /// The user ticks one of their own items off (or back on).
 async fn task_tick(State(app): Shared, UrlPath(tid): UrlPath<String>, bytes: Bytes) -> Response {
-    let b = match body(&bytes) {
-        Ok(b) => b,
-        Err(r) => return r,
-    };
+    let b = attempt!(body(&bytes));
     let done = b["done"].as_bool().unwrap_or(false);
     match app.board.lock().unwrap().tick(&tid, done) {
         Ok(t) => {
@@ -788,10 +786,10 @@ async fn history(State(app): Shared, Query(q): Query<HashMap<String, String>>) -
     let before = match q.get("before").map(|b| b.parse::<i64>()) {
         None => None,
         Some(Ok(b)) => Some(b),
-        Some(Err(_)) => return text(StatusCode::BAD_REQUEST, "400: Bad Request"),
+        Some(Err(_)) => return bad_request(),
     };
     let Ok(limit) = q.get("limit").map(|l| l.parse::<i64>()).unwrap_or(Ok(200)) else {
-        return text(StatusCode::BAD_REQUEST, "400: Bad Request");
+        return bad_request();
     };
     let events: Vec<Event> = app.events.before(before, limit.clamp(0, 1000) as usize);
     let events: Vec<Cow<Value>> = events.iter().map(|e| app.sized(e)).collect();
@@ -897,10 +895,7 @@ fn this_phone(app: &App, headers: &HeaderMap) -> Result<String, Response> {
 
 /// What the app needs to register (the VAPID key) and how this phone is reached now.
 async fn push_info(State(app): Shared, headers: HeaderMap) -> Response {
-    let dev = match this_phone(&app, &headers) {
-        Ok(d) => d,
-        Err(r) => return r,
-    };
+    let dev = attempt!(this_phone(&app, &headers));
     let rec = auth(&app).device(&dev).and_then(|d| d.get("push").cloned()).filter(|r| !r.is_null());
     ok(json!({"vapid": app.push.webpush.public(), "way": rec.as_ref().map(Push::way),
               "sending": rec.as_ref().is_some_and(|r| app.push.can_send(r))}))
@@ -909,14 +904,8 @@ async fn push_info(State(app): Shared, headers: HeaderMap) -> Response {
 /// The app registers after each login: {"token"} from Firebase, {"up": {endpoint, p256dh, auth}} from a UnifiedPush
 /// app, or {"ws": true} for the background connection (the answer carries its secret). Nothing turns them off.
 async fn push_token(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> Response {
-    let dev = match this_phone(&app, &headers) {
-        Ok(d) => d,
-        Err(r) => return r,
-    };
-    let b = match body(&bytes) {
-        Ok(b) => b,
-        Err(r) => return r,
-    };
+    let dev = attempt!(this_phone(&app, &headers));
+    let b = attempt!(body(&bytes));
     let mut out = json!({"ok": true});
     let rec = if let Some(up) = b.get("up").filter(|u| u.is_object()) {
         let field = |k: &str, n: usize| json!(seimei_core::util::cut(up[k].as_str().unwrap_or(""), n));
@@ -941,10 +930,7 @@ async fn push_token(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> Res
 }
 
 async fn push_test(State(app): Shared, headers: HeaderMap) -> Response {
-    let dev = match this_phone(&app, &headers) {
-        Ok(d) => d,
-        Err(r) => return r,
-    };
+    let dev = attempt!(this_phone(&app, &headers));
     if auth(&app).device(&dev).and_then(|d| d.get("push").cloned()).is_none() {
         return text(StatusCode::CONFLICT, "this phone has no notifications registered");
     }
@@ -967,10 +953,7 @@ async fn web_push_set(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> R
     let Some(id) = auth(&app).browser_of(&headers) else {
         return text(StatusCode::FORBIDDEN, "the phone app has its own notifications");
     };
-    let b = match body(&bytes) {
-        Ok(b) => b,
-        Err(r) => return r,
-    };
+    let b = attempt!(body(&bytes));
     if flag(&b["off"]) {
         auth(&app).set_browser_push(&id, None);
         return ok(json!({"on": false}));
@@ -1028,10 +1011,7 @@ async fn push_ws(
 
 /// The app tells which view it shows (chat, another tab, an agent's page): replies skip only the chat.
 async fn presence(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> Response {
-    let b = match body(&bytes) {
-        Ok(b) => b,
-        Err(r) => return r,
-    };
+    let b = attempt!(body(&bytes));
     let view = seimei_core::util::chars(&s(&b, "view"), 20);
     let dev = app.auth.as_ref().and_then(|a| a.device_of(&headers).or_else(|| a.browser_of(&headers)));
     if !view.is_empty() {
@@ -1079,7 +1059,7 @@ async fn upload(State(app): Shared, Query(q): Query<HashMap<String, String>>, re
     let mut body = req.into_body().into_data_stream();
     let too_large = json!({"error": format!("files are limited to {} MB", seimei_core::uploads::MAX_BYTES >> 20)});
     while let Some(chunk) = body.next().await {
-        let Ok(chunk) = chunk else { return text(StatusCode::BAD_REQUEST, "400: Bad Request") };
+        let Ok(chunk) = chunk else { return bad_request() };
         if inc.write(&chunk).is_err() {
             return json_status(StatusCode::PAYLOAD_TOO_LARGE, too_large);
         }
@@ -1194,10 +1174,7 @@ const MAX_IMAGES: usize = 6;
 const MAX_FILES: usize = 10;
 
 async fn send(State(app): Shared, bytes: Bytes) -> Response {
-    let b = match body(&bytes) {
-        Ok(b) => b,
-        Err(r) => return r,
-    };
+    let b = attempt!(body(&bytes));
     let said = s(&b, "text").trim().to_string();
     let list = |k: &str| match &b[k] {
         Value::Null => Some(vec![]),
@@ -1252,14 +1229,11 @@ async fn interrupt(State(app): Shared) -> Response {
 
 /// The user's tap on a card: approve or deny, with a permission card's option and a note for the agent.
 async fn decide(State(app): Shared, UrlPath(aid): UrlPath<String>, bytes: Bytes) -> Response {
-    let b = match body(&bytes) {
-        Ok(b) => b,
-        Err(r) => return r,
-    };
+    let b = attempt!(body(&bytes));
     let approve = match b["decision"].as_str() {
         Some("approve") => true,
         Some("deny") => false,
-        _ => return text(StatusCode::BAD_REQUEST, "400: Bad Request"),
+        _ => return bad_request(),
     };
     let option = Some(seimei_core::util::chars(&s(&b, "option"), 40)).filter(|o| !o.is_empty() && b["option"] != false);
     let note = Some(seimei_core::util::chars(s(&b, "note").trim(), 2000)).filter(|n| !n.is_empty());
@@ -1290,19 +1264,10 @@ fn worker_of(app: &App, id: &str) -> Result<Arc<seimei_core::workers::Worker>, R
 
 /// The user writes to a shikigami on its page.
 async fn worker_send(State(app): Shared, UrlPath(id): UrlPath<String>, bytes: Bytes) -> Response {
-    let w = match worker_of(&app, &id) {
-        Ok(w) => w,
-        Err(r) => return r,
-    };
-    let b = match body(&bytes) {
-        Ok(b) => b,
-        Err(r) => return r,
-    };
+    let w = attempt!(worker_of(&app, &id));
+    let b = attempt!(body(&bytes));
     let shown = s(&b, "text").trim().to_string();
-    let infos = match attached(&app, &b["files"]) {
-        Ok(i) => i,
-        Err(r) => return r,
-    };
+    let infos = attempt!(attached(&app, &b["files"]));
     let mut said = shown.clone();
     if !infos.is_empty() {
         said += ATTACHED;
@@ -1310,13 +1275,13 @@ async fn worker_send(State(app): Shared, UrlPath(id): UrlPath<String>, bytes: By
     }
     let said = said.trim().to_string();
     if said.is_empty() {
-        return text(StatusCode::BAD_REQUEST, "400: Bad Request");
+        return bad_request();
     }
     let chips: Vec<Value> =
         infos.iter().map(|i| json!({"id": i["id"], "name": i["name"], "size": i["size"], "kind": i["kind"]})).collect();
     let asked = w.state() == "asking";
     if let Err(e) = w.send(&said, Some(&shown), chips).await {
-        return json_status(StatusCode::CONFLICT, json!({"error": e}));
+        return conflict(e);
     }
     // The main chat says the user answered or messaged it; an open "asks" card settles on it.
     let quote = if shown.is_empty() { "(files)".to_string() } else { seimei_core::util::chars(&shown, 200) };
@@ -1344,14 +1309,8 @@ async fn worker_stop(State(app): Shared, UrlPath(id): UrlPath<String>) -> Respon
 
 /// The user changes a shikigami's effort, model or permission mode (the page's Change sheet).
 async fn worker_tune(State(app): Shared, UrlPath(id): UrlPath<String>, bytes: Bytes) -> Response {
-    let w = match worker_of(&app, &id) {
-        Ok(w) => w,
-        Err(r) => return r,
-    };
-    let b = match body(&bytes) {
-        Ok(b) => b,
-        Err(r) => return r,
-    };
+    let w = attempt!(worker_of(&app, &id));
+    let b = attempt!(body(&bytes));
     let pick = |k: &str| Some(s(&b, k)).filter(|v| !v.is_empty());
     let tuned = async {
         if let Some(mode) = pick("mode").filter(|m| *m != w.mode()) {
@@ -1367,14 +1326,8 @@ async fn worker_tune(State(app): Shared, UrlPath(id): UrlPath<String>, bytes: By
 
 /// Hide a shikigami from the Agents list, or bring it back; nothing is stopped or deleted.
 async fn worker_archive(State(app): Shared, UrlPath(id): UrlPath<String>, bytes: Bytes) -> Response {
-    let w = match worker_of(&app, &id) {
-        Ok(w) => w,
-        Err(r) => return r,
-    };
-    let b = match body(&bytes) {
-        Ok(b) => b,
-        Err(r) => return r,
-    };
+    let w = attempt!(worker_of(&app, &id));
+    let b = attempt!(body(&bytes));
     if let Err(e) = app.pool.set_archived(&w, flag(&b["archived"])) {
         return text(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
     }
@@ -1437,10 +1390,7 @@ async fn session(
     UrlPath(pid): UrlPath<String>,
     Query(q): Query<HashMap<String, String>>,
 ) -> Response {
-    let (sess, path) = match user_session(&app, &pid).await {
-        Ok(found) => found,
-        Err(r) => return r,
-    };
+    let (sess, path) = attempt!(user_session(&app, &pid).await);
     let start =
         q.get("from").filter(|f| !f.is_empty() && f.bytes().all(|b| b.is_ascii_digit())).and_then(|f| f.parse().ok());
     let info = app.watcher.row(sess.pid).unwrap_or_else(|| {
@@ -1490,14 +1440,8 @@ fn via(sess: &Live, typed: bool) -> Option<&'static str> {
 
 /// Hide one of the user's sessions from the list, or bring it back. The session keeps running.
 async fn session_archive(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes: Bytes) -> Response {
-    let (sess, _) = match user_session(&app, &pid).await {
-        Ok(found) => found,
-        Err(r) => return r,
-    };
-    let b = match body(&bytes) {
-        Ok(b) => b,
-        Err(r) => return r,
-    };
+    let (sess, _) = attempt!(user_session(&app, &pid).await);
+    let b = attempt!(body(&bytes));
     let on = flag(&b["archived"]);
     if let Err(e) = app.watcher.set_archived(&sess.session_id, on) {
         return text(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
@@ -1508,18 +1452,9 @@ async fn session_archive(State(app): Shared, UrlPath(pid): UrlPath<String>, byte
 /// Type the user's message into the session's own kitty window, on their tap in the app; without one, the
 /// dispatcher passes it on with SendMessage.
 async fn session_send(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes: Bytes) -> Response {
-    let (sess, _) = match user_session(&app, &pid).await {
-        Ok(found) => found,
-        Err(r) => return r,
-    };
-    let b = match body(&bytes) {
-        Ok(b) => b,
-        Err(r) => return r,
-    };
-    let lines = match attachment_lines(&app, &b["files"]) {
-        Ok(l) => l,
-        Err(r) => return r,
-    };
+    let (sess, _) = attempt!(user_session(&app, &pid).await);
+    let b = attempt!(body(&bytes));
+    let lines = attempt!(attachment_lines(&app, &b["files"]));
     let said = format!("{}{lines}", s(&b, "text").trim());
     if said.trim().is_empty() || said.chars().count() > 20000 {
         return text(StatusCode::BAD_REQUEST, "text, up to 20000 characters");
@@ -1532,20 +1467,14 @@ async fn session_send(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes: 
     }
     match kitty::type_message(sess.pid, said.trim()).await {
         Ok(()) => ok(json!({"ok": true})),
-        Err(e) => json_status(StatusCode::CONFLICT, json!({"error": e})),
+        Err(e) => conflict(e),
     }
 }
 
 /// Press an option of the session's open question, or answer it in the user's words.
 async fn session_answer(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes: Bytes) -> Response {
-    let (sess, path) = match user_session(&app, &pid).await {
-        Ok(found) => found,
-        Err(r) => return r,
-    };
-    let b = match body(&bytes) {
-        Ok(b) => b,
-        Err(r) => return r,
-    };
+    let (sess, path) = attempt!(user_session(&app, &pid).await);
+    let b = attempt!(body(&bytes));
     let rec = sess.rec.clone();
     let ask = tokio::task::spawn_blocking(move || {
         let ask = path.and_then(|p| brief(&p).ok()).map(|b| b["ask"].clone()).filter(|a| !a.is_null());
@@ -1569,10 +1498,7 @@ async fn session_answer(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes
     let options: Vec<String> =
         q["options"].as_array().into_iter().flatten().filter(|o| o.is_object()).map(|o| s(o, "label")).collect();
     let done = if b.get("text").is_some() {
-        let lines = match attachment_lines(&app, &b["files"]) {
-            Ok(l) => l,
-            Err(r) => return r,
-        };
+        let lines = attempt!(attachment_lines(&app, &b["files"]));
         let said = format!("{}{lines}", s(&b, "text").trim());
         if said.trim().is_empty() {
             return text(StatusCode::BAD_REQUEST, "text");
@@ -1593,19 +1519,16 @@ async fn session_answer(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes
     };
     match done {
         Ok(()) => ok(json!({"ok": true})),
-        Err(e) => json_status(StatusCode::CONFLICT, json!({"error": e})),
+        Err(e) => conflict(e),
     }
 }
 
 /// Open on server: the shikigami's session opens in a terminal there, and stays a shikigami.
 async fn worker_laptop(State(app): Shared, UrlPath(id): UrlPath<String>) -> Response {
-    let w = match worker_of(&app, &id) {
-        Ok(w) => w,
-        Err(r) => return r,
-    };
+    let w = attempt!(worker_of(&app, &id));
     let win = match w.hand_over().await {
         Ok(win) => win,
-        Err(e) => return json_status(StatusCode::CONFLICT, json!({"error": e})),
+        Err(e) => return conflict(e),
     };
     app.events.add(json!({"type": "system", "text": format!("{} is open in a terminal on the server", w.name())}));
     let line = format!(
@@ -1620,16 +1543,13 @@ async fn worker_laptop(State(app): Shared, UrlPath(id): UrlPath<String>) -> Resp
 
 /// Take over: the shikigami becomes one of the user's sessions (their tap is the OK).
 async fn worker_release(State(app): Shared, UrlPath(id): UrlPath<String>) -> Response {
-    let w = match worker_of(&app, &id) {
-        Ok(w) => w,
-        Err(r) => return r,
-    };
+    let w = attempt!(worker_of(&app, &id));
     if w.state() == "released" {
         return json_status(StatusCode::CONFLICT, json!({"error": format!("{} is your session already.", w.name())}));
     }
     let said = match app.adopter.release(&w, false).await {
         Ok(said) => said,
-        Err(e) => return json_status(StatusCode::CONFLICT, json!({"error": e})),
+        Err(e) => return conflict(e),
     };
     if w.state() != "released" {
         return json_status(StatusCode::CONFLICT, json!({"error": said}));
@@ -1640,10 +1560,7 @@ async fn worker_release(State(app): Shared, UrlPath(id): UrlPath<String>) -> Res
 
 /// Hand off: adopt this session as a shikigami, through the same card as seimei's adopt.
 async fn session_adopt(State(app): Shared, UrlPath(pid): UrlPath<String>) -> Response {
-    let (sess, _) = match user_session(&app, &pid).await {
-        Ok(found) => found,
-        Err(r) => return r,
-    };
+    let (sess, _) = attempt!(user_session(&app, &pid).await);
     let app = app.clone();
     tokio::spawn(async move {
         let said = match app.adopter.request(&sess.pid.to_string(), "idle", Wish::default()).await {
