@@ -1,6 +1,6 @@
-//! `seimei browser-host`: the extension's native-messaging host. The browser starts it and talks on stdin and stdout
-//! (a 4-byte native-endian length, then JSON); it relays each message as one JSON line to seimei's browser socket and
-//! back. It outlives seimei restarts by reconnecting, and ends when the browser closes stdin.
+//! `seimei browser-host`: the extension's native-messaging host, which the browser starts and talks to on stdin and stdout (a 4-byte native-endian length, then JSON).
+//! It relays each message as one JSON line to seimei's browser socket and back.
+//! It outlives seimei restarts by reconnecting, and ends when the browser closes stdin.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;

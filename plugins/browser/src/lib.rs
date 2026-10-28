@@ -1,9 +1,7 @@
-//! The browser plugin: the user's Firefox or Chromium tabs through the seimei extension (extension/ here), whose
-//! native-messaging host connects to seimei's link socket. Its tools run inside seimei, which holds the link and knows
-//! which tabs seimei opened; `seimei plugin browser` forwards each call. Page text and downloads are untrusted data.
-//! Acting in a tab the user opened needs their Approve card once per tab and site; closing one goes by guard.toml.
-//! The agent browser (browser: "agent") is a logged-out Firefox of seimei's own in the agent display: every tab
-//! there is seimei's, so nothing in it asks.
+//! The browser plugin: the user's Firefox or Chromium tabs through the seimei extension (extension/ here), whose native-messaging host connects to seimei's link socket.
+//! Its tools run inside seimei, which holds the link and knows which tabs seimei opened; `seimei plugin browser` forwards each call.
+//! Page text and downloads are untrusted data. Acting in a tab the user opened needs their Approve card once per tab and site; closing one goes by guard.toml.
+//! The agent browser (browser: "agent") is a logged-out Firefox of seimei's own in the agent display: every tab there is seimei's, so nothing in it asks.
 
 pub mod host;
 
@@ -334,8 +332,8 @@ impl Browser {
         n
     }
 
-    /// Whether seimei may act in the tab: its own tabs (opened by it, or in its tab group) always, the user's
-    /// only after their Approve card, which holds until the tab leaves that site. None to go on, or the reply.
+    /// Whether seimei may act in the tab: its own tabs (opened by it, or in its tab group) always, the user's only after their Approve card, which holds until the tab leaves that site.
+    /// None to go on, or the reply.
     async fn may_act(&self, tab: i64, doing: &str, session: &dyn Session) -> Result<Option<Value>, String> {
         if self.mine() || self.opened.lock().unwrap().contains(&tab) {
             return Ok(None);
@@ -441,8 +439,7 @@ impl Browser {
         ))
     }
 
-    /// An error from inside a page, said plainly when the browser keeps extensions out of it or the extension is
-    /// older than seimei.
+    /// An error from inside a page, said plainly when the browser keeps extensions out of it or the extension is older than seimei.
     fn page_error(&self, e: String) -> String {
         let low = e.to_lowercase();
         if let Some(op) = e.strip_prefix("unknown op ") {

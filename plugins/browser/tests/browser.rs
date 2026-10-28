@@ -1,6 +1,5 @@
-//! tests/cases.json: each scenario's tool calls on
-//! one browser, a fake connector at its link answering each op with the step's replies (or failing with its fails),
-//! the user deciding each card as the step says. Checks the text, the card and what the connector got.
+//! tests/cases.json: each scenario's tool calls on one browser, with a fake connector at its link that answers each op with the step's replies (or fails with its fails).
+//! The user decides each card as the step says; the test checks the text, the card and what the connector got.
 
 #[path = "../../../crates/core/tests/it/env.rs"]
 mod env;

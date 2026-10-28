@@ -1,7 +1,6 @@
 // The seimei connector: a native-messaging port to `seimei browser-host`, which relays to the seimei server on this computer.
 // Requests come as {id, op, args}; each gets {id, ok, result} or {id, ok: false, error}.
-// One script for Firefox (manifest.json, MV2) and Chromium browsers (chromium.json, MV3): FIREFOX picks the few calls
-// that differ (injecting page.js, page dialogs, screenshots, the browser's name).
+// One script for Firefox (manifest.json, MV2) and Chromium browsers (chromium.json, MV3); FIREFOX picks the few calls that differ.
 // Newer Chromium has a `browser` namespace too: Firefox is told apart by getBrowserInfo, which only it has.
 const api = globalThis.browser ?? chrome;
 const FIREFOX = typeof api.runtime.getBrowserInfo === 'function';
@@ -114,8 +113,8 @@ async function call(id, frame, fn, args) {
   return r.result.value;
 }
 
-// Chromium: a content script cannot replace the page's alert, confirm and prompt, so they are swapped in the page's
-// own world while acting, and report to page.js (quietDialogs) through a DOM event. Returns the undo.
+// Chromium: a content script cannot replace the page's alert, confirm and prompt, so swap them in the page's own world while acting.
+// They report to page.js (quietDialogs) through a DOM event. Returns the undo.
 async function pageDialogs(id, frame, accept) {
   if (FIREFOX) return async () => {};
   const target = { tabId: id, frameIds: [frame] };
@@ -141,8 +140,8 @@ async function pageDialogs(id, frame, accept) {
   }).catch(() => {});
 }
 
-// A screenshot of rect (page pixels) as a data URL. Chromium has no captureTab: its debugger protocol can take one of
-// a background tab too (the browser shows "seimei started debugging this browser" meanwhile).
+// A screenshot of rect (page pixels) as a data URL.
+// Chromium has no captureTab: its debugger protocol can take one of a background tab too (the browser shows "seimei started debugging this browser" meanwhile).
 async function capture(id, opts) {
   if (FIREFOX) return api.tabs.captureTab(id, opts);
   const { format, quality, rect, scale } = opts;

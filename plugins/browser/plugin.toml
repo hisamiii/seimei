@@ -1,4 +1,4 @@
-# The browser plugin, built into seimei: Claude Code starts `seimei plugin browser` for each session that has it.
+# The browser plugin, built into seimei: the harness starts `seimei plugin browser` for each session that has it.
 # Its tools run inside seimei, which holds the browser link; the process forwards each call.
 name = "browser"
 command = "seimei"

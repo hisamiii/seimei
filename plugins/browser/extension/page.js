@@ -1,7 +1,6 @@
-// Injected into a page (each frame on its own) when seimei reads, acts or waits there. It runs in the extension's
-// content-script scope: the page cannot see the element map below, and setting a field's value goes through the
-// browser's own setter. Events it sends have isTrusted false. Secret fields (passwords, card numbers, one-time codes,
-// files) are never read or filled.
+// Injected into a page (each frame on its own) when seimei reads, acts or waits there.
+// It runs in the content-script scope: the page cannot see the element map below, and setting a field's value goes through the browser's own setter.
+// Events it sends have isTrusted false. Secret fields (passwords, card numbers, one-time codes, files) are never read or filled.
 if (!globalThis.seimeiPage) {
   const MAX_TEXT = 1000000;
   const MAX_ELEMENTS = 300;
@@ -297,8 +296,8 @@ if (!globalThis.seimeiPage) {
       });
     },
 
-    // Waits for a selector or text to appear, or a selector to go. Hidden tabs throttle timers, so this watches
-    // mutations; the extension enforces the timeout and calls stop().
+    // Waits for a selector or text to appear, or a selector to go.
+    // Hidden tabs throttle timers, so this watches mutations; the extension enforces the timeout and calls stop().
     wait(args) {
       const check = () => {
         if (args.for === 'text') return (document.body ? document.body.textContent : '').includes(args.value);

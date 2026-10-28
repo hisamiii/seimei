@@ -1,13 +1,6 @@
-"""Installs the browser connector from a checkout (the maintainer's deploy runs it; `seimei setup` does the same for a
-release): the native-messaging host (a script beside the xpi that runs `<checkout>/bin/seimei browser-host`), its
-manifest in each hosts folder given (Firefox reads ~/.mozilla/native-messaging-hosts, or
-~/.config/mozilla/native-messaging-hosts where it uses XDG paths), and the extension for the user to install once
-(about:addons, Install Add-on From File).
-
-The extension is seimei.xpi here when sign.py signed the version in manifest.json (Firefox builds that enforce
-signing load only that one), else it is packed here unsigned. Its id: the signed file's, else [plugins.browser]
-extension_id in config.toml, else the one the installed host already allows (so an extension installed before keeps
-working), else seimei@localhost.
+"""Installs the browser connector from a checkout (deploys and `seimei setup` do this): the native-messaging host, its manifest in each hosts folder given, and the extension.
+The host is a script beside the xpi that runs `<checkout>/bin/seimei browser-host`; the user installs the extension once (about:addons, Install Add-on From File).
+The extension is seimei.xpi here when sign.py signed the version in manifest.json, else it is packed here unsigned. Its id: the signed file's, else [plugins.browser] extension_id, else the one the installed host allows (so an older install keeps working), else seimei@localhost.
 Usage: install.py <this folder> <xpi to write> <config.toml> <native-messaging hosts dir>..."""
 import json
 import shlex

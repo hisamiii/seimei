@@ -1,10 +1,6 @@
-"""Signs the browser connector on addons.mozilla.org, unlisted (AMO signs it but does not list it), and writes the
-signed extension to seimei.xpi beside it, which install.py then installs. Firefox builds that enforce signing load only
-a signed extension.
-
-The AMO API key (https://addons.mozilla.org/developers/addon/api/key/) goes in ~/.config/amo/amo.env as
-AMO_JWT_ISSUER=... and AMO_JWT_SECRET=... (mode 600); it is never printed. Each signing needs a version AMO has not
-seen yet: bump "version" in manifest.json first.
+"""Signs the browser connector on addons.mozilla.org, unlisted, and writes it to seimei.xpi beside it for install.py: Firefox builds that enforce signing load only a signed extension.
+The AMO API key (https://addons.mozilla.org/developers/addon/api/key/) goes in ~/.config/amo/amo.env as AMO_JWT_ISSUER=... and AMO_JWT_SECRET=... (mode 600); it is never printed.
+Each signing needs a version AMO has not seen yet: bump "version" in manifest.json first.
 Usage: python3 plugins/browser/extension/sign.py [extension id]   (default: the id install.py picks)"""
 import base64
 import hashlib
