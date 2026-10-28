@@ -76,11 +76,6 @@ fn votes(inp: &Value) -> Vec<String> {
     paths.into_iter().filter_map(project_of).collect()
 }
 
-/// The user and assistant rows of the main thread from byte `start` on (a start mid-line skips to the next line).
-fn rows(path: &Path, start: u64) -> Vec<Value> {
-    rows_from(path, start).0
-}
-
 /// Whole transcript rows (user and assistant, no sidechains or compaction summaries) from byte start on (a start
 /// mid-line skips to the next line), and where they end.
 pub(crate) fn rows_from(path: &Path, start: u64) -> (Vec<Value>, u64) {
@@ -106,6 +101,22 @@ pub(crate) fn time_of(row: &Value) -> f64 {
     let s = row["timestamp"].as_str().unwrap_or("");
     chrono::NaiveDateTime::parse_from_str(s.get(..19).unwrap_or(""), "%Y-%m-%dT%H:%M:%S")
         .map_or(0.0, |t| t.and_utc().timestamp() as f64)
+}
+
+/// A typed prompt, not a tool result, a meta row or a slash command's echo.
+pub(crate) fn prompt_text(row: &Value, results: bool) -> Option<String> {
+    let text = text_of(&row["message"]["content"]).trim().to_string();
+    let typed = !text.is_empty() && !results && row["isMeta"] != true;
+    (typed && !text.starts_with("<command-") && !text.starts_with("<local-command")).then_some(text)
+}
+
+pub(crate) fn tool_results(content: &Value) -> Vec<&Value> {
+    content.as_array().into_iter().flatten().filter(|b| b["type"] == "tool_result").collect()
+}
+
+/// A tool_use block's input; {} when it has none.
+pub(crate) fn input_of(block: &Value) -> Value {
+    if block["input"].is_object() { block["input"].clone() } else { json!({}) }
 }
 
 /// The text blocks of a message's content.
@@ -156,25 +167,17 @@ pub fn brief(path: &Path) -> std::io::Result<Value> {
         (vec![], String::new(), 0u64, Value::from(""), Value::Null);
     // Open tool calls by id, in the order they were made.
     let mut pending: Vec<(String, f64, String, Value)> = vec![];
-    for row in rows(path, meta.len().saturating_sub(TAIL)) {
+    for row in rows_from(path, meta.len().saturating_sub(TAIL)).0 {
         if !row["effort"].is_null() && row["effort"] != "" {
             effort = row["effort"].clone();
         }
         let content = &row["message"]["content"];
-        let blocks = content.as_array().cloned().unwrap_or_default();
         if row["type"] == "user" {
-            let results: Vec<&Value> = blocks.iter().filter(|b| b["type"] == "tool_result").collect();
+            let results = tool_results(content);
             for b in &results {
                 pending.retain(|p| b["tool_use_id"] != p.0.as_str());
             }
-            let text = text_of(content);
-            let text = text.trim();
-            if !text.is_empty()
-                && results.is_empty()
-                && row["isMeta"] != true
-                && !text.starts_with("<command-")
-                && !text.starts_with("<local-command")
-            {
+            if prompt_text(&row, !results.is_empty()).is_some() {
                 pending.clear();
             }
             continue;
@@ -189,11 +192,11 @@ pub fn brief(path: &Path) -> std::io::Result<Value> {
                 model = m.clone();
             }
         }
-        for b in &blocks {
+        for b in content.as_array().into_iter().flatten() {
             if b["type"] == "text" && b["text"].as_str().is_some_and(|t| !t.trim().is_empty()) {
                 last = b["text"].as_str().unwrap_or("").trim().to_string();
             } else if b["type"] == "tool_use" {
-                let inp = if b["input"].is_object() { b["input"].clone() } else { json!({}) };
+                let inp = input_of(b);
                 votes_seen.extend(votes(&inp));
                 let id = b["id"].as_str().unwrap_or("").to_string();
                 pending.retain(|p| p.0 != id);

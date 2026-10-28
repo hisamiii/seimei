@@ -13,7 +13,10 @@ use crate::aliases::Aliases;
 use crate::events::EventLog;
 use crate::kitty;
 use crate::paths::home;
-use crate::transcripts::{brief, claude_dir, project_of, rows_from, summary, text_of, time_of, transcript};
+use crate::transcripts::{
+    brief, claude_dir, input_of, project_of, prompt_text, rows_from, summary, text_of, time_of, tool_results,
+    transcript,
+};
 use crate::util::{as_text, chars, children, now, read_tail, stat_field};
 use crate::workers::Pool;
 
@@ -170,17 +173,6 @@ pub fn find(key: &str, own: &Own, aliases: Option<&Aliases>) -> Option<Live> {
     None
 }
 
-/// A typed prompt, not a tool result, a meta row or a slash command's echo.
-fn prompt_text(row: &Value, results: bool) -> Option<String> {
-    let text = text_of(&row["message"]["content"]).trim().to_string();
-    let typed = !text.is_empty() && !results && row["isMeta"] != true;
-    (typed && !text.starts_with("<command-") && !text.starts_with("<local-command")).then_some(text)
-}
-
-fn tool_results(content: &Value) -> Vec<&Value> {
-    content.as_array().into_iter().flatten().filter(|b| b["type"] == "tool_result").collect()
-}
-
 /// Last user messages and assistant texts, plus tool calls still open (a pending AskUserQuestion first).
 pub fn peek(path: &Path, count: usize) -> Value {
     let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
@@ -207,7 +199,7 @@ pub fn peek(path: &Path, count: usize) -> Value {
                 } else if b["type"] == "tool_use" {
                     let id = as_text(&b["id"]);
                     pending.retain(|p| p.0 != id);
-                    let inp = if b["input"].is_object() { b["input"].clone() } else { json!({}) };
+                    let inp = input_of(b);
                     pending.push((id, t.clone(), as_text(&b["name"]), inp));
                 }
             }
@@ -271,7 +263,7 @@ pub fn timeline(path: &Path, start: Option<u64>, events: usize) -> Value {
                 let text = chars(b["text"].as_str().unwrap_or("").trim(), 20000);
                 out.push(json!({"id": format!("{uid}:{i}"), "type": "assistant", "text": text, "t": t}));
             } else if b["type"] == "tool_use" {
-                let inp = if b["input"].is_object() { b["input"].clone() } else { json!({}) };
+                let inp = input_of(b);
                 out.push(json!({"id": format!("{uid}:{i}"), "type": "tool", "name": b["name"], "tool_id": b["id"],
                     "summary": summary(&inp), "t": t}));
             }
