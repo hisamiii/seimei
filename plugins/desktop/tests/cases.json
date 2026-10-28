@@ -1004,7 +1004,7 @@
     }
    },
    "shell": "fish",
-   "want": "kitty -d '/home/me/src/it'\"'\"'s' fish -c 'claude --model opus --resume 0b8d7f8e-1111-2222-3333-444455556666; exec fish'"
+   "want": "kitty -d \"/home/me/src/it's\" fish -c 'claude --model opus --resume 0b8d7f8e-1111-2222-3333-444455556666; exec fish'"
   },
   {
    "rec": {
@@ -1052,7 +1052,7 @@
      }
     }
    ],
-   "want": "workspace 1: firefox\nworkspace 2: resume Claude session \"0b8d7f8e\"\nworkspace None: resume Claude session \"fix the build\""
+   "want": "workspace 1: firefox\nworkspace 2: resume Claude session \"0b8d7f8e\"\nworkspace ?: resume Claude session \"fix the build\""
   }
  ],
  "keys": [
@@ -1355,7 +1355,7 @@
    ],
    "want": {
     "events": [],
-    "error": "unknown key 'hyper'"
+    "error": "unknown key \"hyper\""
    }
   },
   {
@@ -1967,7 +1967,7 @@
      ]
     },
     "want": {
-     "text": "unknown key 'hyper'",
+     "text": "unknown key \"hyper\"",
      "error": true,
      "log": [],
      "keys": []

@@ -13,8 +13,8 @@ use serde_json::{Value, json};
 use super::backend::{
     Backend, Ctx, Emit, Env, Meta, Ours, digits, listening, nested, rect_shot, script_file, session_socket,
 };
-use super::text_of;
-use seimei_core::util::{py_json, py_json_compact, token_urlsafe, truthy};
+use seimei_core::util::as_text;
+use seimei_core::util::{token_urlsafe, truthy};
 
 const MAGIC: &[u8] = b"i3-ipc";
 const RUN_COMMAND: u32 = 0;
@@ -112,7 +112,7 @@ impl Sway {
             .into_iter()
             .flatten()
             .filter(|r| !truthy(&r["success"]))
-            .map(|r| if truthy(&r["error"]) { text_of(&r["error"]) } else { "failed".into() })
+            .map(|r| if truthy(&r["error"]) { as_text(&r["error"]) } else { "failed".into() })
             .collect();
         if !bad.is_empty() {
             return Err(bad.join("; "));
@@ -239,7 +239,7 @@ impl Backend for Sway {
                 let r = &o["rect"];
                 let scale = if truthy(&o["scale"]) { o["scale"].clone() } else { json!(1) };
                 (
-                    text_of(&o["name"]),
+                    as_text(&o["name"]),
                     json!({"x": r["x"], "y": r["y"], "width": r["width"], "height": r["height"], "scale": scale}),
                 )
             })
@@ -271,7 +271,7 @@ impl Backend for Sway {
             "version" => self.ipc(GET_VERSION, "")?,
             _ => return Err(format!("what is one of {}", QUERIES.join(", "))),
         };
-        Ok(py_json_compact(&data))
+        Ok(data.to_string())
     }
 
     fn action(&self, args: &[String]) -> Result<String, String> {
@@ -326,7 +326,7 @@ impl Backend for Sway {
     }
 
     fn move_to_workspace(&self, wid: i64, workspace: &str) -> Result<(), String> {
-        let ws = if digits(workspace) { format!("number {workspace}") } else { py_json(&json!(workspace)) };
+        let ws = if digits(workspace) { format!("number {workspace}") } else { json!(workspace).to_string() };
         self.command(&format!("[con_id={wid}] move container to workspace {ws}")).map(drop)
     }
 

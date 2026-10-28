@@ -11,7 +11,6 @@ use serde_json::{Value, json};
 use super::backend::{Backend, Ctx, Emit, Env, Meta, Ours, Reach, encode};
 use super::dbus::{Arg, Bus};
 use super::vinput::{MOD_KEYS, Op, char_sym, combo};
-use seimei_core::util::py_json_compact;
 
 const QUERIES: [&str; 3] = ["windows", "workspaces", "outputs"];
 pub const UUID: &str = "seimei@hisamiowo.xyz";
@@ -205,7 +204,7 @@ impl Backend for Gnome {
             "outputs" => Value::Object(self.outputs()?.into_iter().collect()),
             _ => return Err(format!("what is one of {}", QUERIES.join(", "))),
         };
-        Ok(py_json_compact(&data))
+        Ok(data.to_string())
     }
 
     fn action(&self, args: &[String]) -> Result<String, String> {

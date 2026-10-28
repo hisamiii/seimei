@@ -8,7 +8,8 @@ use std::time::Duration;
 
 use serde_json::{Map, Value, json};
 
-use super::{Desktop, WORKSPACE, text_of};
+use super::{Desktop, WORKSPACE};
+use seimei_core::util::as_text;
 use seimei_core::util::{chars, now, read_json, sh_quote, truthy, write_json};
 
 const EVERY: Duration = Duration::from_secs(30);
@@ -97,12 +98,12 @@ pub fn command(rec: &Value, shell: &str, home: &Path) -> Option<String> {
     if rec["app_id"] == "kitty" {
         let c = &rec["claude"];
         let dir =
-            [&c["cwd"], &rec["cwd"]].into_iter().find(|v| truthy(v)).map_or(home.to_string_lossy().into(), text_of);
+            [&c["cwd"], &rec["cwd"]].into_iter().find(|v| truthy(v)).map_or(home.to_string_lossy().into(), as_text);
         if truthy(c) {
             // Through the user's shell, so their `claude` function (claude-queue here) wraps it as before.
             let mut words = vec!["claude".to_string()];
-            words.extend(c["args"].as_array().into_iter().flatten().map(text_of));
-            words.extend(["--resume".into(), text_of(&c["session_id"])]);
+            words.extend(c["args"].as_array().into_iter().flatten().map(as_text));
+            words.extend(["--resume".into(), as_text(&c["session_id"])]);
             let claude = words.iter().map(|w| sh_quote(w)).collect::<Vec<_>>().join(" ");
             return Some(format!(
                 "kitty -d {} {shell} -c {}",
@@ -112,7 +113,7 @@ pub fn command(rec: &Value, shell: &str, home: &Path) -> Option<String> {
         }
         return Some(format!("kitty -d {}", sh_quote(&dir)));
     }
-    let argv: Vec<String> = rec["argv"].as_array().into_iter().flatten().map(text_of).collect();
+    let argv: Vec<String> = rec["argv"].as_array().into_iter().flatten().map(as_text).collect();
     let first = argv.first()?;
     // Just the program: apps restore their own state, and arguments like a file played at launch are stale.
     let keep = if INTERPRETERS.contains(&base(first)) && argv.len() > 1 { 2 } else { 1 };
@@ -125,12 +126,13 @@ pub fn describe(plan: &[Value]) -> String {
         .map(|r| {
             let c = &r["claude"];
             let what = if truthy(c) {
-                let name = if truthy(&c["name"]) { text_of(&c["name"]) } else { chars(&text_of(&c["session_id"]), 8) };
+                let name = if truthy(&c["name"]) { as_text(&c["name"]) } else { chars(&as_text(&c["session_id"]), 8) };
                 format!("resume Claude session \"{name}\"")
             } else {
-                text_of(&r["app_id"])
+                as_text(&r["app_id"])
             };
-            format!("workspace {}: {what}", text_of(&r["workspace"]))
+            let ws = if r["workspace"].is_null() { "?".into() } else { as_text(&r["workspace"]) };
+            format!("workspace {ws}: {what}")
         })
         .collect();
     lines.join("\n")
@@ -142,7 +144,7 @@ fn sort_key(r: &Value) -> (String, f64, Vec<f64>) {
         Some(p) if !p.is_empty() => p.iter().map(|v| v.as_f64().unwrap_or(0.0)).collect(),
         _ => vec![99.0, 99.0],
     };
-    (if truthy(&r["output"]) { text_of(&r["output"]) } else { String::new() }, ws, pos)
+    (if truthy(&r["output"]) { as_text(&r["output"]) } else { String::new() }, ws, pos)
 }
 
 impl Desktop {
@@ -165,7 +167,7 @@ impl Desktop {
         let mut out = vec![];
         let none = json!({});
         for w in &wins {
-            let app = text_of(&w["app_id"]);
+            let app = as_text(&w["app_id"]);
             if w["id"].as_i64().is_some_and(|i| ours.contains(&i))
                 || SKIP_APPS.contains(&app.as_str())
                 || !truthy(&w["pid"])
@@ -236,12 +238,12 @@ impl Desktop {
         }
         let mut have: HashMap<String, i64> = HashMap::new();
         for w in self.b.windows()? {
-            *have.entry(text_of(&w["app_id"])).or_default() += 1;
+            *have.entry(as_text(&w["app_id"])).or_default() += 1;
         }
         let mut out = vec![];
         for rec in old["windows"].as_array().into_iter().flatten() {
             // Windows that came back on their own (autostart, an app's own session restore) count first.
-            let n = have.entry(text_of(&rec["app_id"])).or_default();
+            let n = have.entry(as_text(&rec["app_id"])).or_default();
             if *n > 0 && !truthy(&rec["claude"]) {
                 *n -= 1;
                 continue;
@@ -272,14 +274,14 @@ impl Desktop {
     pub async fn restore(self: &Arc<Self>, plan: &[Value]) -> Vec<String> {
         let mut done = vec![];
         for r in plan {
-            let app = text_of(&r["app_id"]);
+            let app = as_text(&r["app_id"]);
             let moved = async {
-                if let Some(w) = self.spawn(&text_of(&r["command"]), false).await? {
+                if let Some(w) = self.spawn(&as_text(&r["command"]), false).await? {
                     // Spawned apps are the user's again, not seimei's.
                     let wid = w["id"].as_i64().unwrap_or(-1);
                     self.disown(wid);
                     if truthy(&r["workspace"]) && !truthy(&r["floating"]) {
-                        let ws = text_of(&r["workspace"]);
+                        let ws = as_text(&r["workspace"]);
                         self.blocking(move |d| d.b.move_to_workspace(wid, &ws)).await?;
                     }
                 }
@@ -288,7 +290,7 @@ impl Desktop {
             done.push(match moved.await {
                 Ok(()) => format!(
                     "{app} on workspace {}{}",
-                    text_of(&r["workspace"]),
+                    as_text(&r["workspace"]),
                     if truthy(&r["claude"]) { " (resumed)" } else { "" }
                 ),
                 Err(e) => format!("{app} failed: {e}"),

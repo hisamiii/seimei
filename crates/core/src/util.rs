@@ -167,53 +167,6 @@ pub fn cut(s: &str, n: usize) -> &str {
     &s[..end]
 }
 
-/// JSON the way Python's json.dumps writes it by default: ", " and ": " between items, non-ASCII as \\u escapes.
-/// Tool call summaries show it on the page.
-pub fn py_json(v: &Value) -> String {
-    py_dumps(v, false, true)
-}
-
-/// The same with ensure_ascii=False: other characters as they are.
-pub fn py_json_utf8(v: &Value) -> String {
-    py_dumps(v, false, false)
-}
-
-/// The same with separators=(",", ":"), as compact JSON for a model to read.
-pub fn py_json_compact(v: &Value) -> String {
-    py_dumps(v, true, true)
-}
-
-fn py_dumps(v: &Value, compact: bool, ascii: bool) -> String {
-    struct Py(bool, bool);
-    impl serde_json::ser::Formatter for Py {
-        fn begin_array_value<W: ?Sized + std::io::Write>(&mut self, w: &mut W, first: bool) -> std::io::Result<()> {
-            if first { Ok(()) } else { w.write_all(if self.0 { b"," } else { b", " }) }
-        }
-        fn begin_object_key<W: ?Sized + std::io::Write>(&mut self, w: &mut W, first: bool) -> std::io::Result<()> {
-            if first { Ok(()) } else { w.write_all(if self.0 { b"," } else { b", " }) }
-        }
-        fn begin_object_value<W: ?Sized + std::io::Write>(&mut self, w: &mut W) -> std::io::Result<()> {
-            w.write_all(if self.0 { b":" } else { b": " })
-        }
-        fn write_string_fragment<W: ?Sized + std::io::Write>(&mut self, w: &mut W, s: &str) -> std::io::Result<()> {
-            for c in s.chars() {
-                if c.is_ascii() || !self.1 {
-                    w.write_all(c.encode_utf8(&mut [0; 4]).as_bytes())?;
-                } else {
-                    for unit in c.encode_utf16(&mut [0; 2]) {
-                        write!(w, "\\u{unit:04x}")?;
-                    }
-                }
-            }
-            Ok(())
-        }
-    }
-    let mut out = vec![];
-    let mut ser = serde_json::Serializer::with_formatter(&mut out, Py(compact, ascii));
-    v.serialize(&mut ser).expect("JSON to memory");
-    String::from_utf8(out).expect("UTF-8")
-}
-
 /// At most `n` characters.
 pub fn chars(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
@@ -283,50 +236,6 @@ pub fn sh_quote(s: &str) -> String {
     shlex::try_quote(s).map_or_else(|_| "''".into(), |q| q.into_owned())
 }
 
-/// A string as Python's repr() shows it: single quotes, unless only double quotes avoid escaping.
-pub fn py_repr(s: &str) -> String {
-    let q = if s.contains('\'') && !s.contains('"') { '"' } else { '\'' };
-    let mut out = String::from(q);
-    for c in s.chars() {
-        match c {
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if c == q => {
-                out.push('\\');
-                out.push(c);
-            }
-            c if (c as u32) < 0x20 || c as u32 == 0x7f => out.push_str(&format!("\\x{:02x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out.push(q);
-    out
-}
-
-/// Lines split like Python's str.splitlines: at \n, \r\n, a lone \r and the other Unicode line breaks.
-pub fn splitlines(s: &str) -> Vec<&str> {
-    let breaks =
-        |c: char| matches!(c, '\n' | '\r' | '\x0b' | '\x0c' | '\x1c'..='\x1e' | '\u{85}' | '\u{2028}' | '\u{2029}');
-    let mut out = vec![];
-    let (mut start, mut it) = (0, s.char_indices().peekable());
-    while let Some((i, c)) = it.next() {
-        if breaks(c) {
-            out.push(&s[start..i]);
-            start = i + c.len_utf8();
-            if c == '\r' && it.peek().is_some_and(|&(_, n)| n == '\n') {
-                it.next();
-                start += 1;
-            }
-        }
-    }
-    if start < s.len() {
-        out.push(&s[start..]);
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -345,26 +254,6 @@ mod tests {
         assert_eq!(sh_quote("shikigami x"), "'shikigami x'");
         // Read back as one word by a shell's own rules
         assert_eq!(shlex::split(&sh_quote("it's $HOME")).unwrap(), ["it's $HOME"]);
-    }
-
-    #[test]
-    fn repr_like_python() {
-        assert_eq!(py_repr("dev"), "'dev'");
-        assert_eq!(py_repr("it's"), "\"it's\"");
-        assert_eq!(py_repr("a'b\"c\\\n"), "'a\\'b\"c\\\\\\n'");
-    }
-
-    #[test]
-    fn lines_like_python() {
-        assert_eq!(splitlines("a\r\nb\rc\n\nd\n"), ["a", "b", "c", "", "d"]);
-        assert!(splitlines("").is_empty());
-    }
-
-    #[test]
-    fn json_like_python() {
-        let v = serde_json::json!({"a": [1, "ü😀", 2.5], "b": {"c": null, "d": true}, "e": "q\"\\\n"});
-        let want = r#"{"a": [1, "\u00fc\ud83d\ude00", 2.5], "b": {"c": null, "d": true}, "e": "q\"\\\n"}"#;
-        assert_eq!(py_json(&v), want);
     }
 
     #[test]

@@ -11,7 +11,8 @@ use seimei_core::guard::About;
 use seimei_core::shell::commands;
 use seimei_core::util::truthy;
 
-use super::{Desktop, text_of};
+use super::Desktop;
+use seimei_core::util::as_text;
 
 // Redirect targets: > file, >> file, &> file, 2> file; not 2>&1 or >&2 (no file).
 static REDIRECT: LazyLock<Regex> =
@@ -145,9 +146,9 @@ pub fn check(tool: &str, inp: &Value, desk: &Desktop) -> Option<About> {
     let conf = b.config_dir();
     let edit = format!("edit the {} config", b.meta().label);
     let ours = desk.ours();
-    let field = |k: &str| inp.get(k).filter(|v| truthy(v)).map(text_of);
+    let field = |k: &str| inp.get(k).filter(|v| truthy(v)).map(as_text);
     if tool == "Bash" {
-        let cmd = inp.get("command").map(text_of).unwrap_or_default();
+        let cmd = inp.get("command").map(as_text).unwrap_or_default();
         for c in commands(&cmd).into_iter().flatten() {
             if let Some(hit) = b.bash_hit(&c.argv, &ours) {
                 return about(kind(&hit), hit, cmd);
@@ -167,13 +168,13 @@ pub fn check(tool: &str, inp: &Value, desk: &Desktop) -> Option<About> {
             return about("config", edit, format!("{path}\n\n{detail}"));
         }
     } else if tool == format!("mcp__desktop__{}", b.meta().name) && inp["display"] != "agent" {
-        let mut args = vec![inp.get("action").map(text_of).unwrap_or_default()];
+        let mut args = vec![inp.get("action").map(as_text).unwrap_or_default()];
         if inp.get("args").is_some_and(seimei_core::util::truthy) {
             match &inp["args"] {
-                Value::Array(a) => args.extend(a.iter().map(text_of)),
+                Value::Array(a) => args.extend(a.iter().map(as_text)),
                 Value::String(s) => args.extend(s.chars().map(String::from)),
                 Value::Object(o) => args.extend(o.keys().cloned()),
-                v => args.push(text_of(v)),
+                v => args.push(as_text(v)),
             }
         }
         if let Some(hit) = b.action_hit(&args, &ours) {

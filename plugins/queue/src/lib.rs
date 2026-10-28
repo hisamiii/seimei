@@ -620,7 +620,7 @@ impl Queue {
 
     pub fn check_trigger(&self, trigger: &str, target: &str) -> Result<(), String> {
         if trigger == "queue_wait" && wait_minutes(target).is_none() {
-            return Err(format!("queue_wait's target is minutes, not {}", util::py_repr(target)));
+            return Err(format!("queue_wait's target is minutes, not \"{target}\""));
         }
         Ok(())
     }

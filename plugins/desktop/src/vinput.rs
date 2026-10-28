@@ -4,7 +4,6 @@
 //!
 //! Each call uploads a keymap with one key per keysym it needs, so any character types without a layout switch.
 
-use seimei_core::util::py_repr;
 use std::io::Write;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::path::Path;
@@ -69,7 +68,7 @@ pub fn combo(spec: &str) -> Result<(u32, u32), String> {
             "shift" => mods |= SHIFT,
             "alt" => mods |= ALT,
             "super" | "meta" | "win" => mods |= SUPER,
-            k => sym = Some(keysym(k).ok_or_else(|| format!("unknown key {}", py_repr(k)))?),
+            k => sym = Some(keysym(k).ok_or_else(|| format!("unknown key \"{k}\""))?),
         }
     }
     Ok((mods, sym.ok_or_else(|| format!("{spec} has no key besides its modifiers"))?))

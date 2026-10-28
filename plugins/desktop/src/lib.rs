@@ -36,9 +36,9 @@ use tokio::sync::oneshot;
 pub use backend::{Backend, Ctx};
 use seimei_core::approvals::Approvals;
 use seimei_core::events::EventLog;
-use seimei_core::plugins::{Builtin, Factory, Fut, Host, Session, Windows, ask_guard, int, py, shot_file, strip};
+use seimei_core::plugins::{Builtin, Factory, Fut, Host, Session, Windows, ask_guard, int, shot_file, strip};
 use seimei_core::tools::text;
-use seimei_core::util::{b64, chars, now, py_json, py_json_utf8, py_repr, token_urlsafe, truthy};
+use seimei_core::util::{as_text, b64, chars, now, token_urlsafe, truthy};
 use uinput::Device;
 
 /// The workspace apps opened for a task go to.
@@ -58,11 +58,6 @@ Drive the {about} with your desktop tools (start with desktop), not {cli} in Bas
 - screenshot returns the image's path: Read it when you need to look (show=true puts it in the chat and returns the image).
 - Never type into a window you have not just looked at. Prefer keyboard shortcuts and typing over clicks.
 - The user has a stop key on the {about}. When they press it, your turn ends and desktop input is blocked for a minute: do not resume driving until they say so.";
-
-/// A value as Python's str() shows it.
-pub(crate) fn text_of(v: &Value) -> String {
-    py(v)
-}
 
 pub const PLUGIN: Factory = Factory {
     name: "desktop",
@@ -416,11 +411,11 @@ impl Desktop {
         let ours = self.ours();
         let mut lines = vec![];
         for (name, lg) in &outs {
-            let g = |k: &str| text_of(&lg[k]);
+            let g = |k: &str| as_text(&lg[k]);
             lines.push(format!("Output {name}: {}x{} logical, scale {}", g("width"), g("height"), g("scale")));
         }
         let focused = wins.iter().find(|w| truthy(&w["is_focused"])).map(|w| w["id"].clone());
-        let out_of = |s: &Value| if truthy(&s["output"]) { text_of(&s["output"]) } else { String::new() };
+        let out_of = |s: &Value| if truthy(&s["output"]) { as_text(&s["output"]) } else { String::new() };
         spaces.sort_by(|a, b| (out_of(a), a["idx"].as_f64()).partial_cmp(&(out_of(b), b["idx"].as_f64())).unwrap());
         let pos = |w: &Value| -> Vec<f64> {
             match w["pos"].as_array() {
@@ -430,11 +425,11 @@ impl Desktop {
         };
         for ws in &spaces {
             let mut here: Vec<&Value> = wins.iter().filter(|w| w["workspace_id"] == ws["id"]).collect();
-            let mut head = format!("Workspace {}", text_of(&ws["idx"]));
+            let mut head = format!("Workspace {}", as_text(&ws["idx"]));
             if truthy(&ws["name"]) {
-                head += &format!(" \"{}\"", text_of(&ws["name"]));
+                head += &format!(" \"{}\"", as_text(&ws["name"]));
             }
-            head += &format!(" on {}", text_of(&ws["output"]));
+            head += &format!(" on {}", as_text(&ws["output"]));
             if truthy(&ws["is_active"]) {
                 head += " (active)";
             }
@@ -454,22 +449,22 @@ impl Desktop {
                 let flags = if flags.is_empty() { String::new() } else { format!(" [{}]", flags.join(", ")) };
                 lines.push(format!(
                     "  window {}: {} \"{}\"{flags}",
-                    text_of(&w["id"]),
-                    text_of(&w["app_id"]),
-                    text_of(&w["title"])
+                    as_text(&w["id"]),
+                    as_text(&w["app_id"]),
+                    as_text(&w["title"])
                 ));
             }
         }
         for w in wins.iter().filter(|w| w["workspace_id"].is_null()) {
             lines.push(format!(
                 "  window {}: {} \"{}\" (no workspace)",
-                text_of(&w["id"]),
-                text_of(&w["app_id"]),
-                text_of(&w["title"])
+                as_text(&w["id"]),
+                as_text(&w["app_id"]),
+                as_text(&w["title"])
             ));
         }
         if let Some(l) = layouts.filter(|l| truthy(&l["names"])) {
-            let names: Vec<String> = l["names"].as_array().unwrap().iter().map(text_of).collect();
+            let names: Vec<String> = l["names"].as_array().unwrap().iter().map(as_text).collect();
             let cur = names.get(l["current_idx"].as_u64().unwrap_or(0) as usize).cloned().unwrap_or_default();
             lines.push(format!("Keyboard layout: {cur} (of {})", names.join(", ")));
         }
@@ -671,7 +666,7 @@ impl Desktop {
         }
         t.driving_until = now() + 20.0;
         // For the bar's "seimei is driving" indicator.
-        let _ = std::fs::write(&self.driving, py_json(&json!({"until": t.driving_until})));
+        let _ = std::fs::write(&self.driving, json!({"until": t.driving_until}).to_string());
         Ok(())
     }
 
@@ -818,7 +813,7 @@ impl Desktop {
             return Err("the screen is locked; unlock it first".into());
         }
         if !window.is_null() && self.b.focused_id().map(|f| json!(f)).as_ref() != Some(window) {
-            return Err(format!("window {} is no longer focused; focus it and take a new screenshot", text_of(window)));
+            return Err(format!("window {} is no longer focused; focus it and take a new screenshot", as_text(window)));
         }
         let scale = self.screen_scale()?;
         let (sx, sy) = (x / scale, y / scale);
@@ -865,15 +860,15 @@ impl Desktop {
             t if t == name => match need(args, "action") {
                 Err(e) => Err(e),
                 Ok(a) => {
-                    let mut argv = vec![text_of(a)];
-                    argv.extend(args["args"].as_array().into_iter().flatten().map(text_of));
+                    let mut argv = vec![as_text(a)];
+                    argv.extend(args["args"].as_array().into_iter().flatten().map(as_text));
                     self.blocking(move |d| d.b.action(&argv))
                         .await
                         .map(|o| if o.is_empty() { "Done.".into() } else { o })
                 }
             },
             t if t == format!("{name}_query") => {
-                let what = args.get("what").map_or(String::new(), text_of);
+                let what = args.get("what").map_or(String::new(), as_text);
                 self.blocking(move |d| d.b.query(&what)).await.map(|out| {
                     if out.chars().count() <= 30_000 {
                         out
@@ -885,13 +880,13 @@ impl Desktop {
             "open_app" => match need(args, "command") {
                 Err(e) => Err(e),
                 Ok(c) => {
-                    let own = args.get("workspace").map_or("seimei".into(), text_of) == "seimei";
-                    match self.spawn(&text_of(c), own).await {
+                    let own = args.get("workspace").map_or("seimei".into(), as_text) == "seimei";
+                    match self.spawn(&as_text(c), own).await {
                         Ok(Some(w)) => Ok(format!(
                             "Opened window {}: {} \"{}\".",
-                            text_of(&w["id"]),
-                            text_of(&w["app_id"]),
-                            text_of(&w["title"])
+                            as_text(&w["id"]),
+                            as_text(&w["app_id"]),
+                            as_text(&w["title"])
                         )),
                         Ok(None) => {
                             Ok("Started, but no new window of its own showed up within 15 s (apps like Firefox open \
@@ -902,13 +897,13 @@ impl Desktop {
                     }
                 }
             },
-            "type_text" => match (need(args, "window").and_then(int), need(args, "text").map(text_of)) {
+            "type_text" => match (need(args, "window").and_then(int), need(args, "text").map(as_text)) {
                 (Ok(w), Ok(t)) => self.blocking(move |d| d.type_into(w, &t)).await.map(|_| "Typed.".into()),
                 (Err(e), _) | (_, Err(e)) => Err(e),
             },
             "press_keys" => match (need(args, "window").and_then(int), need(args, "keys")) {
                 (Ok(w), Ok(k)) => {
-                    let keys: Vec<String> = k.as_array().into_iter().flatten().map(text_of).collect();
+                    let keys: Vec<String> = k.as_array().into_iter().flatten().map(as_text).collect();
                     self.blocking(move |d| d.keys(w, &keys)).await.map(|_| "Pressed.".into())
                 }
                 (Err(e), _) | (_, Err(e)) => Err(e),
@@ -943,7 +938,7 @@ impl Desktop {
                 Ok(wid) => self.blocking(move |d| d.screenshot(wid)).await.map(|(data, mime)| {
                     let note = match wid {
                         None => "Whole screen; click coordinates are pixels of this image.".into(),
-                        Some(_) => format!("Window {}.", text_of(&window)),
+                        Some(_) => format!("Window {}.", as_text(&window)),
                     };
                     (data, mime.to_string(), note)
                 }),
@@ -963,7 +958,7 @@ impl Desktop {
                 Ok((name, _)) => name,
                 Err(e) => return text(&e, true),
             };
-            let caption = chars(&if truthy(&args["caption"]) { text_of(&args["caption"]) } else { String::new() }, 300);
+            let caption = chars(&if truthy(&args["caption"]) { as_text(&args["caption"]) } else { String::new() }, 300);
             self.system(json!({"type": "image", "file": name, "caption": caption}), None);
             note += " Shown to the user.";
             return json!({"content": [{"type": "image", "data": b64(data), "mimeType": mime},
@@ -984,7 +979,7 @@ impl Desktop {
             let amount = int(need(args, "amount")?)?;
             return self.blocking(move |d| d.click(x, y, &window, "left", 0, amount)).await.map(|_| "Scrolled.".into());
         }
-        let button = args.get("button").map_or("left".into(), text_of);
+        let button = args.get("button").map_or("left".into(), as_text);
         let count = args.get("count").map_or(Ok(1), int)?;
         let moved = args.get("count").is_some_and(|c| !truthy(c));
         self.blocking(move |d| d.click(x, y, &window, &button, count, 0)).await?;
@@ -1007,42 +1002,42 @@ impl Desktop {
             })
             .await?;
         let pid = found.ok_or_else(|| format!("no window {wid}"))?["pid"].clone();
-        let pid = text_of(&pid);
+        let pid = as_text(&pid);
         let r = if tool == "ui_tree" {
             let depth = args.get("depth").map_or(Ok(12), int)?.to_string();
-            let filter = if truthy(&args["filter"]) { text_of(&args["filter"]) } else { String::new() };
+            let filter = if truthy(&args["filter"]) { as_text(&args["filter"]) } else { String::new() };
             a11y(&["tree", &pid, &depth, &filter], env).await
         } else if args.get("set_text").is_some_and(|t| !t.is_null()) {
-            a11y(&["set-text", &pid, &text_of(need(args, "path")?), &text_of(&args["set_text"])], env).await
+            a11y(&["set-text", &pid, &as_text(need(args, "path")?), &as_text(&args["set_text"])], env).await
         } else if args.get("action").is_some_and(|t| !t.is_null()) {
-            a11y(&["act", &pid, &text_of(need(args, "path")?), &text_of(&args["action"])], env).await
+            a11y(&["act", &pid, &as_text(need(args, "path")?), &as_text(&args["action"])], env).await
         } else {
             return Err("Give action or set_text.".into());
         };
         if let Some(e) = r.get("error") {
-            return Err(text_of(e));
+            return Err(as_text(e));
         }
         if tool == "ui_action" {
-            return Ok(py_json_utf8(&r));
+            return Ok(r.to_string());
         }
         let nodes = r["nodes"].as_array().cloned().unwrap_or_default();
-        let mut head = format!("{}: {} elements", text_of(&r["app"]), nodes.len());
+        let mut head = format!("{}: {} elements", as_text(&r["app"]), nodes.len());
         if truthy(&r["truncated"]) {
             head += " (cut off)";
         }
         if truthy(&r["deeper"]) {
-            head += &format!(", {} subtrees deeper than the depth", text_of(&r["deeper"]));
+            head += &format!(", {} subtrees deeper than the depth", as_text(&r["deeper"]));
         }
         let mut lines = vec![head];
         for n in nodes {
             let mut extra = vec![];
             if truthy(&n["name"]) {
-                extra.push(format!("\"{}\"", text_of(&n["name"])));
+                extra.push(format!("\"{}\"", as_text(&n["name"])));
             }
             if truthy(&n["text"]) {
-                extra.push(format!("text={}", py_repr(&chars(&text_of(&n["text"]), 120))));
+                extra.push(format!("text={:?}", chars(&as_text(&n["text"]), 120)));
             }
-            let list = |k: &str| n[k].as_array().into_iter().flatten().map(text_of).collect::<Vec<_>>().join(",");
+            let list = |k: &str| n[k].as_array().into_iter().flatten().map(as_text).collect::<Vec<_>>().join(",");
             if truthy(&n["actions"]) {
                 extra.push(format!("actions={}", list("actions")));
             }
@@ -1050,7 +1045,7 @@ impl Desktop {
                 extra.push(format!("[{}]", list("states")));
             }
             let indent = "  ".repeat(n["depth"].as_u64().unwrap_or(0) as usize);
-            lines.push(format!("{indent}{} {} {}", text_of(&n["path"]), text_of(&n["role"]), extra.join(" ")));
+            lines.push(format!("{indent}{} {} {}", as_text(&n["path"]), as_text(&n["role"]), extra.join(" ")));
         }
         Ok(lines.join("\n"))
     }
@@ -1136,10 +1131,10 @@ async fn notifications(args: &Value) -> Value {
         // niri's own "Screenshot captured" notices, mostly from seimei's window shots, are noise.
         let rows = rows.into_iter().filter(|n| !(n["app_name"] == "niri" && n["summary"] == "Screenshot captured"));
         for n in rows.take(limit) {
-            let app = if truthy(&n["app_name"]) { text_of(&n["app_name"]) } else { "?".into() };
-            let summary = n.get("summary").map_or(String::new(), text_of);
+            let app = if truthy(&n["app_name"]) { as_text(&n["app_name"]) } else { "?".into() };
+            let summary = n.get("summary").map_or(String::new(), as_text);
             let body =
-                if truthy(&n["body"]) { format!(" | {}", chars(&text_of(&n["body"]), 300)) } else { String::new() };
+                if truthy(&n["body"]) { format!(" | {}", chars(&as_text(&n["body"]), 300)) } else { String::new() };
             out.push(format!("[{label}] {app}: {summary}{body}"));
         }
     }

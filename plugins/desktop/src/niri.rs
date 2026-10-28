@@ -10,7 +10,7 @@ use regex::Regex;
 use serde_json::{Value, json};
 
 use super::backend::{Backend, Ctx, Emit, Env, Meta, Ours, digits, exec, listening, session_socket};
-use seimei_core::util::{py_json_compact, sh_quote, token_urlsafe, truthy};
+use seimei_core::util::{sh_quote, token_urlsafe, truthy};
 
 const QUERIES: [&str; 8] =
     ["outputs", "workspaces", "windows", "focused-window", "focused-output", "layers", "keyboard-layouts", "version"];
@@ -75,7 +75,7 @@ impl Niri {
         BufReader::new(s).read_line(&mut line).map_err(|e| e.to_string())?;
         let reply: Value = serde_json::from_str(&line).map_err(|e| format!("niri: {e}"))?;
         if let Some(e) = reply.get("Err") {
-            return Err(super::text_of(e));
+            return Err(super::as_text(e));
         }
         let ok = reply["Ok"].clone();
         Ok(match ok.get(request) {
@@ -146,7 +146,7 @@ impl Niri {
             if !mine.is_empty() {
                 for n in mine {
                     let id = if n["id"].is_object() { &n["id"]["data"] } else { &n["id"] };
-                    let _ = exec(&["makoctl", "dismiss", "-n", &super::text_of(id), "--no-history"], env, None, 2.0);
+                    let _ = exec(&["makoctl", "dismiss", "-n", &super::as_text(id), "--no-history"], env, None, 2.0);
                 }
                 return;
             }
@@ -230,7 +230,7 @@ impl Backend for Niri {
             return Err(if e.trim().is_empty() { format!("niri msg {what} failed") } else { e.trim().into() });
         }
         let v: Value = serde_json::from_str(&r.text()).map_err(|e| format!("niri msg {what} is not JSON: {e}"))?;
-        Ok(py_json_compact(&v))
+        Ok(v.to_string())
     }
 
     fn action(&self, args: &[String]) -> Result<String, String> {
@@ -268,7 +268,7 @@ impl Backend for Niri {
             let ws = spaces.iter().find(|s| s["id"] == w["workspace_id"]).ok_or("no workspace for the window")?;
             let empty = spaces.iter().filter(|s| s["output"] == ws["output"] && s["active_window_id"].is_null());
             let last = empty.max_by_key(|s| s["idx"].as_i64().unwrap_or(0)).ok_or("no empty workspace to name")?;
-            self.act(&["set-workspace-name", "--workspace", &super::text_of(&last["idx"]), name])?;
+            self.act(&["set-workspace-name", "--workspace", &super::as_text(&last["idx"]), name])?;
         }
         self.move_to_workspace(wid, name)
     }

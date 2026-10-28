@@ -147,7 +147,7 @@ pub trait Backend: Send + Sync {
             return None;
         }
         match wid.and_then(|w| self.window(w).ok().flatten()) {
-            Some(w) => Some(format!("close {} \"{}\"", super::text_of(&w["app_id"]), super::text_of(&w["title"]))),
+            Some(w) => Some(format!("close {} \"{}\"", super::as_text(&w["app_id"]), super::as_text(&w["title"]))),
             None => Some("close a window".into()),
         }
     }
@@ -314,7 +314,7 @@ pub fn rect_shot(b: &dyn Backend, wid: i64) -> Result<Vec<u8>, String> {
             b.meta().label
         ));
     }
-    let n = |k: &str| super::text_of(&w["rect"][k]);
+    let n = |k: &str| super::as_text(&w["rect"][k]);
     let geo = format!("{},{} {}x{}", n("x"), n("y"), n("width"), n("height"));
     run(&["grim", "-g", &geo, "-t", "png", "-"], &b.env()?, None, 20.0)
 }

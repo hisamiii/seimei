@@ -17,8 +17,9 @@ use super::gnome::{self, Gnome};
 use super::kde::Kde;
 use super::niri::Niri;
 use super::vinput::Op;
-use super::{Desktop, Session, int, text_of, uinput};
+use super::{Desktop, Session, int, uinput};
 use seimei_core::tools::text;
+use seimei_core::util::as_text;
 use seimei_core::util::{chars, sh_quote, token_urlsafe, truthy};
 
 /// seimei's own config for the inner niri. repeat-rate 0: a virtual keyboard's keys must not repeat.
@@ -460,9 +461,9 @@ fn overview(up: &Up) -> Result<String, String> {
         let focused = if truthy(&w["is_focused"]) { " [focused]" } else { "" };
         lines.push(format!(
             "  window {}: {} \"{}\"{focused}",
-            text_of(&w["id"]),
-            text_of(&w["app_id"]),
-            text_of(&w["title"])
+            as_text(&w["id"]),
+            as_text(&w["app_id"]),
+            as_text(&w["title"])
         ));
     }
     Ok(lines.join("\n"))
@@ -567,19 +568,19 @@ impl Desktop {
         match tool {
             "desktop" => overview(up),
             t if t == up.b.meta().name => {
-                let mut argv = vec![text_of(need("action")?)];
-                argv.extend(a["args"].as_array().into_iter().flatten().map(text_of));
+                let mut argv = vec![as_text(need("action")?)];
+                argv.extend(a["args"].as_array().into_iter().flatten().map(as_text));
                 up.b.action(&argv).map(|o| if o.is_empty() { "Done.".into() } else { o })
             }
-            t if t.strip_suffix("_query") == Some(up.b.meta().name) => up.b.query(&text_of(need("what")?)),
+            t if t.strip_suffix("_query") == Some(up.b.meta().name) => up.b.query(&as_text(need("what")?)),
             "type_text" => {
                 self.agent_drive(up, need("window")?)?;
-                up.b.input(&[Op::Text(text_of(need("text")?))]).map(|_| "Typed.".into())
+                up.b.input(&[Op::Text(as_text(need("text")?))]).map(|_| "Typed.".into())
             }
             "press_keys" => {
                 self.agent_drive(up, need("window")?)?;
                 let ops: Vec<Op> =
-                    need("keys")?.as_array().into_iter().flatten().map(|k| Op::Combo(text_of(k))).collect();
+                    need("keys")?.as_array().into_iter().flatten().map(|k| Op::Combo(as_text(k))).collect();
                 up.b.input(&ops).map(|_| "Pressed.".into())
             }
             "click" | "scroll" => {
@@ -589,7 +590,7 @@ impl Desktop {
                 let op = if tool == "scroll" {
                     Op::Scroll { x, y, w, h, amount: int(need("amount")?)? }
                 } else {
-                    let name = a.get("button").map_or("left".into(), text_of);
+                    let name = a.get("button").map_or("left".into(), as_text);
                     let button = uinput::button(&name).ok_or_else(|| format!("no button {name}"))?;
                     Op::Click { x, y, w, h, button, count: a.get("count").map_or(Ok(1), int)? }
                 };
@@ -629,7 +630,7 @@ impl Desktop {
 
     /// open_app in the agent display: start it if needed, then wait for the app's window there.
     async fn agent_open(self: &Arc<Self>, args: &Value) -> Result<String, String> {
-        let command = text_of(args.get("command").filter(|c| !c.is_null()).ok_or("command is missing")?);
+        let command = as_text(args.get("command").filter(|c| !c.is_null()).ok_or("command is missing")?);
         if joins_users_browser(&command) {
             return Err("Firefox started here would open in the user's running Firefox. Use the browser tools with \
                         browser: \"agent\": they run the agent browser in the agent display."
@@ -640,9 +641,9 @@ impl Desktop {
         Ok(match w {
             Some(w) => format!(
                 "Opened window {} in the agent display: {} \"{}\".",
-                text_of(&w["id"]),
-                text_of(&w["app_id"]),
-                text_of(&w["title"])
+                as_text(&w["id"]),
+                as_text(&w["app_id"]),
+                as_text(&w["title"])
             ),
             None => "Started in the agent display, but no window of its own showed up within 15 s.".into(),
         })

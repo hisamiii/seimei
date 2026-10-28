@@ -34,4 +34,4 @@ It uses the system `claude` binary: seimei uses your Claude Code login, however 
 
 ## License
 
-MIT (LICENSE), except `discord/`: it builds into Vencord, so that one folder is GPL-3.0-or-later (discord/LICENSE).
+MIT (LICENSE).

@@ -12,7 +12,6 @@ use regex::Regex;
 use serde_json::{Value, json};
 
 use super::backend::{Backend, Ctx, Emit, Env, Meta, Ours, digits, exec, run};
-use seimei_core::util::py_json_compact;
 
 const QUERIES: [&str; 4] = ["windows", "workspaces", "outputs", "root"];
 const ROOT_PROPS: [&str; 6] = [
@@ -218,7 +217,7 @@ impl Backend for X11 {
             "root" => json!(self.root()?),
             _ => return Err(format!("what is one of {}", QUERIES.join(", "))),
         };
-        Ok(py_json_compact(&data))
+        Ok(data.to_string())
     }
 
     fn action(&self, args: &[String]) -> Result<String, String> {

@@ -12,8 +12,8 @@ use regex::Regex;
 use serde_json::{Value, json};
 
 use super::backend::{Backend, Ctx, Emit, Env, Meta, Ours, digits, listening, rect_shot, script_file};
-use super::text_of;
-use seimei_core::util::{py_json_compact, truthy};
+use seimei_core::util::as_text;
+use seimei_core::util::truthy;
 
 const QUERIES: [&str; 7] = ["clients", "workspaces", "monitors", "activewindow", "devices", "layers", "version"];
 const CLOSE: [&str; 5] = ["killactive", "forcekillactive", "closewindow", "killwindow", "forcekillwindow"];
@@ -203,7 +203,7 @@ impl Backend for Hyprland {
             // Python's round(): halves go to the even neighbour.
             let r = |v: f64| (v / s).round_ties_even() as i64;
             out.push((
-                text_of(&m["name"]),
+                as_text(&m["name"]),
                 json!({"x": m["x"], "y": m["y"], "width": r(w), "height": r(h), "scale": scale}),
             ));
         }
@@ -218,7 +218,7 @@ impl Backend for Hyprland {
         if !QUERIES.contains(&what) {
             return Err(format!("what is one of {}", QUERIES.join(", ")));
         }
-        Ok(py_json_compact(&self.get(what)?))
+        Ok(self.get(what)?.to_string())
     }
 
     fn action(&self, args: &[String]) -> Result<String, String> {

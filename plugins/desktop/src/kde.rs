@@ -15,10 +15,9 @@ use serde_json::{Value, json};
 
 use super::backend::{Backend, Ctx, Emit, Env, Meta, Ours, Reach, encode};
 use super::dbus::{Arg, Bus};
-use super::text_of;
 use super::vinput::{MOD_KEYS, Op, char_sym, combo};
 use super::wire::{Args, Conn, fixed, socket_path, string, words};
-use seimei_core::util::py_json_compact;
+use seimei_core::util::as_text;
 
 const QUERIES: [&str; 3] = ["windows", "desktops", "outputs"];
 
@@ -515,7 +514,7 @@ impl Backend for Kde {
             .into_iter()
             .enumerate()
             .map(|(i, (_, _, mut v))| {
-                let name = text_of(&v["name"]);
+                let name = as_text(&v["name"]);
                 let name = if name.is_empty() { format!("output-{i}") } else { name };
                 if xdg.is_none() {
                     let s = v["scale"].as_f64().unwrap_or(1.0).max(1.0);
@@ -539,7 +538,7 @@ impl Backend for Kde {
             "outputs" => Value::Object(self.outputs()?.into_iter().collect()),
             _ => return Err(format!("what is one of {}", QUERIES.join(", "))),
         };
-        Ok(py_json_compact(&data))
+        Ok(data.to_string())
     }
 
     fn action(&self, args: &[String]) -> Result<String, String> {
