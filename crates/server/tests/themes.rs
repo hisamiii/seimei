@@ -1,5 +1,4 @@
-//! Every fixed theme the page and the app ship (web/themes), on both sides and with every accent, keeps its text and
-//! marks readable: WCAG 4.5:1 for text, 3:1 for marks and outlines. contrib/themes.py makes them so with the same list.
+//! Every fixed theme the page and the app ship (web/themes), on both sides and with every accent, keeps its text and marks readable: WCAG 4.5:1 for text, 3:1 for marks and outlines. contrib/themes.py makes them so with the same list.
 //! Material You is left out: its scheme comes from the wallpaper or a seed, and M3's tones keep it readable.
 
 use std::path::Path;

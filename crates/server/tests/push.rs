@@ -1,5 +1,4 @@
-//! Push against local fakes of Google's token and send endpoints and of a UnifiedPush server: the rules (who gets
-//! what, when), FCM's JWT and messages, and Web Push sends a phone can read.
+//! Push against local fakes of Google's token and send endpoints and of a UnifiedPush server: the rules (who gets what, when), FCM's JWT and messages, and Web Push sends a phone can read.
 
 use std::collections::HashSet;
 use std::net::SocketAddr;

@@ -1,5 +1,5 @@
-//! HTTP side: the page, login, the event stream, history, and the write endpoints. Routes, status codes and bodies are
-//! the wire protocol the web page and the phone app speak.
+//! HTTP side: the page, login, the event stream, history, and the write endpoints.
+//! Routes, status codes and bodies are the wire protocol the web page and the phone app speak.
 
 #![allow(clippy::result_large_err)] // axum responses as the error side, as handlers return them
 
@@ -105,7 +105,7 @@ pub struct App {
     pub pool: Arc<Pool>,
     /// The user's own sessions, for the page and the dispatcher.
     pub watcher: Arc<Watcher>,
-    /// Hand off, Take over.
+    /// Hand off and Take over: sessions moving between the user and the shikigami.
     pub adopter: Arc<Adopter>,
     /// The dispatcher's watch rules.
     pub watches: Arc<Watches>,
@@ -124,7 +124,6 @@ pub struct Setup {
     pub origins: HashSet<String>,
     /// The web UI's folder; None for the one built into the binary.
     pub web: Option<PathBuf>,
-    /// The state folder.
     pub state: PathBuf,
     pub push: Arc<Push>,
     pub dispatcher: dispatcher::Config,
@@ -132,7 +131,6 @@ pub struct Setup {
     pub shikigami: String,
     /// The terminal a released or lent session opens in (config [sessions] terminal).
     pub terminal: String,
-    /// The plugins enabled in config.
     pub plugins: Arc<seimei_core::plugins::Plugins>,
     pub asr: Option<Arc<seimei_core::asr::Asr>>,
 }
@@ -268,8 +266,8 @@ mod embedded {
     include!(concat!(env!("OUT_DIR"), "/web.rs"));
 }
 
-/// The page files: the ones built in, or a snapshot of a folder at startup, so edits on disk never mix with a running
-/// server. Assets live under /static/<hash>/, so a restart gets fresh URLs past any cache.
+/// The page files: the ones built in, or a snapshot of a folder at startup, so edits on disk never mix with a running server.
+/// Assets live under /static/<hash>/, so a restart gets fresh URLs past any cache.
 fn load_web(web: Option<&Path>) -> (String, HashMap<String, Bytes>) {
     let mut files = vec![];
     let Some(web) = web else {
@@ -893,8 +891,8 @@ async fn push_info(State(app): Shared, headers: HeaderMap) -> Response {
               "sending": rec.as_ref().is_some_and(|r| app.push.can_send(r))}))
 }
 
-/// The app registers after each login: {"token"} from Firebase, {"up": {endpoint, p256dh, auth}} from a UnifiedPush
-/// app, or {"ws": true} for the background connection (the answer carries its secret). Nothing turns them off.
+/// The app registers after each login: {"token"} from Firebase, {"up": {endpoint, p256dh, auth}} from a UnifiedPush app, or {"ws": true} for the background connection (the answer carries its secret).
+/// Nothing turns them off.
 async fn push_token(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> Response {
     let dev = attempt!(this_phone(&app, &headers));
     let b = attempt!(body(&bytes));
@@ -939,8 +937,8 @@ async fn web_push_info(State(app): Shared, headers: HeaderMap) -> Response {
     ok(json!({"vapid": app.push.webpush.public(), "on": on}))
 }
 
-/// The page subscribes this browser with its Push API subscription ({endpoint, keys: {p256dh, auth}}), and a test
-/// notification follows; {"off": true} stops it. It ends with the browser's session.
+/// The page subscribes this browser with its Push API subscription ({endpoint, keys: {p256dh, auth}}), and a test notification follows; {"off": true} stops it.
+/// It ends with the browser's session.
 async fn web_push_set(State(app): Shared, headers: HeaderMap, bytes: Bytes) -> Response {
     let Some(id) = auth(&app).browser_of(&headers) else {
         return text(StatusCode::FORBIDDEN, "the phone app has its own notifications");
@@ -1136,8 +1134,8 @@ async fn workers_all(State(app): Shared) -> Response {
 /// Events a worker's page loads at most at once.
 const PAGE: usize = 400;
 
-/// A shikigami's row and its log: the last PAGE events, or those after ?after= (a page's cached copy). When more than
-/// PAGE came since, only the last PAGE come, with "reset": the copy is too old to extend.
+/// A shikigami's row and its log: the last PAGE events, or those after ?after= (a page's cached copy).
+/// When more than PAGE came since, only the last PAGE come, with "reset": the copy is too old to extend.
 async fn worker_history(
     State(app): Shared,
     UrlPath(id): UrlPath<String>,
@@ -1418,8 +1416,8 @@ async fn session(
     ok(out)
 }
 
-/// How a message from the page reaches the session: typed into its kitty window, or through the dispatcher's
-/// SendMessage when seimei cannot type into it. None: neither.
+/// How a message from the page reaches the session: typed into its terminal window, or through the dispatcher's SendMessage.
+/// None: neither.
 fn via(sess: &Live, typed: bool) -> Option<&'static str> {
     let to = sess.address();
     match () {
@@ -1440,8 +1438,7 @@ async fn session_archive(State(app): Shared, UrlPath(pid): UrlPath<String>, byte
     ok(json!({"archived": on}))
 }
 
-/// Type the user's message into the session's own kitty window, on their tap in the app; without one, the
-/// dispatcher passes it on with SendMessage.
+/// Type the user's message into the session's own terminal window; without one, the dispatcher passes it on with SendMessage.
 async fn session_send(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes: Bytes) -> Response {
     let (sess, _) = attempt!(user_session(&app, &pid).await);
     let b = attempt!(body(&bytes));

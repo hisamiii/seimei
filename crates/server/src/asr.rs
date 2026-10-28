@@ -1,7 +1,5 @@
-//! Dictation routes (docs/asr.md): `POST /api/asr` takes a 16 kHz mono WAV with the client's hint in the
-//! `X-Seimei-Asr` header (JSON: chat, window, screen, draft), fills in the context seimei knows and returns the text.
-//! The laptop's dictate posts the same to `<state>/asr.sock` (mode 600 in the 700 state dir: this user only, no
-//! login), which also takes `/edit`.
+//! Dictation routes (docs/asr.md): `POST /api/asr` takes a 16 kHz mono WAV and the client's hint in `X-Seimei-Asr`, adds the context seimei knows and returns the text.
+//! A local client posts the same to `<state>/asr.sock` (mode 600 in the 700 state dir: this user only, no login), which also takes `/edit`.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -136,8 +134,8 @@ pub async fn edited(State(app): Shared, req: Request) -> Response {
     ok(json!({"ok": true}))
 }
 
-/// {hint, text?}: the context and list a request with this hint gets, and what the fixer makes of `text`. For the
-/// eval and for checking what goes out; nothing is sent anywhere.
+/// {hint, text?}: the context and list a request with this hint gets, and what the fixer makes of `text`.
+/// For the eval and for checking what goes out; nothing is sent anywhere.
 async fn local_context(State(app): Shared, req: Request) -> Response {
     let Ok(bytes) = axum::body::to_bytes(req.into_body(), 1 << 20).await else {
         return text(StatusCode::PAYLOAD_TOO_LARGE, "too large");
@@ -163,7 +161,7 @@ async fn local_transcribe(State(app): Shared, req: Request) -> Response {
     run(app, req, "dictate").await
 }
 
-/// The laptop's socket: no login (the file's mode keeps other users out), no Host or Origin checks.
+/// The local socket: no login (the file's mode keeps other users out), no Host or Origin checks.
 pub fn local_router(app: Arc<App>) -> Router {
     Router::new()
         .route("/asr", post(local_transcribe))
