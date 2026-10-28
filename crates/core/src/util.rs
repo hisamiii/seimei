@@ -85,6 +85,13 @@ pub fn write_json(path: &Path, data: &impl Serialize) -> std::io::Result<()> {
     std::fs::rename(&tmp, path)
 }
 
+/// write_json for a state file whose save may fail without stopping anything: the error goes to the log.
+pub fn save_json(path: &Path, data: &impl Serialize) {
+    if let Err(e) = write_json(path, data) {
+        eprintln!("seimei: saving {}: {e}", path.display());
+    }
+}
+
 /// A file's bytes from `off` to its end.
 pub fn read_from(path: &Path, off: u64) -> std::io::Result<Vec<u8>> {
     use std::io::{Read, Seek, SeekFrom};

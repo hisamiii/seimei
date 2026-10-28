@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use crate::events::EventLog;
-use crate::util::{now, read_json, write_json};
+use crate::util::{now, read_json, save_json};
 
 pub const STATES: [&str; 6] = ["open", "running", "asks", "review", "paused", "done"];
 /// The owner of items the user does themselves.
@@ -206,17 +206,11 @@ impl Board {
     }
 
     fn save(&self) {
-        let data = serde_json::to_value(&self.data).expect("the board serializes");
-        if let Err(e) = write_json(&self.path, &data) {
-            eprintln!("seimei: tasks.json: {e}");
-        }
+        save_json(&self.path, &self.data);
     }
 
     fn save_archive(&self) {
-        let data = serde_json::to_value(&self.archive).expect("the archive serializes");
-        if let Err(e) = write_json(&self.path.with_file_name("tasks-archive.json"), &data) {
-            eprintln!("seimei: tasks-archive.json: {e}");
-        }
+        save_json(&self.path.with_file_name("tasks-archive.json"), &self.archive);
     }
 
     fn changed(&mut self) {

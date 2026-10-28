@@ -18,8 +18,8 @@ use url::Url;
 use webauthn_rs::prelude::*;
 
 use crate::util::{
-    b64url, b64url_decode, chars, hex, now, random_bytes, random_string, same, sha256_hex, token_urlsafe, unhex,
-    write_json,
+    b64url, b64url_decode, chars, hex, now, random_bytes, random_string, same, save_json, sha256_hex, token_urlsafe,
+    unhex,
 };
 
 /// How long a browser login lasts; a paired phone's session is shorter and renews by signing a fresh challenge.
@@ -391,9 +391,7 @@ impl Auth {
     }
 
     fn save(&self, g: &mut Inner) {
-        if let Err(e) = write_json(&self.path, &g.data) {
-            eprintln!("seimei: auth.json: {e}");
-        }
+        save_json(&self.path, &g.data);
         g.mtime = std::fs::metadata(&self.path)
             .and_then(|m| m.modified())
             .ok()

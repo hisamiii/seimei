@@ -38,7 +38,7 @@ use crate::sessions::{self, Own};
 use crate::tasks::{Board, Fields};
 use crate::transcripts::{brief, project_of, transcript};
 use crate::usage::Usage;
-use crate::util::{as_text, chars, far, hex, now, random_bytes, read_json, sh_quote, uuid4, write_json};
+use crate::util::{as_text, chars, far, hex, now, random_bytes, read_json, save_json, sh_quote, uuid4};
 
 mod acp_session;
 pub use acp_session::{Mode, acp_mode, claude_shaped};
@@ -1682,9 +1682,7 @@ impl Pool {
     /// Saves workers.json and sends the pages the new list; call it after any change to a record.
     pub fn changed(&self) {
         let recs: Vec<Record> = self.all().iter().map(|w| w.rec()).collect();
-        if let Err(e) = write_json(&self.path, &recs) {
-            eprintln!("seimei: saving workers.json: {e}");
-        }
+        save_json(&self.path, &recs);
         self.events.flash(self.listing());
     }
 

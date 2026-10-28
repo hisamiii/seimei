@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 use crate::events::EventLog;
 use crate::plugins::Plugins;
 use crate::push::Push;
-use crate::util::{as_text, chars, hex, now, random_bytes, read_json, write_json};
+use crate::util::{as_text, chars, hex, now, random_bytes, read_json, save_json};
 
 pub const TRIGGERS: [(&str, &str); 6] = [
     ("shikigami_done", "a shikigami (target: its name, or * for any) finishes its task"),
@@ -88,12 +88,6 @@ impl Watches {
         all
     }
 
-    fn save(&self, rules: &[Value]) {
-        if let Err(e) = write_json(&self.path, &rules) {
-            eprintln!("seimei: saving watches: {e}");
-        }
-    }
-
     /// Adds a rule after checking its trigger and target; Err says what is wrong, for the dispatcher.
     pub fn add(&self, r: NewRule) -> Result<Value, String> {
         let triggers = self.triggers();
@@ -113,7 +107,7 @@ impl Watches {
             "created": at, "expires": at + 3600.0 * hours.clamp(0.05, MAX_HOURS)});
         let mut rules = self.rules.lock().unwrap();
         rules.push(rule.clone());
-        self.save(&rules);
+        save_json(&self.path, &*rules);
         Ok(rule)
     }
 
@@ -126,7 +120,7 @@ impl Watches {
         let mut rules = self.rules.lock().unwrap();
         let n = rules.len();
         rules.retain(|r| r["id"] != id);
-        self.save(&rules);
+        save_json(&self.path, &*rules);
         rules.len() < n
     }
 
@@ -199,7 +193,7 @@ impl Watches {
                 if !repeat {
                     rules.retain(|x| x["id"] != r["id"]);
                 }
-                self.save(&rules);
+                save_json(&self.path, &*rules);
             }
             let done = if repeat { "" } else { "; the rule is done" };
             (self.tell)(&format!(
@@ -281,7 +275,7 @@ impl Watches {
                 rules.iter().filter(|r| r["expires"].as_f64().unwrap_or(0.0) <= at).cloned().collect();
             if !gone.is_empty() {
                 rules.retain(|r| r["expires"].as_f64().unwrap_or(0.0) > at);
-                self.save(&rules);
+                save_json(&self.path, &*rules);
             }
             gone
         };

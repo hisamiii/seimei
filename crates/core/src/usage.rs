@@ -10,7 +10,7 @@ use serde_json::{Map, Value, json};
 
 use crate::cost::Cost;
 use crate::events::EventLog;
-use crate::util::{append_line, local_time, now, read_json, write_json};
+use crate::util::{append_line, local_time, now, read_json, save_json};
 
 const NAMES: [(&str, &str); 2] = [("five_hour", "5-hour"), ("seven_day", "Weekly")];
 const WARN_AT: [f64; 2] = [0.8, 0.95];
@@ -79,15 +79,9 @@ impl Usage {
     }
 
     fn changed(&self, d: &mut Value) {
-        self.save(d);
+        save_json(&self.path, d);
         if let Some(ev) = &self.events {
             ev.flash(Usage::snap(d));
-        }
-    }
-
-    fn save(&self, d: &Value) {
-        if let Err(e) = write_json(&self.path, d) {
-            eprintln!("seimei: usage.json: {e}");
         }
     }
 
@@ -172,7 +166,7 @@ impl Usage {
             seen.shift_remove(&first);
         }
         let Some(base) = base else {
-            self.save(&d);
+            save_json(&self.path, &*d);
             return;
         };
         let mut turn: Vec<(String, i64)> =

@@ -18,7 +18,7 @@ use crate::approvals::Approvals;
 use crate::kitty;
 use crate::sessions;
 use crate::transcripts::{brief, transcript};
-use crate::util::{as_text, chars, now, read_json, write_json};
+use crate::util::{as_text, chars, now, read_json, save_json};
 use crate::workers::{Adoption, Pool, Worker};
 
 const SHELLS: [&str; 5] = ["bash", "zsh", "fish", "sh", "dash"];
@@ -235,16 +235,10 @@ impl Adopter {
         read_json(&self.state).and_then(|v| v.as_object().cloned()).unwrap_or_default()
     }
 
-    fn save(&self, pending: &Map<String, Value>) {
-        if let Err(e) = write_json(&self.state, pending) {
-            eprintln!("seimei: saving adopt-pending.json: {e}");
-        }
-    }
-
     fn forget(&self, pid: i64) {
         let mut pending = self.pending();
         if pending.shift_remove(&pid.to_string()).is_some() {
-            self.save(&pending);
+            save_json(&self.state, &pending);
         }
     }
 
@@ -275,7 +269,7 @@ impl Adopter {
             self.wait(pid, s.clone(), Wish::of(&p["args"]), p["until"].as_f64().unwrap_or(0.0));
             true
         });
-        self.save(&pending);
+        save_json(&self.state, &pending);
     }
 
     fn wait(&self, pid: i64, s: Value, wish: Wish, until: f64) {
@@ -366,7 +360,7 @@ impl Adopter {
         }
         let mut all = self.pending();
         all.insert(pid.to_string(), json!({"s": row, "args": wish.json(), "until": until}));
-        self.save(&all);
+        save_json(&self.state, &all);
         self.wait(pid, row, wish, until);
         Ok(format!("Approved. {name} is busy; it gets adopted when it next goes idle, and you hear when it does."))
     }
