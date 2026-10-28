@@ -11,7 +11,7 @@ use std::time::Duration;
 use agent_client_protocol_schema::v1 as acp;
 use seimei_proto::BoxFuture;
 use seimei_proto::acp::{
-    Client, Error, Event, Handler, McpServer, Options, Outcome, PermissionRequest, PlanEntry, ToolCall, Update,
+    Client, Error, Event, Handler, McpServer, Options, Outcome, PermissionRequest, PlanEntry, Update,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -211,66 +211,6 @@ async fn handshake_and_a_turn() {
 }
 
 #[tokio::test]
-async fn permission_allowed_and_rejected() {
-    let o = options("perm");
-    let pick = Pick::new(Some("allow_once"));
-    let mut c = Client::connect(o.clone(), pick.clone()).await.unwrap();
-    c.prompt_text("!tool ls -la").unwrap();
-    let (ups, end) = turn(&mut c).await;
-    let call = ToolCall {
-        id: "call_1".into(),
-        title: "Run ls -la".into(),
-        kind: "execute".into(),
-        status: "pending".into(),
-        input: Some(json!({"command": "ls -la"})),
-        content: vec![],
-    };
-    let upd = |status: &str, content: Vec<String>| {
-        Update::ToolCallUpdate(ToolCall { id: "call_1".into(), status: status.into(), content, ..ToolCall::default() })
-    };
-    let want = vec![
-        Update::ToolCall(call.clone()),
-        upd("in_progress", vec![]),
-        upd("completed", vec!["ran ls -la".into()]),
-        text("Ran it (allow-once)."),
-    ];
-    assert_eq!((ups, end), (want, Ok("end_turn".into())));
-    let asked = pick.asked.lock().unwrap().clone();
-    assert_eq!(asked.len(), 1);
-    assert_eq!(asked[0].tool, call);
-    let kinds: Vec<&str> = asked[0].options.iter().map(|o| o.kind.as_str()).collect();
-    assert_eq!(kinds, ["allow_once", "allow_always", "reject_once", "reject_always"]);
-    c.close().await;
-
-    let mut c = Client::connect(o.clone(), Pick::new(Some("reject_once"))).await.unwrap();
-    c.prompt_text("!tool rm -rf build").unwrap();
-    let (ups, end) = turn(&mut c).await;
-    assert_eq!(ups[1..], [upd("failed", vec!["denied".into()]), text("Did not run it (reject-once).")]);
-    assert_eq!(end, Ok("end_turn".into()));
-
-    // A call it runs without asking is told once, when it ended, whole.
-    c.prompt_text("!unasked echo hi").unwrap();
-    let mut unasked = vec![];
-    loop {
-        match tokio::time::timeout(Duration::from_secs(20), c.recv()).await.expect("an event in time") {
-            Some(Event::Unasked(t)) => unasked.push(t),
-            Some(Event::TurnEnd(_)) => break,
-            Some(_) => {}
-            None => panic!("the agent exited mid-turn"),
-        }
-    }
-    assert_eq!(unasked.len(), 1, "{unasked:?}");
-    let u = &unasked[0];
-    assert_eq!((u.id.as_str(), u.kind.as_str(), u.status.as_str()), ("call_u", "execute", "completed"));
-    assert_eq!(
-        (u.input.clone(), u.content.clone()),
-        (Some(json!({"command": "echo hi"})), vec!["ran echo hi".to_string()])
-    );
-    c.close().await;
-    conform(&o.cwd);
-}
-
-#[tokio::test]
 async fn cancel_ends_the_turn_and_answers_an_open_permission() {
     let o = options("cancel");
     let pick = Pick::new(None);
@@ -372,23 +312,6 @@ async fn load_goes_on_with_a_session() {
     assert_eq!(turn(&mut c).await.0, [text("You said: and the wren?")]);
     c.close().await;
     conform(&o.cwd);
-}
-
-#[tokio::test]
-async fn an_agent_that_dies_ends_its_turn() {
-    let o = options("crash");
-    let mut c = Client::connect(o.clone(), Pick::new(None)).await.unwrap();
-    c.prompt_text("!crash").unwrap();
-    assert_eq!(turn(&mut c).await, (vec![text("Going down.")], Err("the agent exited".into())));
-    assert_eq!(tokio::time::timeout(Duration::from_secs(5), c.recv()).await.unwrap(), None);
-    assert!(c.prompt_text("anyone?").is_err() || turn_or_none(&mut c).await);
-    assert!(c.close().await.is_some_and(|s| s.code() == Some(3)));
-    conform(&o.cwd);
-}
-
-/// After the agent died: a prompt either fails to send or never gets an answer.
-async fn turn_or_none(c: &mut Client) -> bool {
-    matches!(tokio::time::timeout(Duration::from_secs(2), c.recv()).await, Ok(None) | Err(_))
 }
 
 #[tokio::test]

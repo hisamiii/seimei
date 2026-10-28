@@ -11,6 +11,7 @@ mod markers;
 mod password;
 mod screens;
 mod sessionevents;
+mod shikigami;
 mod tasks;
 mod views;
 mod watches;

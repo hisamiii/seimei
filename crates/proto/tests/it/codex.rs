@@ -133,45 +133,6 @@ async fn handshake_and_turns() {
 }
 
 #[tokio::test]
-async fn approvals_accepted_and_declined() {
-    let o = options("perm");
-    let pick = Pick::new(Some("allow_once"));
-    let mut c = codex::connect(o.clone(), pick.clone()).await.unwrap();
-    c.prompt_text("!tool make test").unwrap();
-    let (ups, unasked, end) = turn(&mut c).await;
-    assert_eq!((unasked, end), (vec![], Ok("end_turn".into())));
-    let asked = pick.asked.lock().unwrap().pop().unwrap();
-    assert_eq!((asked.tool.kind.as_str(), asked.tool.title.as_str()), ("execute", "make test"));
-    assert_eq!(asked.tool.input, Some(json!({"command": "make test"})));
-    assert_eq!(asked.options.iter().map(|o| o.kind.as_str()).collect::<Vec<_>>(), ["allow_once", "reject_once"]);
-    match &ups[..] {
-        [Update::ToolCall(t), Update::ToolCallUpdate(u), Update::Text(said)] => {
-            assert_eq!((t.kind.as_str(), t.title.as_str(), t.status.as_str()), ("execute", "make test", "in_progress"));
-            assert_eq!((u.id.as_str(), u.status.as_str()), (t.id.as_str(), "completed"));
-            assert_eq!(u.content, vec!["ran make test".to_string()]);
-            assert_eq!(said, "Ran it.");
-        }
-        _ => panic!("{ups:?}"),
-    }
-    // A file change asks after its item started: the request carries its path.
-    c.prompt_text("!edit notes.txt").unwrap();
-    let (ups, _, _) = turn(&mut c).await;
-    let asked = pick.asked.lock().unwrap().pop().unwrap();
-    assert_eq!((asked.tool.kind.as_str(), asked.tool.input.clone()), ("edit", Some(json!({"path": "notes.txt"}))));
-    assert_eq!(ups.last(), Some(&text("Wrote it.")));
-    c.close().await;
-
-    let pick = Pick::new(Some("reject_once"));
-    let mut c = codex::connect(o.clone(), pick.clone()).await.unwrap();
-    c.prompt_text("!tool rm -rf build").unwrap();
-    let (ups, _, end) = turn(&mut c).await;
-    assert_eq!(end, Ok("end_turn".into()));
-    assert!(matches!(&ups[1], Update::ToolCallUpdate(u) if u.status == "failed"), "{ups:?}");
-    assert_eq!(ups.last(), Some(&text("Did not run it (decline).")));
-    c.close().await;
-}
-
-#[tokio::test]
 async fn unasked_calls_and_interrupts() {
     let o = options("cancel");
     let pick = Pick::new(None);

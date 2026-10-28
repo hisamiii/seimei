@@ -2,7 +2,7 @@
 //! first turn with the prompt, a command through the guard and a card, a file change, the granted plugins in the
 //! thread's config, stop, and a resumed thread. No Codex and no model.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -12,42 +12,10 @@ use seimei_core::guard::Guard;
 use seimei_core::plugins::Plugins;
 use seimei_core::tasks::Board;
 use seimei_core::usage::Usage;
-use seimei_core::workers::{Parts, Pool, Summon, Worker};
+use seimei_core::workers::{Parts, Pool, Summon};
 use serde_json::Value;
 
-fn root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
-}
-
-async fn until(secs: u64, f: impl Fn() -> bool) -> bool {
-    for _ in 0..secs * 20 {
-        if f() {
-            return true;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    f()
-}
-
-fn log(w: &Worker) -> Vec<Value> {
-    w.log.after(0).iter().map(|e| (**e).clone()).collect()
-}
-
-fn said(w: &Worker, from: usize) -> Vec<String> {
-    log(w)[from..]
-        .iter()
-        .filter(|e| e["type"] == "assistant")
-        .map(|e| e["text"].as_str().unwrap().to_string())
-        .collect()
-}
-
-async fn turn(w: &Arc<Worker>, text: &str, state: &str) -> (usize, bool) {
-    let from = log(w).len();
-    w.send(text, None, vec![]).await.unwrap();
-    let w2 = w.clone();
-    let settled = until(20, || w2.state() == state && log(&w2).len() > from + 1).await;
-    (from, settled)
-}
+use crate::shikigami::{log, root, said, turn, until};
 
 /// The methods the fake was sent, in order.
 fn sent(fake: &Path) -> Vec<String> {
