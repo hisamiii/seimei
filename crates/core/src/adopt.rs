@@ -470,56 +470,9 @@ impl Adopter {
         let win = if bg { None } else { kitty::window(pid).ok() };
         let shell = if bg { 0 } else { ppid(pid) };
         let shell = if SHELLS.contains(&comm(shell).as_str()) { shell } else { 0 };
-        let mut interrupted = false;
-        if bg {
-            // No window to press Esc in: `claude stop` ends a turn in flight too.
-            interrupted = interrupt && !idle(s);
-        } else if interrupt && !idle(s) {
-            // Esc stops the turn (or closes an open prompt) like the user at the keyboard; without the window, SIGINT.
-            match &win {
-                Some(w) if kitty::reachable(pid).is_none() => kitty::key(w, "escape").await?,
-                _ => kill(pid, libc::SIGINT),
-            }
-            interrupted = true;
-            for _ in 0..SETTLE * 2 {
-                tokio::time::sleep(Duration::from_millis(500)).await;
-                if self.now(pid).await.is_none_or(|now| idle(&now)) {
-                    break;
-                }
-            }
-        }
-        let path = transcript(&as_text(&s["session_id"]), &as_text(&s["cwd"]));
-        let tokens = match path {
-            Some(p) => tokio::task::spawn_blocking(move || brief(&p).ok()).await.ok().flatten(),
-            None => None,
-        }
-        .and_then(|b| b["tokens"].as_i64())
-        .unwrap_or(0);
+        let interrupted = interrupt && !idle(s) && self.interrupt(pid, bg, &win).await?;
+        let a = adoption(s, wish).await;
         let kids = tokio::task::spawn_blocking(move || descendants(pid)).await.unwrap_or_default();
-        let model = match (wish.model.as_str(), s["model"].as_str().filter(|m| !m.is_empty())) {
-            ("", Some(m)) => format!("claude-{m}"),
-            ("", None) => crate::plan::get().work.clone(),
-            (m, _) => m.into(),
-        };
-        let effort = Some(wish.effort.clone())
-            .filter(|e| !e.is_empty())
-            .or_else(|| s["effort"].as_str().filter(|e| !e.is_empty()).map(String::from));
-        let context = if wish.context.is_empty() {
-            crate::plan::get().context_for(tokens).to_string()
-        } else {
-            wish.context.clone()
-        };
-        let a = Adoption {
-            name: if wish.name.is_empty() { name.clone() } else { wish.name.clone() },
-            session_id: as_text(&s["session_id"]),
-            cwd: as_text(&s["cwd"]),
-            model,
-            effort,
-            context,
-            origin: name.clone(),
-            project: Some(wish.project.clone()).filter(|p| !p.is_empty()),
-            link: Some(wish.task_id.clone()).filter(|t| !t.is_empty()),
-        };
         // The shikigami starts first: if it cannot, the user's session goes on untouched.
         let (w, before) = self.pool.adopt_start(&a).await.map_err(|e| {
             let cut = if interrupted { " (interrupted mid-turn)" } else { "" };
@@ -531,47 +484,9 @@ impl Adopter {
         }
         // What the old process left running (a language server, a job that outlived it) ends too, as the card said.
         end_left(&kids).await;
-        // A background job shows once: its wrapper gives the command, the processes below it repeat it.
-        let mut died: Vec<String> = vec![];
-        for (p, c) in &kids {
-            if alive(*p) || c.is_empty() || LSP.is_match(c) || (WRAPPER.is_match(c) && job(c) == *c) {
-                continue;
-            }
-            let j = job(c);
-            if !died.contains(&j) {
-                died.push(j);
-            }
-        }
-        let mut window = if bg { "none (a background session)" } else { "kept" }.to_string();
-        match &win {
-            Some(w) if wish.close_window && shell != 0 => {
-                // The shell the session ran in is at its prompt now: exit closes the window.
-                if kitty::text(w, "exit\n").await.is_ok() {
-                    tokio::time::sleep(Duration::from_millis(1500)).await;
-                }
-                if alive(shell) {
-                    kill(shell, libc::SIGHUP);
-                }
-                window = "closed".into();
-            }
-            _ if wish.close_window => {
-                window = if shell == 0 { "closed with the session" } else { "kept (not reachable)" }.into();
-            }
-            _ => {}
-        }
-        let place = if bg { "in the background under Claude Code's daemon" } else { "in a terminal on the server" };
-        let mut first = format!(
-            "seimei adopted you: you were the user's own session \"{name}\" {place}, and now you go on in the \
-             background as a shikigami. "
-        );
-        if interrupted {
-            first += "You were interrupted mid-turn: check what was in flight before you go on. ";
-        }
-        if !died.is_empty() {
-            let list: Vec<String> = died.iter().take(10).map(|d| chars(d, 150)).collect();
-            first += &format!("Background processes that ended with the old session: {}. ", list.join("; "));
-        }
-        first += "Carry on with what you were doing; your final message is your report to the user.";
+        let died = ended_jobs(&kids);
+        let window = close_window(&win, shell, bg, wish.close_window).await;
+        let first = first_message(&name, bg, interrupted, &died);
         if let Err(e) = self.pool.adopt_go(&w, before, &a, &first).await {
             return Err(format!(
                 "session \"{name}\" ended and shikigami {} ({}) holds it, but its first message failed ({e}); its \
@@ -598,6 +513,109 @@ impl Adopter {
         }
         Ok(said)
     }
+
+    /// Stop the turn in flight. A background session needs nothing here: `claude stop` ends its turn too. Otherwise
+    /// Esc, like the user at the keyboard (SIGINT without the window), then a wait for it to settle.
+    async fn interrupt(&self, pid: i64, bg: bool, win: &Option<kitty::Window>) -> Result<bool, String> {
+        if bg {
+            return Ok(true);
+        }
+        match win {
+            Some(w) if kitty::reachable(pid).is_none() => kitty::key(w, "escape").await?,
+            _ => kill(pid, libc::SIGINT),
+        }
+        for _ in 0..SETTLE * 2 {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            if self.now(pid).await.is_none_or(|now| idle(&now)) {
+                break;
+            }
+        }
+        Ok(true)
+    }
+}
+
+/// The shikigami a session becomes: the wish's model, effort and context, else the session's own, else the plan's.
+async fn adoption(s: &Value, wish: &Wish) -> Adoption {
+    let name = as_text(&s["name"]);
+    let path = transcript(&as_text(&s["session_id"]), &as_text(&s["cwd"]));
+    let tokens = match path {
+        Some(p) => tokio::task::spawn_blocking(move || brief(&p).ok()).await.ok().flatten(),
+        None => None,
+    }
+    .and_then(|b| b["tokens"].as_i64())
+    .unwrap_or(0);
+    let model = match (wish.model.as_str(), s["model"].as_str().filter(|m| !m.is_empty())) {
+        ("", Some(m)) => format!("claude-{m}"),
+        ("", None) => crate::plan::get().work.clone(),
+        (m, _) => m.into(),
+    };
+    let effort = Some(wish.effort.clone())
+        .filter(|e| !e.is_empty())
+        .or_else(|| s["effort"].as_str().filter(|e| !e.is_empty()).map(String::from));
+    let context =
+        if wish.context.is_empty() { crate::plan::get().context_for(tokens).to_string() } else { wish.context.clone() };
+    Adoption {
+        name: if wish.name.is_empty() { name.clone() } else { wish.name.clone() },
+        session_id: as_text(&s["session_id"]),
+        cwd: as_text(&s["cwd"]),
+        model,
+        effort,
+        context,
+        origin: name,
+        project: Some(wish.project.clone()).filter(|p| !p.is_empty()),
+        link: Some(wish.task_id.clone()).filter(|t| !t.is_empty()),
+    }
+}
+
+/// The jobs that ended with the old session. A background job shows once: its wrapper gives the command, the
+/// processes below it repeat it.
+fn ended_jobs(kids: &[(i64, String)]) -> Vec<String> {
+    let mut died: Vec<String> = vec![];
+    for (p, c) in kids {
+        if alive(*p) || c.is_empty() || LSP.is_match(c) || (WRAPPER.is_match(c) && job(c) == *c) {
+            continue;
+        }
+        let j = job(c);
+        if !died.contains(&j) {
+            died.push(j);
+        }
+    }
+    died
+}
+
+/// Close the session's window when asked; what became of it, for the report.
+async fn close_window(win: &Option<kitty::Window>, shell: i64, bg: bool, close: bool) -> String {
+    match win {
+        Some(w) if close && shell != 0 => {
+            // The shell the session ran in is at its prompt now: exit closes the window.
+            if kitty::text(w, "exit\n").await.is_ok() {
+                tokio::time::sleep(Duration::from_millis(1500)).await;
+            }
+            if alive(shell) {
+                kill(shell, libc::SIGHUP);
+            }
+            "closed".into()
+        }
+        _ if close => if shell == 0 { "closed with the session" } else { "kept (not reachable)" }.into(),
+        _ => if bg { "none (a background session)" } else { "kept" }.into(),
+    }
+}
+
+/// The shikigami's first message: where it came from and what ended on the way.
+fn first_message(name: &str, bg: bool, interrupted: bool, died: &[String]) -> String {
+    let place = if bg { "in the background under Claude Code's daemon" } else { "in a terminal on the server" };
+    let mut first = format!(
+        "seimei adopted you: you were the user's own session \"{name}\" {place}, and now you go on in the \
+         background as a shikigami. "
+    );
+    if interrupted {
+        first += "You were interrupted mid-turn: check what was in flight before you go on. ";
+    }
+    if !died.is_empty() {
+        let list: Vec<String> = died.iter().take(10).map(|d| chars(d, 150)).collect();
+        first += &format!("Background processes that ended with the old session: {}. ", list.join("; "));
+    }
+    first + "Carry on with what you were doing; your final message is your report to the user."
 }
 
 /// End the user's Claude Code: a background job through `claude stop`, else SIGTERM (SIGKILL after 15 s).
