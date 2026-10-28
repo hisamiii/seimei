@@ -1,5 +1,9 @@
 package com.hisamiowo.seimei
 
+import androidx.compose.animation.core.Animatable
+import androidx.activity.BackEventCompat
+import androidx.activity.compose.PredictiveBackHandler
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
@@ -618,7 +622,14 @@ fun AppScreen(vm: Seimei) {
             if (!WindowInsets.isImeVisible) NavBar(vm)
         }
     }
-    vm.page?.let { AgentPage(vm, it) }
+    // Forward and backward (BEHAVIOR.md 1): a page comes in from the right and goes back out to it. Predictive back
+    // has already taken the page away when it commits, so that exit only finishes it.
+    AnimatedContent(vm.page, transitionSpec = {
+        if (still) fadeIn(tween(150)) togetherWith fadeOut(tween(150))
+        else if (targetState != null) (slideInHorizontally(tween(300, easing = EMPHASIZED_DECEL)) { it / 8 } + fadeIn(tween(300))) togetherWith
+            fadeOut(tween(90))
+        else EnterTransition.None togetherWith (slideOutHorizontally(tween(200, easing = EMPHASIZED_ACCEL)) { it / 8 } + fadeOut(tween(200)))
+    }, contentKey = { it?.let { p -> p.kind + p.id } }, label = "page") { p -> if (p != null) AgentPage(vm, p) }
     // The one polite live region TalkBack reads: a card that arrives, a reply, a card that settles (BEHAVIOR.md 6)
     Text(vm.said, Modifier.size(1.dp).alpha(0f).semantics { liveRegion = LiveRegionMode.Polite })
     // Above whatever holds the bottom edge, measured: never over the field (final/ 19 and 20: 44 over a composer, 32 over the bar)
@@ -666,6 +677,39 @@ private fun Lanes(vm: Seimei, still: Boolean) {
         else slideInHorizontally(tween(300, easing = EMPHASIZED_DECEL)) { it * dir } togetherWith
             slideOutHorizontally(tween(300, easing = EMPHASIZED_DECEL)) { -it * dir }
     }, label = "lane") { l -> if (l == "k") TasksTab(vm) else ChatTab(vm, l) }
+    }
+}
+
+/** Predictive back (BEHAVIOR.md 2) for a screen: while the gesture runs it shrinks toward 90% and leans to the swipe
+ *  edge with the 8dp margin and rounded corners; on commit it leaves on emphasized accelerate, on cancel it comes back.
+ *  The returned modifier draws that; onBack runs once the gesture commits. */
+@Composable
+fun predictiveBack(enabled: Boolean = true, onBack: () -> Unit): Modifier {
+    val back = remember { Animatable(0f) }
+    var edge by remember { mutableStateOf(0) }
+    val scope = rememberCoroutineScope()
+    PredictiveBackHandler(enabled) { events ->
+        try {
+            events.collect { e ->
+                edge = e.swipeEdge
+                back.snapTo(e.progress)
+            }
+            back.animateTo(1f, tween(150, easing = EMPHASIZED_ACCEL))
+            onBack()
+        } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+            scope.launch { back.animateTo(0f, tween(200, easing = EMPHASIZED_DECEL)) }
+            throw e
+        }
+    }
+    return Modifier.graphicsLayer {
+        val p = back.value
+        val s = 1f - .1f * p
+        scaleX = s
+        scaleY = s
+        translationX = (if (edge == BackEventCompat.EDGE_LEFT) 1 else -1) * 8.dp.toPx() * p
+        shape = RoundedCornerShape(28.dp * p)
+        clip = p > 0f
+        alpha = if (p >= 1f) 0f else 1f
     }
 }
 

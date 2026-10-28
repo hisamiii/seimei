@@ -80,7 +80,6 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.foundation.layout.requiredSize
-import androidx.activity.compose.BackHandler
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
@@ -346,7 +345,7 @@ private fun TaskArchive(vm: Seimei, b: Board?) {
         vm.taskArchOpen = false
         vm.taskArchQuery = ""
     }
-    BackHandler(onBack = close)
+    val gesture = predictiveBack(onBack = close)
     val cs = MaterialTheme.colorScheme
     val all = remember(b, vm.taskArch) {
         val old = vm.taskArch.map { task(it) }
@@ -355,7 +354,7 @@ private fun TaskArchive(vm: Seimei, b: Board?) {
     }
     val q = vm.taskArchQuery.trim().lowercase()
     val hits = if (q.isEmpty()) all else all.filter { t -> listOf(t.id, t.title, t.project, t.owner).any { it.lowercase().contains(q) } }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
+    LazyColumn(Modifier.fillMaxSize().then(gesture), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
         item("ahead") {
             Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(close, Modifier.size(48.dp)) { Icon(Icons.back, "Back to tasks", Modifier.size(22.dp)) }

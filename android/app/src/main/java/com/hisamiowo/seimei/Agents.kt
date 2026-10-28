@@ -2,9 +2,6 @@ package com.hisamiowo.seimei
 
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
-import androidx.compose.animation.core.Animatable
-import androidx.activity.BackEventCompat
-import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.runtime.snapshotFlow
@@ -380,12 +377,12 @@ fun ArchiveList(vm: Seimei, now: Long) {
         vm.archOpen = false
         vm.archQuery = ""
     }
-    BackHandler(onBack = close)
+    val gesture = predictiveBack(onBack = close)
     val cs = MaterialTheme.colorScheme
     val all = archivedAgents(vm)
     val q = vm.archQuery.trim().lowercase()
     val hits = if (q.isEmpty()) all else all.filter { a -> a.find.any { it.lowercase().contains(q) } }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp)) {
+    LazyColumn(Modifier.fillMaxSize().then(gesture), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp)) {
         item("ahead") {
             Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(close, Modifier.size(48.dp)) { Icon(Icons.back, "Back to agents", Modifier.size(22.dp)) }
@@ -585,37 +582,11 @@ fun blocked(pg: Page): String? {
 fun AgentPage(vm: Seimei, pg: Page) {
     // The details toggle is a state change, not a screen: a plain handler
     BackHandler(enabled = pg.details) { pg.details = false }
-    // Predictive back (BEHAVIOR.md 2): while the gesture runs the page shrinks toward 90% and leans to the swipe edge
-    // with the 8dp margin and rounded corners; on commit it leaves on emphasized accelerate, on cancel it comes back
-    val back = remember { Animatable(0f) }
-    var edge by remember { mutableStateOf(0) }
-    val scope = rememberCoroutineScope()
-    PredictiveBackHandler(enabled = !pg.details) { events ->
-        try {
-            events.collect { e ->
-                edge = e.swipeEdge
-                back.snapTo(e.progress)
-            }
-            back.animateTo(1f, tween(150, easing = EMPHASIZED_ACCEL))
-            vm.closePage()
-        } catch (e: kotlin.coroutines.cancellation.CancellationException) {
-            scope.launch { back.animateTo(0f, tween(200, easing = EMPHASIZED_DECEL)) }
-            throw e
-        }
-    }
+    val gesture = predictiveBack(!pg.details) { vm.closePage() }
     val cs = MaterialTheme.colorScheme
     val a = if (pg.kind == "worker") fromWorker(pg.row) else fromSession(pg.row, vm.seen)
     var zoom by remember { mutableStateOf<String?>(null) }
-    val p = back.value
-    Surface(Modifier.fillMaxSize().graphicsLayer {
-        val s = 1f - .1f * p
-        scaleX = s
-        scaleY = s
-        translationX = (if (edge == BackEventCompat.EDGE_LEFT) 1 else -1) * 8.dp.toPx() * p
-        shape = RoundedCornerShape(28.dp * p)
-        clip = p > 0f
-        alpha = if (p >= 1f) 0f else 1f
-    }, color = cs.surface) {
+    Surface(Modifier.fillMaxSize().then(gesture), color = cs.surface) {
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
             Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 4.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(vm::closePage, Modifier.size(48.dp)) { Icon(Icons.back, "Back to agents", Modifier.size(22.dp)) }
