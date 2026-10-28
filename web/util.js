@@ -238,9 +238,11 @@ export function snack(text, action = null) {
   if (!action) snackTimer = setTimeout(unsnack, 4000);
 }
 
-export async function getJSON(path) {
+// gone runs on a 404: the server no longer has the thing (not the same as offline).
+export async function getJSON(path, gone) {
   const r = await fetch(path).catch(() => null);
   if (r?.status === 401) toLogin();
+  if (r?.status === 404) gone?.();
   return r?.ok ? r.json() : null;
 }
 

@@ -292,10 +292,10 @@ function archRow(n) {
   const b = el('button', 'archrow sl');
   b.type = 'button';
   const t = el('span', 'txt');
-  t.append(el('b', null, 'Archived'));
+  t.append(el('b', null, 'Archived'), el('span', null, `${n} shikigami and session${n === 1 ? '' : 's'}`));
   const tl = el('span', 'tile done');
   tl.append(svg(ARCH, 20));
-  b.append(tl, t, el('span', 'cnt', String(n)), svg('m9 6 6 6-6 6', 20));
+  b.append(tl, t, svg('m9 6 6 6-6 6', 20));
   b.addEventListener('click', openArch);
   return b;
 }
@@ -691,8 +691,11 @@ async function poll(soon = false) {
   if (!P || P.kind !== 'session') return;
   const p = P;
   if (soon) await new Promise((r) => setTimeout(r, 600));
-  const r = await getJSON(`api/sessions/${p.id}${p.next != null ? `?from=${p.next}` : ''}`);
+  const r = await getJSON(`api/sessions/${p.id}${p.next != null ? `?from=${p.next}` : ''}`, () => {
+    p.row = { ...p.row, reach: 'The session has ended.', via: null };
+  });
   if (P !== p) return;
+  if (!r) composerState();
   if (r) {
     if ((p.next != null && r.next < p.next) || r.reset) {
       // The transcript was replaced (compacted or continued), or ran far ahead: draw it again.
@@ -1014,13 +1017,15 @@ export async function openPage(kind, id) {
   const path = kind === 'worker'
     ? `api/workers/${encodeURIComponent(id)}${kept ? `?after=${kept.last || 0}` : ''}`
     : `api/sessions/${id}${kept?.next != null ? `?from=${kept.next}` : ''}`;
-  let r = await getJSON(path);
+  let gone = false;
+  let r = await getJSON(path, () => { gone = true; });
   // A pid the system gave to another session since: that one is new here.
   if (r && kind === 'session' && kept?.next != null && kept.row?.session_id && r.session.session_id !== kept.row.session_id) {
     r = await getJSON(`api/sessions/${id}`);
     if (r) r.reset = true;
   }
   if (kept && P !== p) return;
+  if (!r && kept && gone) return note('The server no longer has this; it shows the last copy.');
   if (!r) return kept ? snack('Offline: this is the last copy') : snack("Couldn't reach the server");
   // Drawn anew when there was no copy, or the server says the copy is too old to extend.
   if (!kept || r.reset) build(kind, id, kind === 'worker' ? { ...r.worker, ...live } : { ...r.session, reach: r.reach, via: r.via });

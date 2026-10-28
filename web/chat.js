@@ -1172,7 +1172,6 @@ input.addEventListener('keydown', (e) => {
   }
 });
 stopBtn.addEventListener('click', () => post('api/interrupt', {}).catch(() => {}));
-$('retry').addEventListener('click', () => location.reload());
 
 // ---------- images ----------
 

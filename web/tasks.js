@@ -347,10 +347,10 @@ function archRow(n) {
   t.append(el('b', null, 'Archived'));
   // The projects folded away say where their done items went
   const gone = board.projects.filter((p) => !board.tasks.some((x) => x.project === p.name && x.state !== 'done'));
-  if (gone.length) t.append(el('span', null, `${gone.map((p) => p.name).join(', ')}: all done`));
+  t.append(el('span', null, gone.length ? `${gone.map((p) => p.name).join(', ')}: all done` : `${n} done`));
   const tl = el('span', 'tile done');
   tl.append(svg(ARCH, 20));
-  b.append(tl, t, el('span', 'cnt', String(n)), svg(RIGHT, 20));
+  b.append(tl, t, svg(RIGHT, 20));
   b.addEventListener('click', () => {
     archView = true;
     history.pushState({ tarch: true }, '');

@@ -252,6 +252,8 @@ document.addEventListener('visibilitychange', () => {
   navigator.serviceWorker?.getRegistration().then((r) => r?.getNotifications()).then((ns) => ns?.forEach((n) => n.close())).catch(() => null);
 });
 window.addEventListener('pageshow', (e) => { if (e.persisted) resume(); });
+// Try now, on the away block: reconnect at once instead of waiting for the next retry.
+$('retry').addEventListener('click', connect);
 
 async function start() {
   // The chat as last seen draws at once; the server then sends only what came since (the stream replays it).

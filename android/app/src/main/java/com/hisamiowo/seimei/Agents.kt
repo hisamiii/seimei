@@ -992,7 +992,7 @@ fun Details(vm: Seimei, pg: Page) {
                     Spacer(Modifier.width(8.dp))
                     Text(if (armed) "Stop it and open in a terminal" else "Open in a terminal")
                 }
-                error?.let { Text("Couldn't open it: $it", fontSize = 13.sp, color = cs.error) }
+                error?.let { Text("Couldn't open ${r.str("name")} on the server: $it", fontSize = 13.sp, color = cs.error) }
             }
             if (pg.kind == "worker" && state in ACTIVE) {
                 FilledTonalButton({

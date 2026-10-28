@@ -1201,7 +1201,6 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Opens the shikigami in a terminal on the server; null when it worked, else why not. */
     /** The Change sheet: a new effort, model or permission mode for a shikigami; null when it took. */
     suspend fun workerTune(pg: Page, body: JSONObject): String? = try {
         pg.row = pg.row.merged(api.post("api/workers/${pg.id}/tune", body))
@@ -1210,18 +1209,19 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     } catch (e: HttpError) {
         // The server says why as {"error": ...}; the page shows that line too.
         runCatching { JSONObject(e.body).optString("error") }.getOrNull()?.ifEmpty { null }
-            ?: e.body.trim().take(200).ifEmpty { "no answer" }
+            ?: e.body.trim().take(200).ifEmpty { "The server said no (${e.code})" }
     } catch (e: IOException) {
-        "no answer"
+        "The server didn't answer"
     }
 
+    /** Opens the shikigami in a terminal on the server; null when it worked, else why not. */
     suspend fun workerLaptop(id: String): String? = try {
         api.post("api/workers/$id/laptop")
         null
     } catch (e: HttpError) {
-        try { JSONObject(e.body).optString("error") } catch (x: JSONException) { "" }.ifEmpty { "no answer" }
+        try { JSONObject(e.body).optString("error") } catch (x: JSONException) { "" }.ifEmpty { "The server said no (${e.code})" }
     } catch (e: IOException) {
-        "no answer"
+        "The server didn't answer"
     }
 
     /** Take over (a shikigami goes on as the user's own session) or Hand off (a session becomes a shikigami once
