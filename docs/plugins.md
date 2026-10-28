@@ -16,7 +16,7 @@ enabled = ["desktop", "music", "mytool"]
 
 | plugin | what | needs |
 |---|---|---|
-| `desktop` | windows, workspaces, screenshots, typing and pointer (uinput), AT-SPI, layout memory, screen unlock, clipboard; on niri, KDE Plasma and GNOME also the agent display, a screen of seimei's own with its own keyboard and pointer for agent apps (a nested niri; a headless KWin or GNOME Shell) | niri, sway, Hyprland, KDE Plasma 6 or GNOME 45 and later on Wayland (GNOME with seimei's Shell extension, which `seimei setup` installs), or an X11 EWMH window manager |
+| `desktop` | windows, workspaces, screenshots, typing and pointer (uinput), AT-SPI, layout memory, screen unlock; on niri, sway and Hyprland also the clipboard and mako's notifications; on niri, KDE Plasma and GNOME also the agent display, a screen of seimei's own with its own keyboard and pointer for agent apps (a nested niri; a headless KWin or GNOME Shell) | niri, sway, Hyprland, KDE Plasma 6 or GNOME 45 and later on Wayland (GNOME with seimei's Shell extension, which `seimei setup` installs), or an X11 EWMH window manager |
 | `discord` | read and send through the user's Discord client | the Vencord plugin in `plugins/discord/vencord/` built into Vesktop |
 | `browser` | tabs, page text and elements, acting on pages, waiting, tab screenshots, open, download; with the agent display also the agent browser, a logged-out Firefox of seimei's own | the seimei extension in Firefox or a fork of it (`seimei.xpi` on the release page) |
 | `music` | Quod Libet and MPRIS players | the Quod Libet bridge (`plugins/music/seimei_bridge.py`) for tags and playlists |

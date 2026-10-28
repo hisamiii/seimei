@@ -915,7 +915,8 @@ impl Desktop {
             },
             "click" | "scroll" => self.click_tool(tool, args).await,
             "ui_tree" | "ui_action" => self.a11y_tool(tool, args, None).await,
-            "notifications" => return notifications(args).await,
+            // mako runs beside wlroots compositors and niri only.
+            "notifications" if matches!(name, "niri" | "sway" | "hyprland") => return notifications(args).await,
             "clipboard_read" => return self.clipboard(None, session).await,
             "unlock_screen" => self.blocking(|d| d.unlock()).await,
             "restore_desktop" => return self.restore_tool(args, session).await,
