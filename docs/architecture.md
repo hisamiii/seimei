@@ -42,7 +42,7 @@ seimei runs three kinds of session: the dispatcher, the shikigami and the user's
 
 When a shikigami finishes, fails or asks, the dispatcher hears it at its next turn. Questions and failures wake the dispatcher at once. A shikigami's process closes a few seconds after its turn ends, because an idle one holds about 330 MB. The next message resumes the session. After a restart, running shikigami get a "continue", at most 3 per hour. "Open on server" or "Give to me" hands a shikigami to the user as a terminal session. "Hand to seimei" takes it back.
 
-A message to one of the user's own sessions is typed into its kitty window when that window allows remote control, see [config.md](config.md). Otherwise the dispatcher passes it on with SendMessage.
+A message to one of the user's own sessions is typed into its kitty window when that window allows remote control, see [config.md](config.md). Otherwise the server writes it to the session's messaging socket in the frame Claude Code's SendMessage uses, with no model turn. `seimei_proto::peer` holds that format, pinned to the `peerProtocol` it was captured from.
 
 The plan in `[models]`, in `plan.rs`, sets the models and context a shikigami gets. It covers summon's choices and defaults, adopt and the dispatcher's compaction point.
 

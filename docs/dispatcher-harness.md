@@ -5,7 +5,7 @@ This is a design for running the dispatcher on Claude Code, an ACP agent or Code
 - **Dispatcher**: the main seimei session the owner chats with.
 - **Shikigami**: the worker sessions the dispatcher starts.
 
-Status: a proposal for the owner to approve. Nothing in it is built yet.
+Status: approved. Step 2 is built: the server relays the user's messages itself.
 
 ## 1. What the dispatcher needs from a harness
 
@@ -56,9 +56,9 @@ What is missing, and how seimei fills it:
 - **Tool switches on ACP**: the protocol has none. The owner sets them in `[agents.<name>] args` or `env`.
 - **Rate limits on ACP**: there are none, so the page shows no windows for that agent.
 - **Denied paths**: only Claude Code takes them from seimei. Elsewhere the agent's own permission settings decide every call.
-- **The relay**: the owner writes on the page of one of their own Claude Code sessions that has no terminal seimei can type into. The dispatcher passes the message on with SendMessage. `session_send` in `crates/server/src/lib.rs` calls `Dispatcher::relay` for it, so it works only while the dispatcher is Claude Code.
-- **Relay without the dispatcher**: seimei's server can deliver the message itself. `Live::address()` in `sessions.rs` already knows each session's messaging socket, from `messagingSocketPath` in the session registry or `cc-socks/<pid>.sock`, and SendMessage is a write to that socket. The server writes the same message there and reports whether it arrived or was held, with no model turn.
-- **The catch**: the socket's message format is Claude Code's own and not documented. seimei pins it to the tested version, as `TESTED` does for stream-json.
+- **The relay**: the owner writes on the page of one of their own Claude Code sessions that has no terminal seimei can type into. seimei's server writes the message to that session's messaging socket in the frame SendMessage uses, so it works on any dispatcher harness.
+- **Holds**: the frame carries the dispatcher's permission-mode class, as SendMessage did, so a session in another class holds the message until the owner allows it. The frame names a reply socket next to the session's own. A hold or refusal comes back there within milliseconds, and a second of silence means the message is in the inbox.
+- **The catch**: the format is Claude Code's own and not documented. `seimei_proto::peer` pins it to `peerProtocol` 1 from the session registry, captured from Claude Code 2.1.306, and a session with another one gets no relay.
 - **The style reminder after tool calls**: it is a `PostToolUse` hook. Elsewhere it rides each message only, as it already does.
 
 Codex method names follow the app-server v2 schema and move between versions. Step 8 checks each one against `codex app-server generate-json-schema` for the tested version.

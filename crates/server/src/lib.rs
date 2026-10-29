@@ -38,6 +38,7 @@ use seimei_core::uploads::Uploads;
 use seimei_core::usage::Usage;
 use seimei_core::util::{as_text, flag, now, read_json, truthy, write_json};
 use seimei_core::watches::Watches;
+use seimei_core::workers::harness::{self, Delivery};
 use seimei_core::workers::{self, Pool};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
@@ -1427,13 +1428,12 @@ async fn session(
     ok(out)
 }
 
-/// How a message from the page reaches the session: typed into its terminal window, or through the dispatcher's SendMessage.
+/// How a message from the page reaches the session: typed into its terminal window, or written to its inbox by seimei.
 /// None: neither.
 fn via(sess: &Live, typed: bool) -> Option<&'static str> {
-    let to = sess.address();
     match () {
         _ if typed => Some("kitty"),
-        _ if Path::new(to.trim_start_matches("uds:")).exists() => Some("seimei"),
+        _ if harness::inbox(&sess.rec, &sess.address()).is_some() => Some("seimei"),
         _ => None,
     }
 }
@@ -1449,7 +1449,7 @@ async fn session_archive(State(app): Shared, UrlPath(pid): UrlPath<String>, byte
     ok(json!({"archived": on}))
 }
 
-/// Type the user's message into the session's own terminal window; without one, the dispatcher passes it on with SendMessage.
+/// Type the user's message into the session's own terminal window; without one, write it to the session's inbox.
 async fn session_send(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes: Bytes) -> Response {
     let (sess, _) = attempt!(user_session(&app, &pid).await);
     let b = attempt!(body(&bytes));
@@ -1460,9 +1460,13 @@ async fn session_send(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes: 
     }
     let pid = sess.pid;
     let typed = tokio::task::spawn_blocking(move || terminal::reachable(pid).is_none()).await.unwrap_or(false);
-    if via(&sess, typed) == Some("seimei") {
-        app.dispatcher.relay(&sess.name, &sess.address(), said.trim());
-        return ok(json!({"ok": true, "via": "seimei"}));
+    if !typed && let Some(inbox) = harness::inbox(&sess.rec, &sess.address()) {
+        return match harness::relay(&inbox, app.dispatcher.mode(), said.trim()).await {
+            Ok(Delivery::Inbox) => ok(json!({"ok": true, "via": "seimei"})),
+            Ok(Delivery::Held(_)) => ok(json!({"ok": true, "via": "seimei", "held": true})),
+            Ok(Delivery::Refused(why)) => conflict(why),
+            Err(e) => conflict(format!("Its inbox did not take the message: {e}")),
+        };
     }
     match terminal::type_message(sess.pid, said.trim()).await {
         Ok(()) => ok(json!({"ok": true})),

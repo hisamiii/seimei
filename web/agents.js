@@ -649,7 +649,7 @@ async function submit(e) {
   }
   files.forEach((a) => a.url && URL.revokeObjectURL(a.url));
   note(null);
-  if (r.via === 'seimei') snack('seimei passes it on');
+  if (r.via === 'seimei') snack(r.held ? 'Held until you allow it in its terminal' : 'In its inbox');
   composerState();
   stick(true);
   if (P.kind === 'session') poll(true);
@@ -781,7 +781,7 @@ function details() {
   }
   if (actions.childElementCount) body.push(actions);
   if (P.kind === 'worker' && r.task) body.push(taskRow(r.task, r.now));
-  if (P.kind === 'session') body.push(el('p', 'usage-note', r.via === 'seimei' ? 'seimei passes messages on with Claude Code\'s SendMessage: this terminal can\'t be typed into' : r.reach || 'Typed into its terminal on the server'));
+  if (P.kind === 'session') body.push(el('p', 'usage-note', r.via === 'seimei' ? 'seimei writes messages to its Claude Code inbox: this terminal can\'t be typed into' : r.reach || 'Typed into its terminal on the server'));
   sheet.body.replaceChildren(...body);
   showSheet('details');
 }

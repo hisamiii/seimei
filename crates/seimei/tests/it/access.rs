@@ -10,10 +10,10 @@ use std::time::{Duration, Instant};
 use seimei_core::util::sha256_hex;
 use serde_json::Value;
 
-struct Server {
+pub(crate) struct Server {
     child: Child,
-    home: PathBuf,
-    port: u16,
+    pub(crate) home: PathBuf,
+    pub(crate) port: u16,
 }
 
 impl Drop for Server {
@@ -41,6 +41,11 @@ fn seimei(home: &Path) -> Command {
 }
 
 fn start(name: &str) -> Server {
+    start_with(name, "")
+}
+
+/// A dev server with `config` added to its config file.
+pub(crate) fn start_with(name: &str, config: &str) -> Server {
     let home = std::env::temp_dir().join(format!("seimei-access-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&home);
     for d in ["cfg/seimei", "data", "run", "claude"] {
@@ -48,7 +53,7 @@ fn start(name: &str) -> Server {
     }
     // A free port; --dev serves on the configured one plus one.
     let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
-    std::fs::write(home.join("cfg/seimei/config.toml"), format!("[server]\nport = {}\n", port - 1)).unwrap();
+    std::fs::write(home.join("cfg/seimei/config.toml"), format!("[server]\nport = {}\n{config}", port - 1)).unwrap();
     let mut pw = seimei(&home)
         .args(["passwd", "--dev"])
         .stdin(Stdio::piped())
@@ -67,14 +72,14 @@ fn start(name: &str) -> Server {
     Server { child, home, port }
 }
 
-struct Reply {
-    status: u16,
+pub(crate) struct Reply {
+    pub(crate) status: u16,
     head: String,
-    body: String,
+    pub(crate) body: String,
 }
 
 /// One HTTP/1.1 request; `headers` are "Name: value" lines, Host and Content-Length are added unless given.
-fn call(port: u16, method: &str, path: &str, headers: &[&str], body: &[u8]) -> Reply {
+pub(crate) fn call(port: u16, method: &str, path: &str, headers: &[&str], body: &[u8]) -> Reply {
     let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
     s.set_read_timeout(Some(Duration::from_secs(15))).unwrap();
     let mut req = format!("{method} {path} HTTP/1.1\r\nConnection: close\r\n");
@@ -99,14 +104,14 @@ fn call(port: u16, method: &str, path: &str, headers: &[&str], body: &[u8]) -> R
     Reply { status, head: head.to_string(), body: body.to_string() }
 }
 
-fn post_json(port: u16, path: &str, extra: &[&str], body: &str) -> Reply {
+pub(crate) fn post_json(port: u16, path: &str, extra: &[&str], body: &str) -> Reply {
     let origin = format!("Origin: http://localhost:{port}");
     let mut h = vec!["Content-Type: application/json", origin.as_str()];
     h.extend_from_slice(extra);
     call(port, "POST", path, &h, body.as_bytes())
 }
 
-fn login(port: u16) -> String {
+pub(crate) fn login(port: u16) -> String {
     let r = post_json(port, "/api/auth/password", &[], &format!("{{\"password\": \"{PASSWORD}\"}}"));
     assert_eq!(r.status, 200, "login: {}", r.body);
     let line = r.head.lines().find(|l| l.to_lowercase().starts_with("set-cookie:")).expect("a cookie");

@@ -7,10 +7,12 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 use seimei_proto::HookMatcher;
+use seimei_proto::peer;
+pub use seimei_proto::peer::Delivery;
 use serde_json::{Value, json};
 
 use crate::paths::home;
-use crate::util::{chars, read_tail};
+use crate::util::{chars, read_tail, uuid4};
 
 /// The Claude Code version seimei's protocol client was built against; older ones may lack parts of it.
 pub const TESTED: (u32, u32) = (2, 1);
@@ -112,6 +114,17 @@ pub fn projects_dir() -> PathBuf {
 /// The session registry: a <pid>.json for each running session.
 pub fn registry_dir() -> PathBuf {
     config_dir().join("sessions")
+}
+
+/// The session's messaging socket at `address` ("uds:<path>"), when seimei can write to it: it is there and speaks the tested protocol.
+pub fn inbox(rec: &Value, address: &str) -> Option<PathBuf> {
+    let path = PathBuf::from(address.strip_prefix("uds:")?);
+    (rec["peerProtocol"].as_i64() == Some(peer::PROTOCOL) && path.exists()).then_some(path)
+}
+
+/// Write the user's message to a session's inbox. The sender's mode is the dispatcher's, as its SendMessage carried: a session in another class holds it.
+pub async fn relay(inbox: &Path, mode: &str, text: &str) -> std::io::Result<Delivery> {
+    peer::send(inbox, "the user, via seimei", mode, &uuid4(), text).await
 }
 
 /// The scratch folders of the daemon's background jobs.

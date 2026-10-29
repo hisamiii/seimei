@@ -12,5 +12,6 @@ mod fake_queue;
 mod live_acp;
 mod live_dispatcher;
 mod plugin;
+mod relay;
 mod setup;
 mod update;

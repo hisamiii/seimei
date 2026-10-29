@@ -99,7 +99,7 @@ listen_on unix:${XDG_RUNTIME_DIR}/kitty-{kitty_pid}
 include ~/.local/share/seimei/kitty-rc.conf
 ```
 
-Without the bridge, a message from the page reaches the session through the dispatcher's SendMessage. The session's questions are then answered on the server.
+Without the bridge, seimei's server writes a message from the page to the session's Claude Code inbox, as SendMessage would. A session in another permission mode than the dispatcher's holds it until you allow it in its terminal. The session's questions are then answered on the server.
 
 ## Environment
 
