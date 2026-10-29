@@ -14,5 +14,6 @@ mod live_acp;
 mod live_dispatcher;
 mod plugin;
 mod relay;
+mod seimei_tools;
 mod setup;
 mod update;

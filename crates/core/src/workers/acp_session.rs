@@ -17,7 +17,7 @@ impl Session {
         let plugins = &self.pool.plugins;
         let mut servers = Map::from_iter([("shikigami".into(), json!({}))]);
         servers.extend(plugins.servers(&name, Some(&self.w.id), Some(&groups)));
-        servers.insert("shikigami".into(), Value::Object(plugins.own_server(&name, &self.w.id)));
+        servers.insert("shikigami".into(), Value::Object(plugins.own_server(&name, Some(&self.w.id))));
         let mcp = acp_servers(servers);
         let mut env = self.pool.plugins.env(&name);
         env.extend(a.env);

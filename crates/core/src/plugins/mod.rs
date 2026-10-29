@@ -117,6 +117,8 @@ const MCP_KEYS: [&str; 6] = ["type", "command", "args", "env", "url", "headers"]
 
 /// Runs a shikigami's own tool for it: (worker id, tool, args) to the tool's result, None for no such worker.
 pub type OwnTools = Box<dyn Fn(&str, &str, &Value) -> Option<Value> + Send + Sync>;
+/// The dispatcher's own MCP server: one JSON-RPC message to its response, None for a notification or when seimei is shutting down.
+pub type SeimeiTools = Box<dyn Fn(Value) -> Fut<'static, Option<Value>> + Send + Sync>;
 
 /// One enabled plugin: its MCP server entry and the text it adds to the prompts.
 pub struct Plugin {
@@ -144,6 +146,8 @@ pub struct Plugins {
     tokens: Mutex<HashMap<String, Grant>>,
     /// The shikigami's own tools, for a session that reaches them through the socket; set by the worker pool.
     pub own: OnceLock<OwnTools>,
+    /// The dispatcher's own tools, for a harness that cannot serve them in-process; set by the server.
+    pub seimei: OnceLock<SeimeiTools>,
 }
 
 /// A session token's session: who it is, the plugins it was given, and its agent process.
@@ -222,6 +226,7 @@ impl Plugins {
             exe: exe.into(),
             tokens: Mutex::default(),
             own: OnceLock::new(),
+            seimei: OnceLock::new(),
         };
         let enabled = cfg.get("enabled").and_then(|e| e.as_array()).cloned().unwrap_or_default();
         for name in enabled.iter().filter_map(|n| n.as_str()) {
@@ -408,19 +413,20 @@ impl Plugins {
         out
     }
 
-    /// A shikigami's own tools (ask, board) as a stdio MCP server, for an agent that cannot be served in-process.
+    /// A session's own tools as a stdio MCP server, for an agent that cannot be served in-process: a shikigami's (ask, board), or the dispatcher's with no worker.
     /// Call after servers(): its token then carries the granted plugins and these.
-    pub fn own_server(&self, who: &str, worker: &str) -> Map<String, Value> {
+    pub fn own_server(&self, who: &str, worker: Option<&str>) -> Map<String, Value> {
+        let own = if worker.is_some() { "shikigami" } else { "seimei" };
         let mut names = (self.tokens.lock().unwrap().values())
-            .find(|g| g.who == who && g.worker.as_deref() == Some(worker))
+            .find(|g| g.who == who && g.worker.as_deref() == worker)
             .map(|g| g.plugins.clone())
             .unwrap_or_default();
-        names.retain(|n| n != "shikigami");
-        names.push("shikigami".into());
-        let env = self.link_env(self.token(who, Some(worker), &names));
+        names.retain(|n| n != own);
+        names.push(own.into());
+        let env = self.link_env(self.token(who, worker, &names));
         Map::from_iter([
             ("command".into(), json!(self.exe)),
-            ("args".into(), json!(["plugin", "shikigami"])),
+            ("args".into(), json!(["plugin", own])),
             ("env".into(), env),
         ])
     }
@@ -513,6 +519,20 @@ impl Plugins {
                 let reply = match (grant, req["op"].as_str()) {
                     (None, _) => json!({"error": "unknown session"}),
                     (Some(g), _) if !mine(&g) => json!({"error": "not this session's process"}),
+                    (Some(g), Some("mcp")) => {
+                        // The dispatcher's own tools: only its token carries them.
+                        let tools =
+                            me.seimei.get().filter(|_| g.worker.is_none() && g.plugins.iter().any(|p| p == "seimei"));
+                        let Some(tools) = tools else {
+                            let _ = wr.write_all(b"{\"error\": \"this session has no seimei tools\"}\n").await;
+                            return;
+                        };
+                        // The call went away (cancelled, or its session ended): drop it, cards and all.
+                        tokio::select! {
+                            r = tools(req["message"].clone()) => json!({"result": r}),
+                            _ = rd.read_u8() => return,
+                        }
+                    }
                     (Some(g), Some("call")) => {
                         let plugin = req["plugin"].as_str().unwrap_or("");
                         if !g.plugins.iter().any(|p| p == plugin) {
@@ -675,6 +695,15 @@ impl Remote {
 /// A hosted one forwards each call to seimei; the others run their tools in this process.
 pub async fn serve_stdio(name: &str, builtins: &[Factory]) -> Result<(), String> {
     let var = |k: &str| std::env::var(k).unwrap_or_default();
+    if name == "seimei" {
+        return forward_stdio(Remote {
+            plugin: name.into(),
+            socket: var("SEIMEI_SOCKET"),
+            token: var("SEIMEI_TOKEN"),
+            state: var("SEIMEI_STATE").into(),
+        })
+        .await;
+    }
     let factory = builtins.iter().find(|f| f.name == name);
     let mut spec = match (name, factory) {
         // The shikigami's own tools, for an ACP agent (the default harness has them in-process).
@@ -742,6 +771,47 @@ pub async fn serve_stdio(name: &str, builtins: &[Factory]) -> Result<(), String>
         if let Some(key) = key {
             calls.insert(key, task.abort_handle());
         }
+    }
+    Ok(())
+}
+
+/// `seimei plugin seimei`: the dispatcher's own tools, each JSON-RPC message answered by seimei through its socket.
+/// Its tool list changes with config (agents, plugins), so seimei answers initialize and tools/list too.
+async fn forward_stdio(remote: Remote) -> Result<(), String> {
+    let remote = Arc::new(remote);
+    let out = Arc::new(tokio::sync::Mutex::new(tokio::io::stdout()));
+    let running: Arc<Mutex<HashMap<String, tokio::task::AbortHandle>>> = Arc::default();
+    let mut lines = tokio::io::BufReader::new(tokio::io::stdin()).lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        let Ok(msg) = serde_json::from_str::<Value>(&line) else { continue };
+        if msg["method"] == "notifications/cancelled" {
+            // Dropping the call closes its connection, and seimei drops the call, cards and all.
+            if let Some(h) = running.lock().unwrap().remove(&msg["params"]["requestId"].to_string()) {
+                h.abort();
+            }
+            continue;
+        }
+        // Other notifications need no answer.
+        let Some(id) = msg.get("id").cloned() else { continue };
+        let (remote, out, done, key) = (remote.clone(), out.clone(), running.clone(), id.to_string());
+        let mut calls = running.lock().unwrap();
+        let task = tokio::spawn(async move {
+            let req = json!({"token": remote.token, "op": "mcp", "message": msg});
+            let reply = remote.request(req).await.unwrap_or_default();
+            let r = match reply.get("result") {
+                Some(Value::Null) | None => {
+                    let why = reply["error"].as_str().unwrap_or(LOST);
+                    json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32603, "message": why}})
+                }
+                Some(r) => r.clone(),
+            };
+            let mut out = out.lock().await;
+            let _ = out.write_all(format!("{r}\n").as_bytes()).await;
+            let _ = out.flush().await;
+            drop(out);
+            done.lock().unwrap().remove(&id.to_string());
+        });
+        calls.insert(key, task.abort_handle());
     }
     Ok(())
 }

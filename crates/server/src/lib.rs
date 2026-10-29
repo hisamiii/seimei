@@ -195,6 +195,12 @@ impl App {
             cost: cost.clone(),
             push: push.clone(),
         });
+        // A harness that cannot serve the dispatcher's tools in-process reaches them through the plugin socket.
+        let weak = Arc::downgrade(&tools);
+        let _ = pool.plugins.seimei.set(Box::new(move |msg| {
+            let tools = weak.upgrade();
+            Box::pin(async move { tools?.handle(msg).await })
+        }));
         let dispatcher =
             Dispatcher::new(disp, events.clone(), state, usage.clone(), approvals.clone(), audit.clone(), tools);
         let _ = pool.dispatcher.set(dispatcher.clone());

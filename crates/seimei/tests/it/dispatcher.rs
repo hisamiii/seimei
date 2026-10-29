@@ -22,7 +22,7 @@ async fn until(secs: u64, f: impl Fn() -> bool) -> bool {
 }
 
 /// The server's wiring of the dispatcher, on the state in `state`.
-fn app(state: &Path, work: &Path) -> seimei_server::App {
+pub(crate) fn app(state: &Path, work: &Path) -> seimei_server::App {
     let events = Arc::new(EventLog::open(&state.join("events.jsonl")).unwrap());
     let push = Push::new(
         events.clone(),
