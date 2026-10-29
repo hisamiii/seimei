@@ -9,6 +9,7 @@ mod access;
 mod acp_tools;
 mod browser_host;
 mod dispatcher;
+mod dispatcher_acp;
 mod fake_queue;
 mod live_acp;
 mod live_dispatcher;

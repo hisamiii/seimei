@@ -124,7 +124,7 @@ The code map lists where each part lives. Paths are relative to the repo root.
 `crates/core/src` holds the sessions:
 
 - `dispatcher.rs`: the permanent session and the routing of event turns. Its prompt is `dispatcher.md`.
-- `harness/`: the `Harness` trait the dispatcher's turns read, as `Ev` events. `harness/claude.rs` is the Claude Code implementation.
+- `harness/`: the `Harness` trait the dispatcher's turns read, as `Ev` events. `harness/claude.rs` is the Claude Code implementation, and `harness/acp.rs` the one for ACP agents and Codex.
 - `workers/`: shikigami, with summon, resume and hand-over.
 - `workers/claude.rs`: the Claude Code adapter. It holds the CLI flags and env, the transcript and session-registry layout, hooks, settings paths, tool names and model prices.
 - `workers/acp_session.rs`: the adapter for ACP and Codex agents.

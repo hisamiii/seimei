@@ -1,6 +1,7 @@
 //! A dispatcher session on any harness: what the turn loop reads from it ([`Ev`]) and what it asks of it ([`Harness`]).
-//! The default harness is the one implementation so far.
+//! The default harness has one implementation, and ACP agents (Codex among them) the other.
 
+pub mod acp;
 pub mod claude; // lint: allow scoped-name
 
 use std::future::Future;
@@ -8,8 +9,10 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use seimei_proto::Handler;
 use serde_json::{Map, Value};
+
+use crate::dispatcher::Seimei;
+use crate::workers::Agent;
 
 pub type Fut<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -57,9 +60,15 @@ pub struct Spec {
     pub env: Vec<(String, String)>,
     /// The session to resume, or the id a new one takes.
     pub session: String,
+    /// The id was just made: there is no session to resume.
+    pub fresh: bool,
+    /// The ACP agent to run on; None for the default harness.
+    pub agent: Option<Agent>,
     /// The plugins' MCP servers, their config file and the tools allowed without a card.
     pub mcp_servers: Map<String, Value>,
     pub mcp_config_file: PathBuf,
+    /// seimei's own tools as a stdio server, for a harness that cannot serve them in-process.
+    pub own_server: Map<String, Value>,
     pub allowed_tools: Vec<String>,
     /// Paths no agent may read or edit.
     pub deny: Vec<String>,
@@ -68,13 +77,15 @@ pub struct Spec {
     /// Tokens at which the context compacts.
     pub compact_window: i64,
     /// seimei's side: permission cards, hooks and its own tools.
-    pub handler: Arc<dyn Handler>,
+    pub handler: Arc<Seimei>,
 }
 
 /// A connected dispatcher session.
 pub trait Harness: Send {
     /// The agent's process, whose descendants may use the plugins' session token.
     fn pid(&self) -> Option<u32>;
+    /// The session's id, which a restart resumes.
+    fn session_id(&self) -> String;
     /// A message; one sent mid-turn joins the running turn. images: (media type, base64 data).
     fn send(&mut self, text: &str, images: &[(String, String)]) -> Result<(), String>;
     /// The next event; None when the agent is gone.
@@ -90,5 +101,8 @@ pub trait Harness: Send {
 
 /// Start the dispatcher's session.
 pub async fn connect(spec: Spec) -> Result<Box<dyn Harness>, String> {
-    Ok(Box::new(claude::Session::connect(spec).await?)) // lint: allow scoped-name
+    match spec.agent {
+        Some(_) => Ok(Box::new(acp::Session::connect(spec).await?)),
+        None => Ok(Box::new(claude::Session::connect(spec).await?)), // lint: allow scoped-name
+    }
 }

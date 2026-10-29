@@ -317,10 +317,20 @@ impl Client {
         if let Some(turn) = &self.codex {
             return turn.start(&self.rpc, &self.session_id, text);
         }
+        self.prompt(vec![json!({"type": "text", "text": text})])
+    }
+
+    /// Whether a prompt may carry image blocks: an ACP agent that says so.
+    pub fn takes_images(&self) -> bool {
+        self.codex.is_none() && self.init["agentCapabilities"]["promptCapabilities"]["image"] == json!(true)
+    }
+
+    /// Start an ACP turn on content blocks (text, and images if [`Client::takes_images`]).
+    pub fn prompt(&self, blocks: Vec<Value>) -> Result<(), Error> {
         let rpc = &self.rpc;
         let n = rpc.id();
         rpc.pending.lock().unwrap().insert(n, Waiter::Turn);
-        let params = json!({"sessionId": self.session_id, "prompt": [{"type": "text", "text": text}]});
+        let params = json!({"sessionId": self.session_id, "prompt": blocks});
         rpc.send(json!({"jsonrpc": "2.0", "id": n, "method": "session/prompt", "params": params})).inspect_err(|_| {
             rpc.pending.lock().unwrap().remove(&n);
         })

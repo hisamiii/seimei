@@ -281,6 +281,8 @@ pub struct Config {
     pub mode: String,
     pub about: String,
     pub compact_window: i64,
+    /// The default harness, or "acp:<name>" for an [agents.<name>] entry.
+    pub harness: String,
 }
 
 impl Config {
@@ -302,6 +304,7 @@ impl Config {
             mode: mode.into(),
             about: about.into(),
             compact_window,
+            harness: s("harness").unwrap_or_else(|| "claude".into()), // lint: allow scoped-name
         }
     }
 }
@@ -530,13 +533,21 @@ impl Dispatcher {
     }
 
     /// What its session starts from; a new session id is kept until the harness has a conversation under it.
-    fn spec(&self, handler: Arc<dyn Handler>) -> Spec {
+    fn spec(&self, handler: Arc<Seimei>) -> Result<Spec, String> {
+        let agent = match self.cfg.harness.strip_prefix("acp:") {
+            None => None,
+            Some(name) => Some(
+                (self.tools.pool.agents.get().and_then(|m| m.get(name)).cloned())
+                    .ok_or(format!("no ACP agent {name} in config [agents]"))?,
+            ),
+        };
         let file = self.state.join("session_id");
         let saved = std::fs::read_to_string(&file).map(|s| s.trim().to_string()).unwrap_or_default();
-        let session = if saved.is_empty() { crate::util::uuid4() } else { saved };
+        let fresh = saved.is_empty();
+        let session = if fresh { crate::util::uuid4() } else { saved };
         let _ = std::fs::write(&file, format!("{session}\n"));
         let plugins = &self.tools.pool.plugins;
-        Spec {
+        Ok(Spec {
             name: self.cfg.name.clone(),
             cwd: self.cfg.cwd.clone(),
             model: self.cfg.model.clone(),
@@ -544,14 +555,17 @@ impl Dispatcher {
             prompt: self.prompt(),
             env: plugins.env("seimei"),
             session,
+            fresh,
+            agent,
             mcp_servers: plugins.servers("seimei", None, None),
             mcp_config_file: plugins.config_file("seimei"),
+            own_server: plugins.own_server("seimei", None),
             allowed_tools: plugins.allowed(None),
             deny: self.tools.pool.denied(),
             checklist: self.state.join("compact-checklist.md"),
             compact_window: self.cfg.compact_window,
             handler,
-        }
+        })
     }
 
     /// The session, for good: it reconnects (1 s, doubling to 60 s) whenever the agent exits or fails to start.
@@ -562,7 +576,7 @@ impl Dispatcher {
         let (mut delay, mut failures) = (Duration::from_secs(1), 0u32);
         let calls = Arc::new(std::sync::atomic::AtomicU64::new(0));
         loop {
-            let handler: Arc<dyn Handler> = Arc::new(Seimei {
+            let handler = Arc::new(Seimei {
                 approvals: self.approvals.clone(),
                 audit: self.audit.clone(),
                 tools: self.tools.clone(),
@@ -570,8 +584,14 @@ impl Dispatcher {
                 state: self.state.clone(),
                 calls: calls.clone(),
             });
-            let why = match harness::connect(self.spec(handler)).await {
+            let session = match self.spec(handler) {
+                Ok(spec) => harness::connect(spec).await,
+                Err(e) => Err(e),
+            };
+            let why = match session {
                 Ok(mut session) => {
+                    // An ACP agent names its sessions itself.
+                    let _ = std::fs::write(self.state.join("session_id"), format!("{}\n", session.session_id()));
                     // Its plugins run under this process: their session token is good only from there.
                     self.tools.pool.plugins.root("seimei", None, session.pid());
                     t.set(Some(true), None);
@@ -610,7 +630,7 @@ impl Dispatcher {
 }
 
 /// What the harness asks of seimei's session: permission cards, the audit's hooks, seimei's own tools.
-struct Seimei {
+pub struct Seimei {
     approvals: Arc<Approvals>,
     audit: Arc<Audit>,
     tools: Arc<Tools>,
@@ -618,6 +638,18 @@ struct Seimei {
     state: PathBuf,
     /// Its own tool calls (not its subagents'): every style::EVERY of them hears the user's style again.
     calls: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl Seimei {
+    /// The permission mode it runs in.
+    pub fn mode(&self) -> &str {
+        &self.mode
+    }
+
+    /// A card for a call the mode left open, as for an ACP shikigami: the mode was applied already.
+    pub async fn card(&self, req: &PermissionRequest) -> Permission {
+        crate::permissions::can_use(&self.approvals, "seimei", None, req, &self.mode, "default", None).await.permission
+    }
 }
 
 impl Handler for Seimei {

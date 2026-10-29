@@ -179,7 +179,7 @@ impl Session {
 }
 
 /// The granted plugins as an ACP agent takes them: stdio servers only (an agent need not speak HTTP MCP).
-fn acp_servers(servers: Map<String, Value>) -> Vec<acp::McpServer> {
+pub(crate) fn acp_servers(servers: Map<String, Value>) -> Vec<acp::McpServer> {
     let strs = |v: &Value| -> Vec<String> {
         v.as_array().into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect()
     };

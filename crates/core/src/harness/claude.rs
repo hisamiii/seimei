@@ -13,15 +13,16 @@ use crate::workers::harness;
 
 pub struct Session {
     client: Client,
+    session: String,
     /// The events one message became, handed out one at a time.
     queue: VecDeque<Ev>,
 }
 
 impl Session {
     pub async fn connect(spec: Spec) -> Result<Session, String> {
-        let handler = spec.handler.clone();
+        let (handler, session) = (spec.handler.clone(), spec.session.clone());
         let client = Client::connect(options(spec), handler).await.map_err(|e| e.to_string())?;
-        Ok(Session { client, queue: VecDeque::new() })
+        Ok(Session { client, session, queue: VecDeque::new() })
     }
 
     /// One message as the events the turn loop reads.
@@ -89,6 +90,10 @@ impl Session {
 impl Harness for Session {
     fn pid(&self) -> Option<u32> {
         self.client.pid()
+    }
+
+    fn session_id(&self) -> String {
+        self.session.clone()
     }
 
     fn send(&mut self, text: &str, images: &[(String, String)]) -> Result<(), String> {

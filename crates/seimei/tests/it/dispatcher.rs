@@ -11,7 +11,7 @@ use seimei_core::plugins::Plugins;
 use seimei_core::push::{Fcm, Push, WebPush};
 use serde_json::{Value, json};
 
-async fn until(secs: u64, f: impl Fn() -> bool) -> bool {
+pub(crate) async fn until(secs: u64, f: impl Fn() -> bool) -> bool {
     for _ in 0..secs * 20 {
         if f() {
             return true;
@@ -23,6 +23,11 @@ async fn until(secs: u64, f: impl Fn() -> bool) -> bool {
 
 /// The server's wiring of the dispatcher, on the state in `state`.
 pub(crate) fn app(state: &Path, work: &Path) -> seimei_server::App {
+    app_on(state, work, "")
+}
+
+/// The same with more [dispatcher] keys.
+pub(crate) fn app_on(state: &Path, work: &Path, keys: &str) -> seimei_server::App {
     let events = Arc::new(EventLog::open(&state.join("events.jsonl")).unwrap());
     let push = Push::new(
         events.clone(),
@@ -33,7 +38,7 @@ pub(crate) fn app(state: &Path, work: &Path) -> seimei_server::App {
     let plugins =
         Arc::new(Plugins::load_at(&toml::Table::new(), state, env!("CARGO_BIN_EXE_seimei"), &seimei::BUILTINS));
     let disp: toml::Table =
-        format!("model = \"opus\"\ncwd = \"{}\"\nname = \"seimei-fake\"", work.display()).parse().unwrap();
+        format!("model = \"opus\"\ncwd = \"{}\"\nname = \"seimei-fake\"\n{keys}", work.display()).parse().unwrap();
     seimei_server::App::new(seimei_server::Setup {
         events,
         auth: None,
@@ -50,7 +55,7 @@ pub(crate) fn app(state: &Path, work: &Path) -> seimei_server::App {
     .unwrap()
 }
 
-fn after(app: &seimei_server::App, from: i64) -> Vec<Value> {
+pub(crate) fn after(app: &seimei_server::App, from: i64) -> Vec<Value> {
     app.events.after(from).iter().map(|e| (**e).clone()).collect()
 }
 
@@ -61,7 +66,7 @@ fn heard(log: &Path) -> Vec<String> {
 }
 
 /// Send as the user and wait for the turn to end with an assistant reply or a system line; the events since.
-async fn turn(app: &seimei_server::App, text: &str) -> Vec<Value> {
+pub(crate) async fn turn(app: &seimei_server::App, text: &str) -> Vec<Value> {
     let from = app.events.last_id();
     app.dispatcher.send(text, &[], vec![], &[], None, None);
     let ends = |evs: &[Value]| evs.iter().any(|e| e["type"] == "assistant" || e["type"] == "system");

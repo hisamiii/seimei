@@ -40,6 +40,7 @@ use crate::util::{as_text, chars, far, hex, now, random_bytes, read_json, save_j
 
 mod acp_session;
 pub mod claude; // lint: allow scoped-name
+pub(crate) use acp_session::acp_servers;
 pub use acp_session::{Mode, acp_mode, shaped};
 pub use claude as harness; // lint: allow scoped-name
 use harness::transcript;
