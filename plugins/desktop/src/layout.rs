@@ -1,6 +1,6 @@
 //! The desktop layout, remembered so a new desktop session (a WM restart or a reboot) can be brought back: apps on their workspaces, terminal windows in their folders, and agent sessions resumed.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -84,6 +84,23 @@ fn terminal(proc: &Path, sessions: &Path, pid: i64, kids: &HashMap<i64, Vec<i64>
     out
 }
 
+/// The agent sessions running now: their ids, and the newest transcript each continued into.
+fn running(proc: &Path, sessions: &Path) -> HashSet<String> {
+    let mut out = HashSet::new();
+    let Ok(dir) = std::fs::read_dir(sessions) else { return out };
+    for f in dir.flatten() {
+        let Some(rec) = read_json(&f.path()).filter(|r| truthy(&r["sessionId"])) else { continue };
+        if !rec["pid"].as_i64().is_some_and(|pid| proc.join(pid.to_string()).is_dir()) {
+            continue;
+        }
+        if let Some(stem) = seimei_core::sessions::transcript_of(&rec).as_deref().and_then(Path::file_stem) {
+            out.insert(stem.to_string_lossy().into_owned());
+        }
+        out.insert(as_text(&rec["sessionId"]));
+    }
+    out
+}
+
 /// Which WM session a snapshot is from; older layouts keep it under "niri".
 fn session_of(snap: &Value) -> Value {
     match snap.get("session") {
@@ -161,6 +178,11 @@ impl Desktop {
         self.state.join("layout-previous.json")
     }
 
+    /// The WM session the old layout was last offered in, kept across seimei's restarts.
+    fn offered_path(&self) -> PathBuf {
+        self.state.join("layout-offered.json")
+    }
+
     pub fn snapshot(&self) -> Result<Value, String> {
         let b = &self.b;
         let ctx = b.ctx();
@@ -206,9 +228,10 @@ impl Desktop {
         }
     }
 
-    pub async fn tick(self: &Arc<Self>) -> Result<(), String> {
+    /// One snapshot; true when it offered the old layout, once per WM session.
+    pub async fn tick(self: &Arc<Self>) -> Result<bool, String> {
         if !self.up() {
-            return Ok(());
+            return Ok(false);
         }
         let snap = self.blocking(|d| d.snapshot()).await?;
         let (path, previous) = (self.layout_path(), self.previous_path());
@@ -218,22 +241,16 @@ impl Desktop {
             std::fs::rename(&path, &previous).map_err(|e| e.to_string())?;
             saved = None;
         }
-        let session = snap["session"].as_str().map(String::from);
-        let offer = {
-            let mut offered = self.offered.lock().unwrap();
-            let go = *offered != session && previous.exists();
-            if go {
-                *offered = session;
-            }
-            go
-        };
+        let offered = read_json(&self.offered_path()).map(|o| o["session"].clone());
+        let offer = previous.exists() && offered.as_ref() != Some(&snap["session"]);
         if offer {
+            write_json(&self.offered_path(), &json!({"session": snap["session"]})).map_err(|e| e.to_string())?;
             tokio::spawn(self.clone().offer());
         }
         if snap["windows"].as_array().is_some_and(|w| !w.is_empty()) || !saved.as_ref().is_some_and(truthy) {
             write_json(&path, &snap).map_err(|e| e.to_string())?;
         }
-        Ok(())
+        Ok(offer)
     }
 
     pub fn plan(&self) -> Result<Vec<Value>, String> {
@@ -241,6 +258,8 @@ impl Desktop {
         if !truthy(&old) || now() - old["time"].as_f64().unwrap_or(0.0) > MAX_AGE {
             return Ok(vec![]);
         }
+        let ctx = self.b.ctx();
+        let running = running(&ctx.proc, &sessions_dir(&ctx.home));
         let mut have: HashMap<String, i64> = HashMap::new();
         for w in self.b.windows()? {
             *have.entry(as_text(&w["app_id"])).or_default() += 1;
@@ -253,7 +272,11 @@ impl Desktop {
                 *n -= 1;
                 continue;
             }
-            if let Some(cmd) = command(rec, &self.shell, &self.b.ctx().home) {
+            // A session the user resumed already.
+            if truthy(&rec["claude"]) && running.contains(&as_text(&rec["claude"]["session_id"])) {
+                continue;
+            }
+            if let Some(cmd) = command(rec, &self.shell, &ctx.home) {
                 let mut r = rec.clone();
                 r["command"] = json!(cmd);
                 out.push(r);

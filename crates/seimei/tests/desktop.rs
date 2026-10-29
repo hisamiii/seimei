@@ -227,6 +227,7 @@ fn main() {
         let got = json!({"text": text.join("\n"), "error": r["isError"] == true, "log": t.log(), "keys": t.keys()});
         t.compare(&format!("niri call {i} {} {}", c["tool"], c["args"]), &c["want"], got);
     }
+    layout_offers(&mut t, &rt);
     rt.block_on(end_to_end(&mut t, g));
     let _ = fake.kill();
     let _ = fake.wait();
@@ -236,6 +237,35 @@ fn main() {
     if t.fail > 0 {
         std::process::exit(1);
     }
+}
+
+/// The old layout is offered once per WM session: a seimei restart in the same one offers nothing, and a session the user resumed already is not in the plan.
+fn layout_offers(t: &mut T, rt: &tokio::runtime::Runtime) {
+    let state = t.root.join("layout");
+    std::fs::create_dir_all(&state).unwrap();
+    // A terminal window with an agent session in it, which a restore resumes.
+    let term = |sid: &str| json!({"app_id": "kitty", "workspace": 1, "claude": {"session_id": sid, "cwd": "/tmp", "args": []}}); // lint: allow scoped-name
+    let windows = [term("resumed"), term("closed")];
+    let old = json!({"session": "niri.wayland-1.1.sock", "time": seimei_core::util::now(), "windows": windows});
+    std::fs::write(state.join("layout.json"), old.to_string()).unwrap();
+    // The resumed one runs again, in a process of its own.
+    std::fs::create_dir_all(t.root.join("proc/5151")).unwrap();
+    std::fs::create_dir_all(t.root.join("claude/sessions")).unwrap();
+    std::fs::write(t.root.join("claude/sessions/5151.json"), json!({"pid": 5151, "sessionId": "resumed"}).to_string())
+        .unwrap();
+    let (ctx, sink) = (t.ctx(), t.sink.clone());
+    let desk = || {
+        let d = Arc::new(Desktop::new(Some("niri"), ctx.clone(), &state, Some("fish"), Some(sink.clone())).unwrap());
+        d.event("up", json!(null));
+        d
+    };
+    let first = desk();
+    t.check("a new WM session: the card", rt.block_on(first.tick()) == Ok(true), &json!(null));
+    t.check("then no second card", rt.block_on(first.tick()) == Ok(false), &json!(null));
+    let plan: Vec<Value> = first.plan().unwrap().iter().map(|r| r["claude"]["session_id"].clone()).collect();
+    t.check("the plan skips running sessions", plan == [json!("closed")], &json!(plan));
+    t.check("restart in same wm session: no card", rt.block_on(desk().tick()) == Ok(false), &json!(null));
+    let _ = std::fs::remove_dir_all(&state);
 }
 
 /// `seimei plugin desktop` as the agent's CLI starts it: the spec for seimei's backend, a call seimei runs on the fake niri, and the card for closing a window seimei did not open.

@@ -159,8 +159,6 @@ pub struct Desktop {
     /// The pointer and the keyboard; holding them is driving.
     input: Mutex<(Device, Device)>,
     times: Mutex<Times>,
-    /// The layout memory: which session it last offered to bring back.
-    offered: Mutex<Option<String>>,
     /// The agent display (niri, KDE Plasma, GNOME): a screen of seimei's own for agent apps.
     pub agent: agent::Agent,
 }
@@ -244,7 +242,6 @@ impl Desktop {
             waiting: Mutex::default(),
             input: Mutex::new(input),
             times: Mutex::default(),
-            offered: Mutex::default(),
             agent,
         })
     }
