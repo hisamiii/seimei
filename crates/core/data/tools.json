@@ -625,6 +625,43 @@
     "type": "object"
    },
    "name": "tasks"
+  },
+  {
+   "description": "Ask the user to pick between options when your harness has no question cards of its own: they get a card with the options as buttons, and their pick (or what they typed) comes back as this tool's answer. It waits up to 30 minutes.",
+   "inputSchema": {
+    "properties": {
+     "question": {
+      "type": "string"
+     },
+     "header": {
+      "type": "string",
+      "description": "a short label for the card"
+     },
+     "options": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "label": {
+         "type": "string"
+        },
+        "description": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "label"
+       ]
+      }
+     }
+    },
+    "required": [
+     "question",
+     "options"
+    ],
+    "type": "object"
+   },
+   "name": "ask"
   }
  ],
  "shikigami": {

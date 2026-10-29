@@ -73,6 +73,8 @@ async fn the_dispatchers_tools_over_stdio() {
     let names: Vec<&str> =
         got[&2]["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
     assert!(names.contains(&"summon") && names.contains(&"tasks"), "{names:?}");
+    // The default harness has question cards of its own: no ask tool.
+    assert!(!names.contains(&"ask"), "{names:?}");
     let tasks = &got[&3]["result"];
     assert!(tasks["isError"] != true && tasks["content"][0]["text"].is_string(), "{tasks}");
 

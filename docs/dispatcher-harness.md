@@ -5,7 +5,7 @@ This is a design for running the dispatcher on Claude Code, an ACP agent or Code
 - **Dispatcher**: the main seimei session the owner chats with.
 - **Shikigami**: the worker sessions the dispatcher starts.
 
-Status: approved, with steps 1 to 5 built. An offline test pins the dispatcher, and the server relays the user's messages itself. The dispatcher reads its session through the `Harness` trait, and `seimei plugin seimei` serves its tools over stdio. The trait has an ACP implementation, tested on the fake ACP agent.
+Status: approved, with steps 1 to 6 built. An offline test pins the dispatcher, and the server relays the user's messages itself. The dispatcher reads its session through the `Harness` trait, and `seimei plugin seimei` serves its tools over stdio. The trait has an ACP implementation, tested on the fake ACP agent, where an `ask` tool raises the question card.
 
 ## 1. What the dispatcher needs from a harness
 

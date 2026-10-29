@@ -331,7 +331,7 @@ pub async fn can_use(
 /// seimei's AskUserQuestion as chat cards, one per question: its options as buttons, a written answer through the note, Skip to leave it.
 /// The answers go back as the tool's own (updatedInput.answers, question to label), so the model reads them as the user's choice.
 /// A card counts as skipped after DISPATCHER_WAIT.
-async fn ask(approvals: &Approvals, who: &str, input: &Value) -> Decided {
+pub(crate) async fn ask(approvals: &Approvals, who: &str, input: &Value) -> Decided {
     let questions = input["questions"].as_array().cloned().unwrap_or_default();
     let mut answers = Map::new();
     for q in &questions {

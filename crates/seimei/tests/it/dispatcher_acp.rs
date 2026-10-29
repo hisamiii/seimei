@@ -1,5 +1,5 @@
 //! The dispatcher on the fake ACP agent in tests/fakes: the system prompt rides a new session's first prompt, a reply streams, a mid-turn message waits for the turn's end, images go as blocks.
-//! A call made unasked lands in the audit log, one that asks raises a card, seimei's own tools answer through `seimei plugin seimei`, a Stop cancels, and a restart loads the session.
+//! A call made unasked lands in the audit log, one that asks raises a card, seimei's own tools answer through `seimei plugin seimei` (ask with the question card), a Stop cancels, and a restart loads the session.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -158,6 +158,22 @@ async fn run(state: PathBuf, work: PathBuf, fake: PathBuf) {
     let said = evs.iter().find(|e| e["type"] == "assistant").unwrap()["text"].as_str().unwrap().to_string();
     let result: Value = serde_json::from_str(&said).unwrap();
     assert!(result["content"].is_array() && result["isError"] != true, "{result}");
+
+    // ask raises the question card, and the user's pick is its answer; the prompt names it in place of AskUserQuestion.
+    assert!(got[0].0.contains("use mcp__seimei__ask: they get a card"));
+    let from = first.events.last_id();
+    let q = r#"{"question": "Blue or green?", "options": [{"label": "Blue"}, {"label": "Green"}]}"#;
+    first.dispatcher.send(&format!("!call seimei ask {q}"), &[], vec![], &[], None, None);
+    assert!(until(20, || after(&first, from).iter().any(|e| e["type"] == "approval")).await);
+    let card = after(&first, from).into_iter().find(|e| e["type"] == "approval").unwrap();
+    assert_eq!((&card["action"], &card["detail"]), (&json!("question"), &json!("Blue or green?")), "{card}");
+    assert!(first.approvals.decide(card["aid"].as_str().unwrap(), true, Some("c1".into()), None));
+    assert!(
+        until(20, || after(&first, from).iter().any(|e| e["type"] == "assistant") && !first.dispatcher.busy()).await
+    );
+    let said = after(&first, from).into_iter().find(|e| e["type"] == "assistant").unwrap();
+    let result: Value = serde_json::from_str(said["text"].as_str().unwrap()).unwrap();
+    assert_eq!(result["content"][0]["text"], "The user picked: Green", "{result}");
 
     // A Stop cancels the running turn.
     let from = first.events.last_id();

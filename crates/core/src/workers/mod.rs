@@ -1472,7 +1472,7 @@ pub struct Pool {
     pub events: Arc<EventLog>,
     pub board: Arc<Mutex<Board>>,
     usage: Arc<Usage>,
-    approvals: Arc<Approvals>,
+    pub(crate) approvals: Arc<Approvals>,
     pub audit: Arc<Audit>,
     pub dispatcher: OnceLock<Arc<dyn Listener>>,
     terminal: String,

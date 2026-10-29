@@ -194,6 +194,7 @@ impl App {
             usage: usage.clone(),
             cost: cost.clone(),
             push: push.clone(),
+            ask: disp.on_acp(),
         });
         // A harness that cannot serve the dispatcher's tools in-process reaches them through the plugin socket.
         let weak = Arc::downgrade(&tools);

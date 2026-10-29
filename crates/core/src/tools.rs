@@ -6,6 +6,7 @@ use std::future::Future;
 use std::path::Path;
 use std::sync::{Arc, LazyLock, Mutex};
 
+use seimei_proto::Permission;
 use serde_json::{Value, json};
 
 use crate::adopt::{Adopter, Wish};
@@ -52,6 +53,8 @@ pub struct Tools {
     pub worker_events: Arc<WorkerEvents>,
     pub adopter: Arc<Adopter>,
     pub watches: Arc<Watches>,
+    /// The dispatcher's harness has no question cards of its own: the ask tool stands in.
+    pub ask: bool,
 }
 
 pub fn text(t: &str, error: bool) -> Value {
@@ -258,6 +261,11 @@ impl Tools {
     /// The server as the harness sees it: summon offers the plugins' tool groups and config `[agents]`, and the watch tool lists the plugins' triggers too.
     fn spec(&self) -> Value {
         let mut spec = SERVER.clone();
+        if !self.ask
+            && let Some(tools) = spec["tools"].as_array_mut()
+        {
+            tools.retain(|t| t["name"] != "ask");
+        }
         let agents: Vec<String> = self.pool.agents.get().into_iter().flatten().map(|(n, _)| n.clone()).collect();
         for t in spec["tools"].as_array_mut().into_iter().flatten() {
             match t["name"].as_str() {
@@ -290,6 +298,7 @@ impl Tools {
     async fn call(self: Arc<Self>, name: &str, a: &Value) -> Value {
         match name {
             "summon" => self.summon(a).await,
+            "ask" => self.ask(a).await,
             "message" => {
                 let Some(w) = self.pool.find(&arg(a, "worker")) else { return text("No such shikigami.", true) };
                 // The board moves before the message goes, so the turn it starts follows the new item.
@@ -363,6 +372,19 @@ impl Tools {
                     .await
                     .unwrap_or_else(|e| text(&format!("The tool failed: {e}"), true))
             }
+        }
+    }
+
+    /// The question card AskUserQuestion raises, for a harness without one: the user's pick, or why there is none.
+    async fn ask(&self, a: &Value) -> Value {
+        let input = json!({"questions": [{"question": a["question"], "header": a["header"], "options": a["options"]}]});
+        match crate::permissions::ask(&self.pool.approvals, "seimei", &input).await.permission {
+            Permission::Allow { updated_input, .. } => {
+                let answers = updated_input.map(|u| u["answers"].clone()).unwrap_or_default();
+                let picked = answers.as_object().into_iter().flatten().map(|(_, v)| as_text(v)).next();
+                text(&format!("The user picked: {}", picked.unwrap_or_default()), false)
+            }
+            Permission::Deny { message, .. } => text(&message, false),
         }
     }
 

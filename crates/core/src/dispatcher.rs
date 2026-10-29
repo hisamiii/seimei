@@ -286,6 +286,11 @@ pub struct Config {
 }
 
 impl Config {
+    /// It runs on an ACP agent, which has no question cards of its own.
+    pub fn on_acp(&self) -> bool {
+        self.harness.starts_with("acp:")
+    }
+
     pub fn new(disp: &toml::Table, mode: &str, about: &str, dev: bool) -> Config {
         let s = |k: &str| disp.get(k).and_then(|v| v.as_str()).map(String::from);
         let plan = crate::plan::get();
@@ -412,6 +417,7 @@ impl Dispatcher {
             .replace("{name}", &self.cfg.name)
             .replace("{about}", &self.cfg.about)
             .replace("{grants}", &grants)
+            .replace("{ask}", if self.cfg.on_acp() { "mcp__seimei__ask" } else { "AskUserQuestion" })
             .replace("{plugins}", &plugins.prompt(None))
     }
 
