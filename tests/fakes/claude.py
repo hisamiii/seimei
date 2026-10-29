@@ -343,7 +343,14 @@ REPORTED = re.compile(r"shikigami (\S+) \((\w+)\) finished: (.*)")
 async def dispatcher(self: Fake, text: str, images: int):
     """seimei's scripts. Asking a shikigami is the last step of a turn, so its report starts a turn of its own."""
     t = command(text)
-    if t == "md":
+    if text.startswith("/compact"):
+        # Like Claude Code's /compact: a boundary and the turn's end, with no model text.
+        self.out({"type": "system", "subtype": "compact_boundary", "session_id": self.sid, "uuid": str(uuid.uuid4()),
+                  "compact_metadata": {"trigger": "manual", "pre_tokens": self.usage["inputTokens"]}})
+        self.record({"type": "system", "subtype": "compact_boundary"})
+    elif t == "mark":
+        await self.say("trajectory: Filed away.")
+    elif t == "md":
         await self.say(MD)
     elif t == "long":
         await self.say(LONG, 0.002)
