@@ -8,7 +8,7 @@ use std::time::Duration;
 use seimei_core::workers::Agent;
 use serde_json::{Value, json};
 
-use crate::dispatcher::{after, turn, until};
+use crate::dispatcher::{after, saved, turn, until};
 
 /// What the fake got and said, oldest first.
 fn log(fake: &Path) -> Vec<Value> {
@@ -28,7 +28,8 @@ fn prompts(fake: &Path) -> Vec<(String, Vec<Value>)> {
         .collect()
 }
 
-fn app(state: &Path, work: &Path, fake: &Path) -> seimei_server::App {
+/// The dispatcher on the fake ACP agent; no_load: an agent that can neither load nor resume a session.
+fn app(state: &Path, work: &Path, fake: &Path, no_load: bool) -> seimei_server::App {
     let app = crate::dispatcher::app_on(state, work, "harness = \"acp:fake\"");
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
     let agent = Agent {
@@ -37,7 +38,10 @@ fn app(state: &Path, work: &Path, fake: &Path) -> seimei_server::App {
         env: vec![
             ("FAKE_ACP_DIR".into(), fake.display().to_string()),
             ("FAKE_ACP_LOG".into(), fake.join("log.jsonl").display().to_string()),
-        ],
+        ]
+        .into_iter()
+        .chain(no_load.then(|| ("FAKE_ACP_NO_LOAD".to_string(), "1".to_string())))
+        .collect(),
         protocol: "acp".into(),
     };
     app.pool.agents.set(BTreeMap::from([("fake".to_string(), agent)])).unwrap();
@@ -63,7 +67,7 @@ fn dispatcher_on_the_fake_acp_agent() {
 }
 
 async fn run(state: PathBuf, work: PathBuf, fake: PathBuf) {
-    let first = app(&state, &work, &fake);
+    let first = app(&state, &work, &fake, false);
     tokio::spawn(first.pool.plugins.clone().listen(first.approvals.clone()));
     let task = tokio::spawn(first.dispatcher.clone().run());
 
@@ -76,7 +80,7 @@ async fn run(state: PathBuf, work: PathBuf, fake: PathBuf) {
     let got = prompts(&fake);
     assert!(got[0].0.starts_with(&first.dispatcher.prompt()), "{}", got[0].0);
     assert!(got[0].0.contains("hello there"));
-    let sid = std::fs::read_to_string(state.join("session_id")).unwrap().trim().to_string();
+    let sid = saved(&state).1;
     let new = log(&fake).into_iter().find(|m| m["result"]["sessionId"].is_string()).unwrap();
     assert_eq!(new["result"]["sessionId"], json!(sid), "the agent's session id is kept");
 
@@ -189,7 +193,7 @@ async fn run(state: PathBuf, work: PathBuf, fake: PathBuf) {
     task.abort();
     let _ = task.await;
     drop(first);
-    let second = app(&state, &work, &fake);
+    let second = app(&state, &work, &fake, false);
     let task = tokio::spawn(second.dispatcher.clone().run());
     let evs = turn(&second, "back again").await;
     assert!(
@@ -198,7 +202,90 @@ async fn run(state: PathBuf, work: PathBuf, fake: PathBuf) {
     let loaded = log(&fake).into_iter().filter(|m| m["method"] == "session/load").collect::<Vec<_>>();
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0]["params"]["sessionId"], json!(sid));
-    assert_eq!(std::fs::read_to_string(state.join("session_id")).unwrap().trim(), sid);
+    assert_eq!(saved(&state), ("acp:fake".to_string(), sid));
+    task.abort();
+    let _ = task.await;
+}
+
+#[test]
+fn rollover_on_the_fake_acp_agent() {
+    let base = std::env::temp_dir().join(format!("seimei-rollover-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let (state, work, fake) = (base.join("state"), base.join("work"), base.join("fake"));
+    for d in [&state, &work, &fake, &base.join("agent"), &base.join("cfg/seimei"), &base.join("run")] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    let mut env = crate::env::Env::lock();
+    env.set("CLAUDE_CONFIG_DIR", base.join("agent"));
+    env.set("XDG_CONFIG_HOME", base.join("cfg"));
+    env.set("XDG_RUNTIME_DIR", base.join("run"));
+    let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+    rt.block_on(rollover(state, work.canonicalize().unwrap(), fake));
+    drop(rt);
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// Start the dispatcher and wait until its session says it is new.
+async fn started(app: &seimei_server::App) -> tokio::task::JoinHandle<()> {
+    let from = app.events.last_id();
+    let task = tokio::spawn(app.dispatcher.clone().run());
+    let new = |e: &Value| e["type"] == "system" && e["text"].as_str().is_some_and(|t| t.starts_with("A new session"));
+    assert!(until(20, || after(app, from).iter().any(new)).await, "{:?}", after(app, from));
+    task
+}
+
+async fn rollover(state: PathBuf, work: PathBuf, fake: PathBuf) {
+    let first = app(&state, &work, &fake, true);
+    let task = tokio::spawn(first.dispatcher.clone().run());
+    turn(&first, "remember blue").await;
+    let (_, old) = saved(&state);
+
+    // A planned restart on an agent that cannot load the session: a turn of its own writes the handoff, in the trajectory.
+    let from = first.events.last_id();
+    tokio::time::timeout(Duration::from_secs(20), first.dispatcher.handoff()).await.unwrap();
+    let evs = after(&first, from);
+    let marks: Vec<&Value> = evs.iter().filter_map(|e| e.get("handoff")).collect();
+    assert_eq!(marks, [&json!("start"), &json!("done")], "{evs:?}");
+    let reply = evs.iter().find(|e| e["type"] == "assistant").unwrap();
+    assert_eq!(reply["lane"], "t");
+    let handoff = std::fs::read_to_string(state.join("handoff.md")).unwrap();
+    assert!(handoff.starts_with("You said: [seimei] seimei restarts now"), "{handoff}");
+    task.abort();
+    let _ = task.await;
+    drop(first);
+
+    // The restart opens a new session, whose first prompt holds the prompt, the handoff and the block, then the message.
+    let second = app(&state, &work, &fake, true);
+    let task = started(&second).await;
+    turn(&second, "back again").await;
+    assert_ne!(saved(&state).1, old);
+    let (text, _) = prompts(&fake).pop().unwrap();
+    let at = |s: &str| text.find(s).unwrap_or_else(|| panic!("no {s} in {text}"));
+    assert_eq!(at(&second.dispatcher.prompt()), 0);
+    assert!(at("[seimei] Your last session's handoff") < at("[seimei] After compaction"));
+    assert!(at("[seimei] After compaction") < at("back again"));
+    assert!(!state.join("handoff.md").exists());
+    turn(&second, "and on").await;
+    assert!(prompts(&fake).pop().unwrap().0.starts_with("and on"));
+    task.abort();
+    let _ = task.await;
+    drop(second);
+
+    // A switched harness starts fresh: the other harness's id is never loaded, and the new session is seeded.
+    let other = json!({"harness": "claude", "session": "from-another-harness"}); // lint: allow scoped-name
+    std::fs::write(state.join("session.json"), other.to_string()).unwrap();
+    let third = app(&state, &work, &fake, false);
+    let task = started(&third).await;
+    turn(&third, "hello again").await;
+    assert!(!log(&fake).iter().any(|m| m["method"] == "session/load"));
+    let (text, _) = prompts(&fake).pop().unwrap();
+    assert!(text.starts_with(&third.dispatcher.prompt()) && text.contains("[seimei] After compaction"), "{text}");
+    assert_eq!(saved(&state).0, "acp:fake");
+
+    // An agent that loads sessions needs no handoff.
+    let from = third.events.last_id();
+    tokio::time::timeout(Duration::from_secs(5), third.dispatcher.handoff()).await.unwrap();
+    assert!(!after(&third, from).iter().any(|e| e.get("handoff").is_some()));
     task.abort();
     let _ = task.await;
 }

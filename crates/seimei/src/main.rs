@@ -462,13 +462,23 @@ fn main() {
                 d.note(&format!("The user pressed the stop key: your turn was interrupted.{halted}"), None);
             }
         });
+        // USR2 from deploy.sh before it restarts seimei: a session its harness cannot resume hands off first.
+        let d = app.dispatcher.clone();
+        tokio::spawn(async move {
+            let mut usr2 = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined2()).unwrap();
+            while usr2.recv().await.is_some() {
+                d.handoff().await;
+            }
+        });
         tokio::spawn(push.run());
         tokio::spawn(app.uploads.clone().run());
         let (d, pool, ev) = (app.dispatcher.clone(), app.pool.clone(), events.clone());
+        let d2 = d.clone();
         tokio::spawn(update::restart_when_idle(
             state.clone(),
             move || !d.busy() && pool.running() == 0,
-            move |version| {
+            async move |version: &str| {
+                d2.handoff().await;
                 let text = format!("Restarting on seimei {version}.");
                 ev.add(serde_json::json!({"type": "system", "text": text}));
                 ev.close();

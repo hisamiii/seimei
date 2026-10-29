@@ -96,6 +96,10 @@ impl Harness for Session {
         self.session.clone()
     }
 
+    fn resumes(&self) -> bool {
+        true
+    }
+
     fn send(&mut self, text: &str, images: &[(String, String)]) -> Result<(), String> {
         let sent = if images.is_empty() {
             // Plain text, so a slash command such as /compact stays one.

@@ -11,7 +11,7 @@ use std::time::Duration;
 use regex::Regex;
 use seimei_proto::{BoxFuture, Handler, Permission, PermissionRequest};
 use serde_json::{Map, Value, json};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, sleep_until};
 
 use crate::approvals::Approvals;
@@ -21,7 +21,7 @@ use crate::harness::{self, Ev, Harness, Spec};
 use crate::paths::expand;
 use crate::tools::Tools;
 use crate::usage::Usage;
-use crate::util::chars;
+use crate::util::{as_text, chars, read_json, save_json};
 
 /// A reply that starts with one of these overrides where its turn's class puts it: chat: moves the rest of an event turn to the chat, trajectory: keeps a reply out of the chat (one that asks something, or answers events that need the user, still goes there).
 /// A first line "re: <words from one of the user's messages>" anchors the reply to that message.
@@ -47,6 +47,9 @@ const IDLE_COMPACT: Duration = Duration::from_secs(40 * 60);
 const IDLE_COMPACT_MIN: i64 = 150_000;
 
 const PROMPT: &str = include_str!("dispatcher.md");
+const CHECKLIST: &str = include_str!("checklist.md");
+/// A planned restart waits this long, at most, for the handoff.
+const HANDOFF_WAIT: Duration = Duration::from_secs(4 * 60);
 
 /// The markers a reply starts with: (lane markers, re: quote, the text after them). While streaming (`last` false)
 /// None means the start could still turn out to be a marker.
@@ -268,6 +271,8 @@ enum Cmd {
         key: Option<String>,
     },
     Interrupt,
+    /// A planned restart: a session the harness cannot resume writes its handoff, then the sender hears back.
+    Handoff(oneshot::Sender<()>),
     /// A shikigami's rate limit event: limits are shared by the dispatcher and every worker (one account).
     RateLimit(Value, String, String),
 }
@@ -530,15 +535,34 @@ impl Dispatcher {
 
     /// Its session id, once it has one.
     pub fn session_id(&self) -> Option<String> {
-        let sid = std::fs::read_to_string(self.state.join("session_id")).ok()?;
-        Some(sid.trim().to_string()).filter(|s| !s.is_empty())
+        self.saved_session().map(|(_, id)| id)
+    }
+
+    /// session.json: the harness of its last session and that session's id. An older state's session_id file is the default harness's.
+    fn saved_session(&self) -> Option<(String, String)> {
+        let saved = match read_json(&self.state.join("session.json")) {
+            Some(v) => (as_text(&v["harness"]), as_text(&v["session"])),
+            None => {
+                let id = std::fs::read_to_string(self.state.join("session_id")).unwrap_or_default();
+                ("claude".into(), id.trim().to_string()) // lint: allow scoped-name
+            }
+        };
+        Some(saved).filter(|(_, id)| !id.is_empty())
+    }
+
+    /// Before a planned restart: a session the harness cannot resume writes its Must survive section to handoff.md, which seeds the next one.
+    pub async fn handoff(&self) {
+        let (tx, rx) = oneshot::channel();
+        if self.tx.send(Cmd::Handoff(tx)).is_ok() {
+            let _ = tokio::time::timeout(HANDOFF_WAIT, rx).await;
+        }
     }
 
     pub fn rate_limit(&self, info: &Value, from: &str, session: &str) {
         let _ = self.tx.send(Cmd::RateLimit(info.clone(), from.into(), session.into()));
     }
 
-    /// What its session starts from; a new session id is kept until the harness has a conversation under it.
+    /// What its session starts from: the saved session on the same harness, or a new id.
     fn spec(&self, handler: Arc<Seimei>) -> Result<Spec, String> {
         let agent = match self.cfg.harness.strip_prefix("acp:") {
             None => None,
@@ -547,11 +571,10 @@ impl Dispatcher {
                     .ok_or(format!("no ACP agent {name} in config [agents]"))?,
             ),
         };
-        let file = self.state.join("session_id");
-        let saved = std::fs::read_to_string(&file).map(|s| s.trim().to_string()).unwrap_or_default();
-        let fresh = saved.is_empty();
-        let session = if fresh { crate::util::uuid4() } else { saved };
-        let _ = std::fs::write(&file, format!("{session}\n"));
+        // A switched harness starts fresh: it never loads a foreign id.
+        let saved = self.saved_session().filter(|(h, _)| *h == self.cfg.harness).map(|(_, id)| id);
+        let fresh = saved.is_none();
+        let session = saved.unwrap_or_else(crate::util::uuid4);
         let plugins = &self.tools.pool.plugins;
         Ok(Spec {
             name: self.cfg.name.clone(),
@@ -590,6 +613,7 @@ impl Dispatcher {
                 state: self.state.clone(),
                 calls: calls.clone(),
             });
+            let before = self.saved_session().map(|(_, id)| id);
             let session = match self.spec(handler) {
                 Ok(spec) => harness::connect(spec).await,
                 Err(e) => Err(e),
@@ -597,7 +621,9 @@ impl Dispatcher {
             let why = match session {
                 Ok(mut session) => {
                     // An ACP agent names its sessions itself.
-                    let _ = std::fs::write(self.state.join("session_id"), format!("{}\n", session.session_id()));
+                    let id = session.session_id();
+                    save_json(&self.state.join("session.json"), &json!({"harness": self.cfg.harness, "session": id}));
+                    t.rolled(before.is_some_and(|b| b != id));
                     // Its plugins run under this process: their session token is good only from there.
                     self.tools.pool.plugins.root("seimei", None, session.pid());
                     t.set(Some(true), None);
@@ -720,6 +746,10 @@ struct Turns {
     /// What the harness itself put in since the last model step (a background task ending, a peer's message), named for an event turn that has no input of seimei's.
     own: Option<String>,
     rate_limits: std::collections::HashMap<String, Value>,
+    /// A new session replaced one that could not be resumed: the next message carries the handoff.
+    seed: bool,
+    /// The handoff turn that runs, its replies so far and who waits for it.
+    handoff: Option<(oneshot::Sender<()>, String)>,
 }
 
 /// What the session loop does after a message was handled.
@@ -749,7 +779,63 @@ impl Turns {
             class: Class::Noise,
             own: None,
             rate_limits: Default::default(),
+            seed: false,
+            handoff: None,
         }
+    }
+
+    /// A session connected: when it is new in place of one that could not be resumed, its first message is seeded with the handoff and the After compaction block.
+    fn rolled(&mut self, new: bool) {
+        // A handoff turn the last session did not finish: its waiter hears back now.
+        self.handoff = None;
+        let handoff = self.d.state.join("handoff.md");
+        if !new {
+            let _ = std::fs::remove_file(&handoff);
+            return;
+        }
+        self.seed = true;
+        let _ = std::fs::write(self.d.state.join("compacted"), "");
+        let from = if handoff.exists() { "its handoff and notes" } else { "its notes" };
+        let text = format!("A new session started: the last one could not be resumed, so it goes on from {from}.");
+        self.events.add(json!({"type": "system", "text": text}));
+        // A message that came while it connected is its first.
+        if !self.pending.is_empty() {
+            let first = std::mem::take(&mut self.pending[0].text);
+            self.pending[0].text = self.restore(first);
+        }
+    }
+
+    /// A planned restart on a harness that cannot resume: a turn of its own asks for the Must survive section.
+    fn ask_handoff(&mut self, tx: oneshot::Sender<()>, h: &mut dyn Harness) -> Result<(), String> {
+        if h.resumes() || self.busy || !self.connected {
+            return Ok(());
+        }
+        let text = "Writing a handoff: this harness cannot resume the session after the restart.";
+        self.events.add(json!({"type": "system", "lane": "t", "handoff": "start", "text": text}));
+        self.handoff = Some((tx, String::new()));
+        let ask = format!(
+            "[seimei] seimei restarts now, and this harness cannot resume your session. The next session starts from your \
+             reply to this message, with your notes and the After compaction block. Reply with only the \
+             \"## Must survive\" section this checklist asks for:\n\n{CHECKLIST}"
+        );
+        let src = Some(Source::Event("seimei restarts".into(), Class::Noise));
+        match self.deliver(ask, vec![], src) {
+            Some(c) => h.send(&c.text, &c.images),
+            None => Ok(()),
+        }
+    }
+
+    /// The handoff turn ended: what it said is handoff.md.
+    fn handed_off(&mut self) {
+        let Some((tx, said)) = self.handoff.take() else { return };
+        let text = if said.trim().is_empty() {
+            "The handoff turn said nothing; the next session goes on from the notes."
+        } else {
+            let _ = std::fs::write(self.d.state.join("handoff.md"), said.trim());
+            "Handoff written."
+        };
+        self.events.add(json!({"type": "system", "lane": "t", "handoff": "done", "text": text}));
+        let _ = tx.send(());
     }
 
     fn set(&mut self, connected: Option<bool>, busy: Option<bool>) {
@@ -781,6 +867,11 @@ impl Turns {
                             if let Err(e) = h.interrupt().await {
                                 eprintln!("seimei: interrupt: {e}");
                             }
+                        }
+                    }
+                    Some(Cmd::Handoff(tx)) => {
+                        if let Err(e) = self.ask_handoff(tx, h) {
+                            return e;
                         }
                     }
                     Some(cmd) => {
@@ -849,7 +940,8 @@ impl Turns {
                 }
                 None
             }
-            Cmd::Interrupt => None,
+            // No session to hand off.
+            Cmd::Interrupt | Cmd::Handoff(_) => None,
             Cmd::RateLimit(info, from, session) => {
                 self.rate_limit(&info, &from, &session);
                 None
@@ -877,14 +969,7 @@ impl Turns {
         {
             text = if text.is_empty() { drift } else { format!("{drift}\n\n{text}") };
         }
-        // The first message after a compaction puts back what the summary may have lost.
-        let compacted = self.d.state.join("compacted");
-        if compacted.exists() {
-            let _ = std::fs::remove_file(&compacted);
-            let state = self.d.recall.get().and_then(|f| f()).unwrap_or_default();
-            let back = crate::recall::block(&self.d.notes_path(), &self.events.before(None, 3000), &state);
-            text = if text.is_empty() { back } else { format!("{back}\n\n{text}") };
-        }
+        text = self.restore(text);
         // The user's style reminder rides on every message; the event log already has what the user saw.
         text = crate::style::with(&text, &crate::style::text(&self.d.state));
         if !images.is_empty() && text.is_empty() {
@@ -902,6 +987,26 @@ impl Turns {
             self.pending.push(content);
             None
         }
+    }
+
+    /// The first message after a compaction puts back what the summary may have lost.
+    /// A new session in place of one that could not be resumed gets what the last one handed off first.
+    fn restore(&mut self, mut text: String) -> String {
+        let compacted = self.d.state.join("compacted");
+        if compacted.exists() {
+            let _ = std::fs::remove_file(&compacted);
+            let state = self.d.recall.get().and_then(|f| f()).unwrap_or_default();
+            let back = crate::recall::block(&self.d.notes_path(), &self.events.before(None, 3000), &state);
+            text = if text.is_empty() { back } else { format!("{back}\n\n{text}") };
+        }
+        let handoff = self.d.state.join("handoff.md");
+        if std::mem::take(&mut self.seed)
+            && let Ok(h) = std::fs::read_to_string(&handoff)
+        {
+            let _ = std::fs::remove_file(&handoff);
+            text = format!("[seimei] Your last session's handoff, written before the restart:\n{h}\n\n{text}");
+        }
+        text
     }
 
     /// Idle with a big context and a warm cache: compact now.
@@ -945,7 +1050,13 @@ impl Turns {
                 self.route_held(false);
                 self.events.flash(json!({"type": "thinking"}));
             }
-            Ev::Reply(text) => self.reply(&text),
+            Ev::Reply(text) => {
+                if let Some((_, said)) = &mut self.handoff {
+                    said.push_str(&text);
+                    said.push('\n');
+                }
+                self.reply(&text)
+            }
             Ev::Tool { id, name, input, agent } => {
                 let session = self.d.session_id().unwrap_or_default();
                 let call = Call {
@@ -977,7 +1088,10 @@ impl Turns {
                 let session = self.d.session_id().unwrap_or_default();
                 self.rate_limit(&info, "seimei", &session)
             }
-            Ev::End(failed) => return self.end(failed),
+            Ev::End(failed) => {
+                self.handed_off();
+                return self.end(failed);
+            }
         }
         After::Nothing
     }

@@ -86,6 +86,8 @@ pub trait Harness: Send {
     fn pid(&self) -> Option<u32>;
     /// The session's id, which a restart resumes.
     fn session_id(&self) -> String;
+    /// A restart can open this session again; when not, a planned one asks for a handoff first.
+    fn resumes(&self) -> bool;
     /// A message; one sent mid-turn joins the running turn. images: (media type, base64 data).
     fn send(&mut self, text: &str, images: &[(String, String)]) -> Result<(), String>;
     /// The next event; None when the agent is gone.

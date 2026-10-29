@@ -320,6 +320,12 @@ impl Client {
         self.prompt(vec![json!({"type": "text", "text": text})])
     }
 
+    /// Whether the session can be opened again after a restart: Codex threads resume, an ACP agent says whether it loads or resumes.
+    pub fn resumes(&self) -> bool {
+        let caps = &self.init["agentCapabilities"];
+        self.codex.is_some() || caps["loadSession"] == json!(true) || caps["sessionCapabilities"]["resume"].is_object()
+    }
+
     /// Whether a prompt may carry image blocks: an ACP agent that says so.
     pub fn takes_images(&self) -> bool {
         self.codex.is_none() && self.init["agentCapabilities"]["promptCapabilities"]["image"] == json!(true)

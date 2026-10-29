@@ -131,12 +131,27 @@ if [ -z "${SEIMEI_DEPLOY_TEST:-}" ]; then
     [ -z "$systemd" ] || systemctl --user reenable seimei.service seimei-tunnel.service 2>/dev/null
 fi
 
-# Wait up to 5 minutes for 20 quiet seconds and no open Approve/Deny card, so no turn or held call is cut off.
+# Wait up to 5 minutes for 20 quiet seconds, no open Approve/Deny card and no handoff being written, so no turn or held call is cut off.
+# USR2 first: a dispatcher session its harness cannot resume writes a handoff for the next one.
 step=wait
 status running wait
-python3 - "$state/events.jsonl" <<'PY'
-import json, sys, time
-log = sys.argv[1]
+python3 - "$state/events.jsonl" "${XDG_CONFIG_HOME:-$HOME/.config}/seimei/config.toml" <<'PY'
+import json, os, re, signal, subprocess, sys, time, tomllib
+log, cfg = sys.argv[1:3]
+try:
+    port = int(tomllib.load(open(cfg, "rb")).get("server", {}).get("port", 8417))
+except (OSError, ValueError):
+    port = 8417
+held = re.search(r"pid=(\d+)", subprocess.run(["ss", "-ltnpH", f"sport = :{port}"], capture_output=True, text=True).stdout)
+try:
+    pid = int(held[1]) if held else 0
+    caught = re.search(r"^SigCgt:\s*([0-9a-f]+)", open(f"/proc/{pid}/status").read(), re.M) if pid else None
+    # Only a server that catches USR2: an older one would die of it.
+    if caught and int(caught[1], 16) >> (signal.SIGUSR2 - 1) & 1:
+        os.kill(pid, signal.SIGUSR2)
+        time.sleep(2)
+except OSError:
+    pass
 for _ in range(60):
     try:
         with open(log, "rb") as f:
@@ -148,7 +163,9 @@ for _ in range(60):
         break
     done = {e["aid"] for e in tail if e["type"] == "approval_done"}
     open_cards = [e for e in tail if e["type"] == "approval" and e["aid"] not in done]
-    if time.time() - last["t"] > 20 and not open_cards:
+    handoffs = [e["handoff"] for e in tail if e.get("handoff")]
+    writing = bool(handoffs) and handoffs[-1] == "start"
+    if time.time() - last["t"] > 20 and not open_cards and not writing:
         break
     time.sleep(5)
 PY

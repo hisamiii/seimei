@@ -160,6 +160,10 @@ impl Harness for Session {
         self.client.session_id.clone()
     }
 
+    fn resumes(&self) -> bool {
+        self.client.resumes()
+    }
+
     fn send(&mut self, text: &str, images: &[(String, String)]) -> Result<(), String> {
         if self.turn {
             self.waiting.push((text.to_string(), images.to_vec()));

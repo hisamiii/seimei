@@ -106,7 +106,7 @@ An install from a release updates with `seimei update`, see [install.md](install
 1. Run detached, so the restart it ends with cannot cut it off.
 2. Check out the commit in the production checkout.
 3. Build the server there with `cargo build --release`, in its own `target/`.
-4. Wait until no card is open and the dispatcher is idle.
+4. Send the server USR2, so a dispatcher session its harness cannot resume writes a handoff. Then wait until no card is open, no handoff is being written and the dispatcher is idle.
 5. Rename the build to `bin/seimei` and restart the service.
 
 The result goes to `deploy/last.json`, which seimei hands to whoever it resumes. Under systemd the script runs as its own transient unit. When PID 1 is not systemd, as with OpenRC, it runs in its own session under init.

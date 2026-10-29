@@ -55,6 +55,12 @@ pub(crate) fn app_on(state: &Path, work: &Path, keys: &str) -> seimei_server::Ap
     .unwrap()
 }
 
+/// session.json: the harness of the last session and its id.
+pub(crate) fn saved(state: &Path) -> (String, String) {
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(state.join("session.json")).unwrap()).unwrap();
+    (v["harness"].as_str().unwrap().into(), v["session"].as_str().unwrap().into())
+}
+
 pub(crate) fn after(app: &seimei_server::App, from: i64) -> Vec<Value> {
     app.events.after(from).iter().map(|e| (**e).clone()).collect()
 }
@@ -106,7 +112,8 @@ async fn run(base: PathBuf, state: PathBuf, work: PathBuf, agent: PathBuf) {
     let reply = evs.iter().find(|e| e["type"] == "assistant").unwrap();
     assert!(reply["text"].as_str().unwrap().starts_with("Echo: hello there"), "{reply}");
     assert_eq!((&reply["lane"], &reply["re"]), (&json!("c"), &asked["id"]));
-    let sid = std::fs::read_to_string(state.join("session_id")).unwrap().trim().to_string();
+    let (harness, sid) = saved(&state);
+    assert_eq!(harness, "claude"); // lint: allow scoped-name
     assert!(heard(&log)[0].starts_with("hello there"));
 
     // A tool call: its row, its result and its audit line.
@@ -186,17 +193,19 @@ async fn run(base: PathBuf, state: PathBuf, work: PathBuf, agent: PathBuf) {
     turn(&first, "and once more").await;
     assert!(heard(&log).last().unwrap().starts_with("and once more"));
 
-    // A restart resumes the same conversation.
+    // A restart resumes the same conversation, also from an older state's session_id file.
     task.abort();
     let _ = task.await;
     drop(first);
+    std::fs::remove_file(state.join("session.json")).unwrap();
+    std::fs::write(state.join("session_id"), format!("{sid}\n")).unwrap();
     let second = app(&state, &work);
     let task = tokio::spawn(second.dispatcher.clone().run());
     let evs = turn(&second, "back again").await;
     assert!(
         evs.iter().any(|e| e["type"] == "assistant" && e["text"].as_str().unwrap().starts_with("Echo: back again"))
     );
-    assert_eq!(std::fs::read_to_string(state.join("session_id")).unwrap().trim(), sid);
+    assert_eq!(saved(&state).1, sid);
     let resumes = std::fs::read_to_string(agent.join("resumes.log")).unwrap();
     assert_eq!(
         resumes.lines().map(|l| serde_json::from_str::<Value>(l).unwrap()["sid"].clone()).collect::<Vec<_>>(),

@@ -136,7 +136,7 @@ pub fn run(check: bool, state: &Path) {
 }
 
 /// The server's side: once `seimei update` left its marker and no turn runs (seimei's or a shikigami's), it exits with 75 so systemd (Restart=on-failure) starts the new binary.
-pub async fn restart_when_idle(state: PathBuf, idle: impl Fn() -> bool, before: impl Fn(&str)) {
+pub async fn restart_when_idle(state: PathBuf, idle: impl Fn() -> bool, before: impl AsyncFn(&str)) {
     let marker = state.join(MARKER);
     loop {
         tokio::time::sleep(Duration::from_secs(20)).await;
@@ -146,7 +146,7 @@ pub async fn restart_when_idle(state: PathBuf, idle: impl Fn() -> bool, before: 
         let version = std::fs::read_to_string(&marker).unwrap_or_default();
         let _ = std::fs::remove_file(&marker);
         eprintln!("seimei: restarting on the updated binary ({})", version.trim());
-        before(version.trim());
+        before(version.trim()).await;
         tokio::time::sleep(Duration::from_secs(1)).await;
         std::process::exit(75);
     }
