@@ -85,6 +85,8 @@ pub struct Options {
     pub mcp_servers: Vec<McpServer>,
     /// Go on with this session (session/load) instead of a new one.
     pub load: Option<String>,
+    /// Codex's developer instructions for the thread; an ACP agent has no place for them.
+    pub instructions: Option<String>,
 }
 
 /// A tool call as the agent reports it; an update carries only what changed (empty strings, None, no content).
@@ -139,6 +141,12 @@ pub enum Update {
     /// The whole plan, each time it changes.
     Plan(Vec<PlanEntry>),
     Mode(String),
+    /// Codex compacted the thread's context.
+    Compacted,
+    /// Codex's token use of the thread (its ThreadTokenUsage: total, last, modelContextWindow).
+    Usage(Value),
+    /// Codex's rate-limit windows for its account (a RateLimitSnapshot: primary, secondary, ...).
+    RateLimits(Value),
     /// Anything else (commands, usage, session info), as sent.
     Other(Value),
 }
@@ -174,11 +182,25 @@ pub enum Outcome {
     Cancelled,
 }
 
+/// A question the agent puts to the user (Codex's requestUserInput), with its options as (label, description).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Question {
+    pub id: String,
+    pub header: String,
+    pub question: String,
+    pub options: Vec<(String, String)>,
+}
+
 /// What the agent asks of the session's owner.
 /// Each request runs on its own task; a cancel drops it and answers cancelled.
 pub trait Handler: Send + Sync + 'static {
     fn permission(&self, _req: PermissionRequest) -> BoxFuture<Outcome> {
         Box::pin(async { Outcome::Cancelled })
+    }
+
+    /// The answers by question id; one left out is not answered.
+    fn questions(&self, _qs: Vec<Question>) -> BoxFuture<HashMap<String, Vec<String>>> {
+        Box::pin(async { HashMap::new() })
     }
 }
 

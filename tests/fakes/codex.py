@@ -17,7 +17,7 @@ LOG = os.environ.get("FAKE_CODEX_LOG")
 
 out_lock = threading.Lock()
 waiting: dict = {}  # id of a request to the client -> queue for its answer
-threads: dict = {}  # id -> {"cwd", "mcp"}
+threads: dict = {}  # id -> {"cwd", "mcp", "turns"}
 interrupted: set = set()  # turn ids
 next_id = [0]
 initialized = [False]
@@ -144,6 +144,22 @@ def play(t: Turn, text: str) -> tuple:
     elif cmd == "!crash":
         t.message("Going down.")
         os._exit(3)
+    elif cmd == "!compact":
+        iid = t.item_id()
+        note("item/started", t.p(item={"type": "contextCompaction", "id": iid}, startedAtMs=0))
+        note("item/completed", t.p(item={"type": "contextCompaction", "id": iid}, completedAtMs=0))
+        t.message("Compacted.")
+    elif cmd == "!limits":
+        note("account/rateLimits/updated", {"rateLimits": {
+            "limitId": "codex", "limitName": None, "planType": None, "credits": None, "rateLimitReachedType": None,
+            "primary": {"usedPercent": 42, "windowDurationMins": 300, "resetsAt": 1800000000},
+            "secondary": {"usedPercent": 7, "windowDurationMins": 10080, "resetsAt": 1800500000}}})
+        t.message("Limits sent.")
+    elif cmd == "!question":
+        r = ask("item/tool/requestUserInput", t.p(itemId="q1", isBlocking=True, questions=[
+            {"id": "color", "header": "Color", "question": "Blue or green?", "isOther": False, "isSecret": False,
+             "options": [{"label": "Blue", "description": "calm"}, {"label": "Green", "description": "fresh"}]}]))
+        t.message(json.dumps(r.get("result")), deltas=False)
     elif cmd == "!ask":
         a = ask("item/permissions/requestApproval", t.p(itemId="p1", environmentId=None, startedAtMs=0,
                                                          cwd=threads[t.thread]["cwd"], reason=None,
@@ -163,9 +179,19 @@ def turn_obj(tid: str, status: str, error=None) -> dict:
             "startedAt": None, "completedAt": None, "durationMs": None}
 
 
+def usage(t: Turn):
+    """The thread's token use so far: each turn adds 100 input tokens (40 of them cached) and 10 output."""
+    n = threads[t.thread]["turns"] = threads[t.thread].get("turns", 0) + 1
+    each = {"inputTokens": 100, "cachedInputTokens": 40, "outputTokens": 10, "reasoningOutputTokens": 0,
+            "totalTokens": 110}
+    note("thread/tokenUsage/updated", t.p(tokenUsage={
+        "total": {k: v * n for k, v in each.items()}, "last": each, "modelContextWindow": 200000}))
+
+
 def run_turn(t: Turn, text: str):
     note("turn/started", {"threadId": t.thread, "turn": turn_obj(t.id, "inProgress")})
     status, error = play(t, text)
+    usage(t)
     note("turn/completed", {"threadId": t.thread, "turn": turn_obj(t.id, status, error)})
 
 

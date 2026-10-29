@@ -1,6 +1,6 @@
-//! The dispatcher's session on an ACP agent or `codex app-server`: one prompt at a time, the system prompt in a new session's first one, and the agent's updates as [`Ev`]s.
+//! The dispatcher's session on an ACP agent or `codex app-server`: one prompt at a time, the system prompt in a new session's first one (Codex: its developer instructions), and the agent's updates as [`Ev`]s.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use seimei_proto::acp::{self, Event, Update};
@@ -22,6 +22,9 @@ pub struct Session {
     /// The reply so far, whole once something else comes.
     reply: String,
     thinking: bool,
+    /// Codex's latest token use of the thread, for the turn's end, and the model it runs.
+    usage: Option<Value>,
+    model: String,
 }
 
 impl Session {
@@ -40,6 +43,8 @@ impl Session {
             env_remove: vec![],
             mcp_servers: acp_servers(servers),
             load: (!spec.fresh).then(|| spec.session.clone()),
+            // Codex takes the system prompt as the thread's developer instructions, on a resumed thread too.
+            instructions: (a.protocol == "codex").then(|| spec.prompt.clone()),
         };
         let side = || -> Arc<dyn acp::Handler> { Arc::new(Side { seimei: spec.handler.clone(), own: own(&spec) }) };
         let open = async |opts: &acp::Options| match a.protocol.as_str() {
@@ -57,7 +62,8 @@ impl Session {
         };
         // A loaded session replays its history, which the event log has already.
         client.drain();
-        let prompt = opts.load.is_none().then_some(spec.prompt);
+        let prompt = (opts.load.is_none() && opts.instructions.is_none()).then_some(spec.prompt);
+        let model = client.session["model"].as_str().unwrap_or("codex").to_string();
         Ok(Session {
             client,
             queue: VecDeque::new(),
@@ -66,6 +72,8 @@ impl Session {
             waiting: vec![],
             reply: String::new(),
             thinking: false,
+            usage: None,
+            model,
         })
     }
 
@@ -125,10 +133,20 @@ impl Session {
                 let error = t.status == "failed";
                 self.queue.push_back(Ev::Result { id: t.id, text: t.content.join("\n"), error });
             }
+            Event::Update(Update::Compacted) => {
+                self.said();
+                self.queue.push_back(Ev::Compacted);
+            }
+            Event::Update(Update::Usage(u)) => self.usage = Some(u),
+            Event::Update(Update::RateLimits(snap)) => self.queue.extend(windows(&snap).into_iter().map(Ev::RateLimit)),
             Event::Update(_) => {}
             Event::TurnEnd(end) => {
                 self.said();
                 self.turn = false;
+                if let Some(u) = self.usage.take() {
+                    let session = self.client.session_id.clone();
+                    self.queue.push_back(Ev::Usage(session, Some(model_usage(&u, &self.model))));
+                }
                 let failed = match end {
                     Ok(r) if r == "end_turn" => None,
                     Ok(r) | Err(r) => Some(r),
@@ -204,6 +222,37 @@ impl Harness for Session {
     }
 }
 
+/// Codex's token use as the default harness counts it per model: the thread's totals, cache reads apart from the input.
+fn model_usage(u: &Value, model: &str) -> Value {
+    let t = &u["total"];
+    let n = |k: &str| t[k].as_i64().unwrap_or(0);
+    json!({model: {
+        "inputTokens": n("inputTokens") - n("cachedInputTokens"),
+        "outputTokens": n("outputTokens"),
+        "cacheReadInputTokens": n("cachedInputTokens"),
+        "cacheCreationInputTokens": n("cacheWriteInputTokens"),
+    }})
+}
+
+/// Codex's rate-limit windows as the default harness's rate-limit events, named apart from that account's windows.
+fn windows(snap: &Value) -> Vec<Value> {
+    let reached = !snap["rateLimitReachedType"].is_null();
+    (["primary", "secondary"].iter().map(|k| &snap[*k]))
+        .filter(|w| w["usedPercent"].is_number())
+        .map(|w| {
+            let used = w["usedPercent"].as_f64().unwrap_or(0.0);
+            let name = match w["windowDurationMins"].as_i64() {
+                Some(300) => "Codex 5-hour".to_string(),
+                Some(10080) => "Codex weekly".to_string(),
+                Some(m) => format!("Codex {m}-minute"),
+                None => "Codex".to_string(),
+            };
+            let status = if reached && used >= 100.0 { "rejected" } else { "allowed" };
+            json!({"rateLimitType": name, "status": status, "utilization": used / 100.0, "resetsAt": w["resetsAt"]})
+        })
+        .collect()
+}
+
 /// The tools that never ask: seimei's own and the plugins'.
 fn own(spec: &Spec) -> Vec<String> {
     [vec!["mcp__seimei".into()], spec.allowed_tools.clone()].concat()
@@ -240,6 +289,30 @@ impl acp::Handler for Side {
                 Permission::Allow { .. } => acp::Outcome::Selected(allow),
                 Permission::Deny { .. } => reject,
             }
+        })
+    }
+
+    /// Codex's questions as the question cards AskUserQuestion raises; a skipped one gets no answer.
+    fn questions(&self, qs: Vec<acp::Question>) -> BoxFuture<HashMap<String, Vec<String>>> {
+        let seimei = self.seimei.clone();
+        Box::pin(async move {
+            if qs.is_empty() {
+                return HashMap::new();
+            }
+            let asked: Vec<Value> = (qs.iter())
+                .map(|q| {
+                    let options: Vec<Value> =
+                        q.options.iter().map(|(l, d)| json!({"label": l, "description": d})).collect();
+                    json!({"question": q.question, "header": q.header, "options": options})
+                })
+                .collect();
+            let Permission::Allow { updated_input: Some(got), .. } = seimei.ask(&json!({"questions": asked})).await
+            else {
+                return HashMap::new();
+            };
+            (qs.into_iter())
+                .filter_map(|q| Some((q.id, vec![got["answers"][&q.question].as_str()?.to_string()])))
+                .collect()
         })
     }
 }

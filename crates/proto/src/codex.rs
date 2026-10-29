@@ -1,7 +1,7 @@
 //! A client for `codex app-server` (Codex's JSON-RPC over stdio), driven through the same [`Client`], [`Event`]s and [`Handler`] as an ACP agent.
-//! The thread's id is the session id; `thread/resume` replays nothing.
-//! Command and file change approvals (approval policy untrusted) go to the handler as permission requests with an accept and a decline option.
-//! The MCP servers seimei grants go into the thread's config as approved: seimei granted them already.
+//! The thread's id is the session id; `thread/resume` replays nothing. Its methods are checked against `codex app-server generate-json-schema` of Codex 0.163.0, the tested version.
+//! Command and file change approvals (approval policy untrusted) go to the handler as permission requests with an accept and a decline option, and questions (requestUserInput) go there too.
+//! The MCP servers seimei grants go into the thread's config as approved: seimei granted them already. Compaction items, token use and rate limits come out as updates.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -12,8 +12,8 @@ use tokio::process::ChildStdout;
 use tokio::sync::mpsc;
 
 use crate::acp::{
-    Client, Error, Event, Handler, Options, Outcome, PermissionOption, PermissionRequest, PlanEntry, Rpc, ToolCall,
-    Update, Waiter, error_text, s,
+    Client, Error, Event, Handler, Options, Outcome, PermissionOption, PermissionRequest, PlanEntry, Question, Rpc,
+    ToolCall, Update, Waiter, error_text, s,
 };
 use crate::client::{Line, read_line};
 
@@ -108,6 +108,9 @@ async fn open(c: &mut Client, opts: &Options, turn: &Turn) -> Result<(), Error> 
         config.insert(format!("mcp_servers.{}", m.name), server);
     }
     let mut params = json!({"cwd": opts.cwd, "approvalPolicy": "untrusted", "config": config});
+    if let Some(i) = &opts.instructions {
+        params["developerInstructions"] = json!(i);
+    }
     let mut r = match &opts.load {
         Some(id) => {
             params["threadId"] = json!(id);
@@ -265,7 +268,9 @@ async fn read(
                     }
                     (Some("item/completed"), None) => {
                         let item = &p["item"];
-                        if item["type"] == "agentMessage" {
+                        if item["type"] == "contextCompaction" {
+                            up(Update::Compacted);
+                        } else if item["type"] == "agentMessage" {
                             let id = s(&item["id"]);
                             let text = s(&item["text"]);
                             if !it.streamed.contains(&id) && !text.is_empty() {
@@ -296,6 +301,8 @@ async fn read(
                     }
                     (Some("turn/started"), None) => turn.known(&rpc, &s(&p["turn"]["id"])),
                     (Some("turn/plan/updated"), None) => up(Update::Plan(plan(p))),
+                    (Some("thread/tokenUsage/updated"), None) => up(Update::Usage(p["tokenUsage"].clone())),
+                    (Some("account/rateLimits/updated"), None) => up(Update::RateLimits(p["rateLimits"].clone())),
                     (Some("turn/completed"), None) => {
                         let ended = &p["turn"];
                         let end = match ended["status"].as_str() {
@@ -349,8 +356,8 @@ async fn read(
     }
 }
 
-/// A request from Codex: approvals go to the handler on a task of their own, which a cancel aborts (and answers).
-/// What seimei does not grant through Codex (more permissions, user input, MCP elicitations) is turned down; anything else is not served.
+/// A request from Codex: approvals and questions go to the handler on a task of their own, which a cancel aborts (and answers).
+/// What seimei does not grant through Codex (more permissions, MCP elicitations) is turned down; anything else is not served.
 fn request(
     method: &str,
     id: Value,
@@ -395,7 +402,7 @@ fn request(
             }
         }
         "item/permissions/requestApproval" => return answer(json!({"permissions": {}, "scope": "turn"})),
-        "item/tool/requestUserInput" => return answer(json!({"answers": {}})),
+        "item/tool/requestUserInput" => return questions(id, p, handler, rpc),
         "mcpServer/elicitation/request" => return answer(json!({"action": "decline", "content": null, "_meta": null})),
         _ => {
             let err = json!({"code": -32601, "message": format!("Method not found: {method}")});
@@ -433,4 +440,30 @@ fn request(
         let _ = sh.send(json!({"jsonrpc": "2.0", "id": id2, "result": {"decision": decision}}));
     });
     slot.insert(key, (id, task.abort_handle(), json!({"decision": "cancel"})));
+}
+
+/// requestUserInput: the handler's answers by question id, each as {"answers": [...]}.
+fn questions(id: Value, p: &Value, handler: &Arc<dyn Handler>, rpc: &Arc<Rpc>) {
+    let qs: Vec<Question> = (p["questions"].as_array().into_iter().flatten())
+        .map(|q| Question {
+            id: s(&q["id"]),
+            header: s(&q["header"]),
+            question: s(&q["question"]),
+            options: (q["options"].as_array().into_iter().flatten())
+                .map(|o| (s(&o["label"]), s(&o["description"])))
+                .collect(),
+        })
+        .collect();
+    let key = id.to_string();
+    let (h, sh, id2, key2) = (handler.clone(), rpc.clone(), id.clone(), key.clone());
+    let mut slot = rpc.inflight.lock().unwrap();
+    let task = tokio::spawn(async move {
+        let got = h.questions(qs).await;
+        if sh.inflight.lock().unwrap().remove(&key2).is_none() {
+            return;
+        }
+        let answers: Map<String, Value> = got.into_iter().map(|(k, v)| (k, json!({"answers": v}))).collect();
+        let _ = sh.send(json!({"jsonrpc": "2.0", "id": id2, "result": {"answers": answers}}));
+    });
+    slot.insert(key, (id, task.abort_handle(), json!({"answers": {}})));
 }

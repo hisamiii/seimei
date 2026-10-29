@@ -678,6 +678,11 @@ impl Seimei {
         &self.mode
     }
 
+    /// Question cards for AskUserQuestion's input: the answers, as AskUserQuestion's own.
+    pub async fn ask(&self, input: &Value) -> Permission {
+        crate::permissions::ask(&self.approvals, "seimei", input).await.permission
+    }
+
     /// A card for a call the mode left open, as for an ACP shikigami: the mode was applied already.
     pub async fn card(&self, req: &PermissionRequest) -> Permission {
         crate::permissions::can_use(&self.approvals, "seimei", None, req, &self.mode, "default", None).await.permission

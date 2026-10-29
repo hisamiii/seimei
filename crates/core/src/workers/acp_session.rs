@@ -29,6 +29,7 @@ impl Session {
             env_remove: vec![],
             mcp_servers: mcp,
             load: started.then(|| r.session_id.clone()),
+            instructions: None,
         };
         let handler: Arc<dyn acp::Handler> = Arc::new(AcpSide { w: self.w.clone() });
         let c = match a.protocol.as_str() {
@@ -90,6 +91,8 @@ impl Session {
             }
             // Its thinking stays out of the log, as the default harness's does.
             Event::Update(Update::Thought(_)) => {}
+            // Codex's own bookkeeping: no break in what it says.
+            Event::Update(Update::Usage(_) | Update::RateLimits(_) | Update::Compacted) => {}
             Event::Update(u) => {
                 self.said();
                 self.message.clear();

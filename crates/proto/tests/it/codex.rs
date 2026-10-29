@@ -76,6 +76,8 @@ async fn turn(c: &mut Client) -> (Vec<Update>, Result<String, String>) {
                 Some(Update::Text(prev)) => prev.push_str(&t),
                 _ => ups.push(Update::Text(t)),
             },
+            // Every turn ends with the thread's token use; the dispatcher's test checks it.
+            Some(Event::Update(Update::Usage(_))) => {}
             Some(Event::Update(u)) => ups.push(u),
             Some(Event::TurnEnd(end)) => return (ups, end),
             Some(Event::Unreadable(l)) => panic!("unreadable: {l}"),
