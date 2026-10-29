@@ -12,6 +12,7 @@ pub mod deploys;
 pub mod dispatcher;
 pub mod events;
 pub mod files;
+pub mod harness;
 pub mod metrics;
 pub mod paths;
 pub mod permissions;

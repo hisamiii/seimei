@@ -9,7 +9,7 @@ exclude = ["android/gradlew", "android/gradlew.bat", ".lint.toml"]
 # Harness and terminal names live in their own adapter, its fakes and the docs; generic code says agent, harness or terminal.
 [scoped]
 claude = [
-    "crates/core/src/workers/claude.rs", "crates/proto", "tests/fakes/claude.py", "tests/live.sh", "tests/qa/start.sh",
+    "crates/core/src/workers/claude.rs", "crates/core/src/harness/claude.rs", "crates/proto", "tests/fakes/claude.py", "tests/live.sh", "tests/qa/start.sh",
     "plugins/queue", "contrib/maintainer", "config.example.toml",
     "docs/**", "*.md", "CLAUDE.md", ".lint.toml",
 ]

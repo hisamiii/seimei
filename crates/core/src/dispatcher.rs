@@ -1,7 +1,7 @@
 //! The permanent dispatcher session: one agent conversation that survives restarts.
 //!
 //! One task owns the session and everything about its turns (`Turns`); the server and the rest reach it through a command channel.
-//! Permission prompts, the harness's hooks and seimei's own tools come in on the client's handler, on tasks of their own.
+//! It reads the session through the [`Harness`] trait; permission prompts, the harness's hooks and seimei's own tools come in on the handler, on tasks of their own.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -9,10 +9,7 @@ use std::sync::{Arc, LazyLock, OnceLock};
 use std::time::Duration;
 
 use regex::Regex;
-use seimei_proto::{
-    AssistantMessage, BoxFuture, Client, ContentBlock, Handler, Message, Options, Permission, PermissionRequest,
-    ResultMessage, StreamEvent, SystemPrompt, UserContent, UserMessage,
-};
+use seimei_proto::{BoxFuture, Handler, Permission, PermissionRequest};
 use serde_json::{Map, Value, json};
 use tokio::sync::mpsc;
 use tokio::time::{Instant, sleep_until};
@@ -20,11 +17,11 @@ use tokio::time::{Instant, sleep_until};
 use crate::approvals::Approvals;
 use crate::audit::{Audit, Call};
 use crate::events::EventLog;
+use crate::harness::{self, Ev, Harness, Spec};
 use crate::paths::expand;
 use crate::tools::Tools;
 use crate::usage::Usage;
 use crate::util::chars;
-use crate::workers::harness;
 
 /// A reply that starts with one of these overrides where its turn's class puts it: chat: moves the rest of an event turn to the chat, trajectory: keeps a reply out of the chat (one that asks something, or answers events that need the user, still goes there).
 /// A first line "re: <words from one of the user's messages>" anchors the reply to that message.
@@ -90,7 +87,7 @@ fn asks(text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{asks, own_input};
+    use super::asks;
 
     #[test]
     fn a_question_in_the_last_paragraph_asks() {
@@ -98,16 +95,6 @@ mod tests {
         assert!(asks("Built it.\n\nShould I deploy, or wait for the review? Either works."));
         assert!(!asks("Why did it fail? The cache was stale.\n\nFixed and deployed."));
         assert!(!asks("Noted."));
-    }
-
-    #[test]
-    fn the_harness_inputs_are_named() {
-        let bg = "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>";
-        assert_eq!(own_input(bg).as_deref(), Some("a background task ended"));
-        let peer = "<cross-session-message from=\"cleanup\">hi</cross-session-message>";
-        assert_eq!(own_input(peer).as_deref(), Some("a message from cleanup"));
-        assert_eq!(own_input("[Cross-session delivery notice] held").as_deref(), Some("a delivery notice"));
-        assert_eq!(own_input("just text"), None);
     }
 }
 
@@ -131,20 +118,6 @@ pub fn why(text: &str) -> String {
         })
         .collect();
     chars(&parts.join(", "), 80)
-}
-
-/// What the harness put in a turn by itself, named for the chat's mention of what started it.
-fn own_input(text: &str) -> Option<String> {
-    static FROM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"<cross-session-message from="([^"]*)""#).unwrap());
-    if text.contains("<task-notification>") {
-        Some("a background task ended".into())
-    } else if let Some(c) = FROM.captures(text) {
-        Some(format!("a message from {}", &c[1]))
-    } else if text.contains("Cross-session delivery notice") {
-        Some("a delivery notice".into())
-    } else {
-        None
-    }
 }
 
 /// A message of seimei's or a card the user replies to: (the chip's text, the line seimei gets), or empty strings for anything else.
@@ -226,11 +199,10 @@ pub fn result_text(content: &Value) -> String {
     if text.chars().count() <= RESULT_CHARS { text } else { format!("{}\n[...]", chars(&text, RESULT_CHARS)) }
 }
 
-/// A message for the session: text, or content blocks (photos with their text).
-#[derive(Clone)]
-enum Content {
-    Text(String),
-    Blocks(Value),
+/// A message for the session: its text and photos, as (media type, base64 data).
+struct Content {
+    text: String,
+    images: Vec<(String, String)>,
 }
 
 /// What started a turn: the user's message (its event id) or events (what to call the turn, and their class).
@@ -557,52 +529,28 @@ impl Dispatcher {
         let _ = self.tx.send(Cmd::RateLimit(info.clone(), from.into(), session.into()));
     }
 
-    fn options(&self) -> Options {
+    /// What its session starts from; a new session id is kept until the harness has a conversation under it.
+    fn spec(&self, handler: Arc<dyn Handler>) -> Spec {
         let file = self.state.join("session_id");
         let saved = std::fs::read_to_string(&file).map(|s| s.trim().to_string()).unwrap_or_default();
-        let cwd = &self.cfg.cwd;
-        let (resume, session_id) =
-            if !saved.is_empty() && harness::transcript(&saved, &cwd.display().to_string()).is_some() {
-                (Some(saved), None)
-            } else {
-                // The transcript only exists after the first message, so a fresh id is kept until then.
-                let sid = if saved.is_empty() { crate::util::uuid4() } else { saved };
-                let _ = std::fs::write(&file, format!("{sid}\n"));
-                (None, Some(sid))
-            };
-        let checklist = self.state.join("compact-checklist.md");
+        let session = if saved.is_empty() { crate::util::uuid4() } else { saved };
+        let _ = std::fs::write(&file, format!("{session}\n"));
         let plugins = &self.tools.pool.plugins;
-        let mut env = plugins.env("seimei");
-        env.extend(harness::dispatcher_env(self.cfg.compact_window));
-        Options {
-            cwd: Some(cwd.clone()),
-            model: Some(self.cfg.model.clone()),
-            permission_mode: Some(self.cfg.mode.clone()),
-            // Whatever the agent would ask in a terminal becomes a card, which a chat message also settles.
-            can_use_tool: true,
-            // seimei's tools and its plugins carry their own cards; external MCP servers ask like the rest.
-            allowed_tools: [vec!["mcp__seimei".into()], plugins.allowed(None)].concat(),
-            include_partial_messages: true,
-            setting_sources: Some(harness::SETTING_SOURCES.map(String::from).to_vec()),
-            system_prompt: SystemPrompt::Preset { append: Some(self.prompt()) },
-            env,
-            disallowed_tools: harness::OFF_TOOLS
-                .iter()
-                .chain(&harness::DISPATCHER_OFF)
-                .map(|t| t.to_string())
-                .collect(),
-            skills: Some(vec![]),
-            sdk_mcp_servers: vec!["seimei".into()],
+        Spec {
+            name: self.cfg.name.clone(),
+            cwd: self.cfg.cwd.clone(),
+            model: self.cfg.model.clone(),
+            mode: self.cfg.mode.clone(),
+            prompt: self.prompt(),
+            env: plugins.env("seimei"),
+            session,
             mcp_servers: plugins.servers("seimei", None, None),
-            mcp_config_file: Some(plugins.config_file("seimei")),
-            hooks: harness::hooks(&["style"]),
-            // Only the dispatcher's compactions get the checklist.
-            settings: Some(crate::recall::settings(&checklist, &self.tools.pool.denied())),
-            // A fixed name is a fixed address: peers reply to "seimei" across restarts.
-            extra_args: vec![("name".into(), Some(self.cfg.name.clone()))],
-            resume,
-            session_id,
-            ..Options::default()
+            mcp_config_file: plugins.config_file("seimei"),
+            allowed_tools: plugins.allowed(None),
+            deny: self.tools.pool.denied(),
+            checklist: self.state.join("compact-checklist.md"),
+            compact_window: self.cfg.compact_window,
+            handler,
         }
     }
 
@@ -622,20 +570,20 @@ impl Dispatcher {
                 state: self.state.clone(),
                 calls: calls.clone(),
             });
-            let why = match Client::connect(self.options(), handler).await {
-                Ok(mut client) => {
+            let why = match harness::connect(self.spec(handler)).await {
+                Ok(mut session) => {
                     // Its plugins run under this process: their session token is good only from there.
-                    self.tools.pool.plugins.root("seimei", None, client.pid());
+                    self.tools.pool.plugins.root("seimei", None, session.pid());
                     t.set(Some(true), None);
                     if failures > 0 {
                         self.events.add(json!({"type": "system", "text": "Session is back"}));
                     }
                     (delay, failures) = (Duration::from_secs(1), 0);
-                    let why = t.session(&mut client, &mut rx).await;
-                    client.close().await;
+                    let why = t.session(&mut *session, &mut rx).await;
+                    session.close().await;
                     why
                 }
-                Err(e) => e.to_string(),
+                Err(e) => e,
             };
             eprintln!("seimei: dispatcher session failed: {why}");
             if failures == 0 {
@@ -721,6 +669,8 @@ struct Turns {
     idle_due: Option<Instant>,
     /// The start of a streaming reply, held until it shows whether it is marked.
     head: Option<String>,
+    /// A reply's text is streaming: the next Text continues it rather than starting a new one.
+    in_text: bool,
     /// "t" while a reply marked trajectory: streams.
     block_lane: Option<&'static str>,
     /// An event turn's last reply while it has no marker: held until it shows whether it ends the turn (then it goes to the chat) or more of the turn follows (then it stays in the trajectory).
@@ -754,6 +704,7 @@ impl Turns {
             notes_due: None,
             idle_due: None,
             head: None,
+            in_text: false,
             block_lane: None,
             held: None,
             inputs: vec![],
@@ -775,9 +726,9 @@ impl Turns {
     }
 
     /// A connected session until the agent exits; returns why it ended.
-    async fn session(&mut self, client: &mut Client, rx: &mut mpsc::UnboundedReceiver<Cmd>) -> String {
+    async fn session(&mut self, h: &mut dyn Harness, rx: &mut mpsc::UnboundedReceiver<Cmd>) -> String {
         for c in std::mem::take(&mut self.pending) {
-            if let Err(e) = write(client, c) {
+            if let Err(e) = h.send(&c.text, &c.images) {
                 return e;
             }
         }
@@ -789,23 +740,23 @@ impl Turns {
                     Some(Cmd::Interrupt) => {
                         if self.connected && self.busy {
                             self.stopping = true;
-                            if let Err(e) = client.interrupt().await {
+                            if let Err(e) = h.interrupt().await {
                                 eprintln!("seimei: interrupt: {e}");
                             }
                         }
                     }
                     Some(cmd) => {
                         if let Some(c) = self.command(cmd)
-                            && let Err(e) = write(client, c)
+                            && let Err(e) = h.send(&c.text, &c.images)
                         {
                             return e;
                         }
                     }
                     None => return "seimei is shutting down".into(),
                 },
-                msg = client.recv() => match msg {
-                    None => return "Claude Code exited".into(),
-                    Some(m) => match self.handle(m) {
+                ev = h.recv() => match ev {
+                    None => return "the agent exited".into(),
+                    Some(ev) => match self.handle(ev) {
                         After::Nothing => {}
                         After::Idle => self.idle_due = Some(Instant::now() + IDLE_COMPACT),
                     },
@@ -817,7 +768,7 @@ impl Turns {
                         let notes: Vec<&str> = self.notes.iter().map(|n| n.rsplit('\0').next().unwrap_or(n)).collect();
                         let src = Some(Source::Event("notes waited 30 min".into(), class(&notes.join("\n"))));
                         if let Some(c) = self.deliver(String::new(), vec![], src)
-                            && let Err(e) = write(client, c)
+                            && let Err(e) = h.send(&c.text, &c.images)
                         {
                             return e;
                         }
@@ -825,7 +776,7 @@ impl Turns {
                 }
                 _ = sleep_until(idle_due.unwrap_or_else(crate::util::far)), if idle_due.is_some() => {
                     self.idle_due = None;
-                    self.idle_compact(client).await;
+                    self.idle_compact(h).await;
                 }
             }
         }
@@ -898,16 +849,10 @@ impl Turns {
         }
         // The user's style reminder rides on every message; the event log already has what the user saw.
         text = crate::style::with(&text, &crate::style::text(&self.d.state));
-        let content = if images.is_empty() {
-            Content::Text(text)
-        } else {
-            let mut blocks: Vec<Value> = images
-                .into_iter()
-                .map(|(kind, data)| json!({"type": "image", "source": {"type": "base64", "media_type": kind, "data": data}}))
-                .collect();
-            blocks.push(json!({"type": "text", "text": if text.is_empty() { "(photo)".into() } else { text }}));
-            Content::Blocks(Value::Array(blocks))
-        };
+        if !images.is_empty() && text.is_empty() {
+            text = "(photo)".into();
+        }
+        let content = Content { text, images };
         self.set(None, Some(true));
         if let Some(s) = src {
             self.inputs.push(s);
@@ -923,12 +868,12 @@ impl Turns {
 
     /// Idle with a big context and a warm cache: compact now.
     /// The PreCompact hook adds the checklist, as it does for every compaction; the next message gets the After compaction block.
-    async fn idle_compact(&mut self, client: &Client) {
+    async fn idle_compact(&mut self, h: &mut dyn Harness) {
         if self.busy || !self.connected || !self.pending.is_empty() || !self.notes.is_empty() {
             return;
         }
-        let used = match client.context_usage().await {
-            Ok(v) => v["totalTokens"].as_i64().unwrap_or(0),
+        let used = match h.context_used().await {
+            Ok(n) => n,
             Err(e) => {
                 eprintln!("seimei: context usage failed: {e}");
                 return;
@@ -940,183 +885,144 @@ impl Turns {
         let text = format!("Compacting older context while idle ({}k tokens).", used / 1000);
         self.events.add(json!({"type": "system", "lane": "t", "text": text}));
         self.set(None, Some(true));
-        if let Err(e) = client.query("/compact") {
+        if let Err(e) = h.compact().await {
             eprintln!("seimei: idle compaction failed: {e}");
             self.set(None, Some(false));
         }
     }
 
-    fn handle(&mut self, msg: Message) -> After {
-        match msg {
-            Message::StreamEvent(e) => self.stream(e),
-            Message::Assistant(a) => self.assistant(a),
-            Message::User(u) => self.user(u),
-            Message::System(s) => {
-                if s.subtype == "task_notification" {
-                    self.own = Some("a background task ended".into());
-                }
-                if s.subtype == "compact_boundary" {
-                    let _ = std::fs::write(self.d.state.join("compacted"), "");
-                    self.events.add(json!({"type": "system", "text": "Older context was compacted"}));
+    fn handle(&mut self, ev: Ev) -> After {
+        // Anything but more text (or the account's usage) ends the reply that streams.
+        if !matches!(ev, Ev::Text(_) | Ev::Usage(..) | Ev::RateLimit(_)) {
+            self.end_text();
+        }
+        match ev {
+            Ev::Step => {
+                self.set(None, Some(true));
+                self.step();
+            }
+            Ev::Text(text) => self.text(text),
+            Ev::Thinking => {
+                // More of the turn follows the held reply: it did not end the turn, so it stays in the trajectory.
+                self.route_held(false);
+                self.events.flash(json!({"type": "thinking"}));
+            }
+            Ev::Reply(text) => self.reply(&text),
+            Ev::Tool { id, name, input, agent } => {
+                let session = self.d.session_id().unwrap_or_default();
+                let call = Call {
+                    who: "seimei",
+                    worker: None,
+                    session: &session,
+                    agent: agent.as_deref(),
+                    id: &id,
+                    tool: &name,
+                    input: &input,
+                };
+                self.d.audit.call(call);
+                if agent.is_none() {
+                    self.route_held(false);
+                    let summary = summarize(&input);
+                    self.events.add(json!({"type": "tool", "tool_id": id, "name": name, "summary": summary}));
                 }
             }
-            Message::Result(r) => return self.result(r),
-            Message::RateLimit(info) => {
+            Ev::Result { id, text, error } => {
+                self.events.add(json!({"type": "tool_result", "tool_id": id, "error": error, "text": text}));
+            }
+            Ev::Own(what) => self.own = Some(what),
+            Ev::Compacted => {
+                let _ = std::fs::write(self.d.state.join("compacted"), "");
+                self.events.add(json!({"type": "system", "text": "Older context was compacted"}));
+            }
+            Ev::Usage(session, usage) => self.d.usage.turn("seimei", &session, usage.as_ref(), false),
+            Ev::RateLimit(info) => {
                 let session = self.d.session_id().unwrap_or_default();
                 self.rate_limit(&info, "seimei", &session)
             }
-            Message::Unreadable { error, .. } => eprintln!("seimei: dispatcher: unreadable line: {error}"),
-            Message::Other(_) => {}
+            Ev::End(failed) => return self.end(failed),
         }
         After::Nothing
     }
 
-    fn stream(&mut self, msg: StreamEvent) {
-        if msg.parent_tool_use_id.is_some() {
-            return;
+    /// A piece of a reply; the first piece starts a new reply.
+    fn text(&mut self, mut text: String) {
+        if !self.in_text {
+            self.in_text = true;
+            // More of the turn follows the held reply: it did not end the turn, so it stays in the trajectory.
+            self.route_held(false);
+            self.head = Some(String::new());
+            self.block_lane = None;
         }
-        let ev = &msg.event;
-        let kind = ev["type"].as_str().unwrap_or("");
-        let block = ev["content_block"]["type"].as_str();
-        match kind {
-            "message_start" => {
-                self.set(None, Some(true));
-                self.step();
+        if let Some(h) = &mut self.head {
+            // Hold the start of a reply until it shows whether it is marked.
+            h.push_str(&text);
+            let Some(got) = head(h, false) else { return };
+            text = self.release(got);
+        }
+        self.delta(&text);
+    }
+
+    /// The streaming reply is over: a start that still looked like a marker was text after all.
+    fn end_text(&mut self) {
+        self.in_text = false;
+        let Some(h) = self.head.take().filter(|h| !h.is_empty()) else { return };
+        let got = head(&h, true).expect("a final head");
+        let text = self.release(got);
+        self.delta(&text);
+    }
+
+    /// A whole reply: its markers decide where it goes.
+    fn reply(&mut self, text: &str) {
+        let (lanes, quote, text) = head(text.trim(), true).expect("a final head");
+        // More of the turn: the held reply did not end it.
+        self.route_held(false);
+        // trajectory: is for noise; a reply that asks the user something, or answers what needs them, goes to the chat anyway.
+        let asking = asks(&text);
+        let needs_user = self.class == Class::User && self.events.turn().get("lane").is_some_and(|l| l == "t");
+        let lanes: Vec<&str> = lanes.into_iter().filter(|m| *m == "chat:" || !needs_user).collect();
+        let mut place = Map::new();
+        for m in &lanes {
+            if *m == "chat:" {
+                self.events.to_chat();
+            } else if !asking {
+                place = self.to_trajectory();
             }
-            "content_block_start" if self.held.is_some() => {
-                // More of the turn follows the held reply: it did not end the turn, so it stays in the trajectory.
-                self.route_held(false);
-                self.stream(msg);
+        }
+        if let Some(to) = quote.and_then(|q| self.anchor(&q)) {
+            let said = chars(&flat_case(to["text"].as_str().unwrap_or("")), 300);
+            place.insert("re".into(), to["id"].clone());
+            place.insert("re_text".into(), json!(said));
+            place.insert("re_pin".into(), json!(true));
+        }
+        self.block_lane = None;
+        let turn = self.events.turn();
+        let text = text.trim().to_string();
+        let event_turn = turn.get("lane").is_some_and(|l| l == "t") && turn.contains_key("turn");
+        let mut ev = Map::from_iter([("type".into(), json!("assistant")), ("text".into(), json!(text))]);
+        if !text.is_empty() && event_turn && (lanes.is_empty() || asking) {
+            // In an event turn: to the chat if it asks or ends the turn; held until that shows.
+            ev.extend(turn);
+            ev.extend(place);
+            self.held = Some(ev);
+            if asking {
+                self.route_held(true);
             }
-            "content_block_start" if block == Some("text") => {
-                self.head = Some(String::new());
-                self.block_lane = None;
-            }
-            "content_block_delta" if ev["delta"]["type"] == "text_delta" => {
-                let mut text = ev["delta"]["text"].as_str().unwrap_or("").to_string();
-                if let Some(h) = &mut self.head {
-                    // Hold the start of a reply until it shows whether it is marked.
-                    h.push_str(&text);
-                    let Some(got) = head(h, false) else { return };
-                    text = self.release(got);
-                }
-                self.delta(&text);
-            }
-            "content_block_stop" if self.head.as_ref().is_some_and(|h| !h.is_empty()) => {
-                // A reply that ended while it still looked like a marker: it was text after all.
-                let h = self.head.clone().unwrap_or_default();
-                let got = head(&h, true).expect("a final head");
-                let text = self.release(got);
-                self.delta(&text);
-            }
-            "content_block_start" if block == Some("thinking") => self.events.flash(json!({"type": "thinking"})),
-            _ => {}
+        } else if !text.is_empty() {
+            ev.extend(place);
+            self.events.add(Value::Object(ev));
         }
     }
 
-    fn assistant(&mut self, msg: AssistantMessage) {
-        self.head = None;
-        let session = self.d.session_id().unwrap_or_default();
-        for b in &msg.message.content {
-            if let ContentBlock::ToolUse { id, name, input } = b {
-                let agent = msg.parent_tool_use_id.as_deref();
-                let call = Call { who: "seimei", worker: None, session: &session, agent, id, tool: name, input };
-                self.d.audit.call(call);
-            }
-        }
-        if msg.parent_tool_use_id.is_some() {
-            return;
-        }
-        for b in msg.message.content {
-            match b {
-                ContentBlock::Text { text } if !text.trim().is_empty() => {
-                    let (lanes, quote, text) = head(text.trim(), true).expect("a final head");
-                    if self.held.is_some() {
-                        // More of the turn: the held reply did not end it.
-                        self.route_held(false);
-                    }
-                    // trajectory: is for noise; a reply that asks the user something, or answers what needs them, goes to the chat anyway.
-                    let asking = asks(&text);
-                    let needs_user =
-                        self.class == Class::User && self.events.turn().get("lane").is_some_and(|l| l == "t");
-                    let lanes: Vec<&str> = lanes.into_iter().filter(|m| *m == "chat:" || !needs_user).collect();
-                    let mut place = Map::new();
-                    for m in &lanes {
-                        if *m == "chat:" {
-                            self.events.to_chat();
-                        } else if !asking {
-                            place = self.to_trajectory();
-                        }
-                    }
-                    if let Some(to) = quote.and_then(|q| self.anchor(&q)) {
-                        let said = chars(&flat_case(to["text"].as_str().unwrap_or("")), 300);
-                        place.insert("re".into(), to["id"].clone());
-                        place.insert("re_text".into(), json!(said));
-                        place.insert("re_pin".into(), json!(true));
-                    }
-                    self.block_lane = None;
-                    let turn = self.events.turn();
-                    let text = text.trim().to_string();
-                    let event_turn = turn.get("lane").is_some_and(|l| l == "t") && turn.contains_key("turn");
-                    let mut ev = Map::from_iter([("type".into(), json!("assistant")), ("text".into(), json!(text))]);
-                    if !text.is_empty() && event_turn && (lanes.is_empty() || asking) {
-                        // In an event turn: to the chat if it asks or ends the turn; held until that shows.
-                        ev.extend(turn);
-                        ev.extend(place);
-                        self.held = Some(ev);
-                        if asking {
-                            self.route_held(true);
-                        }
-                    } else if !text.is_empty() {
-                        ev.extend(place);
-                        self.events.add(Value::Object(ev));
-                    }
-                }
-                ContentBlock::ToolUse { id, name, input } => {
-                    if self.held.is_some() {
-                        self.route_held(false);
-                    }
-                    let summary = summarize(&input);
-                    self.events.add(json!({"type": "tool", "tool_id": id, "name": name, "summary": summary}));
-                }
-                _ => {}
-            }
-        }
-    }
-
-    fn user(&mut self, msg: UserMessage) {
-        if msg.parent_tool_use_id.is_some() {
-            return;
-        }
-        let blocks = match msg.message.content {
-            UserContent::Blocks(b) => b,
-            UserContent::Text(text) => vec![ContentBlock::Text { text }],
-        };
-        for b in blocks {
-            if let ContentBlock::Text { text } = &b {
-                self.own = own_input(text).or(self.own.take());
-            }
-            if let ContentBlock::ToolResult { tool_use_id, content, is_error } = b {
-                let text = result_text(&content);
-                let error = is_error.unwrap_or(false);
-                self.events.add(json!({"type": "tool_result", "tool_id": tool_use_id, "error": error, "text": text}));
-            }
-        }
-    }
-
-    fn result(&mut self, msg: ResultMessage) -> After {
-        self.d.usage.turn("seimei", &msg.session_id, msg.model_usage.as_ref(), false);
+    fn end(&mut self, failed: Option<String>) -> After {
         // The held reply ended the turn: it is what the turn has to say, so it goes to the chat, unless only noise started the turn.
         self.route_held(self.class != Class::Noise);
-        if msg.is_error {
+        if let Some(why) = failed {
             let lane = self.events.turn().get("lane").cloned().unwrap_or(json!("c"));
             if self.stopping {
                 self.events.add(json!({"type": "system", "text": "Stopped", "lane": lane}));
             } else {
-                let why = msg.result.clone().filter(|r| !r.is_empty()).unwrap_or(msg.subtype.clone());
-                self.events.add(
-                    json!({"type": "system", "level": "error", "text": format!("Turn failed: {}", crate::util::turn_error(&why)), "lane": lane}),
-                );
+                let text = format!("Turn failed: {}", crate::util::turn_error(&why));
+                self.events.add(json!({"type": "system", "level": "error", "text": text, "lane": lane}));
             }
         }
         self.stopping = false;
@@ -1253,12 +1159,4 @@ impl Turns {
             self.events.add(ev);
         }
     }
-}
-
-fn write(client: &Client, c: Content) -> Result<(), String> {
-    match c {
-        Content::Text(t) => client.query(&t),
-        Content::Blocks(b) => client.query_content(b),
-    }
-    .map_err(|e| e.to_string())
 }

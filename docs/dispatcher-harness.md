@@ -5,7 +5,7 @@ This is a design for running the dispatcher on Claude Code, an ACP agent or Code
 - **Dispatcher**: the main seimei session the owner chats with.
 - **Shikigami**: the worker sessions the dispatcher starts.
 
-Status: approved. Steps 1 and 2 are built: an offline test pins today's dispatcher, and the server relays the user's messages itself.
+Status: approved, with steps 1 to 3 built. An offline test pins the dispatcher, the server relays the user's messages itself, and the dispatcher reads its session through the `Harness` trait.
 
 ## 1. What the dispatcher needs from a harness
 
