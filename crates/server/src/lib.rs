@@ -1455,7 +1455,7 @@ async fn session(
 /// None: neither.
 fn via(sess: &Live, typed: bool) -> Option<&'static str> {
     match () {
-        _ if typed => Some("kitty"),
+        _ if typed => Some("terminal"),
         _ if harness::inbox(&sess.rec, &sess.address()).is_some() => Some("seimei"),
         _ => None,
     }
