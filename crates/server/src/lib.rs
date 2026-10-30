@@ -157,13 +157,6 @@ impl App {
         let cost = Arc::new(Cost::new(&seimei_core::workers::harness::projects_dir()));
         let approvals = Arc::new(Approvals::new(events.clone()));
         let audit = Arc::new(Audit::new(state));
-        let old = seimei_core::util::config_home().join("seimei/guard.toml");
-        if old.exists() {
-            eprintln!(
-                "seimei: {} is no longer read; config [approvals] deny_paths keeps paths from the agents",
-                old.display()
-            );
-        }
         let parts = workers::Parts {
             events: events.clone(),
             board: board.clone(),
