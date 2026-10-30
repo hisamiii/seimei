@@ -636,7 +636,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         shown()
     }
 
-    /** With a copy at hand, only the state and the list come fresh; a copy too far behind is fetched anew. */
+    /** With a copy at hand, only the state and the list come fresh; a copy further behind than the chat keeps is fetched anew, as on the web page: the replay would replace it all. */
     private suspend fun catchUp() {
         val r = api.get("api/history?limit=0")
         val last = r.getLong("last")

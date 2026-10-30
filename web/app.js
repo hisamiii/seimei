@@ -12,8 +12,6 @@ let lastId = 0;
 // The chat's events as they came (the last KEEP_CHAT), kept in this browser for the next visit.
 let raw = [];
 const KEEP_CHAT = 300;
-// A kept chat further behind than this is fetched anew instead of replayed through the stream.
-const REPLAY_MAX = 1000;
 // An older copy is not drawn: a night brings about a thousand events, and drawing a copy only to reload it would flash.
 const KEPT_FOR = 4 * 3600e3;
 const saveChat = () => keep.later('chat', () => ({ events: raw.slice(-KEEP_CHAT), at: Date.now() }));
@@ -282,8 +280,8 @@ async function start() {
   }
   if (res?.status === 401) return location.reload();
   const r = res?.ok ? await res.json() : null;
-  if (r && kept?.length && (r.last < lastId || r.last - lastId > REPLAY_MAX)) {
-    // Too far behind (or another server's log): start from the server's copy.
+  if (r && kept?.length && (r.last < lastId || r.last - lastId > KEEP_CHAT)) {
+    // Further behind than the chat keeps (or another server's log): the replay would replace it all, so start from the server's copy. The app does the same.
     keep.drop('chat');
     return location.reload();
   }
