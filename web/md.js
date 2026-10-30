@@ -9,7 +9,8 @@ const link = (href, text) => `<a href="${esc(href)}" target="_blank" rel="noopen
 function inline(src) {
   const slots = [];
   const put = (html) => `\u0000${slots.push(html) - 1}\u0000`;
-  let s = src.replace(/`([^`\n]+)`/g, (_, c) => put(`<code>${esc(c)}</code>`));
+  // NUL marks the slots, so the text itself may hold none.
+  let s = src.replace(/\u0000/g, '').replace(/`([^`\n]+)`/g, (_, c) => put(`<code>${esc(c)}</code>`));
   s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, t, u) => put(link(u, esc(t))));
   s = s.replace(/https?:\/\/[^\s<>()]*[^\s<>().,;:!?'"]/g, (u) => put(link(u, esc(u))));
   s = esc(s)
@@ -18,7 +19,9 @@ function inline(src) {
     .replace(/(^|[^\w*])\*([^*\s](?:[^*\n]*[^*\s])?)\*(?![\w*])/g, '$1<em>$2</em>')
     .replace(/(^|\W)_([^_\n]+)_(?!\w)/g, '$1<em>$2</em>')
     .replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
-  return s.replace(/\u0000(\d+)\u0000/g, (_, i) => slots[i]);
+  // A slot may hold earlier ones (code in a link's text): each only lower numbers, so this ends.
+  const restore = (t) => t.replace(/\u0000(\d+)\u0000/g, (_, i) => restore(slots[i]));
+  return restore(s);
 }
 
 const FENCE = /^\s*(```|~~~)/;
