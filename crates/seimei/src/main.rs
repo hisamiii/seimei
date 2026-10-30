@@ -160,8 +160,19 @@ fn date(t: Option<f64>, with_time: bool) -> String {
     seimei_core::util::local_time(secs, if with_time { "%Y-%m-%d %H:%M" } else { "%Y-%m-%d" })
 }
 
+/// auth.json is there but does not parse: a new password would replace every passkey and phone in it.
+fn unreadable(state: &std::path::Path, why: &str) -> String {
+    format!(
+        "{} does not parse ({why}). Fix it, or move it away to start over with no password, passkeys or phones.",
+        state.join("auth.json").display()
+    )
+}
+
 /// Recovery lives on the server: these never go through the web page.
 fn account(auth: &Auth, a: &Args, state: &std::path::Path) {
+    if let Some(e) = auth.unreadable() {
+        die(&unreadable(state, &e));
+    }
     match a.command.as_str() {
         "passwd" => {
             let pw = secret("New seimei password: ");
@@ -361,6 +372,9 @@ fn main() {
         (origins, auth)
     } else {
         let auth = Arc::new(Auth::new(&state, &origin));
+        if let Some(e) = auth.unreadable() {
+            die(&unreadable(&state, &e));
+        }
         if !auth.has_password() {
             die("no password yet, run `seimei passwd` first");
         }

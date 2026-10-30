@@ -169,6 +169,8 @@ struct Inner {
     nonces: Pending<String>,
     /// Alarms raised while the lock was held, rung after it is let go.
     rung: Vec<(String, String)>,
+    /// Why auth.json does not parse: nothing is saved over it until it does.
+    unreadable: Option<String>,
 }
 
 enum Challenge {
@@ -313,16 +315,19 @@ impl Auth {
         let mtime = self.mtime();
         if mtime != g.mtime || g.known.is_none() {
             let bytes = mtime.and_then(|_| std::fs::read(&self.path).ok());
+            let was_unreadable = g.unreadable.take().is_some();
             g.data = match bytes.map(|b| serde_json::from_slice(&b)) {
                 Some(Ok(data)) => data,
                 Some(Err(e)) => {
-                    eprintln!("seimei: auth.json: {e}");
+                    eprintln!("seimei: auth.json does not parse ({e}); seimei saves nothing over it until it does");
+                    g.unreadable = Some(e.to_string());
                     Data::default()
                 }
                 None => Data::default(),
             };
             g.mtime = mtime;
-            if g.known.is_none() {
+            // A file that parses again is trusted as at startup: its logins were there before it broke.
+            if g.known.is_none() || was_unreadable {
                 g.known = Some(g.ids());
             } else {
                 self.tripwire(&mut g);
@@ -384,6 +389,9 @@ impl Auth {
     }
 
     fn save(&self, g: &mut Inner) {
+        if g.unreadable.is_some() {
+            return;
+        }
         save_json(&self.path, &g.data);
         g.mtime = self.mtime();
     }
@@ -392,6 +400,11 @@ impl Auth {
     fn mtime(&self) -> Option<u128> {
         let t = std::fs::metadata(&self.path).and_then(|m| m.modified()).ok()?;
         t.duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_nanos())
+    }
+
+    /// Why auth.json does not parse, when it does not: logins and changes wait until it is fixed.
+    pub fn unreadable(&self) -> Option<String> {
+        self.lock().unreadable.clone()
     }
 
     pub fn has_password(&self) -> bool {
@@ -1023,6 +1036,31 @@ mod tests {
         a.lockdown();
         assert!(!a.session(&headers(&token)));
         assert!(a.has_password());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn nothing_is_saved_over_an_auth_file_that_does_not_parse() {
+        let (a, dir) = auth("unreadable");
+        a.pair_code();
+        let good = std::fs::read_to_string(dir.join("auth.json")).unwrap();
+        // A hand edit leaves a trailing comma.
+        let broken = format!("{},", good.trim_end());
+        std::fs::write(dir.join("auth.json"), &broken).unwrap();
+        let a = Auth::new(&dir, "http://localhost:8418");
+        assert!(a.unreadable().is_some());
+        a.set_password("another good password");
+        a.pair_code();
+        assert_eq!(std::fs::read_to_string(dir.join("auth.json")).unwrap(), broken);
+        // Fixed by hand: its logins load as they were, not as forged ones.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(dir.join("auth.json"), &good).unwrap();
+        assert!(a.unreadable().is_none());
+        assert!(a.has_password());
+        assert_eq!(serde_json::from_str::<Value>(&good).unwrap()["pairing"].as_array().map(Vec::len), Some(1));
+        a.pair_code();
+        let now: Value = serde_json::from_slice(&std::fs::read(dir.join("auth.json")).unwrap()).unwrap();
+        assert_eq!(now["pairing"].as_array().map(Vec::len), Some(2));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
