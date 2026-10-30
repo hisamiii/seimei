@@ -43,7 +43,7 @@ fn votes(inp: &Value) -> Vec<String> {
     paths.into_iter().filter_map(project_of).collect()
 }
 
-/// Whole transcript rows (user and assistant, no sidechains or compaction summaries) from byte start on (a start mid-line skips to the next line), and where they end.
+/// Whole transcript rows (user, assistant and prompts queued while the agent worked; no sidechains or compaction summaries) from byte start on (a start mid-line skips to the next line), and where they end.
 pub(crate) fn rows_from(path: &Path, start: u64) -> (Vec<Value>, u64) {
     let Ok(data) = read_from(path, start) else { return (vec![], start) };
     let end = data.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
@@ -55,7 +55,7 @@ pub(crate) fn rows_from(path: &Path, start: u64) -> (Vec<Value>, u64) {
         .into_iter()
         .filter_map(|l| serde_json::from_slice::<Value>(l).ok())
         .filter(|r| {
-            matches!(r["type"].as_str(), Some("user" | "assistant"))
+            (matches!(r["type"].as_str(), Some("user" | "assistant")) || r["attachment"]["type"] == "queued_command")
                 && r["isSidechain"] != true
                 && r["isCompactSummary"] != true
         })

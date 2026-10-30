@@ -122,9 +122,23 @@ pub fn inbox(rec: &Value, address: &str) -> Option<PathBuf> {
     (rec["peerProtocol"].as_i64() == Some(peer::PROTOCOL) && path.exists()).then_some(path)
 }
 
+/// The sender name of the user's messages that relay delivers.
+const RELAYED: &str = "the user, via seimei";
+
 /// Write the user's message to a session's inbox. The sender's mode is the dispatcher's, as its SendMessage carried: a session in another class holds it.
 pub async fn relay(inbox: &Path, mode: &str, text: &str) -> std::io::Result<Delivery> {
-    peer::send(inbox, "the user, via seimei", mode, &uuid4(), text).await
+    peer::send(inbox, RELAYED, mode, &uuid4(), text).await
+}
+
+/// The user's words in a transcript's copy of a message that relay delivered; None for any other session's message.
+pub fn relayed(text: &str) -> Option<String> {
+    let open = text.find("<cross-session-message ")?;
+    let tag = &text[open..open + text[open..].find('>')?];
+    if !tag.contains(&format!("from-name=\"{RELAYED}\"")) {
+        return None;
+    }
+    let body = &text[open + tag.len() + 1..];
+    Some(body.split("</cross-session-message>").next().unwrap_or(body).trim().to_string())
 }
 
 /// The scratch folders of the daemon's background jobs.

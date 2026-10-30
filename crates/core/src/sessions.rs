@@ -230,20 +230,26 @@ pub fn timeline(path: &Path, start: Option<u64>, events: usize) -> Value {
     for row in &rows {
         let (t, uid) = (time_of(row), as_text(&row["uuid"]));
         let content = &row["message"]["content"];
+        if row["type"] == "attachment" {
+            let q = &row["attachment"];
+            out.extend(prompt_event(&text_of(&q["prompt"]), &as_text(&q["origin"]["kind"]), false, &uid, t));
+            continue;
+        }
         if row["type"] == "user" {
             let results = tool_results(content);
-            for b in &results {
+            for (i, b) in results.iter().enumerate() {
                 let text = match &b["content"] {
                     Value::String(x) => x.clone(),
                     c => text_of(c),
                 };
                 let text =
                     if text.chars().count() <= RESULT { text } else { format!("{}\n[...]", chars(&text, RESULT)) };
-                out.push(json!({"type": "tool_result", "tool_id": b["tool_use_id"], "error": b["is_error"] == true,
-                    "text": text, "t": t}));
+                out.push(json!({"id": format!("{uid}:r{i}"), "type": "tool_result", "tool_id": b["tool_use_id"],
+                    "error": b["is_error"] == true, "text": text, "t": t}));
             }
-            if let Some(text) = prompt_text(row, !results.is_empty()) {
-                out.push(json!({"id": uid, "type": "user", "text": chars(&text, 8000), "t": t}));
+            if results.is_empty() {
+                let (origin, meta) = (as_text(&row["origin"]["kind"]), row["isMeta"] == true);
+                out.extend(prompt_event(&text_of(content), &origin, meta, &uid, t));
             }
             continue;
         }
@@ -263,6 +269,27 @@ pub fn timeline(path: &Path, start: Option<u64>, events: usize) -> Value {
         tail = true;
     }
     json!({"events": out, "next": next, "reset": tail})
+}
+
+/// A prompt as the page shows it: the user's words, typed or relayed by seimei, or a note for a background task's end.
+/// None for another session's message, a meta row or a command's echo.
+fn prompt_event(text: &str, origin: &str, meta: bool, id: &str, t: f64) -> Option<Value> {
+    let text = text.trim();
+    if text.is_empty() || text.starts_with("<command-") || text.starts_with("<local-command") {
+        return None;
+    }
+    if let Some(m) = TASK.captures(text) {
+        return Some(json!({"id": id, "type": "system", "text": m[2].trim(), "t": t}));
+    }
+    if text.starts_with("[Request interrupted by user") {
+        return Some(json!({"id": id, "type": "system", "text": "Interrupted", "t": t}));
+    }
+    let said = match origin {
+        // Rows from before the harness wrote an origin have none.
+        "" | "human" if !meta => text.to_string(),
+        _ => harness::relayed(text)?,
+    };
+    Some(json!({"id": id, "type": "user", "text": chars(&said, 8000), "t": t}))
 }
 
 /// The last lines of the command a session runs now: the harness sends its shell's output to a tasks file.

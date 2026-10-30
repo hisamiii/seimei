@@ -1,8 +1,8 @@
-//! tests/cases/sessionevents.json: what the user's sessions run into, as the lines the dispatcher hears after each scan; and where the adapter finds the transcripts and the CLI.
+//! tests/cases/sessionevents.json: what the user's sessions run into, as the lines the dispatcher hears after each scan, and what the page shows of a transcript; and where the adapter finds the transcripts and the CLI.
 
 use std::io::Write;
 
-use seimei_core::sessions::SessionEvents;
+use seimei_core::sessions::{self, SessionEvents};
 use serde_json::{Value, json};
 
 #[test]
@@ -43,6 +43,26 @@ fn session_event_cases() {
         }
     }
     let _ = std::fs::remove_dir_all(&dir);
+    assert!(fails.is_empty(), "{} failures:\n{}", fails.len(), fails.join("\n"));
+}
+
+#[test]
+fn timeline_cases() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/cases/sessionevents.json");
+    let doc: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let file = std::env::temp_dir().join(format!("seimei-timeline-{}.jsonl", std::process::id()));
+    let mut fails = vec![];
+    for c in doc["timeline"].as_array().unwrap() {
+        let whole: String = c["rows"].as_array().unwrap().iter().map(|r| format!("{r}\n")).collect();
+        std::fs::write(&file, format!("{whole}{}", c["partial"].as_str().unwrap_or(""))).unwrap();
+        let tl = sessions::timeline(&file, Some(0), 400);
+        let got: Vec<Value> =
+            tl["events"].as_array().unwrap().iter().map(|e| json!([e["id"], e["type"], e.get("text")])).collect();
+        if json!(got) != c["events"] || tl["next"] != json!(whole.len()) {
+            fails.push(format!("{}: {} next {}\n  want: {}", c["what"], json!(got), tl["next"], c["events"]));
+        }
+    }
+    let _ = std::fs::remove_file(&file);
     assert!(fails.is_empty(), "{} failures:\n{}", fails.len(), fails.join("\n"));
 }
 
