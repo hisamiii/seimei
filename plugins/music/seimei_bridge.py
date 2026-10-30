@@ -142,7 +142,7 @@ def handle(req):
         lib.changed(songs)
         return {"rated": len(songs)}
     if cmd == "tags":
-        # Writes the music files themselves; seimei asks the user first.
+        # Writes the music files themselves.
         songs = songs_for(req)
         for s in songs:
             for tag, value in req["tags"].items():

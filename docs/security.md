@@ -39,6 +39,8 @@ Some tools of seimei's ask the user themselves, whatever the permission mode. A 
 - The desktop plugin closes a window seimei did not open, or ends the desktop session, only after the user's card.
 - The desktop plugin reads the user's clipboard only after their card, once per call. Restoring the desktop layout is one card for all of it.
 
+The music and queue plugins have no cards of their own. Writing tags, deleting a playlist and stopping the GPU holder go as the harness's permissions decide.
+
 ### The audit log
 
 seimei writes every tool call of the dispatcher and the shikigami to `audit.jsonl` in its data folder. It writes them from the tool-call events the harness sends, and marks the calls that failed.

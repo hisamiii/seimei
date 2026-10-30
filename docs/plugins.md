@@ -126,7 +126,7 @@ The queue plugin gives one queued command at a time the GPU or NPU, and the othe
 claude-queue's command prefix puts each command of a queued session in its own scope under `queue.slice`. Its shim, `devgate.so`, asks the socket before the command opens a GPU or NPU device. The turn passes on a few seconds after the holder's processes are gone. Processes outside `queue.slice`, and desktop apps that open a render node, never wait.
 
 - `queue` shows the holder and the line.
-- `queue_stop` stops the holder's whole command, after a card.
+- `queue_stop` sends SIGTERM to the holder's whole command.
 - A wait past 10 minutes is a [seimei] line.
 - `queue_free` and `queue_wait` are watch triggers.
 

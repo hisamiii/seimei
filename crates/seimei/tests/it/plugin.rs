@@ -1,4 +1,4 @@
-//! The plugins end to end on stdio, as the agent's CLI starts them, with seimei's card socket: `seimei plugin queue` with a fake cqd (its spec, a tool's text, a kill card approved and denied, a lost seimei and a stopped cqd), music, the browser forwarding to seimei, and plugins/template installed the way its README says.
+//! The plugins end to end on stdio, as the agent's CLI starts them, with seimei's card socket: `seimei plugin queue` with a fake cqd (its spec, a tool's text, a stop, a lost seimei and a stopped cqd), music, the browser forwarding to seimei, and plugins/template installed the way its README says.
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
