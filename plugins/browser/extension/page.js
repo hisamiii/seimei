@@ -14,9 +14,9 @@ if (!globalThis.seimeiPage) {
 
   // What kind of secret a field holds ('password', 'card number', ...), or '' for an ordinary field.
   const secret = (el) => {
-    if (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA') return '';
+    if (!['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)) return '';
     const type = String(el.type).toLowerCase();
-    if (type === 'password' || type === 'file') return type;
+    if (el.tagName === 'INPUT' && (type === 'password' || type === 'file')) return type;
     const m = SECRET.exec(String(el.getAttribute('autocomplete') || ''));
     if (!m) return '';
     if (m[1].startsWith('cc-')) return 'payment card';
@@ -233,6 +233,7 @@ if (!globalThis.seimeiPage) {
           }
         } else if (action === 'select') {
           if (el.tagName !== 'SELECT') throw new Error(`${args.ref || args.selector} is not a select`);
+          if (secret(el)) throw new Error(`${args.ref || args.selector} is a ${secret(el)} field: ask the user to fill it`);
           const want = clean(args.text, 1000);
           const opt = [...el.options].find((o) => o.value === want) || [...el.options].find((o) => clean(o.label || o.text, 1000) === want);
           if (!opt) throw new Error(`no option "${want}" in ${args.ref || args.selector}`);
