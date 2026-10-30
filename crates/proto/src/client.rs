@@ -28,6 +28,8 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 pub enum Error {
     /// The executable could not be started.
     Spawn(std::io::Error),
+    /// A file the session reads could not be written (its path).
+    Config(std::path::PathBuf, std::io::Error),
     /// The session's folder is not there.
     NoFolder(std::path::PathBuf),
     /// The process is gone (or its stdin is closed).
@@ -54,6 +56,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::Spawn(e) => write!(f, "could not start claude: {e}"),
+            Error::Config(path, e) => write!(f, "could not write {}: {e}", path.display()),
             Error::NoFolder(cwd) => write!(f, "Working directory does not exist: {}", cwd.display()),
             Error::Closed => write!(f, "Claude Code exited"),
             Error::Timeout(s) => write!(f, "control request timeout: {s}"),
@@ -156,7 +159,7 @@ impl Client {
     /// Start the session and initialize it. Fails when the executable is missing or initialize gets no answer.
     pub async fn connect(opts: Options, handler: Arc<dyn Handler>) -> Result<Client, Error> {
         if let (Some(path), Some(config)) = (&opts.mcp_config_file, opts.mcp_config()) {
-            write_private(path, &config).map_err(Error::Spawn)?;
+            write_private(path, &config).map_err(|e| Error::Config(path.clone(), e))?;
         }
         let mut cmd = Command::new(opts.cli_path());
         cmd.args(opts.argv());

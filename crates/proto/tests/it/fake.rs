@@ -291,6 +291,15 @@ async fn a_missing_executable_is_a_spawn_error() {
 }
 
 #[tokio::test]
+async fn an_unwritable_mcp_config_names_its_file() {
+    let mut o = options("config", "seimei");
+    o.sdk_mcp_servers = vec!["seimei".into()];
+    o.mcp_config_file = Some("/proc/nonexistent/mcp.json".into());
+    let e = Client::connect(o, Arc::new(Rec::default())).await.err().unwrap();
+    assert!(e.to_string().starts_with("could not write /proc/nonexistent/mcp.json"), "{e}");
+}
+
+#[tokio::test]
 async fn a_shikigami_reports() {
     let mut c = Client::connect(options("worker", "shikigami runner"), Arc::new(Rec::default())).await.unwrap();
     c.query("!event").unwrap();
