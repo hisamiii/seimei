@@ -318,16 +318,16 @@ pub struct Worker {
     pool: Weak<Pool>,
     /// Its session's task, started with the first command.
     tx: Mutex<Option<mpsc::UnboundedSender<Cmd>>>,
-    /// Permission requests numbered as the harness sent them, and the newest one its record shows: cards asked together are handled on separate tasks, and the last one asked is the one it waits on.
+    /// Permission requests numbered as the harness sent them, and its open cards by that number: cards asked together are handled on separate tasks, and the newest open one is the one it waits on.
     asked: AtomicU64,
-    shown: AtomicU64,
+    cards: Mutex<BTreeMap<u64, String>>,
     /// Its own tool calls (not its subagents'): every style::EVERY of them hears the user's style again.
     calls: AtomicU64,
 }
 
 impl Worker {
     fn new(rec: Record, log: EventLog, pool: Weak<Pool>) -> Arc<Worker> {
-        let (asked, shown, calls) = (AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0));
+        let (asked, calls) = (AtomicU64::new(0), AtomicU64::new(0));
         Arc::new(Worker {
             id: rec.id.clone(),
             rec: Mutex::new(rec),
@@ -335,7 +335,7 @@ impl Worker {
             pool,
             tx: Mutex::new(None),
             asked,
-            shown,
+            cards: Mutex::new(BTreeMap::new()),
             calls,
         })
     }
@@ -417,13 +417,11 @@ impl Worker {
 
     /// A permission card of its is open (what it wants) or settled (None): the Agents page and its board task show that it waits on the user, and seimei hears it.
     fn waiting_card(&self, seq: u64, text: Option<String>) {
-        if text.is_some() && self.shown.fetch_max(seq, Ordering::SeqCst) > seq {
-            return;
-        }
-        self.edit(|r| r.card = text.clone());
+        let Some(card) = open_card(&mut self.cards.lock().unwrap(), seq, text.clone()) else { return };
+        self.edit(|r| r.card = card.clone());
         let pool = self.pool();
         pool.changed();
-        let state = if text.is_some() { "asking".to_string() } else { self.state() };
+        let state = if card.is_some() { "asking".to_string() } else { self.state() };
         pool.board.lock().unwrap().follow(&self.id, &state);
         if let Some(t) = text {
             pool.tell(&self.id, &format!("waits on a permission card: {t}"), false, Some(&format!("perm:{}", self.id)));
@@ -2081,5 +2079,35 @@ impl Pool {
                 false
             }
         }
+    }
+}
+
+/// A card opened (Some) or settled (None) among a worker's open ones: what its record shows now, when that changed. The newest open card is shown.
+fn open_card(open: &mut BTreeMap<u64, String>, seq: u64, text: Option<String>) -> Option<Option<String>> {
+    let before = open.last_key_value().map(|(_, t)| t.clone());
+    match text {
+        Some(t) => open.insert(seq, t),
+        None => open.remove(&seq),
+    };
+    let now = open.last_key_value().map(|(_, t)| t.clone());
+    (now != before).then_some(now)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_newest_open_card_is_shown() {
+        let mut open = BTreeMap::new();
+        assert_eq!(open_card(&mut open, 1, Some("a".into())), Some(Some("a".into())));
+        assert_eq!(open_card(&mut open, 2, Some("b".into())), Some(Some("b".into())));
+        // The older one settles: the newer one still waits.
+        assert_eq!(open_card(&mut open, 1, None), None);
+        assert_eq!(open_card(&mut open, 2, None), Some(None));
+        // A card asked first but handled last does not hide the newer one.
+        open_card(&mut open, 4, Some("d".into()));
+        assert_eq!(open_card(&mut open, 3, Some("c".into())), None);
+        assert_eq!(open_card(&mut open, 4, None), Some(Some("c".into())));
     }
 }
