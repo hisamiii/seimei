@@ -11,7 +11,8 @@ if [ "${1:-}" = --unit ]; then
     shift 2
 fi
 rev=${1:-main}
-repo=$(dirname "$(readlink -f "$0")")
+# This script's folder (contrib/maintainer); the checkout it belongs to is its git root.
+here=$(dirname "$(readlink -f "$0")")
 state=${SEIMEI_STATE:-$HOME/.local/share/seimei}
 dir="$state/deploy"
 mkdir -p "$dir"
@@ -26,10 +27,10 @@ if [ -z "$inner" ]; then
         [ -n "$val" ] && set -- "$@" --setenv="$v=$val"
     done
     if [ -n "$systemd" ]; then
-        env -u LD_PRELOAD systemd-run --user --collect --quiet --unit "$unit" "$@" "$repo/deploy.sh" --unit "$unit" "$rev"
+        env -u LD_PRELOAD systemd-run --user --collect --quiet --unit "$unit" "$@" "$here/deploy.sh" --unit "$unit" "$rev"
     else
         # No subreaper above it: it goes to init, out of reach of seimei's stop and the caller's process group.
-        env -u LD_PRELOAD setsid -f "$repo/deploy.sh" --unit "$unit" "$rev" </dev/null >/dev/null 2>&1
+        env -u LD_PRELOAD setsid -f "$here/deploy.sh" --unit "$unit" "$rev" </dev/null >/dev/null 2>&1
     fi
     echo "deploying $rev in $unit (log: $dir/$unit.log)"
     # Follow it: the log as it grows, then its result. If the restart ends this caller, the deploy goes on.
@@ -102,7 +103,7 @@ status running checkout
 
 app=${SEIMEI_APP:-$HOME/.local/share/seimei-app}
 service=${SEIMEI_SERVICE:-seimei}
-[ -d "$app" ] || git -C "$repo" worktree add --detach "$app" "$rev"
+[ -d "$app" ] || git -C "$(git -C "$here" rev-parse --show-toplevel)" worktree add --detach "$app" "$rev"
 git -C "$app" checkout -q --detach "$rev"
 
 if [ -z "${SEIMEI_DEPLOY_TEST:-}" ]; then
@@ -157,17 +158,27 @@ pos, rest, last_t, cards, writing = 0, b"", None, set(), False
 for _ in range(60):
     try:
         with open(log, "rb") as f:
-            start = max(f.seek(0, 2) - (1 << 20), 0)
-            f.seek(start)
-            tail = [json.loads(l) for l in f.read().splitlines()[1 if start else 0:]]
-        last = tail[-1]
-    except (OSError, IndexError, ValueError):
+            f.seek(pos)
+            lines = (rest + f.read()).split(b"\n")
+            pos = f.tell()
+    except OSError:
         break
-    done = {e["aid"] for e in tail if e["type"] == "approval_done"}
-    open_cards = [e for e in tail if e["type"] == "approval" and e["aid"] not in done]
-    handoffs = [e["handoff"] for e in tail if e.get("handoff")]
-    writing = bool(handoffs) and handoffs[-1] == "start"
-    if time.time() - last["t"] > 20 and not open_cards and not writing:
+    rest = lines.pop()
+    for i, line in enumerate(lines):
+        if i < len(lines) - 1 and b'"approval' not in line and b'"handoff"' not in line:
+            continue
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        last_t = e.get("t", last_t)
+        if e.get("type") == "approval":
+            cards.add(e.get("aid"))
+        elif e.get("type") == "approval_done":
+            cards.discard(e.get("aid"))
+        if e.get("handoff"):
+            writing = e["handoff"] == "start"
+    if (last_t is None or time.time() - last_t > 20) and not cards and not writing:
         break
     time.sleep(5)
 PY
