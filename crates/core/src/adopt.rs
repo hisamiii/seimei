@@ -155,6 +155,8 @@ pub struct Adopter {
     waits: AtomicU64,
     /// The waiting ones, kept across seimei restarts: {pid: {"s": row, "args": ..., "until": t}}.
     state: PathBuf,
+    /// Held while the state file is read, changed and written.
+    saving: Mutex<()>,
 }
 
 impl Adopter {
@@ -166,6 +168,7 @@ impl Adopter {
             waiting: Mutex::default(),
             waits: AtomicU64::new(0),
             state: state.join("adopt-pending.json"),
+            saving: Mutex::default(),
         })
     }
 
@@ -173,15 +176,17 @@ impl Adopter {
         self.me.upgrade().expect("the adopter lives as long as the server")
     }
 
-    fn pending(&self) -> Map<String, Value> {
-        read_json(&self.state).and_then(|v| v.as_object().cloned()).unwrap_or_default()
+    /// Change the waiting ones in the state file; `f` says whether it changed them.
+    fn edit_pending(&self, f: impl FnOnce(&mut Map<String, Value>) -> bool) {
+        let _saving = self.saving.lock().unwrap();
+        let mut pending = read_json(&self.state).and_then(|v| v.as_object().cloned()).unwrap_or_default();
+        if f(&mut pending) {
+            save_json(&self.state, &pending);
+        }
     }
 
     fn forget(&self, pid: i64) {
-        let mut pending = self.pending();
-        if pending.shift_remove(&pid.to_string()).is_some() {
-            save_json(&self.state, &pending);
-        }
+        self.edit_pending(|p| p.shift_remove(&pid.to_string()).is_some());
     }
 
     /// The user's sessions as the page lists them.
@@ -196,22 +201,23 @@ impl Adopter {
 
     /// Pick up the adoptions that were waiting when seimei stopped, for the sessions still running.
     pub fn startup(&self) {
-        let mut pending = self.pending();
         let at = now();
-        pending.retain(|pid, p| {
-            let Ok(pid) = pid.parse::<i64>() else { return false };
-            let s = &p["s"];
-            let mut rec = json!({"pid": pid});
-            if !s["proc_start"].is_null() && s["proc_start"] != "" && s["proc_start"] != 0 {
-                rec["procStart"] = s["proc_start"].clone();
-            }
-            if !sessions::alive(&rec) || at > p["until"].as_f64().unwrap_or(0.0) {
-                return false;
-            }
-            self.wait(pid, s.clone(), Wish::of(&p["args"]), p["until"].as_f64().unwrap_or(0.0));
+        self.edit_pending(|pending| {
+            pending.retain(|pid, p| {
+                let Ok(pid) = pid.parse::<i64>() else { return false };
+                let s = &p["s"];
+                let mut rec = json!({"pid": pid});
+                if !s["proc_start"].is_null() && s["proc_start"] != "" && s["proc_start"] != 0 {
+                    rec["procStart"] = s["proc_start"].clone();
+                }
+                if !sessions::alive(&rec) || at > p["until"].as_f64().unwrap_or(0.0) {
+                    return false;
+                }
+                self.wait(pid, s.clone(), Wish::of(&p["args"]), p["until"].as_f64().unwrap_or(0.0));
+                true
+            });
             true
         });
-        save_json(&self.state, &pending);
     }
 
     fn wait(&self, pid: i64, s: Value, wish: Wish, until: f64) {
@@ -300,9 +306,10 @@ impl Adopter {
                 o.shift_remove(k);
             }
         }
-        let mut all = self.pending();
-        all.insert(pid.to_string(), json!({"s": row, "args": wish.json(), "until": until}));
-        save_json(&self.state, &all);
+        self.edit_pending(|all| {
+            all.insert(pid.to_string(), json!({"s": row, "args": wish.json(), "until": until}));
+            true
+        });
         self.wait(pid, row, wish, until);
         Ok(format!("Approved. {name} is busy; it gets adopted when it next goes idle, and you hear when it does."))
     }
