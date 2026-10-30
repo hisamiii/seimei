@@ -42,7 +42,7 @@ impl Approvals {
     /// Cards left open by a restart: their tool calls died with the old sessions.
     pub fn startup(&self) {
         let mut done = HashSet::new();
-        for ev in self.events.before(None, 2000).iter().rev() {
+        for ev in self.events.after(0).iter().rev() {
             let aid = ev["aid"].as_str().unwrap_or("").to_string();
             match ev["type"].as_str() {
                 Some("approval_done") => _ = done.insert(aid),

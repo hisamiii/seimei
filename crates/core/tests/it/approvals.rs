@@ -67,6 +67,25 @@ async fn cards_wait_remind_and_settle() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A restart closes every card left open, however far back in the log.
+#[test]
+fn a_restart_closes_old_open_cards() {
+    let dir = std::env::temp_dir().join(format!("seimei-approvals-old-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let events = Arc::new(EventLog::open(&dir.join("events.jsonl")).unwrap());
+    events.add(json!({"type": "approval", "aid": "old"}));
+    events.add(json!({"type": "approval", "aid": "done"}));
+    events.add(json!({"type": "approval_done", "aid": "done", "outcome": "allow"}));
+    for i in 0..2500 {
+        events.add(json!({"type": "assistant", "text": format!("line {i}")}));
+    }
+    Approvals::new(events.clone()).startup();
+    let closed: Vec<Value> =
+        events.after(0).iter().filter(|e| e["outcome"] == "restart").map(|e| e["aid"].clone()).collect();
+    assert_eq!(closed, [json!("old")]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn the_ceiling() {
     assert!(within("plan", "default") && within("dontAsk", "default") && !within("acceptEdits", "default"));
