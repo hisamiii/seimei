@@ -177,6 +177,8 @@ function handle(ev) {
 // ---------- connection ----------
 
 let source = null;
+// Set once the page has its history (or the kept chat): before that, a stream from id 0 would replay the whole log.
+let ready = false;
 let awayTimer = 0;
 let lastSeen = 0;
 const SILENT = 40000;
@@ -194,6 +196,7 @@ function lost() {
 }
 
 function connect() {
+  if (!ready) return;
   source?.close();
   lastSeen = Date.now();
   source = new EventSource(`api/stream?after=${lastId}`);
@@ -269,7 +272,14 @@ async function start() {
     show(location.hash.slice(1) || 'chat');
     render();
   }
-  const res = await fetch(kept?.length ? 'api/history?limit=0' : 'api/history?limit=200').catch(() => null);
+  const url = kept?.length ? 'api/history?limit=0' : 'api/history?limit=200';
+  let res = await fetch(url).catch(() => null);
+  // Nothing kept and no history yet (the server asleep, the phone offline): ask again until it comes.
+  while (!kept?.length && !res?.ok && res?.status !== 401) {
+    lost();
+    await new Promise((ok) => setTimeout(ok, 5000));
+    res = await fetch(url).catch(() => null);
+  }
   if (res?.status === 401) return location.reload();
   const r = res?.ok ? await res.json() : null;
   if (r && kept?.length && (r.last < lastId || r.last - lastId > REPLAY_MAX)) {
@@ -290,6 +300,7 @@ async function start() {
   autosize();
   if (!kept?.length) show(location.hash.slice(1) || 'chat');
   render();
+  ready = true;
   connect();
   account();
 }
