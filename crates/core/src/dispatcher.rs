@@ -166,7 +166,7 @@ fn flat_case(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// A hook on every tool call, answered by seimei's handler under this callback id.
+/// A file size for the chat: KB below 1 MB, else MB with one decimal.
 pub fn human(n: u64) -> String {
     if n >= 1 << 20 {
         format!("{:.1} MB", n as f64 / (1 << 20) as f64)
