@@ -225,6 +225,14 @@ class ChatTest {
         assertEquals(listOf("c", "t"), a.map { it.lane })
         assertEquals("e7", a[0].goto)
     }
+
+    @Test fun headerNamesAnAcpHarness() {
+        assertEquals("on codex", harnessLabel("acp:codex"))
+        // The default harness, and a server from before the field, go without saying.
+        assertNull(harnessLabel("claude"))
+        assertNull(harnessLabel(""))
+    }
+
 }
 
 class MarkdownTest {

@@ -384,7 +384,7 @@ impl Dispatcher {
 
     pub fn state(&self) -> Value {
         json!({"type": "state", "connected": self.connected.load(Ordering::Relaxed),
-               "busy": self.busy.load(Ordering::Relaxed)})
+               "busy": self.busy.load(Ordering::Relaxed), "harness": self.cfg.harness})
     }
 
     pub fn busy(&self) -> bool {

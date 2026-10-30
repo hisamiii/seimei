@@ -723,6 +723,9 @@ fun barColor(vm: Seimei): Color {
     return animateColorAsState(if (vm.lifted && vm.page == null) cs.surfaceContainer else cs.surface, tween(225), label = "bar").value
 }
 
+/** The header's note on what the dispatcher runs on: an ACP agent's or Codex's name; the default harness goes without saying. */
+fun harnessLabel(harness: String): String? = if (harness.startsWith("acp:")) "on ${harness.removePrefix("acp:")}" else null
+
 @Composable
 fun Header(vm: Seimei) {
     val st = status(vm)
@@ -752,7 +755,13 @@ fun Header(vm: Seimei) {
         }
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
-            Text(TITLES[vm.tab]!!, fontSize = 20.sp)
+            Row {
+                Text(TITLES[vm.tab]!!, fontSize = 20.sp, modifier = Modifier.alignByBaseline())
+                harnessLabel(vm.harness)?.takeIf { vm.tab == "chat" }?.let {
+                    Spacer(Modifier.width(8.dp))
+                    Text(it, fontSize = 12.sp, color = LocalExtra.current.text3, modifier = Modifier.alignByBaseline())
+                }
+            }
             if (showStatus) Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(7.dp).clip(CircleShape).background(dotColor(dot)))
                 Spacer(Modifier.width(6.dp))

@@ -27,7 +27,7 @@ The dispatcher and every shikigami run as the user, with Bash, in the permission
 
 - seimei turns each path into Claude Code `permissions.deny` rules for Read and Edit. They go into the settings it passes to the dispatcher and to each Claude Code shikigami.
 - These rules stop the file tools, not a Bash command that opens the file.
-- ACP agents and Codex get nothing extra: their own permission settings decide.
+- ACP agents and Codex get nothing extra: their own permission settings decide. This holds for a dispatcher on one, with `[dispatcher] harness`, too.
 
 ### Cards of seimei's own tools
 

@@ -106,6 +106,10 @@ function chrome() {
     text = `Offline since ${clock(S.awaySince / 1000)}`;
   }
   $('title').textContent = TITLES[S.tab];
+  // The dispatcher on an ACP agent or Codex says which; the default harness goes without saying.
+  const harness = S.session.harness || '';
+  $('harness').hidden = S.tab !== 'chat' || !harness.startsWith('acp:');
+  $('harness').textContent = harness.replace(/^acp:/, 'on ');
   $('status').dataset.s = s;
   $('status-text').textContent = text;
   // Idle and working go without saying in the chat (its working line shows a turn); only problems and asks show.

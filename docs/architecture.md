@@ -10,7 +10,7 @@ phone app / web page ──https──> proxy ──> 127.0.0.1:8417  seimei
             │ auth.rs (password, passkeys,     │ push.rs (FCM, Web Push,      │
             │   paired phones)                 │   background stream)         │
             ├──────────────────────────────────┴──────────────────────────────┤
-            │ dispatcher.rs: one Claude Code session, resumed across restarts │
+            │ dispatcher.rs: one session on Claude Code, ACP or Codex         │
             │ workers/:      the shikigami (Claude Code, ACP or Codex)        │
             │ audit.rs:      every tool call, from the harness's events       │
             │ permissions.rs: Claude Code's permission prompts become cards   │
@@ -123,7 +123,7 @@ The code map lists where each part lives. Paths are relative to the repo root.
 
 `crates/core/src` holds the sessions:
 
-- `dispatcher.rs`: the permanent session and the routing of event turns. Its prompt is `dispatcher.md`.
+- `dispatcher.rs`: the permanent session and the routing of event turns, on the harness `[dispatcher] harness` names. Its prompt is `dispatcher.md`.
 - `harness/`: the `Harness` trait the dispatcher's turns read, as `Ev` events. `harness/claude.rs` is the Claude Code implementation, and `harness/acp.rs` the one for ACP agents and Codex.
 - `workers/`: shikigami, with summon, resume and hand-over.
 - `workers/claude.rs`: the Claude Code adapter. It holds the CLI flags and env, the transcript and session-registry layout, hooks, settings paths, tool names and model prices.

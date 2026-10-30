@@ -139,6 +139,9 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         private set
     var busy by mutableStateOf(false)
         private set
+    /** What the dispatcher runs on: the default harness, or "acp:<name>" for an ACP agent or Codex. */
+    var harness by mutableStateOf("")
+        private set
     var items by mutableStateOf<List<Item>>(emptyList())
         private set
     /** The trajectory: what happened on its own (see Chat.fold); the chat shows a line for each run of it. */
@@ -750,6 +753,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     private fun setState(ev: JSONObject) {
         connected = ev.optBoolean("connected")
         busy = ev.optBoolean("busy")
+        harness = ev.optString("harness")
         if (!busy) live = ""
     }
 

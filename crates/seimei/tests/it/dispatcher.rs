@@ -114,6 +114,7 @@ async fn run(base: PathBuf, state: PathBuf, work: PathBuf, agent: PathBuf) {
     assert_eq!((&reply["lane"], &reply["re"]), (&json!("c"), &asked["id"]));
     let (harness, sid) = saved(&state);
     assert_eq!(harness, "claude"); // lint: allow scoped-name
+    assert_eq!(first.dispatcher.state()["harness"], json!(harness));
     assert!(heard(&log)[0].starts_with("hello there"));
 
     // A tool call: its row, its result and its audit line.

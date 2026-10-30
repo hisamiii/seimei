@@ -15,6 +15,7 @@ The table lists each section's keys, their defaults and what they set. Notes on 
 | | `name` | `seimei` | its session's name in Claude Code's registry |
 | | `cwd` | `~` | its working folder |
 | | `compact_window` | 400000 | tokens at which its context compacts |
+| | `harness` | `claude` | Claude Code, or `acp:<name>` for an `[agents]` entry |
 | `[models]` | `work` | `opus` | real work, and the default shikigami model |
 | | `routine` | `sonnet` | routine jobs |
 | | `quick` | `haiku` | lookups, and every shikigami's own subagents |
@@ -42,6 +43,9 @@ Notes on the keys:
 - `web = false` still runs the plugins, the GPU queue among them.
 - `[dispatcher] name` is `seimei-dev` with `--dev`.
 - `compact_window` is 80% of `[models] context` when that is less than 400000.
+- `harness` takes the same values as summon's harness option. A Codex dispatcher is an `[agents.<name>]` entry with `protocol = "codex"`.
+- On an ACP agent or Codex, `[approvals] dispatcher` works as for an ACP shikigami: seimei applies the mode, and what is left becomes a card. The agent uses its own model and compacts at its own point, so `model` and `compact_window` apply to Claude Code only.
+- A changed `harness` starts a fresh session on the next start, seeded with the last handoff and the After compaction block.
 - `context` takes 200k, 256k, 400k or 1m. For a Pro plan, `seimei setup` writes sonnet and 200k.
 - `[sessions] terminal` opens a session the user takes over, as with "Open on server". It is a command line such as `foot -D {cwd} --title {title}`, and the session's command follows it. The default is `$TERMINAL`'s, else the first one installed of kitty, foot, alacritty, ghostty, wezterm, gnome-terminal, konsole and xfce4-terminal.
 - `[approvals]` takes Claude Code's mode names, see [Permission modes](#permission-modes).

@@ -68,6 +68,9 @@ async fn run(state: PathBuf, work: PathBuf, fake: PathBuf) {
     let start = got(&fake).into_iter().find(|m| m["method"] == "thread/start").unwrap();
     assert_eq!(start["params"]["developerInstructions"], json!(first.dispatcher.prompt()));
     assert!(last_turn(&fake).starts_with("hello there"));
+    // The state event names the harness, for the page's header.
+    let st = first.dispatcher.state();
+    assert_eq!((&st["type"], &st["harness"], &st["connected"]), (&json!("state"), &json!("acp:codex"), &json!(true)));
 
     // Its token use counts per turn, cache reads apart from the input.
     let sid = saved(&state).1;
