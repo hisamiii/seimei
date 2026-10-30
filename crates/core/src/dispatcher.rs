@@ -1221,7 +1221,7 @@ impl Turns {
                 _ => {
                     // The harness's own input started it: not noise. The chat names it, or says it came from the harness.
                     self.class = self.class.max(Class::Other);
-                    self.own.take().unwrap_or_else(|| "a notice from Claude Code".into())
+                    self.own.take().unwrap_or_else(|| "a notice from the agent".into())
                 }
             };
             let mut turn = Map::new();
