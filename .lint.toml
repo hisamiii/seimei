@@ -4,7 +4,8 @@
 trailers = ["Co-Authored-By", "Assisted-by"]
 
 [files]
-exclude = ["android/gradlew", "android/gradlew.bat", ".lint.toml"]
+# The READMEs are the author's own text.
+exclude = ["android/gradlew", "android/gradlew.bat", ".lint.toml", "README.md", "README.draft.md"]
 
 # Harness and terminal names live in their own adapter, its fakes and the docs; generic code says agent, harness or terminal.
 [scoped]
