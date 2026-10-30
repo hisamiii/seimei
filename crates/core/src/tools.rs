@@ -412,7 +412,7 @@ impl Tools {
             model: arg(a, "model"),
             effort: opt("effort"),
             context: arg(a, "context"),
-            subagents: opt("subagent_model").unwrap_or_else(|| "haiku".into()),
+            subagents: opt("subagent_model").unwrap_or_default(),
             project: opt("project"),
             link: opt("task_id"),
             tools,
