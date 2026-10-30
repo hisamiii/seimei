@@ -85,6 +85,9 @@ impl Turn {
 /// Starts `codex app-server`, initializes it and starts or resumes the thread named in opts.
 pub async fn connect(opts: Options, handler: Arc<dyn Handler>) -> Result<Client, Error> {
     let (mut c, stdout, events) = Client::start(&opts)?;
+    if let Some(pid) = c.pid() {
+        handler.spawned(pid);
+    }
     let turn = Arc::new(Turn::default());
     c.codex = Some(turn.clone());
     let cwd = opts.cwd.display().to_string();

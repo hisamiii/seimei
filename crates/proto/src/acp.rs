@@ -202,6 +202,9 @@ pub trait Handler: Send + Sync + 'static {
     fn questions(&self, _qs: Vec<Question>) -> BoxFuture<HashMap<String, Vec<String>>> {
         Box::pin(async { HashMap::new() })
     }
+
+    /// The agent's process started, before it opens the session and starts its MCP servers.
+    fn spawned(&self, _pid: u32) {}
 }
 
 pub(crate) enum Waiter {
@@ -248,6 +251,9 @@ impl Client {
     /// Start the agent, initialize it and open the session. A loaded session's history comes first from recv.
     pub async fn connect(opts: Options, handler: Arc<dyn Handler>) -> Result<Client, Error> {
         let (mut c, stdout, events) = Client::start(&opts)?;
+        if let Some(pid) = c.pid() {
+            handler.spawned(pid);
+        }
         tokio::spawn(read(stdout, handler, c.rpc.clone(), events));
         if let Err(e) = c.open(&opts).await {
             c.close().await;

@@ -38,6 +38,7 @@ fn app(state: &Path, work: &Path, fake: &Path, no_load: bool) -> seimei_server::
         env: vec![
             ("FAKE_ACP_DIR".into(), fake.display().to_string()),
             ("FAKE_ACP_LOG".into(), fake.join("log.jsonl").display().to_string()),
+            ("FAKE_ACP_EARLY_MCP".into(), "seimei".into()),
         ]
         .into_iter()
         .chain(no_load.then(|| ("FAKE_ACP_NO_LOAD".to_string(), "1".to_string())))
@@ -157,7 +158,11 @@ async fn run(state: PathBuf, work: PathBuf, fake: PathBuf) {
     let ran = after(&first, from).into_iter().find(|e| e["type"] == "assistant").unwrap();
     assert_eq!(ran["text"], "Ran it (allow-once).");
 
-    // seimei's own tools, from the agent's MCP server.
+    // seimei's own tools, from the agent's MCP server, which answers while the session opens too.
+    let evs = turn(&first, "!early").await;
+    let said = evs.iter().find(|e| e["type"] == "assistant").unwrap()["text"].as_str().unwrap().to_string();
+    let early: Value = serde_json::from_str(&said).unwrap();
+    assert!(early["tools"].as_array().is_some_and(|t| t.iter().any(|t| t["name"] == "tasks")), "{early}");
     let evs = turn(&first, "!call seimei tasks {}").await;
     let said = evs.iter().find(|e| e["type"] == "assistant").unwrap()["text"].as_str().unwrap().to_string();
     let result: Value = serde_json::from_str(&said).unwrap();

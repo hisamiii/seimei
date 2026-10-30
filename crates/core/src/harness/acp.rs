@@ -292,6 +292,11 @@ impl acp::Handler for Side {
         })
     }
 
+    /// Before the session opens: Codex starts its MCP servers then, and seimei's own checks the process.
+    fn spawned(&self, pid: u32) {
+        self.seimei.spawned(pid);
+    }
+
     /// Codex's questions as the question cards AskUserQuestion raises; a skipped one gets no answer.
     fn questions(&self, qs: Vec<acp::Question>) -> BoxFuture<HashMap<String, Vec<String>>> {
         let seimei = self.seimei.clone();

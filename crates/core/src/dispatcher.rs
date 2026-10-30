@@ -687,6 +687,11 @@ impl Seimei {
     pub async fn card(&self, req: &PermissionRequest) -> Permission {
         crate::permissions::can_use(&self.approvals, "seimei", None, req, &self.mode, "default", None).await.permission
     }
+
+    /// Its agent's process started: its plugins run under it, so their session token is good from there on.
+    pub fn spawned(&self, pid: u32) {
+        self.tools.pool.plugins.root("seimei", None, Some(pid));
+    }
 }
 
 impl Handler for Seimei {

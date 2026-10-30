@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A fake ACP agent (agent-client-protocol v1, JSON-RPC over stdio) for seimei's ACP client.
 It never reaches a model: each prompt plays the script its "!command" line picks (see turn()), and what no script takes is echoed back.
-Sessions live in $FAKE_ACP_DIR/sessions/<id>.json; session/load replays one. $FAKE_ACP_NO_LOAD turns loadSession off, $FAKE_ACP_RESUME turns session/resume on (no replay).
+Sessions live in $FAKE_ACP_DIR/sessions/<id>.json; session/load replays one. $FAKE_ACP_NO_LOAD turns loadSession off, $FAKE_ACP_RESUME turns session/resume on (no replay), and $FAKE_ACP_EARLY_MCP names a stdio MCP server whose tools it lists while it opens a session, as Codex does (!early says what it got).
 Every message both ways goes to $FAKE_ACP_LOG as JSON lines {"dir": "in" or "out", "pid": ..., "msg": ...}, so a test can check them against the protocol's types."""
 import json
 import os
@@ -152,7 +152,9 @@ def turn(sid: str, text: str) -> str:
         say(sid, json.dumps(got))
     elif cmd == "!call":
         server, tool, args = rest.split(" ", 2)
-        say(sid, json.dumps(mcp_call(sid, server, tool, json.loads(args))))
+        say(sid, json.dumps(mcp_call(sid, server, "tools/call", {"name": tool, "arguments": json.loads(args)})))
+    elif cmd == "!early":
+        say(sid, json.dumps(sessions[sid].get("early")))
     elif cmd == "!fs":
         r = ask("fs/read_text_file", {"sessionId": sid, "path": "/etc/hostname"})
         say(sid, json.dumps(r.get("error") or r.get("result")))
@@ -163,8 +165,8 @@ def turn(sid: str, text: str) -> str:
     return "end_turn"
 
 
-def mcp_call(sid: str, server: str, tool: str, args: dict):
-    """One tools/call on one of the session's stdio MCP servers, started as an agent starts it."""
+def mcp_call(sid: str, server: str, method: str, params: dict):
+    """One request on one of the session's stdio MCP servers, started as an agent starts it."""
     m = next((m for m in sessions[sid]["mcp"] if m.get("name") == server), None)
     if m is None:
         return {"error": f"no server {server}"}
@@ -185,7 +187,7 @@ def mcp_call(sid: str, server: str, tool: str, args: dict):
         rpc(1, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
                               "clientInfo": {"name": "fake-acp", "version": "0.1.0"}})
         p.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n")
-        r = rpc(2, "tools/call", {"name": tool, "arguments": args})
+        r = rpc(2, method, params)
         return r.get("result") or r.get("error")
     finally:
         p.stdin.close()
@@ -233,6 +235,8 @@ def handle(msg: dict):
             if method == "session/load":
                 history = json.loads(f.read_text())["history"]
         sessions[sid] = {"cwd": p["cwd"], "mcp": p.get("mcpServers") or [], "mode": "ask", "history": []}
+        if os.environ.get("FAKE_ACP_EARLY_MCP"):
+            sessions[sid]["early"] = mcp_call(sid, os.environ["FAKE_ACP_EARLY_MCP"], "tools/list", {})
         for kind, text in history:
             say(sid, text, kind)
         res = {"modes": {"currentModeId": "ask", "availableModes": MODES}}
