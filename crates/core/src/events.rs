@@ -1,7 +1,7 @@
 //! Append-only event log: drives the live stream, scrollback and replay after reconnects.
 
 use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
+use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -18,7 +18,7 @@ const TURN: [&str; 5] = ["assistant", "tool", "tool_result", "image", "file"];
 /// A stalled client loses its stream past this many queued events; it reconnects and replays from its last id.
 const QUEUE: usize = 2000;
 
-/// The append-only event log (events.jsonl): everything the pages show, with dense ids.
+/// The append-only event log (events.jsonl): everything the pages show, with rising ids.
 /// They start at 1, or where a cleared log took over the old one's last id, so clients that resume from that id miss nothing.
 /// The whole log stays in memory; clients replay from it and then follow live events.
 pub struct EventLog {
@@ -40,15 +40,34 @@ fn id(ev: &Value) -> i64 {
 }
 
 impl EventLog {
-    /// Loads the log; a line that is not JSON fails the open rather than being skipped.
+    /// Loads the log. Lines that are not JSON (a write cut short by a full disk) are left out: the file as it was goes to <name>.bad, and the log is written again without them.
     pub fn open(path: &Path) -> std::io::Result<EventLog> {
         let mut events = vec![];
-        if let Ok(f) = File::open(path) {
-            for line in BufReader::new(f).lines() {
-                let line = line?;
-                if !line.trim().is_empty() {
-                    events.push(Arc::new(serde_json::from_str(&line)?));
+        if let Ok(bytes) = std::fs::read(path) {
+            let mut bad = 0;
+            for line in bytes.split(|b| *b == b'\n').filter(|l| !l.trim_ascii().is_empty()) {
+                match serde_json::from_slice(line) {
+                    Ok(ev) => events.push(Arc::new(ev)),
+                    Err(_) => bad += 1,
                 }
+            }
+            if bad > 0 || !bytes.is_empty() && !bytes.ends_with(b"\n") {
+                let mut aside = path.as_os_str().to_owned();
+                aside.push(".bad");
+                eprintln!(
+                    "seimei: {}: {bad} broken line(s) left out; the file as it was is in {}",
+                    path.display(),
+                    Path::new(&aside).display()
+                );
+                std::fs::write(&aside, &bytes)?;
+                let tmp = path.with_extension("jsonl.tmp");
+                let mut f =
+                    std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
+                for ev in &events {
+                    writeln!(f, "{ev}")?;
+                }
+                drop(f);
+                std::fs::rename(&tmp, path)?;
             }
         }
         let file = std::fs::OpenOptions::new().create(true).append(true).mode(0o600).open(path)?;
@@ -76,8 +95,13 @@ impl EventLog {
         ev.insert("t".into(), json!(now()));
         let ev = Arc::new(Value::Object(ev));
         let line = format!("{ev}\n");
+        let len = g.file.metadata().map(|m| m.len());
         if let Err(e) = g.file.write_all(line.as_bytes()) {
-            eprintln!("seimei: events.jsonl: {e}");
+            eprintln!("seimei: {}: {e}", self.path.display());
+            // No half line: the next event must start on a line of its own.
+            if let Ok(len) = len {
+                let _ = g.file.set_len(len);
+            }
         }
         g.events.push(ev.clone());
         g.send(&ev);
@@ -135,15 +159,16 @@ impl EventLog {
     }
 
     /// The event with this id.
-    pub fn get(&self, id: i64) -> Option<Event> {
+    pub fn get(&self, want: i64) -> Option<Event> {
         let g = self.inner.lock().unwrap();
-        usize::try_from(id - g.first()).ok().and_then(|i| g.events.get(i).cloned())
+        let i = g.events.partition_point(|e| id(e) < want);
+        g.events.get(i).filter(|e| id(e) == want).cloned()
     }
 
-    /// Ids are dense, so the id less the first one doubles as an index.
+    /// Ids rise but may have gaps (a line lost to a full disk), so this searches rather than counts.
     pub fn after(&self, last: i64) -> Vec<Event> {
         let g = self.inner.lock().unwrap();
-        let start = ((last + 1 - g.first()).max(0) as usize).min(g.events.len());
+        let start = g.events.partition_point(|e| id(e) <= last);
         g.events[start..].to_vec()
     }
 
@@ -152,18 +177,13 @@ impl EventLog {
         let g = self.inner.lock().unwrap();
         let end = match first {
             None => g.events.len(),
-            Some(f) => ((f - g.first()).max(0) as usize).min(g.events.len()),
+            Some(f) => g.events.partition_point(|e| id(e) < f),
         };
         g.events[end.saturating_sub(limit)..end].to_vec()
     }
 }
 
 impl Inner {
-    /// The id of the first stored event (1 for an empty log).
-    fn first(&self) -> i64 {
-        self.events.first().map(|e| id(e)).unwrap_or(1)
-    }
-
     fn send(&mut self, ev: &Event) {
         // A full queue drops that client's stream: it ends after what is queued and replays from its last id.
         self.subs.retain(|q| q.try_send(ev.clone()).is_ok());
@@ -213,6 +233,37 @@ mod tests {
         let p = std::env::temp_dir().join(format!("seimei-events-{}-{name}.jsonl", std::process::id()));
         let _ = std::fs::remove_file(&p);
         (EventLog::open(&p).unwrap(), p)
+    }
+
+    #[test]
+    fn broken_lines_are_left_out_and_replay_spans_the_gap() {
+        let (l, p) = log("broken");
+        for n in 0..4 {
+            l.add(json!({"type": "user", "text": format!("m{n}")}));
+        }
+        drop(l);
+        // Event 2 lost its end to a full disk, and the last write stopped mid-character.
+        let text = std::fs::read_to_string(&p).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        let mut cut = format!("{}\n{}{}\n{}\n", lines[0], &lines[1][..10], lines[2], lines[3]).into_bytes();
+        cut.extend_from_slice(&"{\"type\": \"user\", \"text\": \"\u{e9}".as_bytes()[..27]);
+        std::fs::write(&p, &cut).unwrap();
+        let l = EventLog::open(&p).unwrap();
+        let ids: Vec<i64> = l.after(0).iter().map(|e| id(e)).collect();
+        assert_eq!(ids, [1, 4]);
+        assert_eq!(l.after(1).len(), 1);
+        assert_eq!(l.after(2).len(), 1);
+        assert!(l.get(2).is_none());
+        assert_eq!(l.get(4).unwrap()["text"], "m3");
+        assert_eq!(l.before(Some(4), 10).len(), 1);
+        assert_eq!(l.add(json!({"type": "user", "text": "next"}))["id"], 5);
+        drop(l);
+        let mut aside = p.as_os_str().to_owned();
+        aside.push(".bad");
+        assert_eq!(std::fs::read(&aside).unwrap(), cut);
+        assert_eq!(EventLog::open(&p).unwrap().after(0).len(), 3);
+        let _ = std::fs::remove_file(&aside);
+        let _ = std::fs::remove_file(&p);
     }
 
     #[test]
