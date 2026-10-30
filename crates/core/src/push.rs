@@ -385,7 +385,8 @@ impl Stream {
             None => {
                 let tag = data.get("tag").and_then(Value::as_str).unwrap_or("").to_string();
                 let w = g.waiting.entry(dev.into()).or_default();
-                w.retain(|(t, _, _)| *t != tag);
+                let t0 = now();
+                w.retain(|(t, exp, _)| *t != tag && *exp > t0);
                 w.push((tag, now() + ttl as f64, data.clone()));
             }
         }
