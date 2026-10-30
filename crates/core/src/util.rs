@@ -64,15 +64,39 @@ pub fn read_json(path: &Path) -> Option<Value> {
     serde_json::from_slice(&std::fs::read(path).ok()?).ok()
 }
 
+/// read_json for a state file the next save replaces: one that exists but does not parse is kept as <name>.bad first.
+pub fn read_state(path: &Path) -> Option<Value> {
+    let bytes = std::fs::read(path).ok()?;
+    match serde_json::from_slice(&bytes) {
+        Ok(v) => Some(v),
+        Err(e) => {
+            let mut bad = path.as_os_str().to_owned();
+            bad.push(".bad");
+            eprintln!("seimei: {} does not parse ({e}); a copy is in {}", path.display(), Path::new(&bad).display());
+            let _ = std::fs::write(&bad, &bytes);
+            None
+        }
+    }
+}
+
 /// Atomic write, 600: state is the user's only.
+/// Each write has its own tmp file: two writers of one file must not write into the same one.
 pub fn write_json(path: &Path, data: &impl Serialize) -> std::io::Result<()> {
-    let tmp = path.with_extension("tmp");
+    static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = path.with_extension(format!("tmp.{}.{n}", std::process::id()));
     let buf = serde_json::to_vec_pretty(data)?;
-    let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
-    f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-    f.write_all(&buf)?;
-    drop(f);
-    std::fs::rename(&tmp, path)
+    let wrote = (|| {
+        let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
+        f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        f.write_all(&buf)?;
+        drop(f);
+        std::fs::rename(&tmp, path)
+    })();
+    if wrote.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    wrote
 }
 
 /// write_json for a state file whose save may fail without stopping anything: the error goes to the log.
@@ -288,6 +312,38 @@ mod tests {
         assert_eq!(read_json(&p).unwrap(), serde_json::json!({"b": [1, 2], "a": {}}));
         use std::os::unix::fs::PermissionsExt;
         assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn writers_of_one_file_never_mix() {
+        let dir = std::env::temp_dir().join(format!("seimei-util-mix-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("w.json");
+        // Bodies of different sizes, so a mixed file is not one of them.
+        let bodies: Vec<Value> = (0..4).map(|i| serde_json::json!({"n": "x".repeat(1000 * (i + 1))})).collect();
+        for _ in 0..50 {
+            std::thread::scope(|s| {
+                for b in &bodies {
+                    s.spawn(|| write_json(&p, b).unwrap());
+                }
+            });
+            assert!(bodies.contains(&read_json(&p).expect("a whole file")));
+        }
+        let left: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(left, ["w.json"]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_state_file_that_does_not_parse_is_kept() {
+        let dir = std::env::temp_dir().join(format!("seimei-util-bad-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("s.json");
+        assert_eq!(read_state(&p), None);
+        std::fs::write(&p, "[1,").unwrap();
+        assert_eq!(read_state(&p), None);
+        assert_eq!(std::fs::read_to_string(dir.join("s.json.bad")).unwrap(), "[1,");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

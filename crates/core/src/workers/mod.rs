@@ -36,7 +36,7 @@ use crate::sessions::{self, Own};
 use crate::tasks::{Board, Fields};
 use crate::transcripts::{brief, project_of};
 use crate::usage::Usage;
-use crate::util::{as_text, chars, far, hex, now, random_bytes, read_json, save_json, sh_quote, uuid4};
+use crate::util::{as_text, chars, far, hex, now, random_bytes, read_state, save_json, sh_quote, uuid4};
 
 mod acp_session;
 pub mod claude; // lint: allow scoped-name
@@ -1485,6 +1485,8 @@ pub struct Pool {
     batch: Mutex<Batch>,
     flushing: AtomicBool,
     hidden: Mutex<HashSet<String>>,
+    /// Held from the snapshot to the rename: a slower save of an older list must not land last.
+    saving: Mutex<()>,
 }
 
 impl Pool {
@@ -1492,7 +1494,7 @@ impl Pool {
         let dir = state.join("workers");
         std::fs::create_dir_all(&dir)?;
         let path = state.join("workers.json");
-        let recs = read_json(&path).and_then(|v| v.as_array().cloned()).unwrap_or_default();
+        let recs = read_state(&path).and_then(|v| v.as_array().cloned()).unwrap_or_default();
         let mut logs = vec![];
         for v in recs {
             let rec = match Record::parse(v) {
@@ -1534,6 +1536,7 @@ impl Pool {
                 batch: Mutex::new(vec![]),
                 flushing: AtomicBool::new(false),
                 hidden: Mutex::new(HashSet::new()),
+                saving: Mutex::new(()),
             }
         });
         // An ACP agent reaches its own tools through the plugin socket.
@@ -1622,8 +1625,10 @@ impl Pool {
 
     /// Saves workers.json and sends the pages the new list; call it after any change to a record.
     pub fn changed(&self) {
+        let saving = self.saving.lock().unwrap();
         let recs: Vec<Record> = self.all().iter().map(|w| w.rec()).collect();
         save_json(&self.path, &recs);
+        drop(saving);
         self.events.flash(self.listing());
     }
 
