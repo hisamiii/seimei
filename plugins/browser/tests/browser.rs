@@ -110,3 +110,39 @@ async fn browser_cases() {
     let _ = std::fs::remove_dir_all(&dir);
     assert!(fails.is_empty(), "{} of {n} failed:\n{}", fails.len(), fails.join("\n"));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reconnected_browser_forgets_its_tabs() {
+    let dir = std::env::temp_dir().join(format!("seimei-browser-re-{}", std::process::id()));
+    let shared = Arc::new(Mutex::new(Shared::default()));
+    let b = Browser::new(Some(&dir));
+    let sock = dir.join("re.sock");
+    tokio::spawn(b.link.clone().run(sock.clone()));
+    let tab =
+        json!({"id": 12, "window": 1, "index": 0, "title": "Mail", "url": "https://mail.example/", "active": true});
+    shared.lock().unwrap().step = json!({"replies": {"open": tab, "info": [tab], "close": 1}});
+    connector(sock.clone(), shared.clone());
+    let user = User(shared.clone());
+    let opened = loop {
+        let r = b.call("browser_open", &json!({"url": "https://mail.example/"}), &user).await;
+        if !r["content"][0]["text"].as_str().unwrap().starts_with("The browser is not connected") {
+            break r;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    assert_eq!(opened["isError"], false, "{opened}");
+    // The browser restarts: its host connects again, and tab 12 may be a tab the user opened.
+    connector(sock, shared.clone());
+    let n = b.link.connection();
+    for _ in 0..100 {
+        if b.link.connection() > n {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    shared.lock().unwrap().step["outcome"] = json!("denied");
+    let r = b.call("browser_close", &json!({"tabs": [12]}), &user).await;
+    assert_eq!(r["content"][0]["text"], "The user denied it; no tabs closed.");
+    assert_eq!(shared.lock().unwrap().cards.len(), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}

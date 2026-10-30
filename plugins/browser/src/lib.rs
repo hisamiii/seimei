@@ -8,6 +8,7 @@ pub mod host;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -33,6 +34,8 @@ pub struct Browser {
     agent_sock: OnceLock<PathBuf>,
     /// Tabs seimei opened (any session): they close and take actions without a card.
     opened: Mutex<HashSet<i64>>,
+    /// The link connection the tab ids above are from.
+    conn: AtomicU64,
     /// The user's tabs they let seimei act in, with the site (scheme://host) the OK holds for.
     approved: Mutex<HashMap<i64, String>>,
     reads: tokio::sync::Mutex<HashMap<i64, (f64, Value)>>,
@@ -283,6 +286,7 @@ impl Browser {
             starter: OnceLock::new(),
             agent_sock: OnceLock::new(),
             opened: Mutex::default(),
+            conn: AtomicU64::new(0),
             approved: Mutex::default(),
             reads: Default::default(),
             name: Mutex::default(),
@@ -520,6 +524,13 @@ impl Browser {
     }
 
     async fn run(&self, tool: &str, a: &Value, session: &dyn Session) -> Result<Value, String> {
+        // A browser numbers its tabs anew when it restarts: ids from an earlier connection may be the user's tabs now.
+        let conn = self.link.connection();
+        if self.conn.swap(conn, Ordering::Relaxed) != conn {
+            self.opened.lock().unwrap().clear();
+            self.approved.lock().unwrap().clear();
+            self.reads.lock().await.clear();
+        }
         let ok = |t: String| Ok(text(&t, false));
         match tool {
             "browser_tabs" => ok(tabs_text(&self.link.call("tabs", 30, json!({})).await?)),

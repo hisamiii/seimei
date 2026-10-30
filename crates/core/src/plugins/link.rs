@@ -99,6 +99,11 @@ impl Link {
         eprintln!("seimei: {} disconnected", self.name);
     }
 
+    /// How many connections the link has had: a new number is a new connector, maybe a restarted browser.
+    pub fn connection(&self) -> u64 {
+        self.conns.load(Ordering::Relaxed)
+    }
+
     /// Whether a connector is connected now.
     pub async fn connected(&self) -> bool {
         self.writer.lock().await.is_some()
