@@ -1,4 +1,4 @@
-//! tests/cases/sessionevents.json: what the user's sessions run into, as the lines the dispatcher hears after each scan.
+//! tests/cases/sessionevents.json: what the user's sessions run into, as the lines the dispatcher hears after each scan; and where the adapter finds the transcripts and the CLI.
 
 use std::io::Write;
 
@@ -44,4 +44,22 @@ fn session_event_cases() {
     }
     let _ = std::fs::remove_dir_all(&dir);
     assert!(fails.is_empty(), "{} failures:\n{}", fails.len(), fails.join("\n"));
+}
+
+/// The default harness finds the transcripts and the CLI where its sessions do: its config dir and its CLI override.
+#[test]
+fn the_adapter_follows_the_config_dir_and_cli() {
+    use seimei_core::workers::harness;
+    let dir = std::env::temp_dir().join(format!("seimei-typed-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("projects/-p")).unwrap();
+    let row = json!({"type": "user", "message": {"role": "user", "content": "render the loom frames"}});
+    std::fs::write(dir.join("projects/-p/s.jsonl"), format!("{row}\n")).unwrap();
+    let mut env = crate::env::Env::lock();
+    env.set("CLAUDE_CONFIG_DIR", &dir);
+    env.set("SEIMEI_CLAUDE", "/opt/cc/claude");
+    let mut turns = vec![];
+    harness::typed_turns(&mut turns);
+    assert_eq!(turns, ["render the loom frames"]);
+    assert_eq!(harness::resume_argv("s".into()), ["/opt/cc/claude", "--resume", "s"]);
+    let _ = std::fs::remove_dir_all(&dir);
 }

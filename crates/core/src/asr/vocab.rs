@@ -365,7 +365,7 @@ fn fish_commands(history: &Path, out: &mut Vec<String>) {
 /// Returns (words, messages).
 pub fn build_auto(dict: &Dict, home: &Path) -> (Vec<String>, usize) {
     let mut texts = vec![];
-    crate::workers::harness::typed_turns(home, &mut texts);
+    crate::workers::harness::typed_turns(&mut texts);
     fish_commands(&home.join(".local/share/fish/fish_history"), &mut texts);
     let (df, forms) = tally(&texts, |_| 1.0);
     let mut out = vec![];

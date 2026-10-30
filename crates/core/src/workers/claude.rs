@@ -156,9 +156,9 @@ pub fn transcript(session: &str, cwd: &str) -> Option<PathBuf> {
     None
 }
 
-/// The user's own turns in the transcripts under home: typed text only (no tool results, meta or compaction summaries).
-pub fn typed_turns(home: &Path, out: &mut Vec<String>) {
-    let Ok(dirs) = std::fs::read_dir(home.join(".claude/projects")) else { return };
+/// The user's own turns in the transcripts: typed text only (no tool results, meta or compaction summaries).
+pub fn typed_turns(out: &mut Vec<String>) {
+    let Ok(dirs) = std::fs::read_dir(projects_dir()) else { return };
     for d in dirs.flatten() {
         let Ok(files) = std::fs::read_dir(d.path()) else { continue };
         for f in files.flatten() {
@@ -261,7 +261,8 @@ pub fn stop_job(job: &str) -> String {
 
 /// The command that resumes a session in a terminal.
 pub fn resume_argv(session_id: String) -> Vec<String> {
-    vec!["claude".into(), "--resume".into(), session_id]
+    let cli = seimei_proto::Options::default().cli_path().display().to_string();
+    vec![cli, "--resume".into(), session_id]
 }
 
 /// The command that sets a session's effort at the next turn boundary.
@@ -271,8 +272,7 @@ pub fn effort_command(effort: &str) -> String {
 
 /// Claude Code's version, from `claude --version` (or $SEIMEI_CLAUDE's).
 pub fn version() -> Option<String> {
-    let exe = std::env::var("SEIMEI_CLAUDE").ok().filter(|p| !p.is_empty()).unwrap_or("claude".into());
-    let out = Command::new(exe).arg("--version").output().ok().filter(|o| o.status.success())?;
+    let out = Command::new(seimei_proto::Options::default().cli_path()).arg("--version").output().ok().filter(|o| o.status.success())?;
     let text = String::from_utf8_lossy(&out.stdout);
     text.split_whitespace().next().map(String::from)
 }
