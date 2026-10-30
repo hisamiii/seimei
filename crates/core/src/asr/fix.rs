@@ -46,7 +46,7 @@ pub fn apply_fixes(text: &str, fixes: &[(Regex, String)]) -> String {
 }
 
 /// A rough sound key: the first letter, then consonants with the usual confusions merged, vowels and repeats out
-/// ("shikigami" and "shi ki ga me" both give "skkgm"; "tero" and "tiro" give "tr").
+/// ("shikigami" and "shi ki ga me" both give "skkgm"; "kero" and "kiro" give "kr").
 fn sound(s: &str) -> String {
     let s = s.to_lowercase().replace("ph", "f").replace("ck", "k").replace("sh", "s").replace("ch", "k");
     let mut out = String::new();
@@ -155,7 +155,7 @@ pub fn fix(dict: &Dict, text: &str, terms: &[String], known: &[String]) -> Fixed
             let (s, _) = span(text, toks[i]);
             let (_, e) = span(text, toks[i + j - 1]);
             out.push_str(&text[at..s]);
-            // A sentence starts with a capital, whatever the term's own spelling ("Tero crashed" -> "Tiro crashed").
+            // A sentence starts with a capital, whatever the term's own spelling ("Kero crashed" -> "Kiro crashed").
             let starts = text[..s].trim_end().is_empty() || text[..s].trim_end().ends_with(['.', '!', '?']);
             let mut term = terms[ti].clone();
             if starts && toks[i].starts_with(char::is_uppercase) && term.starts_with(char::is_lowercase) {
@@ -180,8 +180,8 @@ pub fn fix(dict: &Dict, text: &str, terms: &[String], known: &[String]) -> Fixed
     Fixed { text: out, fixed, suspects }
 }
 
-/// A phrase the model starts with a list term in the term's lowercase spelling ("tiro crashed") starts with a capital, as every other phrase does.
-/// Only plain words: "zfx2048" and "llama.cpp" keep their spelling.
+/// A phrase the model starts with a list term in the term's lowercase spelling ("kiro crashed") starts with a capital, as every other phrase does.
+/// Only plain words: "zqx2048" and "llama.cpp" keep their spelling.
 pub fn capital(text: &str, terms: &[String]) -> String {
     let first = words(text).into_iter().next().unwrap_or("");
     let lead = text.trim_start();
@@ -219,14 +219,14 @@ mod tests {
     }
 
     fn terms() -> Vec<String> {
-        ["rebus", "shikigami", "zfx2048", "tiro", "xbuild", "seimei"].map(String::from).to_vec()
+        ["rebus", "shikigami", "zqx2048", "kiro", "xbuild", "seimei"].map(String::from).to_vec()
     }
 
     #[test]
     fn misheard_terms_are_swapped() {
         let d = dict();
-        let f = fix(&d, "Check whether the shi ki ga me on Re bus still holds ZEFX2048.", &terms(), &[]);
-        assert_eq!(f.text, "Check whether the shikigami on rebus still holds zfx2048.", "{:?}", f.fixed);
+        let f = fix(&d, "Check whether the shi ki ga me on Re bus still holds ZEQX2048.", &terms(), &[]);
+        assert_eq!(f.text, "Check whether the shikigami on rebus still holds zqx2048.", "{:?}", f.fixed);
         assert_eq!(f.fixed.len(), 3);
         assert_eq!(fix(&d, "riBus is back", &terms(), &[]).text, "rebus is back");
         // "shiki" is a word of the auto list, and still part of the misheard run.
@@ -239,8 +239,8 @@ mod tests {
         let mut with_shiki = terms();
         with_shiki.push("shiki".into());
         assert_eq!(fix(&d, "Ask the shiki ga me to check", &with_shiki, &[]).text, "Ask the shikigami to check");
-        assert_eq!(fix(&d, "Tero and many", &terms(), &[]).text, "Tiro and many");
-        assert_eq!(fix(&d, "on Tero. Tero and the Tero", &terms(), &[]).text, "on tiro. Tiro and the tiro");
+        assert_eq!(fix(&d, "Kero and many", &terms(), &[]).text, "Kiro and many");
+        assert_eq!(fix(&d, "on Kero. Kero and the Kero", &terms(), &[]).text, "on kiro. Kiro and the kiro");
     }
 
     #[test]
@@ -251,21 +251,21 @@ mod tests {
             "seimei is back",
             "the bus is low",
             "Check whether it holds",
-            "on tiro now",
+            "on kiro now",
             "is seimei",
         ] {
             let f = fix(&d, s, &terms(), &[]);
             assert_eq!(f.text, s, "{:?}", f.fixed);
         }
         // Only listed terms go in: "Re bus" stays without rebus on the list.
-        assert_eq!(fix(&d, "Re bus", &["tiro".into()], &[]).text, "Re bus");
+        assert_eq!(fix(&d, "Re bus", &["kiro".into()], &[]).text, "Re bus");
     }
 
     #[test]
     fn a_term_starting_a_phrase_gets_a_capital() {
-        assert_eq!(capital("tiro crashed again, so tiro", &terms()), "Tiro crashed again, so tiro");
-        assert_eq!(capital("the tiro", &terms()), "the tiro");
-        assert_eq!(capital("zfx2048 is fine", &terms()), "zfx2048 is fine");
+        assert_eq!(capital("kiro crashed again, so kiro", &terms()), "Kiro crashed again, so kiro");
+        assert_eq!(capital("the kiro", &terms()), "the kiro");
+        assert_eq!(capital("zqx2048 is fine", &terms()), "zqx2048 is fine");
     }
 
     #[test]

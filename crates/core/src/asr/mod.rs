@@ -415,7 +415,7 @@ mod tests {
         cfg.deny = vec!["acme*".into()];
         let asr = Asr::new(cfg, &state);
         let ctx = Context {
-            chat: vec!["ask acmecorp about tiro".into(), "the shikigami on rebus holds zfx2048".into()],
+            chat: vec!["ask acmecorp about kiro".into(), "the shikigami on rebus holds zqx2048".into()],
             agent: vec!["dev".into(), "seimei".into()],
             names: vec!["phonewm_mockups".into()],
             board: vec!["seimei usage: rate-limits log".into()],
@@ -424,7 +424,7 @@ mod tests {
         let (list, desc) = asr.list(&ctx);
         let words: Vec<&str> = list.iter().map(|(w, _)| w.as_str()).collect();
         assert_eq!(&words[..3], ["seimei", "Mod+H", "dev"]);
-        assert!(words.contains(&"shikigami") && words.contains(&"tiro") && words.contains(&"phonewm_mockups"));
+        assert!(words.contains(&"shikigami") && words.contains(&"kiro") && words.contains(&"phonewm_mockups"));
         assert!(!words.iter().any(|w| w.starts_with("acme")));
         assert_eq!(list.iter().find(|(w, _)| w == "rebus").unwrap().1, "chat");
         assert_eq!(list.iter().find(|(w, _)| w == "loom").unwrap().1, "auto");

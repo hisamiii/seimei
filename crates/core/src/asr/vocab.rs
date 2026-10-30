@@ -90,7 +90,7 @@ fn re(cell: &'static OnceLock<Regex>, pat: &str) -> &'static Regex {
     cell.get_or_init(|| Regex::new(pat).expect("a valid pattern"))
 }
 
-/// Words: letters first, then letters and digits, maybe joined by `.`, `+` or `-` (llama.cpp, Mod+H, zfx2048), not inside a longer token (vocab.py's `(?<![\w.+-])`, which Rust's regex has no look-behind for).
+/// Words: letters first, then letters and digits, maybe joined by `.`, `+` or `-` (llama.cpp, Mod+H, zqx2048), not inside a longer token (vocab.py's `(?<![\w.+-])`, which Rust's regex has no look-behind for).
 pub fn words(text: &str) -> Vec<&str> {
     static W: OnceLock<Regex> = OnceLock::new();
     let w = re(&W, r"[A-Za-z][A-Za-z0-9]*(?:[.+\-][A-Za-z0-9]+)*");
@@ -401,7 +401,7 @@ mod tests {
 
     #[test]
     fn word_shapes() {
-        assert_eq!(words("use llama.cpp, Mod+H and zfx2048"), ["use", "llama.cpp", "Mod+H", "and", "zfx2048"]);
+        assert_eq!(words("use llama.cpp, Mod+H and zqx2048"), ["use", "llama.cpp", "Mod+H", "and", "zqx2048"]);
         assert_eq!(words("snake_case x.y_z"), ["snake", "x.y"]);
         assert!(words("_foo").is_empty());
     }
@@ -411,20 +411,20 @@ mod tests {
         let d = dict();
         assert!(d.english("holds") && d.english("checked") && d.english("rebuild"));
         assert!(d.worth("rebus") && d.worth("shikigami") && !d.worth("grep") && !d.worth("deadbeef12"));
-        let chat = vec!["ask tiro about rebus".to_string(), "the shikigami on rebus still holds zfx2048".to_string()];
+        let chat = vec!["ask kiro about rebus".to_string(), "the shikigami on rebus still holds zqx2048".to_string()];
         let r = rare(&d, &chat);
-        // zfx2048 is half digits: dictate's worth() leaves it to the pins too.
+        // zqx2048 is half digits: dictate's worth() leaves it to the pins too.
         assert_eq!(&r[..2], ["rebus", "shikigami"]);
         assert!(
-            r.contains(&"tiro".to_string()) && !r.contains(&"holds".to_string()) && !r.contains(&"zfx2048".to_string())
+            r.contains(&"kiro".to_string()) && !r.contains(&"holds".to_string()) && !r.contains(&"zqx2048".to_string())
         );
     }
 
     #[test]
     fn cleaning() {
-        let t = "keep <system-reminder>drop rebus</system-reminder> this ```code tiro``` see https://x.io/a";
+        let t = "keep <system-reminder>drop rebus</system-reminder> this ```code kiro``` see https://x.io/a";
         let c = clean(t);
-        assert!(c.contains("keep") && c.contains("this") && !c.contains("rebus") && !c.contains("tiro"));
+        assert!(c.contains("keep") && c.contains("this") && !c.contains("rebus") && !c.contains("kiro"));
         assert!(!c.contains("x.io"));
     }
 
@@ -433,11 +433,11 @@ mod tests {
         let m = merge(
             vec![
                 ("pin", vec!["Rebus".into(), "a,b".into()]),
-                ("chat", vec!["rebus".into(), "secret".into(), "tiro".into()]),
+                ("chat", vec!["rebus".into(), "secret".into(), "kiro".into()]),
             ],
             &["sec*".to_string()],
             3,
         );
-        assert_eq!(m, vec![("Rebus".into(), "pin"), ("a b".into(), "pin"), ("tiro".into(), "chat")]);
+        assert_eq!(m, vec![("Rebus".into(), "pin"), ("a b".into(), "pin"), ("kiro".into(), "chat")]);
     }
 }
