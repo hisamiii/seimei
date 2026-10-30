@@ -1055,9 +1055,7 @@ impl Session {
             Message::Assistant(a) => self.assistant(a),
             Message::User(u) => self.user(u),
             Message::Result(r) => {
-                if self.quiet > 0
-                    && r.result.as_deref().is_some_and(|t| harness::EFFORT_SET.iter().any(|e| t.starts_with(e)))
-                {
+                if self.quiet > 0 && local_result(&r) {
                     self.quiet -= 1;
                     return;
                 }
@@ -1090,7 +1088,8 @@ impl Session {
         let blocks = msg.message.content;
         let texts =
             || blocks.iter().filter_map(|b| if let ContentBlock::Text { text } = b { Some(text) } else { None });
-        if self.quiet > 0 && texts().any(|t| harness::EFFORT_SET.iter().any(|e| t.starts_with(e))) {
+        // The CLI's own reply to a local command comes from no model.
+        if self.quiet > 0 && (msg.message.model == "<synthetic>" || texts().any(|t| effort_set(t))) {
             return;
         }
         let goes_on = blocks.iter().any(|b| match b {
@@ -2082,6 +2081,16 @@ impl Pool {
     }
 }
 
+/// The CLI's answer to /effort: words that may change, and no model turn.
+fn effort_set(text: &str) -> bool {
+    harness::EFFORT_SET.iter().any(|e| text.starts_with(e))
+}
+
+/// The result of a local command, which ran no model turn.
+fn local_result(r: &ResultMessage) -> bool {
+    r.num_turns == 0 || r.result.as_deref().is_some_and(effort_set)
+}
+
 /// A card opened (Some) or settled (None) among a worker's open ones: what its record shows now, when that changed. The newest open card is shown.
 fn open_card(open: &mut BTreeMap<u64, String>, seq: u64, text: Option<String>) -> Option<Option<String>> {
     let before = open.last_key_value().map(|(_, t)| t.clone());
@@ -2096,6 +2105,18 @@ fn open_card(open: &mut BTreeMap<u64, String>, seq: u64, text: Option<String>) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_effort_result_is_quiet_whatever_it_says() {
+        let r = |turns: u64, text: &str| {
+            let v = json!({"subtype": "success", "is_error": false, "num_turns": turns, "result": text});
+            local_result(&serde_json::from_value(v).unwrap())
+        };
+        // As the CLI answers /effort high: no model turn.
+        assert!(r(0, "Effort set to high"));
+        assert!(r(1, "Set effort level to high"));
+        assert!(!r(1, "Effort set to high"));
+    }
 
     #[test]
     fn the_newest_open_card_is_shown() {
