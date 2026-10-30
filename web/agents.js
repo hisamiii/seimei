@@ -685,34 +685,37 @@ function add(events) {
   }
 }
 
+// One poll at a time: only the latest one draws and schedules the next, so an older answer never moves the offset back.
 let pollTimer = 0;
+let pollRun = 0;
 async function poll(soon = false) {
   clearTimeout(pollTimer);
   if (!P || P.kind !== 'session') return;
   const p = P;
+  const run = ++pollRun;
   if (soon) await new Promise((r) => setTimeout(r, 600));
+  if (run !== pollRun) return;
   const r = await getJSON(`api/sessions/${p.id}${p.next != null ? `?from=${p.next}` : ''}`, () => {
     p.row = { ...p.row, reach: 'The session has ended', via: null };
   });
-  if (P !== p) return;
-  if (!r) composerState();
-  if (r) {
-    if ((p.next != null && r.next < p.next) || r.reset) {
-      // The transcript was replaced (compacted or continued), or ran far ahead: draw it again.
-      keep.drop(`session-${p.id}`);
-      return openPage('session', p.id);
-    }
-    p.next = r.next;
-    p.row = { ...p.row, ...r.session, reach: r.reach, via: r.via };
-    add(r.events);
-    p.renderer.live(r.doing && { ...r.doing, output: r.live?.output });
-    question(r.ask);
-    head();
-    if (r.session?.session_id) markSeen(r.session);
-    stick();
+  if (P !== p || run !== pollRun) return;
+  if (r && ((p.next != null && r.next < p.next) || r.reset || r.session.session_id !== p.row.session_id)) {
+    // The session went on in another transcript, or ran far ahead: draw it again.
+    keep.drop(`session-${p.id}`);
+    return openPage('session', p.id);
   }
   pollTimer = setTimeout(poll, document.hidden ? 8000 : 2000);
+  if (!r) return composerState();
+  p.next = r.next;
+  p.row = { ...p.row, ...r.session, reach: r.reach, via: r.via };
+  add(r.events);
+  p.renderer.live(r.doing && { ...r.doing, output: r.live?.output });
+  question(r.ask);
+  head();
+  if (r.session?.session_id) markSeen(r.session);
+  stick();
 }
+document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
 
 setInterval(() => {
   if (!P) return;
@@ -1027,16 +1030,17 @@ async function openPage(kind, id) {
   if (kept && P !== p) return;
   if (!r && kept && gone) return note('Gone from the server: this is the last copy');
   if (!r) {
-    if (!kept) return snack("Couldn't reach the server");
-    // The copy keeps polling, and the stream's reconnect refreshes a worker's page.
-    if (kind === 'session') pollTimer = setTimeout(poll, 2000);
-    return snack('Offline: this is the last copy');
+    // The copy, or the page being drawn again, keeps polling; the stream's reconnect refreshes a worker's page.
+    if (kind === 'session' && P?.kind === kind && P.id === id) pollTimer = setTimeout(poll, 2000);
+    return snack(kept ? 'Offline: this is the last copy' : "Couldn't reach the server");
   }
   // Drawn anew when there was no copy, or the server says the copy is too old to extend.
   if (!kept || r.reset) build(kind, id, kind === 'worker' ? { ...r.worker, ...live } : { ...r.session, reach: r.reach, via: r.via });
   else P.row = kind === 'worker' ? { ...P.row, ...r.worker, ...live } : { ...P.row, ...r.session, reach: r.reach, via: r.via };
   if (kind === 'worker') add(r.events);
   else {
+    // A poll still on its way read from the old offset.
+    pollRun++;
     P.next = r.next;
     add(r.events);
     P.renderer.live(r.doing && { ...r.doing, output: r.live?.output });
