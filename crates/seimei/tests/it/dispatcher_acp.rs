@@ -248,12 +248,15 @@ async fn rollover(state: PathBuf, work: PathBuf, fake: PathBuf) {
     let (_, old) = saved(&state);
 
     // A planned restart on an agent that cannot load the session: a turn of its own writes the handoff, in the trajectory.
+    // Asked during a turn, it waits for that turn to end.
     let from = first.events.last_id();
+    first.dispatcher.send("!slow", &[], vec![], &[], None, None);
+    assert!(until(20, || first.dispatcher.busy()).await);
     tokio::time::timeout(Duration::from_secs(20), first.dispatcher.handoff()).await.unwrap();
     let evs = after(&first, from);
     let marks: Vec<&Value> = evs.iter().filter_map(|e| e.get("handoff")).collect();
     assert_eq!(marks, [&json!("start"), &json!("done")], "{evs:?}");
-    let reply = evs.iter().find(|e| e["type"] == "assistant").unwrap();
+    let reply = evs.iter().find(|e| e["type"] == "assistant" && e["lane"] == "t").unwrap();
     assert_eq!(reply["lane"], "t");
     let handoff = std::fs::read_to_string(state.join("handoff.md")).unwrap();
     assert!(handoff.starts_with("You said: [seimei] seimei restarts now"), "{handoff}");

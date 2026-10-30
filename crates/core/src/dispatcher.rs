@@ -757,6 +757,10 @@ struct Turns {
     seed: bool,
     /// The handoff turn that runs, its replies so far and who waits for it.
     handoff: Option<(oneshot::Sender<()>, String)>,
+    /// A handoff asked for during a turn: it is asked once the turn ends.
+    handoff_later: Option<oneshot::Sender<()>>,
+    /// The connected session's id, for the audit and rate limits.
+    session: String,
 }
 
 /// What the session loop does after a message was handled.
@@ -788,13 +792,15 @@ impl Turns {
             rate_limits: Default::default(),
             seed: false,
             handoff: None,
+            handoff_later: None,
+            session: String::new(),
         }
     }
 
     /// A session connected: when it is new in place of one that could not be resumed, its first message is seeded with the handoff and the After compaction block.
     fn rolled(&mut self, new: bool) {
         // A handoff turn the last session did not finish: its waiter hears back now.
-        self.handoff = None;
+        (self.handoff, self.handoff_later) = (None, None);
         let handoff = self.d.state.join("handoff.md");
         if !new {
             let _ = std::fs::remove_file(&handoff);
@@ -814,7 +820,11 @@ impl Turns {
 
     /// A planned restart on a harness that cannot resume: a turn of its own asks for the Must survive section.
     fn ask_handoff(&mut self, tx: oneshot::Sender<()>, h: &mut dyn Harness) -> Result<(), String> {
-        if h.resumes() || self.busy || !self.connected {
+        if h.resumes() || !self.connected {
+            return Ok(());
+        }
+        if self.busy {
+            self.handoff_later = Some(tx);
             return Ok(());
         }
         let text = "Writing a handoff: this harness cannot resume the session after the restart.";
@@ -894,7 +904,14 @@ impl Turns {
                     None => return "the agent exited".into(),
                     Some(ev) => match self.handle(ev) {
                         After::Nothing => {}
-                        After::Idle => self.idle_due = Some(Instant::now() + IDLE_COMPACT),
+                        After::Idle => {
+                            self.idle_due = Some(Instant::now() + IDLE_COMPACT);
+                            if let Some(tx) = self.handoff_later.take()
+                                && let Err(e) = self.ask_handoff(tx, h)
+                            {
+                                return e;
+                            }
+                        }
                     },
                 },
                 _ = sleep_until(notes_due.unwrap_or_else(crate::util::far)), if notes_due.is_some() => {
