@@ -635,9 +635,10 @@ async function submit(e) {
   tray();
   await Promise.all(files.map((a) => a.upload).filter(Boolean));
   const ids = files.filter((a) => a.id).map((a) => a.id);
+  const answering = P.kind === 'session' && P.ask?.answerable;
   let r;
   if (P.kind === 'worker') r = await postJSON(`api/workers/${encodeURIComponent(P.id)}/send`, { text, files: ids });
-  else if (P.ask?.answerable) r = await postJSON(`api/sessions/${P.id}/answer`, { tool_id: P.ask.tool_id, text, files: ids });
+  else if (answering) r = await postJSON(`api/sessions/${P.id}/answer`, { tool_id: P.ask.tool_id, text, files: ids });
   else r = await postJSON(`api/sessions/${P.id}/send`, { text, files: ids });
   if (!r.ok) {
     P.input.value = text;
@@ -650,9 +651,17 @@ async function submit(e) {
   files.forEach((a) => a.url && URL.revokeObjectURL(a.url));
   note(null);
   if (r.via === 'seimei') snack(r.held ? 'Held until you allow it in its terminal' : 'In its inbox');
+  if (P.kind === 'session' && !answering) pend(text || files.map((a) => a.name).join(', '));
   composerState();
   stick(true);
   if (P.kind === 'session') poll(true);
+}
+
+// A sent message shows dimmed at the end until the transcript has it: a busy session takes it only between two steps.
+function pend(text) {
+  const node = el('div', 'msg user pending', text);
+  P.pending.push(node);
+  P.thread.append(node);
 }
 
 function autosize() {
@@ -678,9 +687,15 @@ function add(events) {
     if (ev.id != null) P.ids.add(String(ev.id));
     if (typeof ev.id === 'number') P.last = Math.max(P.last, ev.id);
     P.renderer.add(ev);
+    // The sent message arrived: its dimmed copy goes (the oldest, when the transcript's text differs).
+    if (ev.type === 'user' && P.pending.length) {
+      const i = P.pending.findIndex((n) => n.textContent === ev.text);
+      P.pending.splice(Math.max(i, 0), 1)[0].remove();
+    }
   }
   if (fresh.length) {
     P.empty?.remove();
+    P.thread.append(...P.pending);
     P.raw = P.raw.concat(fresh).slice(-KEEP_PAGE);
     const p = P;
     keep.later(`${p.kind}-${p.id}`, () => ({ events: p.raw, last: p.last, next: p.next, row: p.row, shape: SHAPE }));
@@ -983,7 +998,7 @@ function build(kind, id, row) {
   sp.replaceChildren(bar, banner, main, foot);
 
   P = { kind, id, row, title, sub, ring: r, hand, banner, main, thread, empty, qbox, note: noteEl, tray: trayEl, input, attach, send, stop,
-    files: [], next: null, ask: null, askKey: undefined, pinned: true, renderer: new Renderer(thread), ids: new Set(), raw: [], last: 0 };
+    files: [], next: null, ask: null, askKey: undefined, pinned: true, renderer: new Renderer(thread), ids: new Set(), raw: [], last: 0, pending: [] };
 
   main.addEventListener('scroll', () => { if (P) P.pinned = nearBottom(); }, { passive: true });
   new ResizeObserver(() => stick()).observe(thread);
