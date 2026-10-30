@@ -1066,7 +1066,8 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("seimei-auth-{}-old", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let (salt, t) = (random_bytes(16), now());
+        // Whole seconds: serde_json may not read back the last digit of a 17-digit float.
+        let (salt, t) = (random_bytes(16), now().floor());
         let hash = hex(&scrypt("correct horse battery", &salt, (1 << 10, 8, 1)));
         // As the untyped code wrote it, plus fields this side does not know.
         let mut old = json!({
