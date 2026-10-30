@@ -1838,7 +1838,13 @@ impl Pool {
             return Err(e);
         }
         self.summoned(&w, &s.task);
-        w.send(&s.task, None, vec![]).await?;
+        if let Err(e) = w.send(&s.task, None, vec![]).await {
+            // Its card is in the chat already: it shows as failed, not as starting for good.
+            w.set("failed", |r| r.summary = first_line(&e, 160));
+            self.events.add(json!({"type": "worker", "worker": w.id, "name": w.name(), "event": "failed",
+                "text": chars(&e, 4000)}));
+            return Err(e);
+        }
         Ok(w)
     }
 

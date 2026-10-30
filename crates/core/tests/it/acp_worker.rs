@@ -56,7 +56,8 @@ async fn acp_shikigami() {
         ],
         protocol: "acp".into(),
     };
-    pool.agents.set(BTreeMap::from([("fake".to_string(), agent)])).unwrap();
+    let broken = Agent { command: "/nonexistent/acp-agent".into(), ..agent.clone() };
+    pool.agents.set(BTreeMap::from([("fake".to_string(), agent), ("broken".to_string(), broken)])).unwrap();
 
     // Cards: answered from this list in order (true approves), each kept.
     let answers = Arc::new(Mutex::new(Vec::<bool>::new()));
@@ -91,6 +92,11 @@ async fn acp_shikigami() {
     };
     let e = pool.summon(summon("acp:nope")).await.err().unwrap();
     assert!(e.contains("acp:fake"), "{e}");
+    // An agent that cannot start: the shikigami shows as failed, not as starting for good.
+    let e = pool.summon(Summon { name: "broken".into(), ..summon("acp:broken") }).await.err().unwrap();
+    let b = pool.find("broken").expect("its record");
+    assert_eq!(b.state(), "failed", "{e}");
+    assert!(events.after(0).iter().any(|ev| ev["event"] == "failed" && ev["worker"] == b.id.as_str()));
 
     // 1. Its task is its first turn; the prompt rides along once.
     let w = pool.summon(summon("acp:fake")).await.unwrap();
@@ -213,8 +219,25 @@ async fn acp_shikigami() {
     w.send("!wait", None, vec![]).await.unwrap();
     let w2 = w.clone();
     assert!(until(10, || said(&w2, from) == ["Working."]).await);
+    w.send("too late", None, vec![]).await.unwrap();
     w.stop().await;
     assert!(until(10, || w2.state() == "stopped").await, "{}", w.state());
+    let note =
+        |from: usize| log(&w)[from..].iter().any(|e| e["text"] == "The message sent during the turn did not go.");
+    assert!(note(from), "a message queued behind a stopped turn is said to be lost");
+
+    // A turn that fails says so of the message queued behind it too.
+    let from = log(&w).len();
+    w.send("!fail", None, vec![]).await.unwrap();
+    assert!(until(10, || said(&w2, from) == ["Thinking it over."]).await);
+    w.send("and this", None, vec![]).await.unwrap();
+    assert!(until(10, || w2.state() == "failed").await, "{}", w.state());
+    assert!(note(from));
+    let report = events.after(0).iter().rev().find(|e| e["event"] == "failed").map(|e| e["text"].clone()).unwrap();
+    assert!(
+        report.as_str().unwrap().ends_with("It said: Thinking it over. The message sent during the turn did not go."),
+        "{report}"
+    );
 
     // 10. What only the default harness can do.
     for e in [w.tune(Some("high"), None, "the user").await.err(), w.hand_over().await.err(), w.release().await.err()] {
