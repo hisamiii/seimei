@@ -702,7 +702,11 @@ async fn devices(State(app): Shared, headers: HeaderMap) -> Response {
     ok(json!({"devices": list}))
 }
 
-async fn revoke(State(app): Shared, UrlPath(id): UrlPath<String>) -> Response {
+async fn revoke(State(app): Shared, headers: HeaderMap, UrlPath(id): UrlPath<String>) -> Response {
+    // A phone may unpair itself; the others only from the web page.
+    if Auth::bearer(&headers).is_some() && auth(&app).device_of(&headers).as_deref() != Some(id.as_str()) {
+        return json_status(StatusCode::FORBIDDEN, json!({"error": "unpair other phones from the web page"}));
+    }
     if !auth(&app).revoke(&id) {
         return not_found().await;
     }

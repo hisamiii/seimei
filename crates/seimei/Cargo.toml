@@ -27,6 +27,7 @@ mimalloc = { version = "0.1.52", default-features = false }
 
 [dev-dependencies]
 minisign = "0.10.0"
+openssl = "0.10.81"
 
 [[test]]
 name = "desktop"

@@ -1937,6 +1937,7 @@ dependencies = [
  "mimalloc",
  "minisign",
  "minisign-verify",
+ "openssl",
  "reqwest",
  "seimei-core",
  "seimei-plugin-browser",

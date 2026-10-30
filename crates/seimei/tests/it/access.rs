@@ -210,3 +210,39 @@ fn a_refused_image_leaves_no_file_behind() {
     let stored: Vec<_> = std::fs::read_dir(&files).unwrap().flatten().filter(|f| f.path().is_file()).collect();
     assert!(stored.is_empty(), "{stored:?}");
 }
+
+/// A paired phone: (its id, its signing key).
+fn pair_phone(p: u16, cookie: &str, name: &str) -> (String, openssl::pkey::PKey<openssl::pkey::Private>) {
+    use openssl::{ec, nid::Nid, pkey::PKey};
+    let r = post_json(p, "/api/devices/pair", &[cookie], "{}");
+    let code: Value = serde_json::from_str(&r.body).unwrap();
+    let key = PKey::from_ec_key(ec::EcKey::generate(&ec::EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap()).unwrap())
+        .unwrap();
+    let public = seimei_core::util::b64url(&key.public_key_to_der().unwrap());
+    let body = serde_json::json!({"code": code["code"], "name": name, "public_key": public});
+    let r = post_json(p, "/api/devices/claim", &[], &body.to_string());
+    let dev: Value = serde_json::from_str(&r.body).unwrap();
+    (dev["device"].as_str().unwrap().to_string(), key)
+}
+
+/// A phone's session may unpair that phone, not the others; the web page may unpair any.
+#[test]
+fn a_phone_unpairs_only_itself() {
+    let srv = start("unpair");
+    let p = srv.port;
+    let cookie = login(p);
+    let (a, key) = pair_phone(p, &cookie, "a");
+    let (b, _) = pair_phone(p, &cookie, "b");
+    let (c, _) = pair_phone(p, &cookie, "c");
+    let r = post_json(p, "/api/devices/challenge", &[], &serde_json::json!({"device": a}).to_string());
+    let nonce = serde_json::from_str::<Value>(&r.body).unwrap()["nonce"].as_str().unwrap().to_string();
+    let mut s = openssl::sign::Signer::new(openssl::hash::MessageDigest::sha256(), &key).unwrap();
+    let sig = s.sign_oneshot_to_vec(format!("seimei device login\n{nonce}").as_bytes()).unwrap();
+    let body = serde_json::json!({"device": a, "nonce": nonce, "signature": seimei_core::util::b64url(&sig)});
+    let r = post_json(p, "/api/devices/login", &[], &body.to_string());
+    let token = serde_json::from_str::<Value>(&r.body).unwrap()["token"].as_str().unwrap().to_string();
+    let bearer = format!("Authorization: Bearer {token}");
+    assert_eq!(post_json(p, &format!("/api/devices/{b}/revoke"), &[bearer.as_str()], "{}").status, 403);
+    assert_eq!(post_json(p, &format!("/api/devices/{c}/revoke"), &[cookie.as_str()], "{}").status, 200);
+    assert_eq!(post_json(p, &format!("/api/devices/{a}/revoke"), &[bearer.as_str()], "{}").status, 200);
+}
