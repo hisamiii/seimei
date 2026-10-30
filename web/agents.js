@@ -670,6 +670,8 @@ function stick(force = false) {
 
 // Draws what is new (an event with an id already drawn is skipped) and keeps the page's last KEEP_PAGE events.
 const KEEP_PAGE = 400;
+// What a session's timeline holds: a copy of another shape is drawn anew, so bump it when the server shows more of a transcript.
+const SHAPE = 2;
 function add(events) {
   const fresh = events.filter((ev) => ev.id == null || !P.ids.has(String(ev.id)));
   for (const ev of fresh) {
@@ -681,7 +683,7 @@ function add(events) {
     P.empty?.remove();
     P.raw = P.raw.concat(fresh).slice(-KEEP_PAGE);
     const p = P;
-    keep.later(`${p.kind}-${p.id}`, () => ({ events: p.raw, last: p.last, next: p.next, row: p.row }));
+    keep.later(`${p.kind}-${p.id}`, () => ({ events: p.raw, last: p.last, next: p.next, row: p.row, shape: SHAPE }));
   }
 }
 
@@ -1008,7 +1010,8 @@ function build(kind, id, row) {
 async function openPage(kind, id) {
   const reopen = P && P.kind === kind && P.id === id;
   // The page as last seen draws at once; the server then sends only what came since.
-  const kept = keep.read(`${kind}-${id}`);
+  const copy = keep.read(`${kind}-${id}`);
+  const kept = kind === 'session' && copy?.shape !== SHAPE ? null : copy;
   const live = kind === 'worker' ? S.workers.find((x) => x.id === id) : null;
   if (kept?.events) {
     build(kind, id, { ...kept.row, ...live });
