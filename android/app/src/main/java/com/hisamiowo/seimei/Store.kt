@@ -22,7 +22,8 @@ class Store(dir: File) {
         null
     }
 
-    /** Writes [data] whole (a crash mid-write leaves the old copy), then keeps only the newest [PAGES] pages. */
+    /** Writes [data] whole (a crash mid-write leaves the old copy), then keeps only the newest [PAGES] pages. One write at a time: two saves of a key share its tmp file. */
+    @Synchronized
     fun write(key: String, data: String) {
         try {
             root.mkdirs()

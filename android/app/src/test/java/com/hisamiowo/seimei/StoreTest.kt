@@ -33,6 +33,17 @@ class StoreTest {
         assertEquals(listOf(500L), pg.raw.map { it.getLong("id") })
     }
 
+    @Test fun savesOfOneKeyNeverMix() {
+        val dir = Files.createTempDirectory("store").toFile()
+        val s = Store(dir)
+        val texts = listOf("a".repeat(200_000), "b".repeat(100_000))
+        val writers = texts.map { t -> Thread { repeat(50) { s.write(Store.CHAT, JSONObject().put("t", t).toString()) } } }
+        writers.forEach { it.start() }
+        writers.forEach { it.join() }
+        assertTrue(s.read(Store.CHAT)!!.getString("t") in texts)
+        dir.deleteRecursively()
+    }
+
     @Test fun keepsPagesBoundedAndClears() {
         val dir = Files.createTempDirectory("store").toFile()
         val s = Store(dir)
