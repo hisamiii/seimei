@@ -84,17 +84,13 @@
  ],
  "class": [
   {"text": "[seimei] shikigami app-tester (ab12) finished: 3 bugs fixed", "class": "user"},
-  {"text": "[seimei] Events:\n- claude-queue: q1's command ended but pid 5 still holds npu (2 min since)\n- shikigami asr-bench (cd34) failed: oom", "class": "user"},
+  {"text": "[seimei] Events:\n- seimei restarted\n- shikigami asr-bench (cd34) failed: oom", "class": "user"},
   {"text": "[seimei] session \"kv-gate\" asks: Which branch?", "class": "user"},
   {"text": "[seimei] shikigami dev (ab12) waits on a permission card: Bash rm -r build", "class": "user"},
-  {"text": "[seimei] claude-queue: kernel: amdgpu 0000:c4:00.0: [drm] *ERROR* GPU reset; grants closed until `cq grants on`", "class": "user"},
-  {"text": "[seimei] claude-queue: moved pid 77 waybar out of the queue (desktop)", "class": "noise"},
   {"text": "[seimei] Events:\n- seimei restarted; resumed shikigami dev (told to check their state first)\n- session \"cleanup\" (pid 6575) was closed", "class": "noise"},
   {"text": "[seimei] shikigami dev (ab12) was interrupted by a restart", "class": "noise"},
   {"text": "[seimei] session \"cleanup\" (pid 6575) died without closing: killed or crashed", "class": "other"},
   {"text": "[seimei] session \"cleanup\" finished a turn", "class": "other"},
-  {"text": "[seimei] Events:\n- claude-queue: q1's command ended but pid 5 still holds npu\n- session \"x\" finished a turn", "class": "other"},
-  {"text": "[seimei] claude-queue: kernel: [34321.3] amdxdna 0000:c5:00.1: [drm] *ERROR* aie2_tdr_detect: TDR timeout detected; grants closed until `cq grants on`", "class": "noise"},
-  {"text": "[seimei] claude-queue: kernel: [1200.1] amdgpu 0000:c4:00.0: [drm] *ERROR* ring gfx_0.0.0 timeout; grants closed until `cq grants on`", "class": "user"}
+  {"text": "[seimei] Events:\n- seimei restarted\n- session \"x\" finished a turn", "class": "other"}
  ]
 }

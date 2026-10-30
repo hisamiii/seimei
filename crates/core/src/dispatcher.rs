@@ -224,7 +224,7 @@ pub enum Class {
     /// The rest: the chat, unless marked trajectory:.
     #[default]
     Other,
-    /// A shikigami finished, failed or asks; a session asks; a card waits; a GPU fault: always the chat.
+    /// A shikigami finished, failed or asks; a session asks; a card waits: always the chat.
     User,
 }
 
@@ -232,13 +232,12 @@ static NEEDS_USER: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(concat!(
         r"^shikigami \S+ \(\w+\) (finished|failed|asks|waits on a permission card)",
         r"|^session .* asks: |waits on the server for a permission prompt",
-        r"|^claude-queue: .*(grants closed until|memory pressure|GB available while)",
     ))
     .unwrap()
 });
 static NOISE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r#"^claude-queue: |^seimei restarted|was interrupted by a restart$|^session ".*" \(pid \d+\) was closed$"#,
+        r#"^seimei restarted|was interrupted by a restart$|^session ".*" \(pid \d+\) was closed$"#,
     )
     .unwrap()
 });
@@ -249,9 +248,7 @@ pub fn class(text: &str) -> Class {
         .map(|l| l.trim().trim_start_matches("[seimei] ").trim_start_matches("- "))
         .filter(|l| !l.is_empty() && *l != "Events:" && !l.starts_with("Since your last turn"))
         .collect();
-    // An NPU (amdxdna) timeout recovers once grants reopen: noise, unlike a GPU fault.
-    let needs = |l: &&str| NEEDS_USER.is_match(l) && !(l.starts_with("claude-queue: ") && l.contains("amdxdna"));
-    if lines.iter().any(needs) {
+    if lines.iter().any(|l| NEEDS_USER.is_match(l)) {
         Class::User
     } else if !lines.is_empty() && lines.iter().all(|l| NOISE.is_match(l)) {
         Class::Noise
