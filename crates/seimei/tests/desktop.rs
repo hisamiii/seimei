@@ -123,6 +123,24 @@ fn which(name: &str) -> Option<PathBuf> {
         .find(|p| std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0))
 }
 
+/// A session whose user approves each card after moving the focus to another window of the fake niri.
+struct MovesFocus(PathBuf);
+
+impl Session for MovesFocus {
+    fn state(&self) -> &std::path::Path {
+        std::path::Path::new("/nonexistent")
+    }
+    fn card(&self, _what: Value) -> Fut<'_, Result<String, String>> {
+        Box::pin(async move {
+            let mut s: Value = serde_json::from_str(&std::fs::read_to_string(&self.0).unwrap()).unwrap();
+            let other = s["windows"].as_array().unwrap().iter().map(|w| w["id"].clone()).find(|id| *id != s["focused"]);
+            s["focused"] = other.unwrap();
+            std::fs::write(&self.0, s.to_string()).unwrap();
+            Ok("approved".into())
+        })
+    }
+}
+
 /// A session whose cards the user denies.
 struct Denies;
 
@@ -351,4 +369,11 @@ async fn end_to_end(t: &mut T, g: &Value) {
     t.check("a card for the user's window", card.as_ref().is_some_and(|c| c["target"] == "close kitty \"~\""), &json!(card));
     desk.own_window(4, json!({"command": "kitty"}));
     t.check("no card for seimei's window", desk.native_card("niri", &close).is_none(), &json!(null));
+    desk.disown(4);
+
+    // Approved after the focus moved: the close without an id would hit another window, so nothing runs.
+    let r = desk.call("niri", &json!({"action": "close-window"}), &MovesFocus(t.root.join("niri-state.json"))).await;
+    let text = r["content"][0]["text"].as_str().unwrap_or("");
+    t.check("focus moved during the card", r["isError"] == true && text.starts_with("The focus moved"), &r);
+    t.check("nothing closed", t.log() == json!([]), &json!(null));
 }

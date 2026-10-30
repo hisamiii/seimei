@@ -826,10 +826,19 @@ impl Desktop {
     pub async fn call(self: &Arc<Self>, tool: &str, args: &Value, session: &dyn Session) -> Value {
         let (t, a) = (tool.to_string(), args.clone());
         if let Some(card) = self.blocking(move |d| d.native_card(&t, &a)).await {
-            match session.card(card).await {
+            match session.card(card.clone()).await {
                 Ok(o) if o == "approved" => {}
                 Ok(o) => return text(&format!("The user {o} it; nothing changed."), true),
                 Err(e) => return text(&e, true),
+            }
+            // A close without a window id acts on the focused window: it must still be the one the user approved.
+            let (t, a) = (tool.to_string(), args.clone());
+            let now = self.blocking(move |d| d.native_card(&t, &a)).await;
+            if now.as_ref().map(|c| &c["target"]) != Some(&card["target"]) {
+                return text(
+                    "The focus moved while the card waited, so nothing was closed. Name the window by its id.",
+                    true,
+                );
             }
         }
         if tool == "agent_display" || args["display"] == "agent" {
