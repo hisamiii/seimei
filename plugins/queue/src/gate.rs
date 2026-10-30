@@ -4,6 +4,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
@@ -161,6 +162,8 @@ impl State {
 #[derive(Default)]
 pub struct Gate {
     pub state: Mutex<State>,
+    /// True once it holds the socket: until then the state says nothing about the real queue.
+    pub serving: AtomicBool,
     conns: Mutex<HashMap<u64, mpsc::UnboundedSender<String>>>,
     next: Mutex<u64>,
 }
@@ -185,7 +188,10 @@ impl Gate {
                 let _ = std::fs::create_dir_all(path.parent().unwrap_or(Path::new("/")));
                 let _ = std::fs::remove_file(&path);
                 match UnixListener::bind(&path) {
-                    Ok(l) => break l,
+                    Ok(l) => {
+                        self.serving.store(true, Ordering::Relaxed);
+                        break l;
+                    }
                     Err(e) => eprintln!("seimei: queue: {}: {e}", path.display()),
                 }
             }

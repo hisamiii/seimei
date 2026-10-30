@@ -73,7 +73,7 @@ impl Builtin for Queue {
             loop {
                 tokio::time::sleep(Duration::from_secs(30)).await;
                 let snap = self.gate.state.lock().unwrap().status(now());
-                for (line, key) in self.news(&snap, &names(&host.state)) {
+                for (line, key) in self.news(&snap, || names(&host.state)) {
                     (host.notify)(&line, true, &key);
                 }
             }
@@ -259,7 +259,12 @@ impl Queue {
 
     /// Every watch tick while a rule uses one of its triggers.
     pub async fn watch(&self, watches: &Watches, state: &Path) {
+        // Another daemon holds the socket, or this is a dev server: the gate's empty state is not the queue's.
+        if !self.gate.serving.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
         let snap = self.gate.state.lock().unwrap().status(now());
+        self.forget_gone(&snap);
         let at = now();
         let waiters = snap["waiters"].as_array().cloned().unwrap_or_default();
         if snap["holder"].is_null() && waiters.is_empty() {
@@ -277,19 +282,32 @@ impl Queue {
         }
     }
 
-    /// Waits past WAIT_NEWS not told yet: (line, key).
-    pub fn news(&self, snap: &Value, names: &HashMap<String, String>) -> Vec<(String, String)> {
+    /// Waits past WAIT_NEWS not told yet: (line, key). names runs only when there is news.
+    pub fn news(&self, snap: &Value, names: impl FnOnce() -> HashMap<String, String>) -> Vec<(String, String)> {
+        self.forget_gone(snap);
         let at = snap["t"].as_f64().unwrap_or_else(now);
-        let mut out = vec![];
-        for w in snap["waiters"].as_array().into_iter().flatten() {
-            let key = format!("queue:{}:{}", w["pid"], w["since"]);
-            if at - w["since"].as_f64().unwrap_or(at) >= WAIT_NEWS && self.told.lock().unwrap().insert(key.clone()) {
-                let holder =
-                    if snap["holder"].is_null() { "nobody".into() } else { job_line(&snap["holder"], at, names) };
-                out.push((format!("GPU queue: {} waits, behind {holder}", job_line(w, at, names)), key));
-            }
+        let new: Vec<(&Value, String)> = (snap["waiters"].as_array().into_iter().flatten())
+            .map(|w| (w, format!("queue:{}:{}", w["pid"], w["since"])))
+            .filter(|(w, key)| {
+                at - w["since"].as_f64().unwrap_or(at) >= WAIT_NEWS && self.told.lock().unwrap().insert(key.clone())
+            })
+            .collect();
+        if new.is_empty() {
+            return vec![];
         }
-        out
+        let names = names();
+        let holder = if snap["holder"].is_null() { "nobody".into() } else { job_line(&snap["holder"], at, &names) };
+        new.into_iter()
+            .map(|(w, key)| (format!("GPU queue: {} waits, behind {holder}", job_line(w, at, &names)), key))
+            .collect()
+    }
+
+    /// Told keys end in a waiter's pid:since; those of waiters gone from the line go.
+    fn forget_gone(&self, snap: &Value) {
+        let live: Vec<String> = (snap["waiters"].as_array().into_iter().flatten())
+            .map(|w| format!(":{}:{}", w["pid"], w["since"]))
+            .collect();
+        self.told.lock().unwrap().retain(|k| live.iter().any(|l| k.ends_with(l.as_str())));
     }
 }
 
@@ -298,5 +316,56 @@ fn wait_minutes(target: &str) -> Option<f64> {
     match strip(target) {
         "" | "*" => Some(10.0),
         t => t.parse().ok().filter(|m: &f64| m.is_finite()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+
+    fn snap(t: f64, waiters: Value) -> Value {
+        json!({"t": t, "holder": null, "waiters": waiters})
+    }
+
+    #[test]
+    fn names_are_read_only_for_news_and_told_waits_are_forgotten_once_gone() {
+        let q = Queue::new(&toml::Table::new());
+        let w = json!([{"agent": "a", "pid": 5, "cmd": "x", "device": "/dev/kfd", "since": 0.0}]);
+        let asked = std::cell::Cell::new(0);
+        let names = || {
+            asked.set(asked.get() + 1);
+            HashMap::new()
+        };
+        assert!(q.news(&snap(10.0, w.clone()), names).is_empty());
+        assert_eq!(asked.get(), 0, "no news, no names");
+        assert_eq!(q.news(&snap(700.0, w.clone()), names).len(), 1);
+        assert!(q.news(&snap(710.0, w.clone()), names).is_empty(), "told once");
+        assert_eq!(asked.get(), 1);
+        assert!(q.news(&snap(720.0, json!([])), names).is_empty());
+        assert!(q.told.lock().unwrap().is_empty(), "the waiter left");
+    }
+
+    #[tokio::test]
+    async fn queue_free_needs_the_gate_on_the_socket() {
+        use seimei_core::events::EventLog;
+        use seimei_core::push::{Fcm, Push, WebPush};
+        let dir = std::env::temp_dir().join(format!("seimei-queue-free-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let rule = json!([{"id": "w1", "trigger": "queue_free", "target": "", "title": "t", "body": "", "level": "normal",
+            "key": null, "reply": false, "repeat": true, "created": 1, "expires": 9e12}]);
+        std::fs::write(dir.join("watches.json"), rule.to_string()).unwrap();
+        let events = Arc::new(EventLog::open(&dir.join("events.jsonl")).unwrap());
+        let push = Push::new(events, None, Fcm::new(dir.join("fcm.json")), WebPush::new(dir.join("vapid.pem"), "x"));
+        let told = Arc::new(Mutex::new(0));
+        let t = told.clone();
+        let watches = Watches::new(&dir.join("watches.json"), push, Box::new(move |_| *t.lock().unwrap() += 1));
+        let q = Queue::new(&toml::Table::new());
+        q.watch(&watches, &dir).await;
+        assert_eq!(*told.lock().unwrap(), 0, "another daemon may hold the queue");
+        q.gate.serving.store(true, Ordering::Relaxed);
+        q.watch(&watches, &dir).await;
+        assert_eq!(*told.lock().unwrap(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
