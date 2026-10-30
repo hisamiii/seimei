@@ -76,12 +76,12 @@ impl Files {
         (valid_name(name) && p.is_file()).then_some(p)
     }
 
-    /// [width, height] of a stored image (only its header is read), so pages can reserve its space.
+    /// [width, height] of a stored image (only its header is read), so pages can reserve its space. Only stored files are cached.
     pub fn dims(&self, name: &str) -> Option<[u32; 2]> {
         if let Some(d) = self.sizes.lock().unwrap().get(name) {
             return *d;
         }
-        let d = self.path(name).and_then(|p| imagesize::size(p).ok()).map(|s| [s.width as u32, s.height as u32]);
+        let d = imagesize::size(self.path(name)?).ok().map(|s| [s.width as u32, s.height as u32]);
         self.sizes.lock().unwrap().insert(name.into(), d);
         d
     }
@@ -172,6 +172,8 @@ mod tests {
         assert_eq!((s.width, s.height), (1280, 960));
         assert_eq!(f.thumb(&name).unwrap(), t, "cached");
         assert!(f.path("../x.png").is_none() && f.path("0123.png").is_none());
+        assert!(f.dims("../x.png").is_none() && f.dims("0123.png").is_none());
+        assert_eq!(f.sizes.lock().unwrap().len(), 1, "only stored files are cached");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
