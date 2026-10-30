@@ -433,11 +433,6 @@ fn main() {
         events.close_open_tools("Interrupted by a restart");
         app.pool.startup();
         app.adopter.startup();
-        let me = app.clone();
-        tokio::task::spawn_blocking(move || match me.prune_files() {
-            0 => {}
-            n => eprintln!("INFO seimei: pruned {n} picture(s) no message names"),
-        });
         tokio::spawn(deploy_note(state.clone(), app.dispatcher.clone()));
         tokio::spawn(app.dispatcher.clone().run());
         tokio::spawn(app.pool.clone().sweep());

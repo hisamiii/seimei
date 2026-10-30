@@ -232,16 +232,6 @@ impl App {
         push.ping(title, text, "urgent", None, false);
     }
 
-    /// Delete the stored pictures no event names (left by a send that failed half way); returns how many went.
-    pub fn prune_files(&self) -> usize {
-        let mut named = std::collections::HashSet::new();
-        for ev in self.events.after(0) {
-            let images = ev["images"].as_array().into_iter().flatten();
-            named.extend(images.chain([&ev["file"]]).filter_map(Value::as_str).map(String::from));
-        }
-        self.files.prune(&named, seimei_core::util::now() - 86400.0)
-    }
-
     /// Pictures carry their size, so lazy images keep their space before they load.
     fn sized<'a>(&self, ev: &'a Value) -> Cow<'a, Value> {
         let mut ev = Cow::Borrowed(ev);

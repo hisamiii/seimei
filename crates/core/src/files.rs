@@ -1,11 +1,11 @@
 //! Images in both directions: photos from the phone, pictures the dispatcher shows. The original is kept as sent;
 //! chats show a thumbnail (WebP, THUMB px on the long side) made once and cached, and the full-screen viewer and Save load the original.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use crate::util::{hex, mtime, random_bytes};
+use crate::util::{hex, random_bytes};
 
 pub const MAX_BYTES: usize = 20 << 20;
 /// What the model accepts per image; bigger uploads are refused (the page shrinks photos first).
@@ -80,25 +80,6 @@ impl Files {
     pub fn path(&self, name: &str) -> Option<PathBuf> {
         let p = self.dir.join(name);
         (valid_name(name) && p.is_file()).then_some(p)
-    }
-
-    /// Delete the stored images no event names (a send that failed half way), with their thumbnails; returns how many went.
-    /// Only those older than `before`: a send in flight has saved its images but not yet logged them.
-    pub fn prune(&self, named: &HashSet<String>, before: f64) -> usize {
-        let mut gone = 0;
-        for f in std::fs::read_dir(&self.dir).into_iter().flatten().flatten() {
-            let name = f.file_name().to_string_lossy().to_string();
-            if !valid_name(&name) || named.contains(&name) || mtime(&f.path()) >= before {
-                continue;
-            }
-            if std::fs::remove_file(f.path()).is_ok() {
-                gone += 1;
-            }
-            let stem = name.split('.').next().unwrap_or("");
-            let _ = std::fs::remove_file(self.thumbs.join(format!("{stem}-{THUMB}.webp")));
-            self.sizes.lock().unwrap().remove(&name);
-        }
-        gone
     }
 
     /// [width, height] of a stored image (only its header is read), so pages can reserve its space. Only stored files are cached.
@@ -198,12 +179,6 @@ mod tests {
         assert_eq!(f.thumb(&name).unwrap(), t, "cached");
         assert!(f.path("../x.png").is_none() && f.path("0123.png").is_none());
         assert!(f.dims("../x.png").is_none() && f.dims("0123.png").is_none());
-        // Only what no event names goes, and only once it is old enough.
-        let (orphan, _) = f.save(&png).unwrap();
-        let named = HashSet::from([name.clone()]);
-        assert_eq!(f.prune(&named, 0.0), 0);
-        assert_eq!(f.prune(&named, crate::util::now() + 1.0), 1);
-        assert!(f.path(&orphan).is_none() && f.path(&name).is_some() && t.exists());
         assert_eq!(f.sizes.lock().unwrap().len(), 1, "only stored files are cached");
         std::fs::remove_dir_all(&dir).unwrap();
     }
