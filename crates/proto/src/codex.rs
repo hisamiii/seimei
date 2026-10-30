@@ -35,10 +35,16 @@ pub(crate) struct Turn {
 }
 
 impl Turn {
-    /// turn/start: its answer names the turn, or fails it.
+    /// turn/start: its answer names the turn, or fails it. One turn at a time: a caller queues while one runs.
     pub(crate) fn start(&self, rpc: &Rpc, thread: &str, text: &str) -> Result<(), Error> {
+        {
+            let mut t = self.state.lock().unwrap();
+            if t.running {
+                return Err(Error::Refused("a turn is running already".into()));
+            }
+            *t = TurnState { running: true, ..TurnState::default() };
+        }
         let n = rpc.id();
-        *self.state.lock().unwrap() = TurnState { running: true, ..TurnState::default() };
         rpc.pending.lock().unwrap().insert(n, Waiter::Turn);
         let input = json!([{"type": "text", "text": text, "text_elements": []}]);
         let params = json!({"threadId": thread, "input": input});
@@ -469,4 +475,23 @@ fn questions(id: Value, p: &Value, handler: &Arc<dyn Handler>, rpc: &Arc<Rpc>) {
         let _ = sh.send(json!({"jsonrpc": "2.0", "id": id2, "result": {"answers": answers}}));
     });
     slot.insert(key, (id, task.abort_handle(), json!({"answers": {}})));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_second_turn_waits_for_the_first() {
+        let (rpc, mut sent) = Rpc::detached();
+        let turn = Turn::default();
+        turn.start(&rpc, "th", "one").unwrap();
+        turn.known(&rpc, "t1");
+        assert!(turn.start(&rpc, "th", "two").is_err());
+        turn.cancel(&rpc).unwrap();
+        let methods: Vec<String> = std::iter::from_fn(|| sent.try_recv().ok())
+            .map(|l| serde_json::from_str::<Value>(&l).unwrap()["method"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(methods, ["turn/start", "turn/interrupt"], "the cancel reaches the running turn");
+    }
 }

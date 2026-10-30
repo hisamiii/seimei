@@ -230,6 +230,14 @@ impl Rpc {
     pub(crate) fn id(&self) -> u64 {
         self.next.fetch_add(1, Ordering::Relaxed) + 1
     }
+
+    /// An Rpc with no process: what it sends comes out of the receiver.
+    #[cfg(test)]
+    pub(crate) fn detached() -> (Rpc, mpsc::UnboundedReceiver<String>) {
+        let (out, rx) = mpsc::unbounded_channel();
+        let rpc = Rpc { out, pending: Mutex::default(), inflight: Mutex::default(), next: AtomicU64::new(0) };
+        (rpc, rx)
+    }
 }
 
 /// One agent process over JSON-RPC on stdio: an ACP agent, or `codex app-server` from [`crate::codex::connect`].
