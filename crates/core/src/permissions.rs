@@ -277,7 +277,7 @@ pub async fn can_use(
         // Bypass stays card-free and blocks them.
         let why = req.decision_reason.as_deref().unwrap_or("a safety check");
         return deny(&format!(
-            "Claude Code blocked this even in bypass mode: {why}. Nobody was asked. Write the command so it can be \
+            "The harness blocked this even in bypass mode: {why}. Nobody was asked. Write the command so it can be \
              checked (for example, no rm inside a shell -c script)."
         ));
     }
