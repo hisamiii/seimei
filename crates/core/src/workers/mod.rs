@@ -1579,6 +1579,14 @@ impl Pool {
         self.path.parent().unwrap_or(Path::new("."))
     }
 
+    /// seimei stops: every shikigami's process closes as after an idle spell (its transcript complete); the records stay for the restart.
+    pub async fn close_all(&self) {
+        let closing: Vec<_> = self.all().into_iter().map(|w| tokio::spawn(async move { w.close().await })).collect();
+        for c in closing {
+            let _ = c.await;
+        }
+    }
+
     pub fn running(&self) -> usize {
         self.all().iter().filter(|w| ACTIVE.contains(&w.state().as_str())).count()
     }

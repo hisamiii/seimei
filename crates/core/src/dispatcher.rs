@@ -272,6 +272,8 @@ enum Cmd {
     Handoff(oneshot::Sender<()>),
     /// A shikigami's rate limit event: limits are shared by the dispatcher and every worker (one account).
     RateLimit(Value, String, String),
+    /// seimei stops: the session closes for good, then the sender hears back.
+    Close(oneshot::Sender<()>),
 }
 
 /// The dispatcher's settings from config.toml ([dispatcher], [approvals] dispatcher, [host] about).
@@ -547,6 +549,14 @@ impl Dispatcher {
         Some(saved).filter(|(_, id)| !id.is_empty())
     }
 
+    /// seimei stops: its agent closes as on any session end (its transcript complete), and no session starts again.
+    pub async fn close(&self) {
+        let (tx, rx) = oneshot::channel();
+        if self.tx.send(Cmd::Close(tx)).is_ok() {
+            let _ = rx.await;
+        }
+    }
+
     /// Before a planned restart: a session the harness cannot resume writes its Must survive section to handoff.md, which seeds the next one.
     pub async fn handoff(&self) {
         let (tx, rx) = oneshot::channel();
@@ -631,6 +641,11 @@ impl Dispatcher {
                     (delay, failures) = (Duration::from_secs(1), 0);
                     let why = t.session(&mut *session, &mut rx).await;
                     session.close().await;
+                    if let Some(done) = t.closing.take() {
+                        t.set(Some(false), Some(false));
+                        let _ = done.send(());
+                        return;
+                    }
                     why
                 }
                 Err(e) => e,
@@ -649,6 +664,10 @@ impl Dispatcher {
                 tokio::select! {
                     _ = sleep_until(until) => break,
                     cmd = rx.recv() => match cmd {
+                        Some(Cmd::Close(done)) => {
+                            let _ = done.send(());
+                            return;
+                        }
                         Some(cmd) => t.offline(cmd),
                         None => return,
                     },
@@ -762,6 +781,8 @@ struct Turns {
     handoff_later: Option<oneshot::Sender<()>>,
     /// The connected session's id, for the audit and rate limits.
     session: String,
+    /// seimei stops: who waits for the session to close.
+    closing: Option<oneshot::Sender<()>>,
 }
 
 /// What the session loop does after a message was handled.
@@ -795,6 +816,7 @@ impl Turns {
             handoff: None,
             handoff_later: None,
             session: String::new(),
+            closing: None,
         }
     }
 
@@ -892,6 +914,10 @@ impl Turns {
                             return e;
                         }
                     }
+                    Some(Cmd::Close(done)) => {
+                        self.closing = Some(done);
+                        return "seimei is shutting down".into();
+                    }
                     Some(cmd) => {
                         if let Some(c) = self.command(cmd)
                             && let Err(e) = h.send(&c.text, &c.images)
@@ -966,7 +992,7 @@ impl Turns {
                 None
             }
             // No session to hand off.
-            Cmd::Interrupt | Cmd::Handoff(_) => None,
+            Cmd::Interrupt | Cmd::Handoff(_) | Cmd::Close(_) => None,
             Cmd::RateLimit(info, from, session) => {
                 self.rate_limit(&info, &from, &session);
                 None

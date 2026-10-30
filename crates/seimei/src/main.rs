@@ -42,6 +42,9 @@ use seimei_core::plugins::Plugins;
 use seimei_core::push::{Fcm, Push, WebPush};
 use seimei_core::util::{config_file, data_dir};
 
+/// How long a stop waits for the agents to close: each gets 5 s after its stdin closes, then 5 s after a SIGTERM.
+const AGENTS_CLOSE: Duration = Duration::from_secs(12);
+
 const COMMANDS: [&str; 13] = [
     "serve",
     "setup",
@@ -506,6 +509,7 @@ fn main() {
         let stop = {
             let events = events.clone();
             let dispatcher = app.dispatcher.clone();
+            let pool = app.pool.clone();
             async move {
                 let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap();
                 tokio::select! {
@@ -519,6 +523,9 @@ fn main() {
                 }
                 // End every open stream, so clients notice at once and the shutdown is not held up by them.
                 events.close();
+                // The agents close as on any session end, so they finish their transcripts; dropped, they would be killed.
+                let agents = async { tokio::join!(dispatcher.close(), pool.close_all()) };
+                let _ = tokio::time::timeout(AGENTS_CLOSE, agents).await;
                 tokio::spawn(async {
                     tokio::time::sleep(Duration::from_secs(5)).await;
                     std::process::exit(0);

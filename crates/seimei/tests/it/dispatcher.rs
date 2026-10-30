@@ -212,6 +212,7 @@ async fn run(base: PathBuf, state: PathBuf, work: PathBuf, agent: PathBuf) {
         resumes.lines().map(|l| serde_json::from_str::<Value>(l).unwrap()["sid"].clone()).collect::<Vec<_>>(),
         [json!(sid)]
     );
-    task.abort();
-    let _ = task.await;
+    // seimei stops: the agent closes as on any session end, and no session starts again.
+    tokio::time::timeout(Duration::from_secs(15), second.dispatcher.close()).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(2), task).await.expect("the session loop ended").unwrap();
 }
