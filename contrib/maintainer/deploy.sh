@@ -152,6 +152,8 @@ try:
         time.sleep(2)
 except OSError:
     pass
+# The whole log, read on as it grows: a card asked long ago is still open, and a line half written stays for the next round.
+pos, rest, last_t, cards, writing = 0, b"", None, set(), False
 for _ in range(60):
     try:
         with open(log, "rb") as f:
