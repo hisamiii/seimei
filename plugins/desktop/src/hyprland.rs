@@ -209,6 +209,10 @@ impl Backend for Hyprland {
         if first == "exit" {
             return Some("exit Hyprland (ends the desktop session)".into());
         }
+        // A command Hyprland runs is outside every other check here.
+        if first == "exec" || first == "execr" {
+            return Some(format!("run {} on your desktop", args[1..].join(" ")));
+        }
         if CLOSE.contains(&first) {
             let rest = args[1..].join(" ");
             if let Some(m) = ADDRESS.captures(&rest) {

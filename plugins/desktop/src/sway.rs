@@ -272,6 +272,10 @@ impl Backend for Sway {
         let line = args.join(" ");
         for part in line.split([';', ',']) {
             let words: Vec<&str> = part.split_whitespace().collect();
+            // A command sway runs is outside every other check here.
+            if words.iter().any(|w| ["exec", "exec_always"].contains(w)) {
+                return Some(format!("run {} on your desktop", part.trim()));
+            }
             if words.contains(&"exit") {
                 return Some("exit sway (ends the desktop session)".into());
             }

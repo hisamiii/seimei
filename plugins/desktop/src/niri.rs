@@ -198,6 +198,8 @@ impl Backend for Niri {
     fn action_hit(&self, args: &[String], ours: &Ours) -> Option<String> {
         match args.first()?.as_str() {
             "quit" => Some("quit niri (ends the desktop session)".into()),
+            // A command niri runs is outside every other check here.
+            "spawn" | "spawn-sh" => Some(format!("run {} on your desktop", args[1..].join(" "))),
             "close-window" => {
                 for (i, a) in args.iter().enumerate() {
                     if a == "--id" && args.get(i + 1).is_some_and(|n| digits(n)) {

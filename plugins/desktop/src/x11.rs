@@ -208,6 +208,10 @@ impl Backend for X11 {
     }
 
     fn action_hit(&self, args: &[String], ours: &Ours) -> Option<String> {
+        // A command xdotool runs is outside every other check here.
+        if args.first()? == "exec" {
+            return Some(format!("run {} on your desktop", args[1..].join(" ")));
+        }
         if !["windowclose", "windowkill", "windowquit"].contains(&args.first()?.as_str()) {
             return None;
         }

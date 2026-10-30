@@ -190,11 +190,16 @@ fn label(w: &Value) -> String {
     format!("{}: {} \"{}\"", as_text(&w["id"]), as_text(&w["app_id"]), as_text(&w["title"]))
 }
 
-/// The native tool's command on b: its output, or "Done.".
-fn native(b: &dyn Backend, action: &Value, args: &Value) -> Result<String, String> {
+/// The native tool's words: its action, then its args (a list).
+fn native_argv(action: &Value, args: &Value) -> Vec<String> {
     let mut argv = vec![as_text(action)];
     argv.extend(args.as_array().into_iter().flatten().map(as_text));
-    b.action(&argv).map(|o| if o.is_empty() { "Done.".into() } else { o })
+    argv
+}
+
+/// The native tool's command on b: its output, or "Done.".
+fn native(b: &dyn Backend, action: &Value, args: &Value) -> Result<String, String> {
+    b.action(&native_argv(action, args)).map(|o| if o.is_empty() { "Done.".into() } else { o })
 }
 
 /// A tool's text answer, or its error.
@@ -287,15 +292,8 @@ impl Desktop {
         if tool != b.meta().name || inp["display"] == "agent" {
             return None;
         }
-        let mut args = vec![inp.get("action").map(as_text).unwrap_or_default()];
-        if inp.get("args").is_some_and(truthy) {
-            match &inp["args"] {
-                Value::Array(a) => args.extend(a.iter().map(as_text)),
-                Value::String(s) => args.extend(s.chars().map(String::from)),
-                Value::Object(o) => args.extend(o.keys().cloned()),
-                v => args.push(as_text(v)),
-            }
-        }
+        // The same words the command runs with.
+        let args = native_argv(&inp["action"], &inp["args"]);
         let hit = b.action_hit(&args, &self.ours())?;
         Some(
             json!({"action": "desktop", "target": hit, "detail": format!("{} {}", b.meta().action_cmd, args.join(" "))}),
