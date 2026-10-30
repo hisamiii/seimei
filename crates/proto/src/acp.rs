@@ -537,6 +537,8 @@ async fn read(stdout: ChildStdout, handler: Arc<dyn Handler>, rpc: Arc<Rpc>, eve
                                 let _ = tx.send(res);
                             }
                             Waiter::Turn => {
+                                // Calls the turn left open (cancelled, or never given a final status) end with it.
+                                calls.clear();
                                 let end = res.map(|r| s(&r["stopReason"]));
                                 let _ = events.send(Event::TurnEnd(end));
                             }
