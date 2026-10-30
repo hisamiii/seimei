@@ -142,6 +142,10 @@ def turn(sid: str, text: str) -> str:
                 return "cancelled"
             time.sleep(0.05)
         say(sid, "Gave up waiting.")
+    elif cmd == "!fail":
+        say(sid, "Thinking it over.")
+        time.sleep(1)
+        return "error:the model is overloaded"
     elif cmd == "!crash":
         say(sid, "Going down.")
         sys.stdout.flush()
@@ -204,7 +208,10 @@ def prompt(i, p: dict):
     cancelled.discard(sid)
     stop = turn(sid, text)
     save(sid)
-    send({"id": i, "result": {"stopReason": stop}})
+    if stop.startswith("error:"):
+        send({"id": i, "error": {"code": -32603, "message": stop.removeprefix("error:")}})
+    else:
+        send({"id": i, "result": {"stopReason": stop}})
 
 
 def handle(msg: dict):

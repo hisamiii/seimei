@@ -147,13 +147,19 @@ impl Session {
     pub(super) fn turn_ended(&mut self, end: Result<String, String>) {
         self.w.edit(|r| r.turns += 1);
         let stopped = self.stopping || end.as_deref() == Ok("cancelled");
-        if !stopped && end.is_ok() && !self.queued.is_empty() {
-            let text = std::mem::take(&mut self.queued).join("\n\n");
-            if self.prompt_acp(text).is_ok() {
-                return;
-            }
+        let queued = std::mem::take(&mut self.queued);
+        if !stopped && end.is_ok() && !queued.is_empty() && self.prompt_acp(queued.join("\n\n")).is_ok() {
+            return;
         }
-        self.queued.clear();
+        // Messages that came during the turn and cannot go on: said, never dropped quietly.
+        let unsent = match queued.len() {
+            0 => String::new(),
+            1 => " The message sent during the turn did not go.".to_string(),
+            n => format!(" The {n} messages sent during the turn did not go."),
+        };
+        if !unsent.is_empty() {
+            self.w.add(json!({"type": "system", "text": unsent.trim()}));
+        }
         let text = self.last_text.trim().to_string();
         let state = self.w.state();
         if state == "asking" && !stopped {
@@ -172,7 +178,7 @@ impl Session {
                         r => format!("Failed: {r}"),
                     };
                     self.w.set("failed", |r| r.summary = why.clone());
-                    let said = if text.is_empty() { why } else { format!("{why} It said: {text}") };
+                    let said = if text.is_empty() { why } else { format!("{why} It said: {text}") } + &unsent;
                     self.pool.report(&self.w, "failed", &said);
                 }
             }

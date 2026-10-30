@@ -945,7 +945,6 @@ impl Session {
         }
         if let Some(c) = &self.acp {
             self.stopping = true;
-            self.queued.clear();
             if let Err(e) = c.cancel() {
                 eprintln!("seimei: cancelling {}: {e}", self.w.name());
             }
