@@ -239,7 +239,7 @@ impl WebPush {
         WebPush { key_path, contact, key: Mutex::new(None), jwts: Mutex::new(HashMap::new()), http: http() }
     }
 
-    /// The VAPID key, made and saved (0600) on first use.
+    /// The VAPID key, made and saved (0600) on first use. A file that does not parse is kept as .bad, so the new key outlives a restart.
     pub fn key(&self) -> EcKey<Private> {
         let mut k = self.key.lock().unwrap();
         if k.is_none() {
@@ -561,7 +561,7 @@ impl Push {
 
     async fn send(self: Arc<Self>, data: Data, ttl: u64, phones: Vec<(String, Value)>) {
         if let Some(auth) = &self.auth {
-            // A phone unpaired from the CLI (`seimei devices --revoke`) still holds its stream: close it (audit I2).
+            // A phone unpaired from the CLI (`seimei devices --revoke`) still holds its stream: close it.
             for dev in self.stream.live_devices() {
                 if auth.device(&dev).is_none() {
                     self.stream.drop_device(&dev);

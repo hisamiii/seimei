@@ -556,7 +556,7 @@ impl Auth {
         )
     }
 
-    /// The same flags as the cookie: a __Host- cookie is only replaced by a Secure one (I1).
+    /// The same flags as the cookie: a __Host- cookie is only replaced by a Secure one.
     pub fn del_cookie(&self) -> String {
         let secure = if self.secure { "; Secure" } else { "" };
         format!(
