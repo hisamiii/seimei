@@ -265,8 +265,9 @@ pub struct Record {
     /// When restarts resumed it, for RESUME_CAP.
     pub resumes: Vec<f64>,
     pub nudge: Nudge,
-    /// Its terminal window on the server, while lent or released.
-    pub laptop_window: Value,
+    /// Its terminal window on the server, while lent or released. Its state then is "laptop", a name kept for the clients and old records.
+    #[serde(rename = "laptop_window")]
+    pub server_window: Value,
     pub released: Option<Released>,
     /// The name of the user's session it was adopted from.
     pub adopted: Option<String>,
@@ -562,12 +563,12 @@ impl Worker {
 
     /// The session is open on the server (after Open on server): its terminal window is still there, or a running
     /// The agent holds the session (a trust prompt delays that, hence the window check). Blocking.
-    pub fn on_laptop(&self) -> bool {
+    pub fn on_server(&self) -> bool {
         if self.state() != "laptop" {
             return false;
         }
         if let Some(d) = self.pool().plugins.windows()
-            && d.window_open(&self.rec().laptop_window) == Some(true)
+            && d.window_open(&self.rec().server_window) == Some(true)
         {
             return true;
         }
@@ -577,7 +578,7 @@ impl Worker {
 
     async fn open_on_server(self: &Arc<Self>) -> bool {
         let w = self.clone();
-        tokio::task::spawn_blocking(move || w.on_laptop()).await.unwrap_or(false)
+        tokio::task::spawn_blocking(move || w.on_server()).await.unwrap_or(false)
     }
 
     /// Lend the session to the user: resume it in a terminal window on the server.
@@ -589,11 +590,11 @@ impl Worker {
         if self.open_on_server().await {
             return Err("it is already open on the server".into());
         }
-        let win = self.to_laptop(&format!("shikigami {}", self.name()), &[]).await?;
+        let win = self.to_server(&format!("shikigami {}", self.name()), &[]).await?;
         let window = win.as_ref().map_or(Value::Null, |w| w["id"].clone());
         self.set("laptop", |r| {
             r.summary = "Open on the server.".into();
-            r.laptop_window = window;
+            r.server_window = window;
         });
         Ok(win)
     }
@@ -609,17 +610,17 @@ impl Worker {
             None
         } else {
             let name = self.name();
-            self.to_laptop(&name, &["--name", &name]).await?
+            self.to_server(&name, &["--name", &name]).await?
         };
         let r = self.rec();
         let path = transcript(&r.session_id, &r.cwd);
         let offset = path.as_deref().and_then(|p| std::fs::metadata(p).ok()).map_or(0, |m| m.len());
-        let window = win.as_ref().map_or_else(|| r.laptop_window.clone(), |w| w["id"].clone());
+        let window = win.as_ref().map_or_else(|| r.server_window.clone(), |w| w["id"].clone());
         let at = path.as_ref().map(|p| p.display().to_string());
         self.set("released", |r| {
             r.summary = "You took it over".into();
             r.question = None;
-            r.laptop_window = window;
+            r.server_window = window;
             r.released = Some(Released { at: now(), path: at, offset });
         });
         self.add(json!({"type": "system", "text": "You took it over"}));
@@ -632,7 +633,7 @@ impl Worker {
     }
 
     /// Stop it if it works, let go of its process, and resume the session in a terminal on the server.
-    async fn to_laptop(self: &Arc<Self>, title: &str, extra: &[&str]) -> Result<Option<Value>, String> {
+    async fn to_server(self: &Arc<Self>, title: &str, extra: &[&str]) -> Result<Option<Value>, String> {
         self.default_harness_only("open in a terminal")?;
         if !self.rec().started {
             return Err("it has no session yet".into());
@@ -1894,7 +1895,7 @@ impl Pool {
                     rec.context_cap = or(&a.context, &r.context_cap);
                     rec.started = true;
                     rec.released = None;
-                    rec.laptop_window = Value::Null;
+                    rec.server_window = Value::Null;
                     rec.adopted = Some(a.origin.clone());
                     rec.question = None;
                 });

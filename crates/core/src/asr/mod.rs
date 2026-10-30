@@ -79,7 +79,7 @@ impl Config {
     }
 }
 
-/// The focused window on the laptop.
+/// The focused window on the server.
 #[derive(Clone, Debug, Default)]
 pub struct Window {
     pub app_id: String,
