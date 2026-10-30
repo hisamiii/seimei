@@ -96,8 +96,10 @@ fn command(w: &Window, cmd: &str, args: &[&str], stdin: bool) -> Result<Command,
 /// Runs a remote control command, waiting at most `limit`.
 fn run(w: &Window, cmd: &str, args: &[&str], data: Option<&str>, limit: Duration) -> Result<String, String> {
     let mut child = command(w, cmd, args, data.is_some())?.spawn().map_err(|e| format!("kitty: {e}"))?;
+    // Fed from a thread of its own, so the time limit holds while kitten does not read.
     if let (Some(d), Some(mut input)) = (data, child.stdin.take()) {
-        let _ = input.write_all(d.as_bytes());
+        let d = d.to_string();
+        std::thread::spawn(move || _ = input.write_all(d.as_bytes()));
     }
     child.stdin.take();
     // Read while it runs: a big screen fills the pipe, and kitten would wait for us forever.
