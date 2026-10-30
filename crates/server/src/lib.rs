@@ -1407,10 +1407,12 @@ async fn session(
     let (sess, path) = attempt!(user_session(&app, &pid).await);
     let start =
         q.get("from").filter(|f| !f.is_empty() && f.bytes().all(|b| b.is_ascii_digit())).and_then(|f| f.parse().ok());
-    let info = app.watcher.row(sess.pid).unwrap_or_else(|| {
+    let mut info = app.watcher.row(sess.pid).unwrap_or_else(|| {
         json!({"pid": sess.pid, "name": sess.name, "status": sess.status, "since": sess.since, "active": sess.active,
-            "cwd": sess.cwd, "session_id": sess.session_id})
+            "cwd": sess.cwd})
     });
+    // The transcript as of now, not as of the list's last scan: the page's byte offsets hold only within one transcript.
+    info["session_id"] = json!(sess.session_id);
     let (rec, spid) = (sess.rec.clone(), sess.pid);
     let read = tokio::task::spawn_blocking(move || {
         let (tl, b) = match &path {
