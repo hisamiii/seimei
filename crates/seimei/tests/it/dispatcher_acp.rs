@@ -195,9 +195,11 @@ async fn run(state: PathBuf, work: PathBuf, fake: PathBuf) {
     assert_eq!((&stopped["text"], &stopped["lane"]), (&json!("Stopped"), &json!("c")));
 
     // A restart loads the same session, and its first prompt carries no system prompt.
+    // The first load crashes the agent: the retry loads it again rather than starting a new one.
     task.abort();
     let _ = task.await;
     drop(first);
+    std::fs::write(fake.join("crash-next-load"), "").unwrap();
     let second = app(&state, &work, &fake, false);
     let task = tokio::spawn(second.dispatcher.clone().run());
     let evs = turn(&second, "back again").await;
@@ -205,8 +207,8 @@ async fn run(state: PathBuf, work: PathBuf, fake: PathBuf) {
         evs.iter().any(|e| e["type"] == "assistant" && e["text"].as_str().unwrap().starts_with("You said: back again"))
     );
     let loaded = log(&fake).into_iter().filter(|m| m["method"] == "session/load").collect::<Vec<_>>();
-    assert_eq!(loaded.len(), 1);
-    assert_eq!(loaded[0]["params"]["sessionId"], json!(sid));
+    assert_eq!(loaded.len(), 2);
+    assert!(loaded.iter().all(|m| m["params"]["sessionId"] == json!(sid)));
     assert_eq!(saved(&state), ("acp:fake".to_string(), sid));
     task.abort();
     let _ = task.await;

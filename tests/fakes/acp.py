@@ -2,6 +2,7 @@
 """A fake ACP agent (agent-client-protocol v1, JSON-RPC over stdio) for seimei's ACP client.
 It never reaches a model: each prompt plays the script its "!command" line picks (see turn()), and what no script takes is echoed back.
 Sessions live in $FAKE_ACP_DIR/sessions/<id>.json; session/load replays one. $FAKE_ACP_NO_LOAD turns loadSession off, $FAKE_ACP_RESUME turns session/resume on (no replay), and $FAKE_ACP_EARLY_MCP names a stdio MCP server whose tools it lists while it opens a session, as Codex does (!early says what it got).
+A file crash-next-load in $FAKE_ACP_DIR makes the next session/load exit the agent.
 Every message both ways goes to $FAKE_ACP_LOG as JSON lines {"dir": "in" or "out", "pid": ..., "msg": ...}, so a test can check them against the protocol's types."""
 import json
 import os
@@ -240,6 +241,11 @@ def handle(msg: dict):
                 send({"id": i, "error": {"code": -32002, "message": f"no session {sid}"}})
                 return
             if method == "session/load":
+                # A load that crashes the agent once, as a slow replay that times out would fail.
+                crash = DIR / "crash-next-load"
+                if crash.exists():
+                    crash.unlink()
+                    os._exit(3)
                 history = json.loads(f.read_text())["history"]
         sessions[sid] = {"cwd": p["cwd"], "mcp": p.get("mcpServers") or [], "mode": "ask", "history": []}
         if os.environ.get("FAKE_ACP_EARLY_MCP"):

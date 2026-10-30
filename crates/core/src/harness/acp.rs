@@ -53,7 +53,8 @@ impl Session {
         };
         let mut client = match open(&opts).await {
             Ok(c) => c,
-            Err(e) if opts.load.is_some() => {
+            // Only an agent that refuses the session starts a new one; a timeout or a crash keeps it for the retry.
+            Err(e @ (acp::Error::Refused(_) | acp::Error::Unsupported(_))) if opts.load.is_some() => {
                 eprintln!("seimei: dispatcher: session {} did not load ({e}); starting a new one", spec.session);
                 opts.load = None;
                 open(&opts).await.map_err(|e| e.to_string())?
@@ -155,10 +156,13 @@ impl Session {
                 // What came during the turn goes on as the next one.
                 if !self.waiting.is_empty() {
                     let waiting = std::mem::take(&mut self.waiting);
+                    let waiting_n = waiting.len();
                     let text = waiting.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>().join("\n\n");
                     let images: Vec<(String, String)> = waiting.into_iter().flat_map(|(_, i)| i).collect();
                     if let Err(e) = self.start(&text, &images) {
-                        eprintln!("seimei: dispatcher: the waiting messages did not go: {e}");
+                        let what = if waiting_n == 1 { "message" } else { "messages" };
+                        self.queue
+                            .push_back(Ev::End(Some(format!("the {what} sent during the turn did not go ({e})"))));
                     }
                 }
             }
