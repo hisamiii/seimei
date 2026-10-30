@@ -621,6 +621,7 @@ impl Dispatcher {
                     let id = session.session_id();
                     save_json(&self.state.join("session.json"), &json!({"harness": self.cfg.harness, "session": id}));
                     t.rolled(before.is_some_and(|b| b != id));
+                    t.session = id;
                     // Its plugins run under this process: their session token is good only from there.
                     self.tools.pool.plugins.root("seimei", None, session.pid());
                     t.set(Some(true), None);
@@ -1082,11 +1083,10 @@ impl Turns {
                 self.reply(&text)
             }
             Ev::Tool { id, name, input, agent } => {
-                let session = self.d.session_id().unwrap_or_default();
                 let call = Call {
                     who: "seimei",
                     worker: None,
-                    session: &session,
+                    session: &self.session,
                     agent: agent.as_deref(),
                     id: &id,
                     tool: &name,
@@ -1109,7 +1109,7 @@ impl Turns {
             }
             Ev::Usage(session, usage) => self.d.usage.turn("seimei", &session, usage.as_ref(), false),
             Ev::RateLimit(info) => {
-                let session = self.d.session_id().unwrap_or_default();
+                let session = self.session.clone();
                 self.rate_limit(&info, "seimei", &session)
             }
             Ev::End(failed) => {
