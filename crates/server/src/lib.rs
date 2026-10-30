@@ -1076,7 +1076,8 @@ async fn upload(State(app): Shared, Query(q): Query<HashMap<String, String>>, re
     let too_large = json!({"error": format!("files are limited to {} MB", seimei_core::uploads::MAX_BYTES >> 20)});
     while let Some(chunk) = body.next().await {
         let Ok(chunk) = chunk else { return bad_request() };
-        if inc.write(&chunk).is_err() {
+        // A slow disk holds this thread, not the runtime's others.
+        if tokio::task::block_in_place(|| inc.write(&chunk)).is_err() {
             return json_status(StatusCode::PAYLOAD_TOO_LARGE, too_large);
         }
     }

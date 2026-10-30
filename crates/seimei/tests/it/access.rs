@@ -246,3 +246,19 @@ fn a_phone_unpairs_only_itself() {
     assert_eq!(post_json(p, &format!("/api/devices/{c}/revoke"), &[cookie.as_str()], "{}").status, 200);
     assert_eq!(post_json(p, &format!("/api/devices/{a}/revoke"), &[bearer.as_str()], "{}").status, 200);
 }
+
+/// A file from the phone streams to disk and comes back as a download.
+#[test]
+fn an_upload_is_stored_and_served() {
+    let srv = start("upload");
+    let p = srv.port;
+    let cookie = login(p);
+    let origin = format!("Origin: http://localhost:{p}");
+    let h = [cookie.as_str(), origin.as_str(), "Content-Type: application/octet-stream"];
+    let r = call(p, "POST", "/api/upload?name=notes.txt", &h, &vec![b'x'; 300_000]);
+    assert_eq!(r.status, 200, "{}", r.body);
+    let up: Value = serde_json::from_str(&r.body).unwrap();
+    assert_eq!((up["name"].as_str(), up["size"].as_u64()), (Some("notes.txt"), Some(300_000)));
+    let back = call(p, "GET", &format!("/api/uploads/{}", up["id"].as_str().unwrap()), &[cookie.as_str()], b"");
+    assert_eq!((back.status, back.body.len()), (200, 300_000));
+}
