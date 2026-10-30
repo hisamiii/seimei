@@ -190,10 +190,13 @@ fn options(spec: Spec) -> Options {
 
 /// What the harness put in a turn by itself, named for the chat's mention of what started it.
 fn own_input(text: &str) -> Option<String> {
+    // The sender's name is in from-name; from is its socket address.
+    static NAME: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"<cross-session-message [^>]*?from-name="([^"]*)""#).unwrap());
     static FROM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"<cross-session-message from="([^"]*)""#).unwrap());
     if text.contains("<task-notification>") {
         Some("a background task ended".into())
-    } else if let Some(c) = FROM.captures(text) {
+    } else if let Some(c) = NAME.captures(text).or_else(|| FROM.captures(text)) {
         Some(format!("a message from {}", &c[1]))
     } else if text.contains("Cross-session delivery notice") {
         Some("a delivery notice".into())
@@ -210,8 +213,11 @@ mod tests {
     fn the_harness_inputs_are_named() {
         let bg = "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>";
         assert_eq!(own_input(bg).as_deref(), Some("a background task ended"));
-        let peer = "<cross-session-message from=\"cleanup\">hi</cross-session-message>";
+        let peer = "<cross-session-message from=\"uds:/run/user/1000/cc-socks/1.sock\" from-name=\"cleanup\" \
+                    from-mode=\"default\">hi</cross-session-message>";
         assert_eq!(own_input(peer).as_deref(), Some("a message from cleanup"));
+        let unnamed = "<cross-session-message from=\"uds:/tmp/1.sock\">hi</cross-session-message>";
+        assert_eq!(own_input(unnamed).as_deref(), Some("a message from uds:/tmp/1.sock"));
         assert_eq!(own_input("[Cross-session delivery notice] held").as_deref(), Some("a delivery notice"));
         assert_eq!(own_input("just text"), None);
     }
