@@ -243,10 +243,14 @@ impl WebPush {
     pub fn key(&self) -> EcKey<Private> {
         let mut k = self.key.lock().unwrap();
         if k.is_none() {
-            let loaded = std::fs::read(&self.key_path)
-                .ok()
-                .and_then(|pem| PKey::private_key_from_pem(&pem).ok())
+            let pem = std::fs::read(&self.key_path).ok();
+            let loaded = (pem.as_deref())
+                .and_then(|pem| PKey::private_key_from_pem(pem).ok())
                 .and_then(|p| p.ec_key().ok());
+            if pem.is_some() && loaded.is_none() {
+                eprintln!("seimei: {} does not parse; kept as .bad, and a new key is made", self.key_path.display());
+                let _ = std::fs::rename(&self.key_path, self.key_path.with_extension("pem.bad"));
+            }
             *k = Some(loaded.unwrap_or_else(|| {
                 let fresh = EcKey::generate(&p256()).expect("key");
                 let pem = PKey::from_ec_key(fresh.clone()).unwrap().private_key_to_pem_pkcs8().unwrap();
@@ -947,5 +951,21 @@ mod tests {
         assert_eq!(s.waiting("W"), ["ping"]);
         s.drop_device("W");
         assert!(s.waiting("W").is_empty());
+        // A phone that never comes back: what expired goes when the next one queues.
+        s.send("W", &msg("approval:1", "x"), 0);
+        s.send("W", &msg("approval:2", "y"), 60);
+        assert_eq!(s.waiting("W"), ["approval:2"]);
+    }
+
+    #[test]
+    fn a_vapid_key_that_does_not_parse_is_replaced_for_good() {
+        let dir = std::env::temp_dir().join(format!("seimei-vapid-bad-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("push-vapid.pem"), "-----BEGIN PRIVATE KEY-----\ncut sh").unwrap();
+        let k = WebPush::new(dir.join("push-vapid.pem"), "x").public();
+        assert_eq!(WebPush::new(dir.join("push-vapid.pem"), "x").public(), k, "the next start keeps it");
+        assert!(std::fs::read_to_string(dir.join("push-vapid.pem.bad")).unwrap().ends_with("cut sh"));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
