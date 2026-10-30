@@ -239,6 +239,16 @@ impl App {
         push.ping(title, text, "urgent", None, false);
     }
 
+    /// Delete the stored pictures no event names (left by a send that failed half way); returns how many went.
+    pub fn prune_files(&self) -> usize {
+        let mut named = std::collections::HashSet::new();
+        for ev in self.events.after(0) {
+            let images = ev["images"].as_array().into_iter().flatten();
+            named.extend(images.chain([&ev["file"]]).filter_map(Value::as_str).map(String::from));
+        }
+        self.files.prune(&named, seimei_core::util::now() - 86400.0)
+    }
+
     /// Pictures carry their size, so lazy images keep their space before they load.
     fn sized<'a>(&self, ev: &'a Value) -> Cow<'a, Value> {
         let mut ev = Cow::Borrowed(ev);
@@ -1200,19 +1210,27 @@ async fn send(State(app): Shared, bytes: Bytes) -> Response {
     let id = |v: &Value| v.as_str().map_or_else(|| v.to_string(), String::from);
     let infos: Option<Vec<Value>> = attached.iter().map(|f| app.uploads.info(&id(f))).collect();
     let Some(infos) = infos else { return text(StatusCode::BAD_REQUEST, "unknown file") };
-    let (mut names, mut saved) = (vec![], vec![]);
+    // Every image is checked before any is stored, so a refused one leaves none behind.
+    let mut datas = vec![];
     for img in &images {
         let data = img["data"].as_str().and_then(seimei_core::util::b64_decode);
         let Some(data) = data else { return text(StatusCode::BAD_REQUEST, "an image is not base64") };
         if data.len() > MAX_MODEL_BYTES {
             return text(StatusCode::BAD_REQUEST, "an image is larger than 5 MB");
         }
+        if let Err(e) = Files::check(&data) {
+            return text(StatusCode::BAD_REQUEST, &seimei_core::util::chars(&e, 200));
+        }
+        datas.push(data);
+    }
+    let (mut names, mut saved) = (vec![], vec![]);
+    for data in datas {
         match app.files.save(&data) {
             Ok((name, kind)) => {
                 names.push(name);
                 saved.push((kind.to_string(), seimei_core::util::b64(&data)));
             }
-            Err(e) => return text(StatusCode::BAD_REQUEST, &seimei_core::util::chars(&e, 200)),
+            Err(e) => return text(StatusCode::INTERNAL_SERVER_ERROR, &seimei_core::util::chars(&e, 200)),
         }
     }
     let cid = Some(seimei_core::util::chars(&as_text(&b["cid"]), 40)).filter(|c| !c.is_empty());

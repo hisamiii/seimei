@@ -195,3 +195,18 @@ fn a_session_written_into_auth_json_is_refused() {
     // The real login is untouched.
     assert_eq!(call(p, "GET", "/api/history", &[cookie.as_str()], b"").status, 200);
 }
+
+/// A send with one image it refuses stores none of its images.
+#[test]
+fn a_refused_image_leaves_no_file_behind() {
+    let srv = start("images");
+    let p = srv.port;
+    let cookie = login(p);
+    let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
+    let body = format!(r#"{{"text": "two", "images": [{{"data": "{png}"}}, {{"data": "aGVsbG8="}}]}}"#);
+    let r = post_json(p, "/api/send", &[cookie.as_str()], &body);
+    assert_eq!(r.status, 400, "{}", r.body);
+    let files = srv.home.join("data/seimei/dev/files");
+    let stored: Vec<_> = std::fs::read_dir(&files).unwrap().flatten().filter(|f| f.path().is_file()).collect();
+    assert!(stored.is_empty(), "{stored:?}");
+}
