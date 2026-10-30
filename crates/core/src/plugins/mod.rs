@@ -157,7 +157,30 @@ struct Grant {
     who: String,
     worker: Option<String>,
     plugins: Vec<String>,
-    root: Option<u32>,
+    root: Option<Root>,
+}
+
+/// An agent process: its pid and its start time, so a later process that gets the pid again is not taken for it.
+#[derive(Clone)]
+struct Root {
+    pid: u32,
+    start: Option<String>,
+}
+
+impl Root {
+    fn of(pid: u32) -> Root {
+        Root { pid, start: start_time(pid) }
+    }
+
+    /// Whether pid is this process, still running, or runs under it.
+    fn holds(&self, pid: u32) -> bool {
+        self.start.is_some() && start_time(self.pid) == self.start && descends(pid, self.pid)
+    }
+}
+
+/// A process's start time, field 22 of /proc/<pid>/stat.
+fn start_time(pid: u32) -> Option<String> {
+    crate::util::stat_field(pid.into(), 19)
 }
 
 /// Whether pid is root or runs under it.
@@ -374,7 +397,7 @@ impl Plugins {
     pub fn root(&self, who: &str, worker: Option<&str>, pid: Option<u32>) {
         let mut tokens = self.tokens.lock().unwrap();
         if let Some(g) = tokens.values_mut().find(|g| g.who == who && g.worker.as_deref() == worker) {
-            g.root = pid;
+            g.root = pid.map(Root::of);
         }
     }
 
@@ -515,7 +538,7 @@ impl Plugins {
                 }
                 let req: Value = serde_json::from_str(&line).unwrap_or_default();
                 let grant = me.tokens.lock().unwrap().get(req["token"].as_str().unwrap_or("")).cloned();
-                let mine = |g: &Grant| matches!((pid, g.root), (Some(p), Some(r)) if descends(p, r));
+                let mine = |g: &Grant| matches!((pid, &g.root), (Some(p), Some(r)) if r.holds(p));
                 let reply = match (grant, req["op"].as_str()) {
                     (None, _) => json!({"error": "unknown session"}),
                     (Some(g), _) if !mine(&g) => json!({"error": "not this session's process"}),
@@ -814,4 +837,19 @@ async fn forward_stdio(remote: Remote) -> Result<(), String> {
         calls.insert(key, task.abort_handle());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_root_is_its_process_not_its_pid() {
+        let me = std::process::id();
+        assert!(Root::of(me).holds(me));
+        // The same pid, started at another time: a process that got the pid again.
+        let reused = Root { pid: me, start: Some("1".into()) };
+        assert!(!reused.holds(me));
+        assert!(!Root::of(u32::MAX).holds(me));
+    }
 }
