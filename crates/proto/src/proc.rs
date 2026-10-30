@@ -43,27 +43,30 @@ impl Proc {
     }
 
     /// Close stdin and give the process time to finish, then SIGTERM its process group, then SIGKILL.
-    /// Returns how it exited.
+    /// The commands it left running in its group get the SIGTERM too. Returns how it exited.
     pub(crate) async fn close(&mut self) -> Option<ExitStatus> {
         self.stop.cancel();
-        let mut child = self.child.take()?;
-        if let Ok(Ok(s)) = tokio::time::timeout(GRACE, child.wait()).await {
-            return Some(s);
+        // The child stays in self.child until it is reaped: a close dropped halfway still kills the group on Drop.
+        let child = self.child.as_mut()?;
+        let mut status = tokio::time::timeout(GRACE, child.wait()).await.ok().and_then(Result::ok);
+        signal(self.pid, libc::SIGTERM);
+        if status.is_none() {
+            status = tokio::time::timeout(GRACE, child.wait()).await.ok().and_then(Result::ok);
         }
-        self.signal(libc::SIGTERM);
-        if let Ok(Ok(s)) = tokio::time::timeout(GRACE, child.wait()).await {
-            return Some(s);
+        if status.is_none() {
+            signal(self.pid, libc::SIGKILL);
+            status = child.wait().await.ok();
         }
-        self.signal(libc::SIGKILL);
-        child.wait().await.ok()
+        self.child = None;
+        status
     }
+}
 
-    fn signal(&self, sig: i32) {
-        if let Some(pid) = self.pid {
-            // SAFETY: killpg only sends a signal; the group is the child's own (process_group(0)).
-            unsafe {
-                libc::killpg(pid as i32, sig);
-            }
+fn signal(pid: Option<u32>, sig: i32) {
+    if let Some(pid) = pid {
+        // SAFETY: killpg only sends a signal; the group is the child's own (process_group(0)).
+        unsafe {
+            libc::killpg(pid as i32, sig);
         }
     }
 }
@@ -73,7 +76,7 @@ impl Drop for Proc {
         // kill_on_drop ends the child itself; the commands it runs get the group's SIGKILL.
         self.stop.cancel();
         if self.child.is_some() {
-            self.signal(libc::SIGKILL);
+            signal(self.pid, libc::SIGKILL);
         }
     }
 }
@@ -92,4 +95,38 @@ async fn write(mut stdin: ChildStdin, mut rx: mpsc::UnboundedReceiver<String>, s
         }
     }
     // Dropping stdin is the process's EOF.
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Whether any process of the group is left, waiting up to 3 s for it to go.
+    async fn group_alive(pid: u32) -> bool {
+        for _ in 0..60 {
+            // SAFETY: signal 0 only checks that the group exists.
+            if unsafe { libc::killpg(pid as i32, 0) } != 0 {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        true
+    }
+
+    #[tokio::test]
+    async fn a_clean_exit_ends_its_background_commands() {
+        let (mut p, _tx, _out) = Proc::spawn(Command::new("sh").args(["-c", "sleep 30 & exec cat"])).unwrap();
+        let pid = p.pid().unwrap();
+        assert!(p.close().await.is_some_and(|s| s.success()));
+        assert!(!group_alive(pid).await);
+    }
+
+    #[tokio::test]
+    async fn a_close_cut_short_still_kills_the_group() {
+        let (mut p, _tx, _out) = Proc::spawn(Command::new("sh").args(["-c", "sleep 30 & sleep 30"])).unwrap();
+        let pid = p.pid().unwrap();
+        assert!(tokio::time::timeout(Duration::from_millis(200), p.close()).await.is_err());
+        drop(p);
+        assert!(!group_alive(pid).await);
+    }
 }
