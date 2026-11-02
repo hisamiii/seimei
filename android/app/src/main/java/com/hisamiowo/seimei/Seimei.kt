@@ -32,6 +32,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.json.JSONArray
 import org.json.JSONException
@@ -88,6 +89,10 @@ class Page(val kind: String, val id: String) {
     internal var last = 0L
     internal var poll: Job? = null
     internal var save: Job? = null
+    /** The stream says a session's transcript grew: its poll reads at once. */
+    internal val poke = Channel<Unit>(Channel.CONFLATED)
+    /** Messages sent to a session, shown dimmed until its transcript has them: a busy one takes them between two steps. */
+    val sent = mutableStateListOf<Pending>()
 
     /** Adds what is new in [evs], or starts over with them ([reset]: the server sent a fresh copy). */
     fun take(evs: List<JSONObject>, reset: Boolean) {
@@ -95,6 +100,8 @@ class Page(val kind: String, val id: String) {
         if (reset) chat = Chat()
         raw = (if (reset) fresh else raw + fresh).takeLast(Store.PAGE_KEEP)
         fresh.forEach(chat::add)
+        // The sent message arrived: its dimmed copy goes (the oldest, when the transcript's text differs).
+        for (e in fresh) if (e.str("type") == "user" && sent.isNotEmpty()) sent.remove(sent.firstOrNull { it.text == e.str("text") } ?: sent.first())
         for (e in fresh) if (e.opt("id") is Number) last = maxOf(last, e.getLong("id"))
         items = chat.items.toList()
     }
@@ -795,6 +802,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             "workers" -> takeWorkers(ev.optJSONArray("list").objects())
             "sessions" -> takeSessions(ev.optJSONArray("list").objects())
             "w" -> workerEvent(ev)
+            "s" -> sessionEvent(ev)
             "usage" -> usage = ev
             "tasks" -> takeBoard(ev)
         }
@@ -1026,10 +1034,10 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         if (id.isNotEmpty()) saveSeen(JSONObject(seen.toString()).put(id, s.optDouble("active", 0.0)))
     }
 
-    /** A session's page follows its transcript from where the last read ended. */
+    /** A session's page follows its transcript from where the last read ended: at once when the stream says it grew. */
     private suspend fun pollSession(pg: Page) {
         while (true) {
-            delay(if (foreground) 2000 else 10_000)
+            withTimeoutOrNull(if (foreground) 2000L else 10_000L) { pg.poke.receive() }
             if (!foreground) continue
             try {
                 val r = api.get("api/sessions/${pg.id}?from=${pg.next ?: 0}")
@@ -1048,8 +1056,9 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Back online: a shikigami's open page fetches what came while the stream was down (a session's polls). */
+    /** Back online: the open page fetches what came while the stream was down. */
     private fun refreshPage() {
+        page?.takeIf { it.kind == "session" }?.poke?.trySend(Unit)
         val pg = page?.takeIf { it.kind == "worker" } ?: return
         viewModelScope.launch {
             try {
@@ -1061,6 +1070,10 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             } catch (e: IOException) {
             }
         }
+    }
+
+    private fun sessionEvent(ev: JSONObject) {
+        page?.takeIf { it.kind == "session" && it.id == ev.optLong("pid").toString() }?.poke?.trySend(Unit)
     }
 
     private fun workerEvent(ev: JSONObject) {
@@ -1092,11 +1105,14 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         dictation.sent(pg.chatKey, text)
         pg.draft = ""
         pg.files = emptyList()
+        val ask = pg.ask
+        val shown = if (pg.kind == "session" && ask?.optBoolean("answerable") != true)
+            Pending(java.util.UUID.randomUUID().toString().take(12), text.ifEmpty { files.joinToString(", ") { it.name } }, emptyList()).also { pg.sent.add(it) }
+        else null
         viewModelScope.launch {
             try {
                 files.forEach { it.job?.join() }
                 val body = JSONObject().put("text", text).put("files", JSONArray(files.mapNotNull { it.id }))
-                val ask = pg.ask
                 when {
                     pg.kind == "worker" -> api.post("api/workers/${pg.id}/send", body)
                     ask != null && ask.optBoolean("answerable") -> api.post("api/sessions/${pg.id}/answer", body.put("tool_id", ask.str("tool_id")))
@@ -1104,6 +1120,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 }
                 pg.note = null
             } catch (e: IOException) {
+                shown?.let { pg.sent.remove(it) }
                 if (pg.draft.isEmpty()) pg.draft = text
                 pg.files = files.filter { it.id != null } + pg.files
                 pg.note = errorOf(e)

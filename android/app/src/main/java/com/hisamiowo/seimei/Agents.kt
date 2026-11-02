@@ -633,7 +633,7 @@ fun AgentPage(vm: Seimei, pg: Page) {
             // Like a chat: newest at the bottom, and a reader near the end follows it.
             val list = rememberLazyListState()
             val rows = pg.items.asReversed()
-            LaunchedEffect(pg.items.lastOrNull()?.key, pg.ask?.str("tool_id"), pg.live?.str("tool_id")) {
+            LaunchedEffect(pg.items.lastOrNull()?.key, pg.sent.size, pg.ask?.str("tool_id"), pg.live?.str("tool_id")) {
                 if (list.firstVisibleItemIndex <= 2) list.scrollToItem(0)
             }
             LazyColumn(
@@ -645,8 +645,9 @@ fun AgentPage(vm: Seimei, pg: Page) {
                 if (pg.kind == "worker" && pg.row.str("state") == "asking" && pg.row.str("question").isNotEmpty()) item("wask") {
                     QuestionCard(vm, pg, JSONObject().put("text", pg.row.str("question")))
                 }
+                items(pg.sent.asReversed(), key = { "p" + it.cid }) { PendingMsg(it, vm) }
                 items(rows, key = { it.key }, contentType = { it::class }) { Row(it, vm, pg.live) { f -> zoom = f } }
-                if (rows.isEmpty()) item("empty") { NotePill("Nothing yet", "") }
+                if (rows.isEmpty() && pg.sent.isEmpty()) item("empty") { NotePill("Nothing yet", "") }
             }
             PageComposer(vm, pg, a)
         }
