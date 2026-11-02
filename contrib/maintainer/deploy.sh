@@ -204,7 +204,8 @@ else
     fi
     # rc-service hands its environment to the service, and this one may be a shikigami's shell: restart from the desktop session's, or a minimal one.
     # niri sets WAYLAND_DISPLAY and NIRI_SOCKET for what it starts, not in its own environment.
-    niri=$(pgrep -u "$(id -u)" -x niri | head -1)
+    # The oldest: the compositor itself, not a "niri msg" that just ended and is not reaped yet.
+    niri=$(pgrep -o -u "$(id -u)" -x niri)
     if [ -n "$niri" ] && [ -r "/proc/$niri/environ" ]; then
         xargs -0 -a "/proc/$niri/environ" sh -c 'exec env -i "$@" ${WAYLAND_DISPLAY:+WAYLAND_DISPLAY=$WAYLAND_DISPLAY} \
             ${NIRI_SOCKET:+NIRI_SOCKET=$NIRI_SOCKET} rc-service --user "$0" restart' "$service"
