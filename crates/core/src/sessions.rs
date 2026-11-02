@@ -587,11 +587,24 @@ pub struct Watcher {
     pool: Arc<Pool>,
     list: Mutex<Vec<Value>>,
     happenings: Mutex<SessionEvents>,
+    /// Each listed session's transcript, as of the last scan: follow watches these.
+    transcripts: Mutex<Vec<(i64, PathBuf)>>,
+}
+
+/// How often follow looks at the transcripts: a page shows a session's new step within about this long.
+const FOLLOW: Duration = Duration::from_millis(250);
+
+/// The sessions whose transcript grew since the last look; sizes becomes what each is now.
+/// A transcript seen for the first time has not grown.
+fn grown(sizes: &mut HashMap<i64, u64>, now: &[(i64, u64)]) -> Vec<i64> {
+    let out = now.iter().filter(|(pid, len)| sizes.get(pid).is_some_and(|l| l != len)).map(|(pid, _)| *pid).collect();
+    *sizes = now.iter().copied().collect();
+    out
 }
 
 impl Watcher {
     pub fn new(events: Arc<EventLog>, pool: Arc<Pool>) -> Watcher {
-        Watcher { events, pool, list: Mutex::default(), happenings: Mutex::default() }
+        Watcher { events, pool, list: Mutex::default(), happenings: Mutex::default(), transcripts: Mutex::default() }
     }
 
     pub fn snapshot(&self) -> Value {
@@ -626,6 +639,12 @@ impl Watcher {
                 let mut rows = listing(&own);
                 let lines = me.happenings.lock().unwrap().scan(&rows);
                 me.mark(&mut rows);
+                let listed: Vec<(i64, PathBuf)> = live(&own)
+                    .into_iter()
+                    .filter(|s| rows.iter().any(|r| r["pid"] == json!(s.pid)))
+                    .filter_map(|s| Some((s.pid, transcript_of(&s.rec)?)))
+                    .collect();
+                *me.transcripts.lock().unwrap() = listed;
                 (rows, lines)
             })
             .await;
@@ -670,6 +689,20 @@ impl Watcher {
             tokio::time::sleep(Duration::from_secs(4)).await;
         }
     }
+
+    /// Tells the pages when a session's transcript grows ({"type": "s", "pid": ...}), so an open one reads on at once.
+    pub async fn follow(self: Arc<Self>) {
+        let mut sizes = HashMap::new();
+        loop {
+            tokio::time::sleep(FOLLOW).await;
+            let paths = self.transcripts.lock().unwrap().clone();
+            let now: Vec<(i64, u64)> =
+                paths.iter().filter_map(|(pid, p)| Some((*pid, std::fs::metadata(p).ok()?.len()))).collect();
+            for pid in grown(&mut sizes, &now) {
+                self.events.flash(json!({"type": "s", "pid": pid}));
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -690,6 +723,15 @@ mod tests {
         assert!(!alive(&json!({"pid": pid, "procStart": "1"})), "another process got the pid");
         assert!(!alive(&json!({"pid": pid, "procStart": null})));
         assert!(!alive(&json!({"pid": "x"})));
+    }
+
+    #[test]
+    fn only_a_transcript_that_grew_is_news() {
+        let mut sizes = HashMap::new();
+        assert!(grown(&mut sizes, &[(1, 100), (2, 50)]).is_empty(), "first seen");
+        assert_eq!(grown(&mut sizes, &[(1, 100), (2, 80)]), vec![2]);
+        assert!(grown(&mut sizes, &[(1, 100), (2, 80), (3, 10)]).is_empty(), "a new session");
+        assert_eq!(grown(&mut sizes, &[(1, 40)]), vec![1], "another transcript of the same session");
     }
 
     #[test]

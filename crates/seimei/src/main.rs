@@ -445,6 +445,7 @@ fn main() {
             }
         });
         tokio::spawn(app.watcher.clone().run());
+        tokio::spawn(app.watcher.clone().follow());
         if let Some(asr) = app.asr.clone() {
             tokio::spawn(asr.nightly());
             tokio::spawn({
