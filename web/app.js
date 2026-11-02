@@ -1,7 +1,7 @@
 // The page: the stream from the server, the three tabs, and the header and navigation bar around them.
 import { $, S, hooks, clock, finePointer, viewing, closeView, keep, reduced } from './util.js';
 import { render, onDelta, clearLive, addEvent, loadHistory, autosize, waitingApprovals, toBottom, showLane, following, nearBottom } from './chat.js';
-import { setWorkers, setSessions, sheetEvent, agentCounts, showAgents, pageOpen, closePage, archOpen, closeArch, refreshPage } from './agents.js';
+import { setWorkers, setSessions, sheetEvent, sessionEvent, agentCounts, showAgents, pageOpen, closePage, archOpen, closeArch, refreshPage } from './agents.js';
 import { setUsage, renderUsage, tone } from './usage.js';
 import { setTasks, loadTasks, tasksArchOpen, closeTasksArch } from './tasks.js';
 import { account } from './account.js';
@@ -161,6 +161,8 @@ function handle(ev) {
     setWorkers(ev);
   } else if (ev.type === 'w') {
     sheetEvent(ev);
+  } else if (ev.type === 's') {
+    sessionEvent(ev);
   } else if (ev.type === 'usage') {
     setUsage(ev);
   } else if (ev.type === 'sessions') {

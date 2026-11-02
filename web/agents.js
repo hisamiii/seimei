@@ -633,14 +633,17 @@ async function submit(e) {
   P.input.value = '';
   autosize();
   tray();
+  const answering = P.kind === 'session' && P.ask?.answerable;
+  const sent = P.kind === 'session' && !answering ? pend(text || files.map((a) => a.name).join(', ')) : null;
+  stick(true);
   await Promise.all(files.map((a) => a.upload).filter(Boolean));
   const ids = files.filter((a) => a.id).map((a) => a.id);
-  const answering = P.kind === 'session' && P.ask?.answerable;
   let r;
   if (P.kind === 'worker') r = await postJSON(`api/workers/${encodeURIComponent(P.id)}/send`, { text, files: ids });
   else if (answering) r = await postJSON(`api/sessions/${P.id}/answer`, { tool_id: P.ask.tool_id, text, files: ids });
   else r = await postJSON(`api/sessions/${P.id}/send`, { text, files: ids });
   if (!r.ok) {
+    if (sent) unpend(sent);
     P.input.value = text;
     P.files.unshift(...files.filter((a) => a.id));
     tray();
@@ -651,7 +654,6 @@ async function submit(e) {
   files.forEach((a) => a.url && URL.revokeObjectURL(a.url));
   note(null);
   if (r.via === 'seimei') snack(r.held ? 'Held until you allow it in its terminal' : 'In its inbox');
-  if (P.kind === 'session' && !answering) pend(text || files.map((a) => a.name).join(', '));
   composerState();
   stick(true);
   if (P.kind === 'session') poll(true);
@@ -662,6 +664,12 @@ function pend(text) {
   const node = el('div', 'msg user pending', text);
   P.pending.push(node);
   P.thread.append(node);
+  return node;
+}
+
+function unpend(node) {
+  if (P) P.pending = P.pending.filter((n) => n !== node);
+  node.remove();
 }
 
 function autosize() {
@@ -705,6 +713,9 @@ function add(events) {
 // One poll at a time: only the latest one draws and schedules the next, so an older answer never moves the offset back.
 let pollTimer = 0;
 let pollRun = 0;
+// The poll whose read is on its way, and whether the transcript grew meanwhile: then one more read follows it.
+let reading = 0;
+let again = false;
 async function poll(soon = false) {
   clearTimeout(pollTimer);
   if (!P || P.kind !== 'session') return;
@@ -712,9 +723,11 @@ async function poll(soon = false) {
   const run = ++pollRun;
   if (soon) await new Promise((r) => setTimeout(r, 600));
   if (run !== pollRun) return;
+  reading = run;
   const r = await getJSON(`api/sessions/${p.id}${p.next != null ? `?from=${p.next}` : ''}`, () => {
     p.row = { ...p.row, reach: 'The session has ended', via: null };
   });
+  if (reading === run) reading = 0;
   if (P !== p || run !== pollRun) return;
   if (r && ((p.next != null && r.next < p.next) || r.reset || r.session.session_id !== p.row.session_id)) {
     // The session went on in another transcript, or ran far ahead: draw it again.
@@ -731,8 +744,19 @@ async function poll(soon = false) {
   head();
   if (r.session?.session_id) markSeen(r.session);
   stick();
+  if (again) {
+    again = false;
+    poll();
+  }
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+
+// The server saw the session's transcript grow: read on now rather than at the next poll.
+export function sessionEvent(ev) {
+  if (P?.kind !== 'session' || String(P.id) !== String(ev.pid)) return;
+  if (reading && reading === pollRun) again = true;
+  else poll();
+}
 
 setInterval(() => {
   if (!P) return;
