@@ -44,7 +44,7 @@ pub async fn send(to: &Path, name: &str, mode: &str, msg_id: &str, text: &str) -
     let content = format!("<{TAG} from-name=\"{name}\" from-mode=\"{}\">\n{body}\n</{TAG}>", mode_class(mode));
     let frame = json!({
         "msgV": 1, "msg_id": msg_id, "type": "user", "message": {"role": "user", "content": content},
-        "priority": "next", "from": format!("uds:{}", reply.path.display()),
+        "priority": "now", "from": format!("uds:{}", reply.path.display()),
     });
     let write = async {
         let mut s = UnixStream::connect(to).await?;

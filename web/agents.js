@@ -659,7 +659,7 @@ async function submit(e) {
   if (P.kind === 'session') poll(true);
 }
 
-// A sent message shows dimmed at the end until the transcript has it: a busy session takes it only between two steps.
+// A sent message shows dimmed at the end until the transcript has it.
 function pend(text) {
   const node = el('div', 'msg user pending', text);
   P.pending.push(node);

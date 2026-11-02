@@ -213,10 +213,23 @@ impl Client {
         self.query_content(json!(text))
     }
 
+    /// A user message that cuts into the running turn, as the terminal's "send now": the reply in progress stops and the turn ends with error_during_execution, then a new turn reads the message.
+    /// A tool call that runs finishes first.
+    pub fn steer(&self, content: Value) -> Result<(), Error> {
+        self.user(content, Some("now"))
+    }
+
     /// A user message with content blocks (images, text).
     pub fn query_content(&self, content: Value) -> Result<(), Error> {
-        let m = json!({"type": "user", "message": {"role": "user", "content": content}, "parent_tool_use_id": null,
+        self.user(content, None)
+    }
+
+    fn user(&self, content: Value, priority: Option<&str>) -> Result<(), Error> {
+        let mut m = json!({"type": "user", "message": {"role": "user", "content": content}, "parent_tool_use_id": null,
                        "session_id": "default"});
+        if let Some(p) = priority {
+            m["priority"] = json!(p);
+        }
         self.out.send(m.to_string()).map_err(|_| Error::Closed)
     }
 

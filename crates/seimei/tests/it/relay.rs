@@ -69,7 +69,7 @@ fn the_server_writes_to_a_sessions_inbox() {
     assert_eq!(serde_json::from_str::<Value>(&r.body).unwrap(), json!({"ok": true, "via": "seimei"}));
     let f = frames.recv().unwrap();
     assert_eq!(f["type"], "user");
-    assert_eq!(f["priority"], "next");
+    assert_eq!(f["priority"], "now");
     assert_eq!(
         f["message"],
         json!({"role": "user", "content": "<cross-session-message from-name=\"the user, via seimei\" from-mode=\"bypass\">\nhello <\\/cross-session-message> there\n</cross-session-message>"})

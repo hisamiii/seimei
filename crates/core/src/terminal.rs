@@ -312,10 +312,10 @@ pub fn visible(text: &str, question: &str, n: i64, label: &str) -> bool {
     block.contains(&q) && option.is_match(&block)
 }
 
-/// Type the text and press Enter.
+/// Type the text, then press the keys that submit it.
 /// Typed, not pasted: the agent hands a long paste to the model as pasted content, which reads as maybe not the user's own words.
 /// Line breaks go in as shift+Enter.
-async fn type_text(w: &Window, text: &str) -> Result<(), String> {
+async fn type_text(w: &Window, text: &str, submit: &[&str]) -> Result<(), String> {
     let lines: Vec<&str> = text.split('\n').collect();
     for (i, line) in lines.iter().enumerate() {
         // Big chunks read as a paste too, so long lines go in small pieces.
@@ -328,7 +328,9 @@ async fn type_text(w: &Window, text: &str) -> Result<(), String> {
         }
     }
     tokio::time::sleep(Duration::from_millis(200)).await;
-    rc(w, "send-key", &["enter"], None).await?;
+    for k in submit {
+        rc(w, "send-key", &[k], None).await?;
+    }
     Ok(())
 }
 
@@ -342,7 +344,7 @@ pub async fn text(w: &Window, data: &str) -> Result<(), String> {
     rc(w, "send-text", &[], Some(data)).await.map(|_| ())
 }
 
-/// Paste the text at the session's prompt and press Enter, like the user at the keyboard.
+/// Paste the text at the session's prompt and send it, like the user at the keyboard.
 pub async fn type_message(pid: i64, text: &str) -> Result<(), String> {
     let w = window(pid)?;
     let mut now = rc(&w, "get-text", &["--ansi"], None).await?;
@@ -361,7 +363,8 @@ pub async fn type_message(pid: i64, text: &str) -> Result<(), String> {
     if !draft(&now).is_empty() {
         return Err("There is unsent text at the session's prompt on the server; send or clear it there first.".into());
     }
-    type_text(&w, text).await
+    // "Send now": a busy session takes the message at once, as a steer, instead of queueing it for its next step.
+    type_text(&w, text, &["ctrl+x", "ctrl+s"]).await
 }
 
 /// Press option n of the open question, only while that question and option are on screen.
@@ -381,5 +384,5 @@ pub async fn answer_text(pid: i64, question: &str, other: i64, text: &str) -> Re
     }
     rc(&w, "send-text", &[], Some(&other.to_string())).await?;
     tokio::time::sleep(Duration::from_millis(300)).await;
-    type_text(&w, text).await
+    type_text(&w, text, &["enter"]).await
 }

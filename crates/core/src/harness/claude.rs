@@ -16,17 +16,29 @@ pub struct Session {
     session: String,
     /// The events one message became, handed out one at a time.
     queue: VecDeque<Ev>,
+    /// A turn this side started runs.
+    turn: bool,
+    /// A message cut into the running turn: that turn's end is not the turn's end.
+    cut: bool,
 }
 
 impl Session {
     pub async fn connect(spec: Spec) -> Result<Session, String> {
         let (handler, session) = (spec.handler.clone(), spec.session.clone());
         let client = Client::connect(options(spec), handler).await.map_err(|e| e.to_string())?;
-        Ok(Session { client, session, queue: VecDeque::new() })
+        Ok(Session { client, session, queue: VecDeque::new(), turn: false, cut: false })
     }
 
     /// One message as the events the turn loop reads.
     fn read(&mut self, msg: Message) {
+        if let Message::Result(r) = &msg {
+            let cut = std::mem::take(&mut self.cut) && r.is_error && r.subtype == "error_during_execution";
+            self.turn = cut;
+            if cut {
+                self.queue.push_back(Ev::Usage(r.session_id.clone(), r.model_usage.clone()));
+                return;
+            }
+        }
         let q = &mut self.queue;
         match msg {
             Message::StreamEvent(e) if e.parent_tool_use_id.is_none() => {
@@ -101,17 +113,21 @@ impl Harness for Session {
     }
 
     fn send(&mut self, text: &str, images: &[(String, String)]) -> Result<(), String> {
-        let sent = if images.is_empty() {
+        let content = if images.is_empty() {
             // Plain text, so a slash command such as /compact stays one.
-            self.client.query(text)
+            json!(text)
         } else {
             let mut blocks: Vec<Value> = images
                 .iter()
                 .map(|(kind, data)| json!({"type": "image", "source": {"type": "base64", "media_type": kind, "data": data}}))
                 .collect();
             blocks.push(json!({"type": "text", "text": text}));
-            self.client.query_content(Value::Array(blocks))
+            Value::Array(blocks)
         };
+        // A running turn takes the message at once, as the terminal's "send now", not at its next step.
+        let now = std::mem::replace(&mut self.turn, true);
+        self.cut |= now;
+        let sent = if now { self.client.steer(content) } else { self.client.query_content(content) };
         sent.map_err(|e| e.to_string())
     }
 

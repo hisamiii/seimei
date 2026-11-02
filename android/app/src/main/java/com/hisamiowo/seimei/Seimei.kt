@@ -91,7 +91,7 @@ class Page(val kind: String, val id: String) {
     internal var save: Job? = null
     /** The stream says a session's transcript grew: its poll reads at once. */
     internal val poke = Channel<Unit>(Channel.CONFLATED)
-    /** Messages sent to a session, shown dimmed until its transcript has them: a busy one takes them between two steps. */
+    /** Messages sent to a session, shown dimmed until its transcript has them. */
     val sent = mutableStateListOf<Pending>()
 
     /** Adds what is new in [evs], or starts over with them ([reset]: the server sent a fresh copy). */

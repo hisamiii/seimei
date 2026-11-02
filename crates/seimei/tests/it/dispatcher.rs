@@ -182,6 +182,19 @@ async fn run(base: PathBuf, state: PathBuf, work: PathBuf, agent: PathBuf) {
     let stopped = after(&first, from).into_iter().find(|e| e["type"] == "system").unwrap();
     assert_eq!((&stopped["text"], &stopped["lane"]), (&json!("Stopped"), &json!("c")));
 
+    // A message mid-turn cuts in, as the terminal's "send now": the cut reply is dropped, and the turn goes on with the message.
+    let from = first.events.last_id();
+    first.dispatcher.send("!slow", &[], vec![], &[], None, None);
+    assert!(until(20, || first.dispatcher.busy()).await);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    first.dispatcher.send("cut in", &[], vec![], &[], None, None);
+    let replied = |evs: &[Value]| evs.iter().any(|e| e["type"] == "assistant");
+    assert!(until(20, || replied(&after(&first, from)) && !first.dispatcher.busy()).await);
+    let evs = after(&first, from);
+    assert!(!evs.iter().any(|e| e["type"] == "system"), "{evs:?}");
+    let said: Vec<&Value> = evs.iter().filter(|e| e["type"] == "assistant").map(|e| &e["text"]).collect();
+    assert!(said.len() == 1 && said[0].as_str().unwrap().starts_with("Echo: cut in"), "{said:?}");
+
     // /compact: the boundary is noted, and the next message carries the After compaction block once.
     let evs = turn(&first, "/compact").await;
     assert!(evs.iter().any(|e| e["type"] == "system" && e["text"] == "Older context was compacted"), "{evs:?}");
@@ -193,6 +206,35 @@ async fn run(base: PathBuf, state: PathBuf, work: PathBuf, agent: PathBuf) {
     assert!(!state.join("compacted").exists());
     turn(&first, "and once more").await;
     assert!(heard(&log).last().unwrap().starts_with("and once more"));
+
+    // A message to a shikigami mid-turn cuts in: the cut turn neither ends nor fails its task, the next one reads the message.
+    let w = first
+        .pool
+        .summon(seimei_core::workers::Summon {
+            name: "cutter".into(),
+            task: "the first task".into(),
+            cwd: work.display().to_string(),
+            model: String::new(),
+            effort: None,
+            context: "256k".into(),
+            subagents: String::new(),
+            project: None,
+            link: None,
+            tools: vec![],
+            mode: None,
+            harness: None,
+        })
+        .await
+        .unwrap();
+    let w2 = w.clone();
+    assert!(until(10, || w2.log.after(0).iter().any(|e| e["type"] == "user")).await);
+    w.send("a change of plan", None, vec![]).await.unwrap();
+    let w2 = w.clone();
+    assert!(until(20, || w2.state() != "running").await);
+    assert_eq!((w.state(), w.rec().summary), ("done".to_string(), "(fake) got: a change of plan".to_string()));
+    let said: Vec<Value> =
+        w.log.after(0).iter().filter(|e| e["type"] == "assistant").map(|e| e["text"].clone()).collect();
+    assert_eq!(said, [json!("(fake) got: a change of plan")]);
 
     // A restart resumes the same conversation, also from an older state's session_id file.
     task.abort();

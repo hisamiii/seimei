@@ -64,6 +64,8 @@ class Fake:
         self.pending: dict[str, asyncio.Future] = {}
         self.inbox: asyncio.Queue = asyncio.Queue()
         self.turn: asyncio.Task | None = None
+        # A "now" message cut the running turn short.
+        self.cut = False
         self.n = 0
         self.usage = {"inputTokens": 0, "outputTokens": 0, "cacheReadInputTokens": 0, "cacheCreationInputTokens": 0}
         root = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / re.sub(r"[^A-Za-z0-9]", "-", self.cwd)
@@ -124,6 +126,10 @@ class Fake:
             elif kind == "control_request":
                 self.control(msg["request_id"], msg.get("request") or {})
             elif kind == "user":
+                # "now" cuts into a running turn, as the terminal's send now: that turn ends at once and the next one reads it.
+                if msg.get("priority") == "now" and self.turn and not self.turn.done():
+                    self.cut = True
+                    self.turn.cancel()
                 await self.inbox.put(msg.get("message", {}).get("content"))
         # stdin closed: the server let go of this session.
         os._exit(0)
@@ -276,6 +282,10 @@ class Fake:
             try:
                 await self.turn
             except asyncio.CancelledError:
+                if self.cut:
+                    self.cut = False
+                    self.result("", error="error_during_execution")
+                    continue
                 self.out({"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "[Request interrupted by user]"}]},
                           "parent_tool_use_id": None, "session_id": self.sid, "uuid": str(uuid.uuid4())})
                 self.result("", error="error_during_execution")

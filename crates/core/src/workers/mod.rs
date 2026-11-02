@@ -767,6 +767,8 @@ struct Session {
     /// A new ACP session: its first prompt carries the shikigami prompt.
     fresh: bool,
     stopping: bool,
+    /// The user's message cut into the running turn: that turn's end is not the task's end.
+    cut: bool,
     last_text: String,
     turn_text: bool,
     /// Subagents still working in the background: the turn may end before they report back.
@@ -805,6 +807,7 @@ impl Session {
             message: String::new(),
             fresh: false,
             stopping: false,
+            cut: false,
             last_text: String::new(),
             turn_text: false,
             tasks: HashMap::new(),
@@ -913,8 +916,13 @@ impl Session {
             return self.prompt_acp(text);
         }
         self.stopping = false;
+        // A turn that runs takes the message at once, not at its next step.
+        let running = self.w.state() == "running";
         self.w.set("running", |r| r.question = None);
-        self.client.as_ref().expect("a session").query(&text).map_err(|e| e.to_string())
+        let client = self.client.as_ref().expect("a session");
+        let sent = if running { client.steer(json!(text)) } else { client.query(&text) };
+        self.cut |= running;
+        sent.map_err(|e| e.to_string())
     }
 
     async fn connect(&mut self) -> Result<(), String> {
@@ -1175,6 +1183,9 @@ impl Session {
         });
         let label = format!("shikigami {}", self.w.name());
         self.pool.usage.turn(&label, &msg.session_id, msg.model_usage.as_ref(), fresh);
+        if std::mem::take(&mut self.cut) && msg.is_error && msg.subtype == "error_during_execution" {
+            return;
+        }
         let said = msg.result.as_deref().unwrap_or("").trim().to_string();
         let trivial = said == "No response requested." || said.is_empty() && !self.turn_text;
         self.turn_text = false;
