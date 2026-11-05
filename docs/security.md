@@ -61,6 +61,8 @@ In bypass mode, approval cards protect against mistakes and casual prompt inject
 
 Such an agent runs as the user and can reach what the user can: seimei's state, its sockets and the local port. Ask mode, `default`, puts shell commands behind cards.
 
+One call on the plugin socket needs no session token. With it, `seimei mcp` under one of the user's own sessions puts a picture or file in the chat. The socket is the user's alone, mode 600.
+
 ## Third-party content
 
 The agents are told that pages, files, messages and tool output from outside are data, not instructions. The harness's deny rules are the floor for what a successful injection could do.

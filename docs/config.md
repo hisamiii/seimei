@@ -89,7 +89,20 @@ seimei devices [--revoke ID] list or unpair phones
 seimei logout-all            end every session
 seimei lockdown              end every session, remove every passkey, unpair every phone
 seimei screen-password [--clear]  the screen lock password the desktop plugin types
+seimei mcp                   an MCP server for your own sessions: show_image and send_file to the chat
 ```
+
+## Pictures from your own sessions
+
+Your own Claude Code sessions can show you an image or hand you a file in seimei's chat, marked with the session's name. It is opt-in: add `seimei mcp` as a user-scope MCP server once.
+
+```
+claude mcp add --scope user seimei-share -- seimei mcp
+```
+
+Use the full path of the binary if `seimei` is not on the PATH Claude Code sees. New sessions then have `show_image` and `send_file`; the dispatcher hears about each picture or file.
+
+The server reaches seimei through `plugins.sock` in seimei's data folder, or `SEIMEI_SOCKET`. seimei names the session by the server's process tree, so it needs no token. A caller that is not under one of your sessions is refused. seimei's own sessions load your user-scope servers too, but there it lists no tools, since they have their own. `claude mcp remove --scope user seimei-share` undoes it.
 
 ## The kitty bridge
 

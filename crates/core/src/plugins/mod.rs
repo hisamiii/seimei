@@ -117,6 +117,8 @@ const MCP_KEYS: [&str; 6] = ["type", "command", "args", "env", "url", "headers"]
 
 /// Runs a shikigami's own tool for it: (worker id, tool, args) to the tool's result, None for no such worker.
 pub type OwnTools = Box<dyn Fn(&str, &str, &Value) -> Option<Value> + Send + Sync>;
+/// show_image and send_file for one of the user's own sessions: (the caller's pid, tool, args) to the tool's result.
+pub type ShareTools = Box<dyn Fn(u32, &str, &Value) -> Value + Send + Sync>;
 /// The dispatcher's own MCP server: one JSON-RPC message to its response, None for a notification or when seimei is shutting down.
 pub type SeimeiTools = Box<dyn Fn(Value) -> Fut<'static, Option<Value>> + Send + Sync>;
 
@@ -148,6 +150,8 @@ pub struct Plugins {
     pub own: OnceLock<OwnTools>,
     /// The dispatcher's own tools, for a harness that cannot serve them in-process; set by the server.
     pub seimei: OnceLock<SeimeiTools>,
+    /// `seimei mcp` in the user's own sessions; set by the worker pool.
+    pub share: OnceLock<ShareTools>,
 }
 
 /// A session token's session: who it is, the plugins it was given, and its agent process.
@@ -250,6 +254,7 @@ impl Plugins {
             tokens: Mutex::default(),
             own: OnceLock::new(),
             seimei: OnceLock::new(),
+            share: OnceLock::new(),
         };
         let enabled = cfg.get("enabled").and_then(|e| e.as_array()).cloned().unwrap_or_default();
         for name in enabled.iter().filter_map(|n| n.as_str()) {
@@ -478,8 +483,10 @@ impl Plugins {
     }
 
     /// Environment for a session named name (seimei's own and each shikigami's).
+    /// SEIMEI_SESSION tells `seimei mcp` it runs in one of seimei's own sessions, which have their own show_image.
     pub fn env(&self, name: &str) -> Vec<(String, String)> {
-        self.made.iter().flat_map(|(_, b)| b.env(name)).collect()
+        let own = ("SEIMEI_SESSION".to_string(), name.to_string());
+        std::iter::once(own).chain(self.made.iter().flat_map(|(_, b)| b.env(name))).collect()
     }
 
     /// How a session's own command runs when it is opened in a terminal (a release or a loan).
@@ -540,6 +547,16 @@ impl Plugins {
                 let grant = me.tokens.lock().unwrap().get(req["token"].as_str().unwrap_or("")).cloned();
                 let mine = |g: &Grant| matches!((pid, &g.root), (Some(p), Some(r)) if r.holds(p));
                 let reply = match (grant, req["op"].as_str()) {
+                    // `seimei mcp` in one of the user's own sessions has no token: its process tree names the session.
+                    (None, Some("call")) if req["plugin"] == "session" => {
+                        let (tool, args) = (req["tool"].as_str().unwrap_or("").to_string(), req["args"].clone());
+                        let me2 = me.clone();
+                        let run = move || Some(me2.share.get()?(pid?, &tool, &args));
+                        match tokio::task::spawn_blocking(run).await.ok().flatten() {
+                            Some(r) => json!({"result": r}),
+                            None => json!({"error": "seimei cannot tell which session this is"}),
+                        }
+                    }
                     (None, _) => json!({"error": "unknown session"}),
                     (Some(g), _) if !mine(&g) => json!({"error": "not this session's process"}),
                     (Some(g), Some("mcp")) => {
@@ -731,6 +748,11 @@ pub async fn serve_stdio(name: &str, builtins: &[Factory]) -> Result<(), String>
     let mut spec = match (name, factory) {
         // The shikigami's own tools, for an ACP agent (the default harness has them in-process).
         ("shikigami", _) => crate::tools::SERVER["shikigami"].clone(),
+        // seimei's own sessions have these tools already: there it lists none.
+        ("session", _) if !var("SEIMEI_SESSION").is_empty() => {
+            json!({"initialize": crate::tools::SERVER["session"]["initialize"], "tools": []})
+        }
+        ("session", _) => crate::tools::SERVER["session"].clone(),
         (_, Some(f)) => serde_json::from_str(f.spec).map_err(|e| format!("{name}'s tools: {e}"))?,
         _ => return Err(format!("no built-in plugin {name}")),
     };
@@ -749,12 +771,12 @@ pub async fn serve_stdio(name: &str, builtins: &[Factory]) -> Result<(), String>
         // One spec per variant (the desktop's window managers); seimei says which.
         spec = spec.get(&variant).cloned().ok_or(format!("{name} has no variant {variant:?}"))?;
     }
-    let remote = Arc::new(Remote {
-        plugin: name.into(),
-        socket: var("SEIMEI_SOCKET"),
-        token: var("SEIMEI_TOKEN"),
-        state: var("SEIMEI_STATE").into(),
-    });
+    // The user's own sessions start `seimei mcp` without seimei's env: the socket is in the default state folder.
+    let socket = Some(var("SEIMEI_SOCKET"))
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| crate::util::data_dir().join("plugins.sock").display().to_string());
+    let remote =
+        Arc::new(Remote { plugin: name.into(), socket, token: var("SEIMEI_TOKEN"), state: var("SEIMEI_STATE").into() });
     let spec = Arc::new(spec);
     let out = Arc::new(tokio::sync::Mutex::new(tokio::io::stdout()));
     // The calls running, by request id, so the harness can cancel one.

@@ -45,7 +45,7 @@ use seimei_core::util::{config_file, data_dir};
 /// How long a stop waits for the agents to close: each gets 5 s after its stdin closes, then 5 s after a SIGTERM.
 const AGENTS_CLOSE: Duration = Duration::from_secs(12);
 
-const COMMANDS: [&str; 13] = [
+const COMMANDS: [&str; 14] = [
     "serve",
     "setup",
     "update",
@@ -58,6 +58,7 @@ const COMMANDS: [&str; 13] = [
     "devices",
     "screen-password",
     "plugin",
+    "mcp",
     "browser-host",
 ];
 
@@ -76,6 +77,7 @@ usage: seimei [COMMAND] [OPTIONS]
   logout-all                    end every session
   lockdown                      end every session, remove every passkey, unpair every phone
   screen-password [--clear]     the screen lock password the desktop plugin types
+  mcp                           an MCP server for your own agent sessions: show_image and send_file to seimei's chat
 
 Config: ~/.config/seimei/config.toml. Docs: docs/config.md in the source.
 ";
@@ -327,6 +329,11 @@ fn main() {
         let name = a.plugin.clone().unwrap_or_else(|| die("usage: seimei plugin NAME"));
         let rt = tokio::runtime::Runtime::new().expect("a runtime");
         return rt.block_on(seimei_core::plugins::serve_stdio(&name, &BUILTINS)).unwrap_or_else(|e| die(&e));
+    }
+    if a.command == "mcp" {
+        // One of the user's own agent sessions starts it: its process tree tells seimei which session it is.
+        let rt = tokio::runtime::Runtime::new().expect("a runtime");
+        return rt.block_on(seimei_core::plugins::serve_stdio("session", &BUILTINS)).unwrap_or_else(|e| die(&e));
     }
     if a.command == "browser-host" {
         return seimei_plugin_browser::host::run();

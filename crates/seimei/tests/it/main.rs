@@ -18,4 +18,5 @@ mod plugin;
 mod relay;
 mod seimei_tools;
 mod setup;
+mod share;
 mod update;

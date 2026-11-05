@@ -1571,6 +1571,11 @@ impl Pool {
         // An ACP agent reaches its own tools through the plugin socket.
         let me = Arc::downgrade(&pool);
         let _ = pool.plugins.own.set(Box::new(move |id, tool, args| Some(me.upgrade()?.get(id)?.call(tool, args))));
+        let me = Arc::downgrade(&pool);
+        let _ = pool.plugins.share.set(Box::new(move |pid, tool, args| match me.upgrade() {
+            Some(pool) => pool.share_for(pid, tool, args),
+            None => crate::tools::text("seimei is shutting down", true),
+        }));
         Ok(pool)
     }
 
@@ -1722,6 +1727,34 @@ impl Pool {
             labels.insert(sid, "seimei (you)".into());
         }
         labels
+    }
+
+    /// show_image and send_file for one of the user's own sessions (`seimei mcp`): the session is the one whose process runs the caller.
+    pub fn share_for(&self, pid: u32, tool: &str, args: &Value) -> Value {
+        let own = self.own_sessions();
+        let rows = sessions::live(&own);
+        // The nearest session up the caller's process tree: a session started inside another one is its own.
+        let (mut p, mut found) = (pid as i64, None);
+        for _ in 0..64 {
+            found = rows.iter().find(|s| s.pid == p);
+            match crate::util::stat_field(p, 1).and_then(|v| v.parse().ok()) {
+                _ if found.is_some() => break,
+                Some(parent) if parent > 1 => p = parent,
+                _ => break,
+            }
+        }
+        let Some(s) = found.filter(|s| !own.contains_key(&s.session_id)) else {
+            return crate::tools::text("seimei found no session of the user's that runs this server.", true);
+        };
+        let from = json!({"from": s.name, "session": s.session_id, "lane": "c"});
+        let r = crate::tools::share(&self.events, &self.files, &self.uploads, tool, args, from);
+        if r["isError"] != true {
+            let what = if tool == "show_image" { "an image" } else { "a file" };
+            let caption = chars(&as_text(&args["caption"]), 200);
+            let caption = if caption.is_empty() { caption } else { format!(": {caption}") };
+            self.notify(&format!("the user's session \"{}\" showed the user {what}{caption}", s.name), false, None);
+        }
+        r
     }
 
     /// An event line about one shikigami for the dispatcher. Lines with the same key replace each other; an empty line takes one back.

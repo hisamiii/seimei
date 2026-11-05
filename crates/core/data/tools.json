@@ -1,5 +1,5 @@
 {
- "about": "seimei's own MCP server as Claude Code sees it (no plugins): the initialize result and tools/list. shikigami: a shikigami's own server. Each built-in plugin's server is in its plugins/<name>/tools.json (served as `seimei plugin <name>`). The descriptions are prompt text. The server serves this file as is.",
+ "about": "seimei's own MCP server as Claude Code sees it (no plugins): the initialize result and tools/list. shikigami: a shikigami's own server. session: `seimei mcp`, the server the user's own sessions may add. Each built-in plugin's server is in its plugins/<name>/tools.json (served as `seimei plugin <name>`). The descriptions are prompt text. The server serves this file as is.",
  "initialize": {
   "capabilities": {
    "tools": {
@@ -739,6 +739,62 @@
    },
    {
     "description": "Hand the user a file to download on their phone or page, marked as yours: any type (PDF, archive, log, audio...), up to 50 MB. It shows in the chat as a download chip. For pictures to look at, use show_image.",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string",
+       "description": "absolute path of the file"
+      },
+      "caption": {
+       "type": "string",
+       "description": "optional one-line caption"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    },
+    "name": "send_file"
+   }
+  ]
+ },
+ "session": {
+  "initialize": {
+   "capabilities": {
+    "tools": {
+     "listChanged": false
+    }
+   },
+   "protocolVersion": "2025-06-18",
+   "serverInfo": {
+    "name": "seimei-share",
+    "version": "1.0.0"
+   }
+  },
+  "tools": [
+   {
+    "description": "Show the user an image in seimei's chat on their phone, marked as from this session: a screenshot, render or chart saved as PNG, JPEG, WebP or GIF (not SVG).",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string",
+       "description": "absolute path of the image file"
+      },
+      "caption": {
+       "type": "string",
+       "description": "optional one-line caption"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    },
+    "name": "show_image"
+   },
+   {
+    "description": "Hand the user a file to download from seimei's chat on their phone, marked as from this session: any type (PDF, archive, log, audio...), up to 50 MB. For pictures to look at, use show_image.",
     "inputSchema": {
      "properties": {
       "path": {
