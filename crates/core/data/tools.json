@@ -479,7 +479,7 @@
    "_meta": {
     "anthropic/alwaysLoad": true
    },
-   "description": "Watch rules: ping the user when something happens, or wake yourself later, without waiting for it. action add (trigger, target, title, body, level, key, reply, hours, repeat, note, every), list, or remove (id). Triggers: shikigami_done: a shikigami (target: its name, or * for any) finishes its task; shikigami_failed: a shikigami fails; shikigami_asks: a shikigami asks a question; shikigami_ends: a shikigami ends in any way: done, failed, stopped, interrupted; session_asks: one of the user's sessions (target: its name, or *) asks a question or waits on a prompt; session_idle: a session finishes its turn (busy -> idle); command_exits: seimei runs target as a shell command, niced and apart from every session, and wakes you with its exit code and last lines when it ends (remove stops it); time: wakes you at target (HH:MM, YYYY-MM-DD HH:MM, or a delay like 30m or 2h), and again each every when given. {name} and {detail} in title/body are filled in. A ping rule fires once unless repeat, expires after hours (default 24, max 168), and you hear when it fires or expires. command_exits and time start a turn of yours with note instead, never expire, and ping the user only when given a title.",
+   "description": "Watch rules: ping the user when something happens, or wake yourself later, without waiting for it. action add (trigger, target, title, body, level, key, reply, hours, repeat, note, every, session, message), list, or remove (id). Triggers: shikigami_done: a shikigami (target: its name, or * for any) finishes its task; shikigami_failed: a shikigami fails; shikigami_asks: a shikigami asks a question; shikigami_ends: a shikigami ends in any way: done, failed, stopped, interrupted; session_asks: one of the user's sessions (target: its name, or *) asks a question or waits on a prompt; session_idle: a session finishes its turn (busy -> idle); command_exits: seimei runs target as a shell command, niced and apart from every session, and wakes you with its exit code and last lines when it ends (remove stops it); time: wakes you at target (HH:MM, YYYY-MM-DD HH:MM, or a delay like 30m or 2h), and again each every when given; after_reboot: wakes you after the machine reboots, with what ran before (session and message: resume a session of the user's they approved the reboot for). {name} and {detail} in title/body are filled in. A ping rule fires once unless repeat, expires after hours (default 24, max 168), and you hear when it fires or expires. command_exits, time and after_reboot start a turn of yours with note instead, and ping the user only when given a title; only after_reboot expires.",
    "inputSchema": {
     "properties": {
      "action": {
@@ -500,7 +500,8 @@
        "session_asks",
        "session_idle",
        "command_exits",
-       "time"
+       "time",
+       "after_reboot"
       ]
      },
      "target": {
@@ -509,7 +510,7 @@
      },
      "title": {
       "type": "string",
-      "description": "the ping's title; optional for command_exits and time"
+      "description": "the ping's title; optional for command_exits, time and after_reboot"
      },
      "body": {
       "type": "string"
@@ -541,11 +542,19 @@
      },
      "note": {
       "type": "string",
-      "description": "command_exits, time: what you want to hear when it fires, like what to do next"
+      "description": "command_exits, time, after_reboot: what you want to hear when it fires, like what to do next"
      },
      "every": {
       "type": "string",
       "description": "time: repeat this often, like 30m, 6h or 1d"
+     },
+     "session": {
+      "type": "string",
+      "description": "after_reboot: one of the user's running sessions (name, pid or alias) that the user approved a reboot for; seimei resumes it after the reboot"
+     },
+     "message": {
+      "type": "string",
+      "description": "after_reboot with session: what the resumed session gets as its first message"
      },
      "id": {
       "type": "string",
@@ -767,6 +776,21 @@
      "type": "object"
     },
     "name": "send_file"
+   },
+   {
+    "description": "Leave seimei a note for after the machine reboots, like your post-reboot checklist or what to resume and how. seimei hears it at its first start on the new boot, with what ran before. It lapses if no reboot comes within a day.",
+    "inputSchema": {
+     "properties": {
+      "note": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "note"
+     ],
+     "type": "object"
+    },
+    "name": "after_reboot"
    }
   ]
  },

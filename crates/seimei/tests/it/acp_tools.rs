@@ -1,4 +1,4 @@
-//! An ACP shikigami's own tools (ask, board, show_image, send_file): the fake agent starts `seimei plugin shikigami` as its session got it, and the call reaches the worker through the plugin socket (a temp one), from that agent's process tree only.
+//! An ACP shikigami's own tools (ask, board, show_image, send_file, after_reboot): the fake agent starts `seimei plugin shikigami` as its session got it, and the call reaches the worker through the plugin socket (a temp one), from that agent's process tree only.
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Write};
@@ -10,8 +10,10 @@ use seimei_core::approvals::Approvals;
 use seimei_core::audit::Audit;
 use seimei_core::events::EventLog;
 use seimei_core::plugins::Plugins;
+use seimei_core::push::{Fcm, Push, WebPush};
 use seimei_core::tasks::Board;
 use seimei_core::usage::Usage;
+use seimei_core::watches::Watches;
 use seimei_core::workers::{Agent, Parts, Pool, Summon, Worker};
 use serde_json::{Value, json};
 
@@ -129,6 +131,21 @@ async fn acp_own_tools() {
         (&sent["from"], &sent["name"], &sent["lane"]),
         (&json!("asker"), &json!("notes.txt"), &json!("c")),
         "{sent}"
+    );
+
+    // after_reboot: a note seimei hears after the next reboot, marked as this shikigami's.
+    let push =
+        Push::new(events.clone(), None, Fcm::new(state.join("fcm.json")), WebPush::new(state.join("v.pem"), "x"));
+    let watches = Arc::new(Watches::new(&state.join("watches.json"), push, Box::new(|_| {})));
+    let _ = pool.watches.set(watches.clone());
+    w.send("!call shikigami after_reboot {\"note\": \"rerun the GPU checks\"}", None, vec![]).await.unwrap();
+    let w3 = watches.clone();
+    assert!(until(20, || !w3.rules().is_empty()).await);
+    let note = &watches.rules()[0];
+    assert_eq!(
+        (&note["trigger"], &note["note"], &note["by"]),
+        (&json!("after_reboot"), &json!("rerun the GPU checks"), &json!("shikigami asker")),
+        "{note}"
     );
 
     // Its token works only from its agent's process tree: not from here.

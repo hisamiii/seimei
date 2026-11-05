@@ -55,8 +55,11 @@ A watch rule pings the user, or wakes the dispatcher with its own note, when som
 - **Ping rules** fire on a shikigami or session that finishes, fails or asks, or on a plugin's trigger. They expire after their hours.
 - **command_exits** runs a shell command at nice 19, in a session of its own, with its output in `watch/<id>.out`. The exit code goes to `watch/<id>.exit`, and the dispatcher wakes with it and the last lines. Remove stops the command's process group.
 - **time** wakes the dispatcher at a local time or after a delay, and again every so often when it repeats. A time that passed while seimei was down fires at the next start and says it came late.
+- **after_reboot** holds a note for the first start on a new boot. A shikigami leaves one with its own after_reboot tool.
 
 A command outlives a restart of seimei. Under systemd it runs in a scope of its own. Elsewhere it runs in a cgroup next to seimei's, since the OpenRC service empties seimei's cgroup on stop. A restarted seimei finds it by pid and start time and still sees its exit file. A command that ends without one, after a kill or a reboot, wakes the dispatcher with no exit code. seimei never runs it again by itself.
+
+At each start seimei compares the machine's boot id with the one in `boot.json`. On a new boot the dispatcher wakes with the shikigami that were mid-task, the user's sessions as last seen in `sessions-seen.json`, and the after_reboot notes. A note that names a session of the user's resumes it in a terminal with its message, since the user approved it with the reboot. The other sessions are only reported.
 
 ## Events and clients
 
@@ -96,7 +99,7 @@ seimei keeps its config in `~/.config/seimei/` and its state in `~/.local/share/
 | `~/.local/state/seimei/seimei.log` | the OpenRC service's log |
 | `$XDG_RUNTIME_DIR/seimei/browser.sock` | the browser connector's socket |
 
-The state folder holds the events, the session id, workers, tasks, notes, `auth.json`, uploads and the audit log. `watches.json` holds the watch rules. Each plugin process uses its session's token on `plugins.sock`. Under systemd the log goes to the journal instead of `seimei.log`.
+The state folder holds the events, the session id, workers, tasks, notes, `auth.json`, uploads and the audit log. `watches.json` holds the watch rules, and `boot.json` with `sessions-seen.json` what a start after a reboot reports. Each plugin process uses its session's token on `plugins.sock`. Under systemd the log goes to the journal instead of `seimei.log`.
 
 ## Themes
 
@@ -155,7 +158,7 @@ The code map lists where each part lives. Paths are relative to the repo root.
 - `audit.rs`: the audit log of every tool call.
 - `approvals.rs`: cards that wait for the user.
 
-State and the user live in `crates/core/src` too. `events.rs` is the log, next to `auth.rs`, `push.rs`, `files.rs`, `uploads.rs`, `usage.rs`, `cost.rs`, `metrics.rs`, `watches.rs`, `archive.rs`, `aliases.rs`, `wake.rs`, `deploys.rs` and `util.rs`.
+State and the user live in `crates/core/src` too. `events.rs` is the log, next to `auth.rs`, `push.rs`, `files.rs`, `uploads.rs`, `usage.rs`, `cost.rs`, `metrics.rs`, `watches.rs`, `boot.rs`, `archive.rs`, `aliases.rs`, `wake.rs`, `deploys.rs` and `util.rs`.
 
 Dictation and plugins:
 

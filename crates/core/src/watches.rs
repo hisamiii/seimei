@@ -20,7 +20,7 @@ use crate::plugins::Plugins;
 use crate::push::Push;
 use crate::util::{as_text, chars, hex, local_time, now, random_bytes, read_json, save_json, stat_field};
 
-pub const TRIGGERS: [(&str, &str); 8] = [
+pub const TRIGGERS: [(&str, &str); 9] = [
     ("shikigami_done", "a shikigami (target: its name, or * for any) finishes its task"),
     ("shikigami_failed", "a shikigami fails"),
     ("shikigami_asks", "a shikigami asks a question"),
@@ -35,9 +35,13 @@ pub const TRIGGERS: [(&str, &str); 8] = [
         "time",
         "wakes you at target (HH:MM, YYYY-MM-DD HH:MM, or a delay like 30m or 2h), and again each every when given",
     ),
+    (
+        "after_reboot",
+        "wakes you after the machine reboots, with what ran before (session and message: resume a session of the user's they approved the reboot for)",
+    ),
 ];
 /// The triggers that wake the dispatcher with its note; a title pings the user too.
-pub const WAKES: [&str; 2] = ["command_exits", "time"];
+pub const WAKES: [&str; 3] = ["command_exits", "time", "after_reboot"];
 /// A command's exit code goes to its exit file: the code survives seimei's restarts, unlike a child's status.
 const RUN: &str = "sh -c \"$1\"; echo $? > \"$2\"";
 /// A command's output is kept this long after it ends, for a later look.
@@ -79,6 +83,10 @@ pub struct NewRule {
     pub note: String,
     /// time: the repeat, like 1d.
     pub every: String,
+    /// after_reboot: one of the user's sessions to resume, {id, name, cwd, message}.
+    pub session: Value,
+    /// Who set it: empty for the dispatcher, else a shikigami's name.
+    pub by: String,
 }
 
 /// "90s", "30m", "2h", "1d" or "1h30m" in seconds.
@@ -226,6 +234,13 @@ impl Watches {
                         json!(every.ok_or(format!("every is a repeat of 1m or more, like 1d, not \"{}\"", r.every))?);
                     rule["repeat"] = json!(true);
                 }
+            }
+            "after_reboot" => {
+                if r.note.trim().is_empty() && r.session.is_null() {
+                    return Err("after_reboot needs a note, or a session to resume".into());
+                }
+                rule["by"] = json!(r.by);
+                rule["session"] = r.session;
             }
             _ => {}
         }
@@ -379,6 +394,15 @@ impl Watches {
         }
     }
 
+    /// After a reboot: every after_reboot rule, taken out.
+    pub fn take_after_reboot(&self) -> Vec<Value> {
+        let mut rules = self.rules.lock().unwrap();
+        let (taken, kept): (Vec<Value>, Vec<Value>) = rules.drain(..).partition(|r| r["trigger"] == "after_reboot");
+        *rules = kept;
+        save_json(&self.path, &*rules);
+        taken
+    }
+
     /// The rules as they are now.
     pub fn rules(&self) -> Vec<Value> {
         self.rules.lock().unwrap().clone()
@@ -445,10 +469,22 @@ impl Watches {
                     as_text(&r["out"])
                 )
             }
-            _ => {
+            "time" => {
                 let due = local_time(r["due"].as_f64().unwrap_or(0.0), "%a %Y-%m-%d %H:%M");
                 let every = r["every"].as_f64().map(|e| format!(", then every {}", mins(e))).unwrap_or_default();
                 format!("{id}: time {target}, next {due}{every}")
+            }
+            _ => {
+                let by =
+                    Some(as_text(&r["by"])).filter(|b| !b.is_empty()).map(|b| format!(" from {b}")).unwrap_or_default();
+                let mut l = format!("{id}: after_reboot{by}");
+                if let Some(s) = r["session"].as_object() {
+                    l += &format!(", resumes the user's session \"{}\"", as_text(&s["name"]));
+                    if !as_text(&s["message"]).is_empty() {
+                        l += &format!(" with \"{}\"", chars(&as_text(&s["message"]), 200));
+                    }
+                }
+                l + &format!(", expires in {}", mins(r["expires"].as_f64().unwrap_or(0.0) - at))
             }
         };
         if !as_text(&r["note"]).is_empty() {

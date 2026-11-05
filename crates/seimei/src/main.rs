@@ -458,7 +458,11 @@ fn main() {
     rt.block_on(async move {
         app.approvals.startup();
         events.close_open_tools("Interrupted by a restart");
-        app.pool.startup();
+        let mid_task = seimei_core::boot::mid_task(&app.pool);
+        let resumed = app.pool.startup();
+        if seimei_core::boot::rebooted(&state, std::path::Path::new(seimei_core::boot::BOOT_ID)) {
+            tokio::spawn(seimei_core::boot::after(app.pool.clone(), app.watches.clone(), mid_task, resumed));
+        }
         app.adopter.startup();
         tokio::spawn(deploy_note(state.clone(), app.dispatcher.clone()));
         tokio::spawn(app.dispatcher.clone().run());

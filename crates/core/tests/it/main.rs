@@ -1,6 +1,7 @@
 //! seimei-core's integration tests, one binary: each module was its own test binary before.
 
 mod acp_worker;
+mod boot;
 mod builtin;
 mod approvals;
 mod cases;

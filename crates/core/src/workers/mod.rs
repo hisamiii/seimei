@@ -59,6 +59,7 @@ Subagents are fine for searches and lookups; they run on {subagents}. No big par
 Start every task with a short step list (3-8 steps, TaskCreate) and keep it current as you go (TaskUpdate: in_progress when you start a step, completed when it is done; add or delete steps when the plan changes). It shows live as your task's steps on the user's board. Skip it only for a one-step job.
 When you switch to a queued board item, start it (mcp__shikigami__board); when it is deployed or delivered, ship it.
 To show the user a picture (a screenshot, a render) or hand them a file, use mcp__shikigami__show_image or mcp__shikigami__send_file.
+Before a reboot of the machine, leave what must happen after it with mcp__shikigami__after_reboot.
 ";
 pub const EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 pub const MODELS: [&str; 3] = ["opus", "sonnet", "haiku"];
@@ -721,7 +722,7 @@ impl Worker {
         harness::after_tool_context(NUDGE)
     }
 
-    /// Its own tools: ask, board, show_image, send_file.
+    /// Its own tools: ask, board, show_image, send_file, after_reboot.
     fn call(&self, name: &str, a: &Value) -> Value {
         let text = crate::tools::text;
         match name {
@@ -743,6 +744,31 @@ impl Worker {
                 self.set("asking", |r| r.question = Some(q.clone()));
                 self.pool().report(self, "asking", &q);
                 text("Asked. The answer arrives as your next message; end your turn now.", false)
+            }
+            "after_reboot" => {
+                let note = as_text(&a["note"]).trim().to_string();
+                let Some(watches) = self.pool().watches.get().cloned() else {
+                    return text("seimei cannot keep notes now", true);
+                };
+                let rule = crate::watches::NewRule {
+                    trigger: "after_reboot".into(),
+                    note,
+                    by: format!("shikigami {}", self.name()),
+                    level: "normal".into(),
+                    ..Default::default()
+                };
+                match watches.add(rule) {
+                    Ok(r) => {
+                        let left = crate::watches::mins(r["expires"].as_f64().unwrap_or(0.0) - now());
+                        text(
+                            &format!(
+                                "Noted: seimei hears it at its first start after a reboot, if one comes within {left}."
+                            ),
+                            false,
+                        )
+                    }
+                    Err(e) => text(&e, true),
+                }
             }
             "board" => {
                 let (name, state) = (self.name(), self.state());
@@ -1502,6 +1528,8 @@ pub struct Pool {
     pub files: Arc<Files>,
     pub uploads: Arc<Uploads>,
     pub dispatcher: OnceLock<Arc<dyn Listener>>,
+    /// The watch rules, for a shikigami's after_reboot note; set by the wiring.
+    pub watches: OnceLock<Arc<crate::watches::Watches>>,
     terminal: String,
     /// The enabled plugins: their env, the groups summon grants, and how a session opens in a terminal.
     pub plugins: Arc<Plugins>,
@@ -1558,6 +1586,7 @@ impl Pool {
                 files: Arc::new(Files::new(state)),
                 uploads: Arc::new(Uploads::new(state)),
                 dispatcher: OnceLock::new(),
+                watches: OnceLock::new(),
                 terminal: parts.terminal,
                 plugins: parts.plugins,
                 agents: OnceLock::new(),
@@ -1942,10 +1971,23 @@ impl Pool {
 
     /// Open its session in a terminal on the server: the window it opened in (its id, when known).
     async fn open_terminal(&self, w: &Worker, title: &str, extra: &[&str]) -> Result<Option<Value>, String> {
-        let mut argv = self.resume_argv(w);
+        let r = w.rec();
+        self.open_session(&r.name, &r.session_id, &r.cwd, title, extra).await
+    }
+
+    /// Resume a session in a terminal on the server, in its folder, with `extra` after the command (a first message).
+    pub async fn open_session(
+        &self,
+        name: &str,
+        session_id: &str,
+        cwd: &str,
+        title: &str,
+        extra: &[&str],
+    ) -> Result<Option<Value>, String> {
+        let mut argv = self.plugins.wrap(name, harness::resume_argv(session_id.into()));
         argv.extend(extra.iter().map(|a| a.to_string()));
         let words: Vec<String> = argv.iter().map(|a| sh_quote(a)).collect();
-        let term = self.terminal.replace("{cwd}", &sh_quote(&w.rec().cwd)).replace("{title}", &sh_quote(title));
+        let term = self.terminal.replace("{cwd}", &sh_quote(cwd)).replace("{title}", &sh_quote(title));
         let cmd = format!("{term} {}", words.join(" "));
         match self.plugins.windows() {
             Some(d) => d.spawn(&cmd, false).await,

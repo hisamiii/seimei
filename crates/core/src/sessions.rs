@@ -680,6 +680,7 @@ impl Watcher {
                         .collect();
                     if sig.as_ref() != Some(&new) {
                         sig = Some(new);
+                        crate::boot::seen(self.pool.state(), &rows);
                         *self.list.lock().unwrap() = rows;
                         self.events.flash(self.snapshot());
                     }

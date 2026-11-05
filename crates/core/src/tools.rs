@@ -609,7 +609,7 @@ impl Tools {
                     },
                     _ => DEFAULT_HOURS,
                 };
-                let rule = NewRule {
+                let mut rule = NewRule {
                     trigger: arg(a, "trigger"),
                     target: or("target", "*"),
                     title: or("title", ""),
@@ -621,11 +621,22 @@ impl Tools {
                     repeat: flag(&a["repeat"]),
                     note: arg(a, "note"),
                     every: arg(a, "every"),
+                    session: Value::Null,
+                    by: String::new(),
                 };
                 let wakes = WAKES.contains(&rule.trigger.as_str());
                 // An unknown trigger is the first thing to hear about, then a missing title.
                 if !wakes && rule.title.is_empty() && self.watches.triggers().iter().any(|(t, _)| *t == rule.trigger) {
                     return text("A rule needs a title for its ping.", true);
+                }
+                let session = arg(a, "session");
+                if rule.trigger == "after_reboot" && !session.trim().is_empty() {
+                    let own = self.pool.own_sessions();
+                    let Some(s) = sessions::find(&session, &own, Some(&self.pool.aliases)) else {
+                        return text(&format!("Could not add: no single running session matches \"{session}\"."), true);
+                    };
+                    rule.session =
+                        json!({"id": s.session_id, "name": s.name, "cwd": s.cwd, "message": arg(a, "message")});
                 }
                 let r = match self.watches.add(rule) {
                     Ok(r) => r,

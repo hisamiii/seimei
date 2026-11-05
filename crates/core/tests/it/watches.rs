@@ -53,6 +53,8 @@ fn watch_cases() {
                 repeat: a["repeat"] == true,
                 note: s("note"),
                 every: s("every"),
+                session: a["session"].clone(),
+                by: s("by"),
             };
             match w.add(rule) {
                 Ok(r) => {
