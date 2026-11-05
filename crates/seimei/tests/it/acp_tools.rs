@@ -1,4 +1,4 @@
-//! An ACP shikigami's own tools (ask, board): the fake agent starts `seimei plugin shikigami` as its session got it, and the call reaches the worker through the plugin socket (a temp one), from that agent's process tree only.
+//! An ACP shikigami's own tools (ask, board, show_image, send_file): the fake agent starts `seimei plugin shikigami` as its session got it, and the call reaches the worker through the plugin socket (a temp one), from that agent's process tree only.
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Write};
@@ -108,6 +108,28 @@ async fn acp_own_tools() {
     let got: Value = serde_json::from_str(&said(&w)[2]).unwrap();
     let text = got["content"][0]["text"].as_str().unwrap();
     assert!(text.starts_with(&tid) && got["isError"] != true, "{got}");
+
+    // show_image and send_file: the chat shows them as this shikigami's, without moving the dispatcher's turn.
+    let img = root.join("tests/qa/img/tiny.png");
+    let show = format!("!call shikigami show_image {{\"path\": \"{}\", \"caption\": \"a dot\"}}", img.display());
+    w.send(&show, None, vec![]).await.unwrap();
+    let ev2 = events.clone();
+    assert!(until(20, || ev2.after(0).iter().any(|e| e["type"] == "image")).await);
+    let shown = (events.after(0).iter()).find(|e| e["type"] == "image").unwrap().clone();
+    assert_eq!(
+        (&shown["from"], &shown["worker"], &shown["lane"], &shown["caption"]),
+        (&json!("asker"), &json!(w.id), &json!("c"), &json!("a dot")),
+        "{shown}"
+    );
+    let send = format!("!call shikigami send_file {{\"path\": \"{}\"}}", root.join("tests/qa/img/notes.txt").display());
+    w.send(&send, None, vec![]).await.unwrap();
+    assert!(until(20, || ev2.after(0).iter().any(|e| e["type"] == "file")).await);
+    let sent = (events.after(0).iter()).find(|e| e["type"] == "file").unwrap().clone();
+    assert_eq!(
+        (&sent["from"], &sent["name"], &sent["lane"]),
+        (&json!("asker"), &json!("notes.txt"), &json!("c")),
+        "{sent}"
+    );
 
     // Its token works only from its agent's process tree: not from here.
     let log = std::fs::read_to_string(fake.join("log.jsonl")).unwrap();

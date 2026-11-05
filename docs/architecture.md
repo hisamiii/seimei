@@ -37,7 +37,7 @@ The workspace has five parts:
 seimei runs three kinds of session: the dispatcher, the shikigami and the user's own Claude Code sessions. The user chats with the dispatcher, and the dispatcher delegates heavy work to shikigami.
 
 - **The dispatcher**, named "seimei", is one session that never ends. It resumes the same session id after every restart and compacts its own context. Its tools are an in-process MCP server, `mcp__seimei__*`: summon, message, tune, notes, tasks, notify, cards, sessions and files.
-- **Shikigami** are worker sessions inside seimei, each with a name, a folder, a model and an effort. Each runs on its own Claude Code process, or on an ACP or Codex agent. Their tools, `mcp__shikigami__*`, let them ask the user and report.
+- **Shikigami** are worker sessions inside seimei, each with a name, a folder, a model and an effort. Each runs on its own Claude Code process, or on an ACP or Codex agent. Their tools, `mcp__shikigami__*`, let them ask the user, move along the board, and show the user an image or a file. The chat marks those as the shikigami's.
 - **The user's own sessions** come from Claude Code's registry in `~/.claude/sessions/*.json` and from the transcripts. The page lists them. A session's page shows its transcript, with the prompts queued mid-turn or relayed by seimei. The server looks at each transcript four times a second. When one grows, it tells the clients on the stream, and an open page reads on at once. A background task's end shows as a note. Adopting one makes it a shikigami, and stopping, resuming or deleting one takes a card.
 
 A message to the dispatcher or a shikigami during its turn cuts in at once, as the terminal's "send now" does. A tool call that runs finishes first.

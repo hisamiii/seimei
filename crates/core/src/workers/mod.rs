@@ -29,12 +29,14 @@ use crate::audit::{Audit, Call};
 use crate::cost::Cost;
 use crate::dispatcher::{result_text, summarize};
 use crate::events::EventLog;
+use crate::files::Files;
 use crate::metrics::{self, WorkerEvents};
 use crate::paths::{expand, home};
 use crate::plugins::Plugins;
 use crate::sessions::{self, Own};
 use crate::tasks::{Board, Fields};
 use crate::transcripts::{brief, project_of};
+use crate::uploads::Uploads;
 use crate::usage::Usage;
 use crate::util::{as_text, chars, far, hex, now, random_bytes, read_state, save_json, sh_quote, uuid4};
 
@@ -56,6 +58,7 @@ If you are blocked on a decision only the user can make, call mcp__shikigami__as
 Subagents are fine for searches and lookups; they run on {subagents}. No big parallel fan-outs.
 Start every task with a short step list (3-8 steps, TaskCreate) and keep it current as you go (TaskUpdate: in_progress when you start a step, completed when it is done; add or delete steps when the plan changes). It shows live as your task's steps on the user's board. Skip it only for a one-step job.
 When you switch to a queued board item, start it (mcp__shikigami__board); when it is deployed or delivered, ship it.
+To show the user a picture (a screenshot, a render) or hand them a file, use mcp__shikigami__show_image or mcp__shikigami__send_file.
 ";
 pub const EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 pub const MODELS: [&str; 3] = ["opus", "sonnet", "haiku"];
@@ -718,10 +721,23 @@ impl Worker {
         harness::after_tool_context(NUDGE)
     }
 
-    /// Its own tools: ask, board.
+    /// Its own tools: ask, board, show_image, send_file.
     fn call(&self, name: &str, a: &Value) -> Value {
         let text = crate::tools::text;
         match name {
+            "show_image" | "send_file" => {
+                let pool = self.pool();
+                let from = json!({"from": self.name(), "worker": self.id, "lane": "c"});
+                let r = crate::tools::share(&pool.events, &pool.files, &pool.uploads, name, a, from);
+                if r["isError"] != true {
+                    let what = if name == "show_image" { "an image" } else { "a file" };
+                    let caption = as_text(&a["caption"]);
+                    let caption =
+                        if caption.is_empty() { String::new() } else { format!(": {}", chars(&caption, 200)) };
+                    pool.tell(&self.id, &format!("showed the user {what}{caption}"), false, None);
+                }
+                r
+            }
             "ask" => {
                 let q = as_text(&a["question"]).trim().to_string();
                 self.set("asking", |r| r.question = Some(q.clone()));
@@ -1482,6 +1498,9 @@ pub struct Pool {
     usage: Arc<Usage>,
     pub(crate) approvals: Arc<Approvals>,
     pub audit: Arc<Audit>,
+    /// The pictures and files shown to the user, here for the shikigami's show_image and send_file.
+    pub files: Arc<Files>,
+    pub uploads: Arc<Uploads>,
     pub dispatcher: OnceLock<Arc<dyn Listener>>,
     terminal: String,
     /// The enabled plugins: their env, the groups summon grants, and how a session opens in a terminal.
@@ -1536,6 +1555,8 @@ impl Pool {
                 usage: parts.usage,
                 approvals: parts.approvals,
                 audit: parts.audit,
+                files: Arc::new(Files::new(state)),
+                uploads: Arc::new(Uploads::new(state)),
                 dispatcher: OnceLock::new(),
                 terminal: parts.terminal,
                 plugins: parts.plugins,

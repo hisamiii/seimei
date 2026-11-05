@@ -151,8 +151,6 @@ impl App {
             pages.insert(name, page.replace("\"static/", &format!("\"static/{version}/")));
         }
         let board = Arc::new(Mutex::new(Board::open(&state.join("tasks.json"), Some(events.clone()))));
-        let files = Arc::new(Files::new(state));
-        let uploads = Arc::new(Uploads::new(state));
         let usage = Arc::new(Usage::new(state, Some(events.clone())));
         let cost = Arc::new(Cost::new(&seimei_core::workers::harness::projects_dir()));
         let approvals = Arc::new(Approvals::new(events.clone()));
@@ -167,6 +165,7 @@ impl App {
             plugins,
         };
         let pool = Pool::new(state, &shikigami, &disp.about, parts)?;
+        let (files, uploads) = (pool.files.clone(), pool.uploads.clone());
         let p = pool.clone();
         let _ = audit.tell.set(Box::new(move |w, line, urgent, key| p.tell(w, line, urgent, key)));
         let worker_events = Arc::new(WorkerEvents::new(events.clone()));

@@ -26,7 +26,7 @@ use crate::watches::{DEFAULT_HOURS, NewRule, TRIGGERS, Watches, mins};
 use crate::workers::harness::transcript;
 use crate::workers::{ACTIVE, EFFORTS, MODELS, Pool, Summon, Worker};
 
-/// data/tools.json: the dispatcher's server, and under "shikigami" the shikigami's own (ask, board).
+/// data/tools.json: the dispatcher's server, and under "shikigami" the shikigami's own (ask, board, show_image, send_file).
 pub(crate) static SERVER: LazyLock<Value> =
     LazyLock::new(|| serde_json::from_str(include_str!("../data/tools.json")).expect("tools.json"));
 
@@ -126,6 +126,41 @@ pub fn summon_problem(a: &Value) -> String {
         }
     }
     String::new()
+}
+
+/// show_image and send_file for whoever calls them: the result for the caller, or an error result.
+/// `from` goes into the event: a shikigami's or session's picture names it and stays in the chat lane, so it never moves the dispatcher's turn.
+pub fn share(events: &EventLog, files: &Files, uploads: &Uploads, tool: &str, a: &Value, from: Value) -> Value {
+    let caption = chars(&arg(a, "caption"), 300);
+    let path = crate::paths::expand(&arg(a, "path"));
+    let path = Path::new(&path);
+    let mut ev = match tool {
+        "show_image" => {
+            if std::fs::metadata(path).is_ok_and(|m| m.len() > MAX_BYTES as u64) {
+                return text("That image is larger than 20 MB.", true);
+            }
+            match std::fs::read(path).map_err(|e| e.to_string()).and_then(|data| files.save(&data)) {
+                Ok((file, _)) => json!({"type": "image", "file": file, "caption": caption}),
+                Err(e) => return text(&format!("Could not show it: {e}"), true),
+            }
+        }
+        _ => match uploads.add(path, None) {
+            // "file", not "id": the event log numbers every event with its own id.
+            Ok(info) => json!({"type": "file", "file": info["id"], "name": info["name"], "size": info["size"],
+                "kind": info["kind"], "caption": caption}),
+            Err(e) => return text(&format!("Could not send it: {e}"), true),
+        },
+    };
+    for (k, v) in from.as_object().into_iter().flatten() {
+        ev[k] = v.clone();
+    }
+    let said = if tool == "show_image" {
+        "Shown to the user.".into()
+    } else {
+        format!("Sent {} to the user.", as_text(&ev["name"]))
+    };
+    events.add(ev);
+    text(&said, false)
 }
 
 /// head, then as many of the newest lines as fit in PEEK_MAX, saying where the rest is when some are left out.
@@ -482,30 +517,7 @@ impl Tools {
                 };
                 text(&capped(&head, &lines, &full), false)
             }
-            "show_image" => {
-                let path = crate::paths::expand(&s("path"));
-                let path = Path::new(&path);
-                if std::fs::metadata(path).is_ok_and(|m| m.len() > MAX_BYTES as u64) {
-                    return text("That image is larger than 20 MB.", true);
-                }
-                let saved = std::fs::read(path).map_err(|e| e.to_string()).and_then(|data| self.files.save(&data));
-                match saved {
-                    Ok((file, _)) => {
-                        self.events.add(json!({"type": "image", "file": file, "caption": chars(&s("caption"), 300)}));
-                        text("Shown to the user.", false)
-                    }
-                    Err(e) => text(&format!("Could not show it: {e}"), true),
-                }
-            }
-            "send_file" => match self.uploads.add(Path::new(&crate::paths::expand(&s("path"))), None) {
-                Ok(info) => {
-                    // "file", not "id": the event log numbers every event with its own id.
-                    self.events.add(json!({"type": "file", "file": info["id"], "name": info["name"],
-                        "size": info["size"], "kind": info["kind"], "caption": chars(&s("caption"), 300)}));
-                    text(&format!("Sent {} to the user.", info["name"].as_str().unwrap_or("")), false)
-                }
-                Err(e) => text(&format!("Could not send it: {e}"), true),
-            },
+            "show_image" | "send_file" => share(&self.events, &self.files, &self.uploads, name, a, json!({})),
             "tasks" => {
                 let (t, error) = self.board.lock().unwrap().tool(a);
                 text(&t, error)

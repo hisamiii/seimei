@@ -716,6 +716,46 @@
      "type": "object"
     },
     "name": "board"
+   },
+   {
+    "description": "Show the user an image inline in the chat, marked as yours: a screenshot, render or chart saved as PNG, JPEG, WebP or GIF (not SVG).",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string",
+       "description": "absolute path of the image file"
+      },
+      "caption": {
+       "type": "string",
+       "description": "optional one-line caption"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    },
+    "name": "show_image"
+   },
+   {
+    "description": "Hand the user a file to download on their phone or page, marked as yours: any type (PDF, archive, log, audio...), up to 50 MB. It shows in the chat as a download chip. For pictures to look at, use show_image.",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string",
+       "description": "absolute path of the file"
+      },
+      "caption": {
+       "type": "string",
+       "description": "optional one-line caption"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    },
+    "name": "send_file"
    }
   ]
  }
