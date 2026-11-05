@@ -479,7 +479,7 @@
    "_meta": {
     "anthropic/alwaysLoad": true
    },
-   "description": "Watch rules: ping the user when something happens, without you waiting for it. action add (trigger, target, title, body, level, key, reply, hours, repeat), list, or remove (id). Triggers: shikigami_done: a shikigami (target: its name, or * for any) finishes its task; shikigami_failed: a shikigami fails; shikigami_asks: a shikigami asks a question; shikigami_ends: a shikigami ends in any way: done, failed, stopped, interrupted; session_asks: one of the user's sessions (target: its name, or *) asks a question or waits on a prompt; session_idle: a session finishes its turn (busy -> idle). {name} and {detail} in title/body are filled in. A rule fires once unless repeat, expires after hours (default 24, max 168), and you hear when it fires or expires.",
+   "description": "Watch rules: ping the user when something happens, or wake yourself later, without waiting for it. action add (trigger, target, title, body, level, key, reply, hours, repeat, note, every), list, or remove (id). Triggers: shikigami_done: a shikigami (target: its name, or * for any) finishes its task; shikigami_failed: a shikigami fails; shikigami_asks: a shikigami asks a question; shikigami_ends: a shikigami ends in any way: done, failed, stopped, interrupted; session_asks: one of the user's sessions (target: its name, or *) asks a question or waits on a prompt; session_idle: a session finishes its turn (busy -> idle); command_exits: seimei runs target as a shell command, niced and apart from every session, and wakes you with its exit code and last lines when it ends (remove stops it); time: wakes you at target (HH:MM, YYYY-MM-DD HH:MM, or a delay like 30m or 2h), and again each every when given. {name} and {detail} in title/body are filled in. A ping rule fires once unless repeat, expires after hours (default 24, max 168), and you hear when it fires or expires. command_exits and time start a turn of yours with note instead, never expire, and ping the user only when given a title.",
    "inputSchema": {
     "properties": {
      "action": {
@@ -498,15 +498,18 @@
        "shikigami_asks",
        "shikigami_ends",
        "session_asks",
-       "session_idle"
+       "session_idle",
+       "command_exits",
+       "time"
       ]
      },
      "target": {
       "type": "string",
-      "description": "shikigami or session name, * for any"
+      "description": "shikigami or session name, * for any; the shell command for command_exits; when for time"
      },
      "title": {
-      "type": "string"
+      "type": "string",
+      "description": "the ping's title; optional for command_exits and time"
      },
      "body": {
       "type": "string"
@@ -535,6 +538,14 @@
      "repeat": {
       "type": "boolean",
       "default": false
+     },
+     "note": {
+      "type": "string",
+      "description": "command_exits, time: what you want to hear when it fires, like what to do next"
+     },
+     "every": {
+      "type": "string",
+      "description": "time: repeat this often, like 30m, 6h or 1d"
      },
      "id": {
       "type": "string",

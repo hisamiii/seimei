@@ -7,6 +7,7 @@ pub mod archive;
 pub mod asr;
 pub mod audit;
 pub mod auth;
+pub mod boot;
 pub mod cost;
 pub mod deploys;
 pub mod dispatcher;

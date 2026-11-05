@@ -22,7 +22,7 @@ use crate::transcripts::project_of;
 use crate::uploads::Uploads;
 use crate::usage::Usage;
 use crate::util::{as_text, chars, flag, now, truthy};
-use crate::watches::{DEFAULT_HOURS, NewRule, TRIGGERS, Watches, mins};
+use crate::watches::{DEFAULT_HOURS, NewRule, TRIGGERS, WAKES, Watches, mins};
 use crate::workers::harness::transcript;
 use crate::workers::{ACTIVE, EFFORTS, MODELS, Pool, Summon, Worker};
 
@@ -619,9 +619,12 @@ impl Tools {
                     reply: flag(&a["reply"]),
                     hours,
                     repeat: flag(&a["repeat"]),
+                    note: arg(a, "note"),
+                    every: arg(a, "every"),
                 };
+                let wakes = WAKES.contains(&rule.trigger.as_str());
                 // An unknown trigger is the first thing to hear about, then a missing title.
-                if rule.title.is_empty() && self.watches.triggers().iter().any(|(t, _)| *t == rule.trigger) {
+                if !wakes && rule.title.is_empty() && self.watches.triggers().iter().any(|(t, _)| *t == rule.trigger) {
                     return text("A rule needs a title for its ping.", true);
                 }
                 let r = match self.watches.add(rule) {
@@ -629,6 +632,9 @@ impl Tools {
                     Err(e) => return text(&format!("Could not add: {e}"), true),
                 };
                 let id = r["id"].as_str().unwrap_or("");
+                if wakes {
+                    return text(&format!("Added {}.", Watches::wake_line(&r, now())), false);
+                }
                 text(
                     &format!(
                         "Added {id}: {} {}, expires in {}.",

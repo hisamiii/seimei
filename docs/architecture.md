@@ -48,6 +48,16 @@ A message to one of the user's own sessions is typed into its kitty window when 
 
 The plan in `[models]`, in `plan.rs`, sets the models and context a shikigami gets. It covers summon's choices and defaults, adopt and the dispatcher's compaction point.
 
+## Watch rules and wake-ups
+
+A watch rule pings the user, or wakes the dispatcher with its own note, when something happens. The dispatcher sets rules with its watch tool, and they live in `watches.json` in the state folder, so restarts and reboots keep them.
+
+- **Ping rules** fire on a shikigami or session that finishes, fails or asks, or on a plugin's trigger. They expire after their hours.
+- **command_exits** runs a shell command at nice 19, in a session of its own, with its output in `watch/<id>.out`. The exit code goes to `watch/<id>.exit`, and the dispatcher wakes with it and the last lines. Remove stops the command's process group.
+- **time** wakes the dispatcher at a local time or after a delay, and again every so often when it repeats. A time that passed while seimei was down fires at the next start and says it came late.
+
+A command outlives a restart of seimei. Under systemd it runs in a scope of its own. Elsewhere it runs in a cgroup next to seimei's, since the OpenRC service empties seimei's cgroup on stop. A restarted seimei finds it by pid and start time and still sees its exit file. A command that ends without one, after a kill or a reboot, wakes the dispatcher with no exit code. seimei never runs it again by itself.
+
 ## Events and clients
 
 Everything the page shows is an event in `events.jsonl` in the state folder. Clients read the history, then follow `/api/stream` (SSE) from the last id they saw, so a reconnect replays what it missed.
@@ -82,10 +92,11 @@ seimei keeps its config in `~/.config/seimei/` and its state in `~/.local/share/
 | `~/.local/share/seimei/` | state, mode 700 |
 | `~/.local/share/seimei/plugins.sock` | where plugin MCP processes reach seimei |
 | `~/.local/share/seimei/mcp/` | each session's MCP config, mode 600 |
+| `~/.local/share/seimei/watch/` | the watched commands' output and exit codes |
 | `~/.local/state/seimei/seimei.log` | the OpenRC service's log |
 | `$XDG_RUNTIME_DIR/seimei/browser.sock` | the browser connector's socket |
 
-The state folder holds the events, the session id, workers, tasks, notes, `auth.json`, uploads and the audit log. Each plugin process uses its session's token on `plugins.sock`. Under systemd the log goes to the journal instead of `seimei.log`.
+The state folder holds the events, the session id, workers, tasks, notes, `auth.json`, uploads and the audit log. `watches.json` holds the watch rules. Each plugin process uses its session's token on `plugins.sock`. Under systemd the log goes to the journal instead of `seimei.log`.
 
 ## Themes
 

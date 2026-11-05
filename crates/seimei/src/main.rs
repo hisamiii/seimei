@@ -134,6 +134,25 @@ fn args() -> Args {
     a
 }
 
+/// What runs a watched command apart from seimei's service, so a restart of seimei does not end it.
+/// Under systemd a scope of its own; else a cgroup next to seimei's, since the OpenRC service empties seimei's cgroup on stop.
+fn detach() -> Vec<String> {
+    if seimei_core::util::systemd() {
+        return ["systemd-run", "--user", "--scope", "--quiet", "--collect", "--"].map(String::from).to_vec();
+    }
+    let own = std::fs::read_to_string("/proc/self/cgroup").unwrap_or_default();
+    let own = own.lines().find_map(|l| l.strip_prefix("0::")).unwrap_or("").trim_matches('/').to_string();
+    let own = std::path::PathBuf::from("/sys/fs/cgroup").join(own);
+    let Some(parent) = own.parent().filter(|p| p.starts_with("/sys/fs/cgroup/")) else { return vec![] };
+    let leaf = parent.join("seimei-watch");
+    if std::fs::create_dir_all(&leaf).is_err() {
+        return vec![];
+    }
+    // The shell moves itself there, then becomes the command: all it starts stays in that cgroup.
+    let procs = leaf.join("cgroup.procs").display().to_string();
+    vec!["sh".into(), "-c".into(), "{ echo $$ > \"$0\"; } 2>/dev/null; exec \"$@\"".into(), procs]
+}
+
 fn die(msg: &str) -> ! {
     eprintln!("seimei: {msg}");
     std::process::exit(2)
@@ -433,6 +452,7 @@ fn main() {
     let app = Arc::new(seimei_server::App::new(setup).unwrap_or_else(|e| die(&format!("workers: {e}"))));
     let _ = app.pool.agents.set(seimei_core::workers::agents_from(cfg.agents.as_ref()));
     let _ = app.pool.deny_paths.set(seimei_core::permissions::deny_paths(&cfg.approvals));
+    let _ = app.watches.detach.set(detach());
     wire(&app);
 
     rt.block_on(async move {

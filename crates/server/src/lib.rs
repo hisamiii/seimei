@@ -197,6 +197,8 @@ impl App {
         let dispatcher =
             Dispatcher::new(disp, events.clone(), state, usage.clone(), approvals.clone(), audit.clone(), tools);
         let _ = pool.dispatcher.set(dispatcher.clone());
+        let d = dispatcher.clone();
+        let _ = watches.wake.set(Box::new(move |line| d.wake(line)));
         let watcher = Arc::new(Watcher::new(events.clone(), pool.clone()));
         Ok(App {
             events,
