@@ -562,9 +562,16 @@ function fileChip(f, t) {
   return a;
 }
 
+// Whose picture or file it is when not seimei's: a shikigami's line opens its page, a session's only names it.
+function sharer(ev, what) {
+  if (!ev.from) return [];
+  if (ev.worker) return [evline(ev, '', el('b', null, ev.from), ` ${what}`)];
+  return [el('small', 'from', `${ev.from} ${what}`)];
+}
+
 function sentFile(ev) {
   const fig = el('figure', 'shown file');
-  fig.append(fileChip({ ...ev, id: ev.file }, ev.t));
+  fig.append(...sharer(ev, 'sent you a file'), fileChip({ ...ev, id: ev.file }, ev.t));
   if (ev.caption) fig.append(el('figcaption', null, ev.caption));
   return fig;
 }
@@ -595,7 +602,7 @@ function shown(ev) {
   const img = pic(ev.file, ev.w && [ev.w, ev.h]);
   // As wide as it fits, never upscaled, and no taller than 60vh: the same box the loaded picture gets.
   if (ev.w && ev.h) img.style.width = `min(100%, ${ev.w}px, calc(60vh * ${(ev.w / ev.h).toFixed(4)}))`;
-  fig.append(img);
+  fig.append(...sharer(ev, 'showed you an image'), img);
   if (ev.caption) fig.append(el('figcaption', null, ev.caption));
   return fig;
 }

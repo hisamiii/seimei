@@ -389,6 +389,7 @@ fun Row(item: Item, vm: Seimei, live: JSONObject? = null, onPicture: (String) ->
         is Item.Worker -> WorkerCard(item, vm)
         is Item.Approval -> ApprovalCard(item, vm)
         is Item.Sent -> Column(Modifier.fillMaxWidth()) {
+            Sharer(item.from, item.worker, "sent you a file", vm)
             FileChip(vm, item.file, Modifier.widthIn(max = 320.dp), expired = expired(item.t))
             if (item.caption.isNotEmpty()) Text(item.caption, fontSize = 13.sp, color = LocalExtra.current.text3, modifier = Modifier.padding(top = 6.dp))
         }
@@ -396,6 +397,7 @@ fun Row(item: Item, vm: Seimei, live: JSONObject? = null, onPicture: (String) ->
             // Never more than twice its own size (a 16 px icon stays small, at least 48dp) and at most 480dp tall.
             val density = LocalDensity.current.density
             val maxW = if (item.w > 0) maxOf(48f, 2f * item.w / density).dp else Dp.Infinity
+            Sharer(item.from, item.worker, "showed you an image", vm)
             Picture(vm, item.file, Modifier.widthIn(max = maxW).heightIn(max = 480.dp).clip(RoundedCornerShape(16.dp)).clickable { onPicture(item.file) },
                 ratio = if (item.w > 0 && item.h > 0) item.w.toFloat() / item.h else null)
             if (item.caption.isNotEmpty()) Text(item.caption, fontSize = 13.sp, color = LocalExtra.current.text3, modifier = Modifier.padding(top = 6.dp))
@@ -796,6 +798,14 @@ val BAD_BG: Color @Composable get() = LocalTokens.current.errorContainer
 val OK_BG: Color @Composable get() = LocalTokens.current.okContainer
 
 /** A quiet line naming a shikigami, one tap from its page: what seimei's own sentence above didn't say. */
+/** Whose picture or file it is when not seimei's: a shikigami's line opens its page, a session's only names it. */
+@Composable
+fun Sharer(from: String, worker: String, what: String, vm: Seimei) {
+    if (from.isEmpty()) return
+    if (worker.isNotEmpty()) EvLine(from, " $what", "", modifier = Modifier.padding(bottom = 6.dp)) { vm.openWorker(worker) }
+    else Text("$from $what", fontSize = 13.sp, color = LocalExtra.current.text3, modifier = Modifier.padding(bottom = 6.dp))
+}
+
 @Composable
 fun EvLine(name: String, rest: String, small: String, failed: Boolean = false, shape: Shape = RoundedCornerShape(12.dp),
     modifier: Modifier = Modifier, fill: Boolean = failed, open: () -> Unit) {

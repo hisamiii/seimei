@@ -476,7 +476,7 @@ body.login { display: grid; place-items: center; grid-template-rows: 1fr; paddin
 .msg .pics.n2 img, .msg .pics.n3 img { aspect-ratio: 1; }
 .shown { margin: 0; align-self: flex-start; max-width: 100%; display: flex; flex-direction: column; gap: 6px; }
 .shown img { max-width: 100%; max-height: 60vh; border-radius: 16px; display: block; cursor: zoom-in; background: var(--container); }
-.shown figcaption { font-size: 13px; color: var(--text-3); }
+.shown figcaption, .shown .from { font-size: 13px; color: var(--text-3); }
 .fchip { display: flex; align-items: center; gap: 12px; min-width: 0; max-width: 340px; padding: 10px 14px 10px 10px; border-radius: 16px; background: var(--container-high); color: var(--text); text-decoration: none; }
 .fchip .ic { flex: none; width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: var(--tonal); color: var(--on-tonal); }
 .fchip .txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }

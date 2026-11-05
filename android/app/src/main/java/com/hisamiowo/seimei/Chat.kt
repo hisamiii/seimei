@@ -33,10 +33,13 @@ sealed interface Item {
         val detail: String, val expires: Double, val outcome: String?,
         val options: List<Opt> = emptyList(), val sub: String = "", val subagent: Boolean = false, val done: Done? = null,
     ) : Item
-    /** w and h: the picture's size from the server (0 when unknown), so its space is kept before it loads. */
-    data class Shown(override val key: String, val file: String, val caption: String, val w: Int = 0, val h: Int = 0) : Item
-    /** A file seimei handed over to download. */
-    data class Sent(override val key: String, val file: FileRef, val caption: String, val t: Double = 0.0) : Item
+    /** w and h: the picture's size from the server (0 when unknown), so its space is kept before it loads.
+     * from and worker: the shikigami or session that showed it, empty for seimei's own. */
+    data class Shown(override val key: String, val file: String, val caption: String, val w: Int = 0, val h: Int = 0,
+        val from: String = "", val worker: String = "") : Item
+    /** A file seimei, a shikigami or a session handed over to download. */
+    data class Sent(override val key: String, val file: FileRef, val caption: String, val t: Double = 0.0,
+        val from: String = "", val worker: String = "") : Item
 }
 
 /** One choice on a permission card: kind once, rule, dir, mode or deny; a rule option carries its rule and where. */
@@ -303,9 +306,9 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
                     put(Item.Note(key, "${ev.str("name")} $what", ""))
                 }
             }
-            "image" -> put(Item.Shown(key, ev.str("file"), ev.str("caption"), ev.optInt("w"), ev.optInt("h")))
+            "image" -> put(Item.Shown(key, ev.str("file"), ev.str("caption"), ev.optInt("w"), ev.optInt("h"), ev.str("from"), ev.str("worker")))
             // "file", not "id": the event log numbers every event with its own id.
-            "file" -> put(Item.Sent(key, ev.fileRef(ev.str("file")), ev.str("caption"), t))
+            "file" -> put(Item.Sent(key, ev.fileRef(ev.str("file")), ev.str("caption"), t, ev.str("from"), ev.str("worker")))
             "approval" -> {
                 val aid = ev.str("aid")
                 approvals[aid] = put(Item.Approval(key, aid, ev.str("who"), ev.str("action"), ev.str("target"),
