@@ -18,6 +18,9 @@ import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.unit.IntOffset
 import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -230,8 +233,8 @@ fun ChatTab(vm: Seimei, lane: String) {
         items(rows, key = { it.key }, contentType = { it::class }) { row ->
             Box(if (row.key == flashing) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp)) else Modifier) {
                 val quote = row.quote(if (traj) "t" else "c")
-                if (quote != null) SwipeReply({ vm.replyIn(quote) }) { Row(row, vm) { zoom = it } }
-                else Row(row, vm) { zoom = it }
+                if (quote != null) SwipeReply({ vm.replyIn(quote) }) { Row(row, vm, chat = !traj) { zoom = it } }
+                else Row(row, vm, chat = !traj) { zoom = it }
             }
         }
         if (vm.hasOlder) item(key = "older") {
@@ -378,10 +381,10 @@ fun TrigRow(t: Item.Trig) {
 }
 
 @Composable
-fun Row(item: Item, vm: Seimei, live: JSONObject? = null, onPicture: (String) -> Unit) {
+fun Row(item: Item, vm: Seimei, live: JSONObject? = null, chat: Boolean = false, onPicture: (String) -> Unit) {
     when (item) {
         is Item.Day -> NotePill(dayLabel(item.t), "", day = true)
-        is Item.Msg -> if (item.role == "user") UserMsg(item, vm, onPicture) else AssistantMsg(item, vm)
+        is Item.Msg -> if (item.role == "user") UserMsg(item, vm, onPicture) else AssistantMsg(item, vm, chat)
         is Item.Fold -> FoldPill(item, vm)
         is Item.Trig -> TrigRow(item)
         is Item.Note -> NotePill(item.text + if (item.n > 1) "  ×${item.n}" else "", item.level)
@@ -459,6 +462,14 @@ fun Away(vm: Seimei) {
 @Composable
 fun UserMsg(m: Item.Msg, vm: Seimei, onPicture: (String) -> Unit) {
     var time by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+    // Sent from a side thread: the thread's line above, one tap from it
+    if (m.thread.isNotEmpty()) EvLine(m.threadName.ifEmpty { "Side thread" }, " · Side thread", "", modifier = Modifier.padding(bottom = 6.dp)) {
+        vm.openThread(m.thread)
+    }
+    // Not the user's own words: who wrote them ("seimei" in a thread)
+    if (m.sender.isNotEmpty()) Text(m.sender, Modifier.padding(end = 4.dp, bottom = 4.dp), fontSize = 12.sp, lineHeight = 16.sp,
+        fontWeight = FontWeight.Medium, color = LocalExtra.current.text3)
     // At most 88% of the lane, as the web's bubbles
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) { Box(Modifier.fillMaxWidth(.88f), contentAlignment = Alignment.CenterEnd) {
         Column(
@@ -489,6 +500,7 @@ fun UserMsg(m: Item.Msg, vm: Seimei, onPicture: (String) -> Unit) {
             if (time) Text(clock(m.t), fontSize = 12.sp, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = .7f))
         }
     } }
+    }
 }
 
 /** A sent message the server has not echoed yet: dimmed, or outlined with a retry when it failed. */
@@ -574,26 +586,64 @@ fun FileChip(vm: Seimei, f: FileRef, modifier: Modifier = Modifier, onUser: Bool
     }
 }
 
+/** A message of seimei's. In the chat ([chat]) a long press opens Reply, Ask on the side and Copy, and an offer adds Ask on the side under it. */
 @Composable
-fun AssistantMsg(m: Item.Msg, vm: Seimei) {
+fun AssistantMsg(m: Item.Msg, vm: Seimei, chat: Boolean = false) {
     var time by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth().clickable(indication = null, interactionSource = null) { time = !time }) {
+    var menu by remember { mutableStateOf(false) }
+    val id = m.key.removePrefix("e").toLongOrNull() ?: 0
+    val haptic = LocalHapticFeedback.current
+    Column(Modifier.fillMaxWidth().then(
+        if (chat && id > 0) Modifier.combinedClickable(indication = null, interactionSource = null, onLongClickLabel = "Message options",
+            onLongClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                menu = true
+            }) { time = !time }
+        else Modifier.clickable(indication = null, interactionSource = null) { time = !time })) {
         m.anchor?.let { AnchorChip(it, vm) }
-        Md(m.text)
+        // The long press is the menu's here; Copy takes the whole text
+        Md(m.text, select = !chat)
         if (time) Text(clock(m.t), fontSize = 12.sp, color = LocalExtra.current.text3, modifier = Modifier.padding(top = 4.dp))
-        if (m.reply > 0) Text("Reply in chat", Modifier.padding(top = 11.dp).heightIn(min = 48.dp).clip(CircleShape).background(LocalTokens.current.tonal)
-            .clickable { vm.replyIn(ReplyTo(m.reply, m.text, "t")) }.padding(horizontal = 16.dp, vertical = 14.dp),
-            fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium, color = LocalTokens.current.onTonal)
+        if (m.reply > 0) TonalPill("Reply in chat") { vm.replyIn(ReplyTo(m.reply, m.text, "t")) }
+        if (m.offer && chat) TonalPill("Ask on the side") { vm.openDraft(ReplyTo(id, m.text, "c")) }
+    }
+    if (menu) MsgMenu(vm, m, id) { menu = false }
+}
+
+/** Reply, Ask on the side, Copy: a message of seimei's, held. */
+@Composable
+fun MsgMenu(vm: Seimei, m: Item.Msg, id: Long, done: () -> Unit) {
+    val clip = LocalClipboard.current
+    val scope = rememberCoroutineScope()
+    val flat = m.text.replace(Regex("\\s+"), " ").trim()
+    Sheet(done, if (flat.length > 90) flat.take(90) + "…" else flat) {
+        @Composable
+        fun Opt(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, run: () -> Unit) = androidx.compose.foundation.layout.Row(
+            Modifier.fillMaxWidth().heightIn(min = 56.dp).clip(RoundedCornerShape(16.dp)).clickable { done(); run() }.padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(icon, null, Modifier.size(22.dp), tint = LocalExtra.current.text2)
+            Spacer(Modifier.width(16.dp))
+            Text(label, fontSize = 16.sp)
+        }
+        Column {
+            Opt(Icons.reply, "Reply") { vm.replyIn(ReplyTo(id, m.text, "c")) }
+            Opt(Icons.thread, "Ask on the side") { vm.openDraft(ReplyTo(id, m.text, "c")) }
+            Opt(Icons.copy, "Copy") {
+                scope.launch { clip.setClipEntry(ClipEntry(android.content.ClipData.newPlainText("message", m.text))) }
+                vm.snack = "Copied"
+            }
+        }
     }
 }
 
 // ---------- markdown ----------
 
 @Composable
-fun Md(src: String, size: Int = 16, color: Color = MaterialTheme.colorScheme.onSurface) {
+fun Md(src: String, size: Int = 16, color: Color = MaterialTheme.colorScheme.onSurface, select: Boolean = true) {
     val colors = MdColors(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.surfaceContainerHigh)
     val blocks = remember(src, colors) { Markdown(colors).parse(src) }
-    SelectionContainer { Blocks(blocks, size, color) }
+    if (select) SelectionContainer { Blocks(blocks, size, color) } else Blocks(blocks, size, color)
 }
 
 @Composable

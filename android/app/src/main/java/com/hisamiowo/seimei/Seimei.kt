@@ -62,8 +62,12 @@ class Pending(val cid: String, val text: String, val sending: List<Attachment>, 
     var failed by mutableStateOf(false)
 }
 
-/** The full-screen page of one agent: a shikigami ("worker", by id) or one of the user's sessions ("session", by pid). */
-class Page(val kind: String, val id: String) {
+/** The full-screen page of one agent: a shikigami ("worker", by id), one of the user's sessions ("session", by pid), or a side thread ("thread", by id).
+ * A draft thread has no id until its first message starts it. */
+class Page(val kind: String, id: String) {
+    var id by mutableStateOf(id)
+    /** Set once: a draft that becomes a thread stays the same screen. */
+    val key = "$kind:$id"
     var row by mutableStateOf(JSONObject())
     var items by mutableStateOf<List<Item>>(emptyList())
     /** The open question (an AskUserQuestion input, plus tool_id and answerable). */
@@ -78,7 +82,7 @@ class Page(val kind: String, val id: String) {
     var draft by mutableStateOf("")
     var files by mutableStateOf<List<Attachment.Doc>>(emptyList())
     /** The hint's name for this chat (docs/asr.md): "w:<id>" or "s:<pid>". */
-    val chatKey get() = (if (kind == "worker") "w:" else "s:") + id
+    val chatKey get() = (when (kind) { "worker" -> "w:"; "thread" -> "t:"; else -> "s:" }) + id
     var details by mutableStateOf(false)
     /** A shikigami's run so far (metrics.rs), fetched when its details open. */
     var metrics by mutableStateOf<JSONObject?>(null)
@@ -243,7 +247,22 @@ class Seimei(app: Application) : AndroidViewModel(app) {
 
     /** An event the chat should scroll to (a tapped "reply ready"), once it has loaded. */
     var focus by mutableStateOf<Long?>(null)
-    var unread by mutableStateOf(false)
+    /** seimei's chat messages that came while the chat was not on screen. */
+    var unread by mutableStateOf(0)
+
+    /** The open side threads (the stream's listing) and how many are archived; all of them, archived too, from api/threads. */
+    var threads by mutableStateOf<List<JSONObject>>(emptyList())
+    var threadsArchived by mutableStateOf(0)
+    var allThreads by mutableStateOf<List<JSONObject>?>(null)
+    var threadArchOpen by mutableStateOf(false)
+    var threadArchQuery by mutableStateOf("")
+    /** The folder seimei last summoned in: where a shikigami made from a thread starts. */
+    var lastCwd by mutableStateOf("")
+    /** The armed watch rules (watches.rs rows), and every picture and file of the chat (api/gallery). */
+    var watches by mutableStateOf<List<JSONObject>>(emptyList())
+    var gallery by mutableStateOf<List<JSONObject>?>(null)
+    /** Whether the chat itself is in front of the user: its tab, no page over it, the app on screen. */
+    val chatInView get() = tab == "chat" && page == null && foreground
 
     var draft by mutableStateOf(prefs.draft)
         private set
@@ -538,6 +557,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     fun onStart() {
         foreground = true
         visible = true
+        if (chatInView) unread = 0
         Push.visible = true
         Push.lockAt = Long.MAX_VALUE
         // Anything pushed while away is on screen now.
@@ -622,6 +642,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         lastId = r.getLong("last")
         r.optJSONObject("state")?.let { setState(it) }
         takeWorkers(r.optJSONArray("workers").objects())
+        r.optJSONObject("threads")?.let(::takeThreads)
         // A send that got through while the connection was down is in the history now.
         val echoed = events.map { it.str("cid") }.toSet()
         pending.removeAll { it.cid in echoed }
@@ -650,6 +671,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         if (last < lastId || last - lastId > Store.CHAT_KEEP) return loadHistory()
         r.optJSONObject("state")?.let { setState(it) }
         takeWorkers(r.optJSONArray("workers").objects())
+        r.optJSONObject("threads")?.let(::takeThreads)
     }
 
     private fun shown() {
@@ -790,7 +812,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             if (System.currentTimeMillis() / 1000.0 - ev.optDouble("t", 0.0) < 60) spoken(ev)?.let { said = it }
             saveChat()
             // The chat dot is for the conversation; the trajectory keeps its own count.
-            if (tab != "chat" && !ev.inTraj() && type in setOf("assistant", "approval", "worker", "image", "file")) unread = true
+            if (!chatInView && !ev.inTraj() && type in setOf("assistant", "approval", "worker", "image", "file")) unread++
             return
         }
         when (type) {
@@ -802,6 +824,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             "workers" -> takeWorkers(ev.optJSONArray("list").objects())
             "sessions" -> takeSessions(ev.optJSONArray("list").objects())
             "w" -> workerEvent(ev)
+            "threads" -> takeThreads(ev)
             "s" -> sessionEvent(ev)
             "usage" -> usage = ev
             "tasks" -> takeBoard(ev)
@@ -876,10 +899,16 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         tab = t
         when (t) {
             "chat" -> {
-                unread = false
+                if (page == null) unread = 0
                 if (lane == "t") markSeen()
             }
             "agents" -> refreshAll(force = true)
+            "threads" -> {
+                threadArchOpen = false
+                loadThreads()
+            }
+            "watches" -> loadWatches()
+            "files" -> loadGallery()
             "usage" -> refreshCost()
         }
         presence()
@@ -956,6 +985,8 @@ class Seimei(app: Application) : AndroidViewModel(app) {
 
     fun openWorker(id: String) = openPage("worker", id)
 
+    fun openThread(id: String) = openPage("thread", id)
+
     fun openSession(pid: Long) = openPage("session", pid.toString())
 
     private fun openPage(kind: String, id: String) {
@@ -964,8 +995,11 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val kept = withContext(Dispatchers.IO) { store.read(Store.pageKey(kind, id)) }
             if (token != opening) return@launch
-            val listed = (if (kind == "worker") workers.firstOrNull { it.str("id") == id }
-                else sessions.firstOrNull { it.optLong("pid").toString() == id }) ?: JSONObject()
+            val listed = when (kind) {
+                "worker" -> workers.firstOrNull { it.str("id") == id }
+                "thread" -> threads.firstOrNull { it.str("id") == id } ?: allThreads?.firstOrNull { it.str("id") == id }
+                else -> sessions.firstOrNull { it.optLong("pid").toString() == id }
+            } ?: JSONObject()
             val shown = kept?.let { k ->
                 Page(kind, id).also { pg ->
                     pg.take(k.optJSONArray("events").objects(), reset = true)
@@ -980,7 +1014,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             }
             try {
                 var r = api.get(when {
-                    kind == "worker" -> if (shown != null) "api/workers/$id?after=${shown.last}" else "api/workers/$id"
+                    kind == "worker" || kind == "thread" -> "api/${kind}s/$id" + if (shown != null) "?after=${shown.last}" else ""
                     shown?.next != null -> "api/sessions/$id?from=${shown.next}"
                     else -> "api/sessions/$id"
                 })
@@ -992,6 +1026,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 val pg = shown ?: Page(kind, id)
                 pg.take(r.getJSONArray("events").objects(), reset = shown == null || r.optBoolean("reset"))
                 if (kind == "worker") pg.row = r.getJSONObject("worker").merged(listed)
+                else if (kind == "thread") pg.row = listed.merged(r.getJSONObject("thread"))
                 else {
                     pg.row = listed
                     takeSession(pg, r)
@@ -1002,6 +1037,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                     presence()
                 }
                 savePage(pg)
+                if (kind == "thread") seenSoon(pg)
             } catch (e: HttpError) {
                 if (shown == null) snack = "Couldn't reach the server"
                 else if (e.code == 404) shown.note = "Gone from the server: this is the last copy"
@@ -1059,14 +1095,15 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     /** Back online: the open page fetches what came while the stream was down. */
     private fun refreshPage() {
         page?.takeIf { it.kind == "session" }?.poke?.trySend(Unit)
-        val pg = page?.takeIf { it.kind == "worker" } ?: return
+        val pg = page?.takeIf { (it.kind == "worker" || it.kind == "thread") && it.id.isNotEmpty() } ?: return
         viewModelScope.launch {
             try {
-                val r = api.get("api/workers/${pg.id}?after=${pg.last}")
+                val r = api.get("api/${pg.kind}s/${pg.id}?after=${pg.last}")
                 if (page !== pg) return@launch
                 pg.take(r.getJSONArray("events").objects(), reset = false)
-                pg.row = pg.row.merged(r.getJSONObject("worker"))
+                pg.row = pg.row.merged(r.getJSONObject(pg.kind))
                 savePage(pg)
+                if (pg.kind == "thread") seenSoon(pg)
             } catch (e: IOException) {
             }
         }
@@ -1077,19 +1114,149 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     }
 
     private fun workerEvent(ev: JSONObject) {
-        val pg = page?.takeIf { it.kind == "worker" && it.id == ev.str("worker") } ?: return
+        val pg = page?.takeIf { (it.kind == "worker" || it.kind == "thread") && it.id == ev.str("worker") } ?: return
         val e = ev.optJSONObject("ev") ?: return
         // The page loaded the log a moment ago; skip what it already holds.
         if (e.has("id") && e.getLong("id") <= pg.last) return
         pg.take(listOf(e), reset = false)
         savePage(pg)
+        if (pg.kind == "thread") seenSoon(pg)
     }
 
     fun closePage() {
         opening++
         page?.poll?.cancel()
         page = null
+        if (tab == "chat") unread = 0
         presence()
+    }
+
+    // ---------- side threads ----------
+
+    private fun takeThreads(l: JSONObject) {
+        threads = l.optJSONArray("list").objects()
+        val moved = l.optInt("archived") != threadsArchived
+        threadsArchived = l.optInt("archived")
+        page?.takeIf { it.kind == "thread" && it.id.isNotEmpty() }?.let { pg ->
+            threads.firstOrNull { it.str("id") == pg.id }?.let { pg.row = pg.row.merged(it) }
+        }
+        if (tab == "threads" && (threadArchOpen || moved)) loadThreads()
+    }
+
+    /** All the threads, archived too, and the folder a shikigami made from one starts in. */
+    fun loadThreads() {
+        viewModelScope.launch {
+            try {
+                val r = api.get("api/threads")
+                allThreads = r.optJSONArray("threads").objects()
+                lastCwd = r.str("cwd").ifEmpty { lastCwd }
+            } catch (e: IOException) {
+            }
+        }
+    }
+
+    /** A new side thread, from the top bar or about a message of seimei's: a page with no thread yet, until the first send. */
+    fun openDraft(quote: ReplyTo? = null) {
+        opening++
+        page?.poll?.cancel()
+        val row = JSONObject().put("name", "").put("state", "new")
+        if (quote != null) row.put("quote", JSONObject().put("id", quote.id).put("text", quote.text))
+        page = Page("thread", "").also { it.row = row }
+        presence()
+    }
+
+    private var seenJob: Job? = null
+
+    /** What the user saw of an open thread, told to the server a moment later: its unread count and its pushes go by it. */
+    private fun seenSoon(pg: Page) {
+        seenJob?.cancel()
+        seenJob = viewModelScope.launch {
+            delay(800)
+            if (page !== pg || !foreground || pg.id.isEmpty()) return@launch
+            try {
+                api.post("api/threads/${pg.id}/seen", JSONObject().put("last", pg.last))
+            } catch (e: IOException) {
+            }
+        }
+    }
+
+    /** The thread's row after an action of the user's: its page and the lists take it. */
+    fun threadRow(row: JSONObject) {
+        val id = row.str("id")
+        fun put(list: List<JSONObject>) = list.map { if (it.str("id") == id) it.merged(row) else it }
+        threads = put(threads)
+        allThreads = allThreads?.let(::put)
+        page?.takeIf { it.kind == "thread" && it.id == id }?.let { it.row = it.row.merged(row) }
+    }
+
+    /** The send sheet's draft: the thread's summary of itself. */
+    suspend fun threadSummary(id: String): Result<String> = try {
+        Result.success(api.post("api/threads/$id/summary").str("text"))
+    } catch (e: IOException) {
+        Result.failure(IOException(errorOf(e)))
+    }
+
+    /** Send to seimei: the text goes into the chat as the user's message, tagged with the thread; null when it went. */
+    suspend fun threadPost(id: String, text: String): String? = try {
+        api.post("api/threads/$id/post", JSONObject().put("text", text))
+        undo = { closePage(); show("chat") }
+        snackAction = "Show"
+        snack = "Sent to seimei"
+        null
+    } catch (e: IOException) {
+        errorOf(e)
+    }
+
+    suspend fun threadTune(id: String, model: String): String? = try {
+        threadRow(api.post("api/threads/$id/tune", JSONObject().put("model", model)))
+        null
+    } catch (e: IOException) {
+        errorOf(e)
+    }
+
+    /** Make this a shikigami: a summon with the thread's text as context; the thread is read-only after. */
+    suspend fun threadShikigami(id: String, body: JSONObject): String? = try {
+        val r = api.post("api/threads/$id/shikigami", body)
+        r.optJSONObject("thread")?.let(::threadRow)
+        val worker = r.str("worker")
+        undo = { openWorker(worker) }
+        snackAction = "Open"
+        snack = "Summoned ${r.str("name")}"
+        null
+    } catch (e: IOException) {
+        errorOf(e)
+    }
+
+    // ---------- watches and files ----------
+
+    fun loadWatches() {
+        viewModelScope.launch {
+            try {
+                watches = api.get("api/watches").optJSONArray("watches").objects()
+            } catch (e: IOException) {
+            }
+        }
+    }
+
+    fun removeWatch(id: String) {
+        viewModelScope.launch {
+            try {
+                api.post("api/watches/$id/remove")
+                watches = watches.filter { it.str("id") != id }
+                snack = "Removed"
+            } catch (e: IOException) {
+                snack = errorOf(e)
+            }
+        }
+    }
+
+    fun loadGallery() {
+        viewModelScope.launch {
+            try {
+                gallery = api.get("api/gallery").optJSONArray("items").objects()
+            } catch (e: IOException) {
+            }
+        }
     }
 
     private fun errorOf(e: IOException): String = (e as? HttpError)?.let {
@@ -1106,7 +1273,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         pg.draft = ""
         pg.files = emptyList()
         val ask = pg.ask
-        val shown = if (pg.kind == "session" && ask?.optBoolean("answerable") != true)
+        val shown = if (pg.kind == "thread" || (pg.kind == "session" && ask?.optBoolean("answerable") != true))
             Pending(java.util.UUID.randomUUID().toString().take(12), text.ifEmpty { files.joinToString(", ") { it.name } }, emptyList()).also { pg.sent.add(it) }
         else null
         viewModelScope.launch {
@@ -1115,6 +1282,15 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                 val body = JSONObject().put("text", text).put("files", JSONArray(files.mapNotNull { it.id }))
                 when {
                     pg.kind == "worker" -> api.post("api/workers/${pg.id}/send", body)
+                    pg.kind == "thread" && pg.id.isEmpty() -> {
+                        pg.row.optJSONObject("quote")?.let { body.put("quote", it.optLong("id")) }
+                        val row = api.post("api/threads", body).getJSONObject("thread")
+                        // The draft is a thread now: its log so far, and the stream's events for it from here
+                        pg.id = row.str("id")
+                        pg.row = pg.row.merged(row)
+                        refreshPage()
+                    }
+                    pg.kind == "thread" -> api.post("api/threads/${pg.id}/send", body)
                     ask != null && ask.optBoolean("answerable") -> api.post("api/sessions/${pg.id}/answer", body.put("tool_id", ask.str("tool_id")))
                     else -> if (api.post("api/sessions/${pg.id}/send", body).str("via") == "seimei") snack = "seimei passes it on"
                 }
@@ -1196,7 +1372,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
 
     /** Hides a finished shikigami or an idle session from the list, or brings it back; nothing is stopped. */
     fun setArchived(a: Agent, on: Boolean, offerUndo: Boolean = true) {
-        val path = if (a.kind == "worker") "api/workers/${a.id}/archive" else "api/sessions/${a.id}/archive"
+        val path = "api/${a.kind}s/${a.id}/archive"
         // Shown at once; the server's listing follows.
         showArchived(a, on)
         if (on && page?.let { it.kind == a.kind && it.id == a.id } != true) viewModelScope.launch(Dispatchers.IO) { store.drop(Store.pageKey(a.kind, a.id)) }
@@ -1224,17 +1400,24 @@ class Seimei(app: Application) : AndroidViewModel(app) {
 
     private fun showArchived(a: Agent, on: Boolean) {
         fun flag(list: List<JSONObject>, key: String) = list.map { if (it.optString(key) == a.id) it.merged(JSONObject().put("archived", on)) else it }
-        if (a.kind == "worker") {
-            workers = flag(workers, "id")
-            allWorkers = allWorkers?.let { flag(it, "id") }
-        } else sessions = flag(sessions, "pid")
+        when (a.kind) {
+            "worker" -> {
+                workers = flag(workers, "id")
+                allWorkers = allWorkers?.let { flag(it, "id") }
+            }
+            "thread" -> {
+                threads = flag(threads, "id")
+                allThreads = allThreads?.let { flag(it, "id") }
+            }
+            else -> sessions = flag(sessions, "pid")
+        }
         page?.takeIf { it.kind == a.kind && it.id == a.id }?.let { it.row = it.row.merged(JSONObject().put("archived", on)) }
     }
 
-    fun workerStop(id: String) {
+    fun workerStop(id: String, kind: String = "worker") {
         viewModelScope.launch {
             try {
-                api.post("api/workers/$id/stop")
+                api.post("api/${kind}s/$id/stop")
             } catch (e: IOException) {
             }
         }

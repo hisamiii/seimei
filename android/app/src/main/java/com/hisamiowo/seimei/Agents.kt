@@ -63,6 +63,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
@@ -201,6 +202,9 @@ data class Agent(
     /** Hidden from the list; find: what the Archived search looks in. */
     val archived: Boolean = false,
     val find: List<String> = emptyList(),
+    /** A side thread's tile wears the thread icon; sent: how often it went to seimei. */
+    val icon: ImageVector? = null,
+    val sent: Int = 0,
 )
 
 fun JSONObject.context(): Int? = if (has("context") && !isNull("context")) optInt("context") else null
@@ -236,6 +240,19 @@ fun fromSession(s: JSONObject, seen: JSONObject): Agent {
         fresh = state == "idle" && s.optDouble("active", 0.0) > seen.optDouble(s.str("session_id"), 0.0) + 1,
         archived = s.optBoolean("archived"), find = listOf(s.str("name"), s.str("project"), s.str("line")),
     )
+}
+
+/** A side thread as a row of the lists and the page's header: the agents' idle tile wearing the thread icon. */
+fun fromThread(t: JSONObject): Agent {
+    val work = t.str("state") in setOf("running", "starting")
+    val line = when {
+        work -> t.optJSONObject("doing")?.let { workerLine(JSONObject().put("doing", it)) }?.ifEmpty { null } ?: "Working"
+        t.str("shikigami").isNotEmpty() -> "Became a shikigami"
+        else -> t.str("last")
+    }
+    return Agent("thread", t.str("id"), t.str("name"), "", t.context(), if (work) "work" else "idle", t.optDouble("updated", 0.0), line,
+        fresh = t.optInt("unread") > 0, archived = t.optBoolean("archived"),
+        find = listOf(t.str("name"), t.str("last"), t.str("quote")), icon = Icons.thread, sent = t.optInt("sent"))
 }
 
 /** Working agents, and how many things wait on the user. */
@@ -411,7 +428,11 @@ fun ArchiveList(vm: Seimei, now: Long) {
 
 val LocalExtraText3: Color @Composable get() = LocalTokens.current.text3
 
-fun Seimei.open(a: Agent) = if (a.kind == "worker") openWorker(a.id) else openSession(a.id.toLong())
+fun Seimei.open(a: Agent) = when (a.kind) {
+    "worker" -> openWorker(a.id)
+    "thread" -> openThread(a.id)
+    else -> openSession(a.id.toLong())
+}
 
 @Composable
 fun GroupTitle(title: String, color: Color) =
@@ -473,7 +494,7 @@ fun AgentTile(a: Agent) {
         ShapeTile(a.name, 44.dp, if (work) cs.primary else if (a.state == "idle") t.containerHighest else bg, work) {
             when (a.state) {
                 "ask" -> Icon(Icons.question, null, Modifier.size(20.dp), tint = color)
-                "idle" -> Icon(Icons.clock, null, Modifier.size(20.dp), tint = color)
+                "idle" -> Icon(a.icon ?: Icons.clock, null, Modifier.size(20.dp), tint = color)
             }
         }
         return
@@ -514,6 +535,10 @@ fun AgentRow(a: Agent, now: Long, query: String = "", shape: Shape = RoundedCorn
                     // Who asks has an emphasized name
                     Text(a.name, fontSize = 16.sp, lineHeight = 24.sp, fontWeight = if (ask) FontWeight.Bold else FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         color = if (ask) t.onWarnContainer else if (a.state == "done" || a.archived) LocalExtra.current.text2 else Color.Unspecified, modifier = Modifier.weight(1f, fill = false))
+                    // A thread that went to seimei says so
+                    if (a.sent > 0) Text("Sent", Modifier.padding(start = 8.dp).clip(RoundedCornerShape(8.dp)).background(cs.secondaryContainer)
+                        .padding(horizontal = 6.dp, vertical = 1.dp), fontSize = 11.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium,
+                        color = cs.onSecondaryContainer)
                 }
                 Spacer(Modifier.width(8.dp))
                 // New since you looked: the time in primary, no dot
@@ -569,6 +594,7 @@ fun ContextRing(pct: Int?, onClick: () -> Unit) {
 /** Why the composer cannot type into this session, or null. */
 fun blocked(pg: Page): String? {
     if (pg.kind == "worker") return null
+    if (pg.kind == "thread") return if (pg.row.str("shikigami").isNotEmpty()) "Now a shikigami" else null
     val ask = pg.ask
     // Without the terminal a message still goes through seimei (SendMessage), an answer does not.
     pg.reach?.let { if (pg.via != "seimei" || ask != null) return if (ask != null) "Answer on the server" else it }
@@ -583,16 +609,36 @@ fun AgentPage(vm: Seimei, pg: Page) {
     BackHandler(enabled = pg.details) { pg.details = false }
     val gesture = predictiveBack(!pg.details) { vm.closePage() }
     val cs = MaterialTheme.colorScheme
-    val a = if (pg.kind == "worker") fromWorker(pg.row) else fromSession(pg.row, vm.seen)
+    val thread = pg.kind == "thread"
+    val draft = thread && pg.id.isEmpty()
+    val a = when (pg.kind) {
+        "worker" -> fromWorker(pg.row)
+        "thread" -> fromThread(pg.row)
+        else -> fromSession(pg.row, vm.seen)
+    }
     var zoom by remember { mutableStateOf<String?>(null) }
+    var sending by remember { mutableStateOf(false) }
+    if (sending) SendSheet(vm, pg) { sending = false }
     Surface(Modifier.fillMaxSize().then(gesture), color = cs.surface) {
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
             Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 4.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(vm::closePage, Modifier.size(48.dp)) { Icon(Icons.back, "Back to agents", Modifier.size(22.dp)) }
+                IconButton(vm::closePage, Modifier.size(48.dp)) {
+                    Box {
+                        Icon(Icons.back, "Back", Modifier.size(22.dp))
+                        // News in seimei's chat while away from it
+                        if (thread && vm.unread > 0) Box(Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-2).dp).size(8.dp).clip(CircleShape)
+                            .background(cs.primary))
+                    }
+                }
                 Column(Modifier.weight(1f)) {
                     // The name at 22, then the project (text-2, medium) and the state in its colour, at 12
-                    Text(a.name, fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (draft) "New side thread" else a.name, fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (thread) {
+                        val word = if (draft) "New" else if (a.state == "work") "Working" else if (pg.row.str("shikigami").isNotEmpty()) "Shikigami" else "Idle"
+                        Text(listOf(pg.row.str("model"), word).filter { it.isNotEmpty() }.joinToString(" · "), Modifier.padding(top = 2.dp),
+                            fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1,
+                            color = if (a.state == "work") cs.primary else LocalExtra.current.text3)
+                    } else Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                         if (a.project.isNotEmpty() && a.project != a.name) {
                             Text(a.project, fontSize = 12.sp, lineHeight = 16.sp, color = LocalExtra.current.text2, fontWeight = FontWeight.Medium)
                             Text(" · ", fontSize = 12.sp, lineHeight = 16.sp, color = LocalExtra.current.text3)
@@ -611,22 +657,37 @@ fun AgentPage(vm: Seimei, pg: Page) {
                 // One tap each way between seimei and the user.
                 val canHand = if (pg.kind == "worker") pg.row.optBoolean("started", true) && pg.row.str("state") !in setOf("released", "starting")
                     else pg.row.str("kind") in setOf("interactive", "background")
-                if (canHand) FilledTonalButton({ vm.handoff(pg) }, Modifier.height(40.dp).padding(end = 0.dp)
+                // A thread's Send: once it has said something, while it is not a shikigami
+                if (thread && !draft && pg.row.str("shikigami").isEmpty() && pg.items.any { it is Item.Msg && it.role == "assistant" })
+                    FilledTonalButton({ sending = true }, Modifier.height(40.dp).semantics { contentDescription = "Send to seimei" },
+                        contentPadding = PaddingValues(horizontal = 16.dp)) {
+                        Text("Send", fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+                    }
+                if (!thread && canHand) FilledTonalButton({ vm.handoff(pg) }, Modifier.height(40.dp).padding(end = 0.dp)
                     .semantics { contentDescription = if (pg.kind == "worker") "Take over ${a.name}" else "Hand ${a.name} off to seimei" },
                     contentPadding = PaddingValues(horizontal = 16.dp)) {
                     Text(if (pg.kind == "worker") "Take over" else "Hand off", fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1)
                 }
                 Spacer(Modifier.width(8.dp))
-                ContextRing(a.context) { pg.details = true }
+                if (!draft) ContextRing(a.context) { pg.details = true }
             }
-            if (a.archived) Row(
+            if (thread && pg.row.str("shikigami").isNotEmpty()) Row(
+                Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 4.dp).clip(RoundedCornerShape(16.dp))
+                    .background(cs.surfaceContainer).padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.check, null, Modifier.size(20.dp), tint = LocalExtra.current.text3)
+                Spacer(Modifier.width(12.dp))
+                Text("Became a shikigami", Modifier.weight(1f).padding(vertical = 6.dp), fontSize = 14.sp, lineHeight = 19.sp, color = LocalExtra.current.text2)
+                TextButton({ vm.openWorker(pg.row.str("shikigami")) }) { Text("Open") }
+            } else if (a.archived) Row(
                 Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 4.dp).clip(RoundedCornerShape(16.dp))
                     .background(cs.surfaceContainer).padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(Icons.shelf, null, Modifier.size(20.dp), tint = LocalExtra.current.text3)
                 Spacer(Modifier.width(12.dp))
-                Text(if (pg.kind == "worker") "Archived. A message brings it back." else "Archived, still running",
+                Text(if (pg.kind != "session") "Archived. A message brings it back." else "Archived, still running",
                     Modifier.weight(1f).padding(vertical = 6.dp), fontSize = 14.sp, lineHeight = 19.sp, color = LocalExtra.current.text2)
                 TextButton({ vm.setArchived(a, false) }) { Text("Unarchive") }
             }
@@ -647,12 +708,12 @@ fun AgentPage(vm: Seimei, pg: Page) {
                 }
                 items(pg.sent.asReversed(), key = { "p" + it.cid }) { PendingMsg(it, vm) }
                 items(rows, key = { it.key }, contentType = { it::class }) { Row(it, vm, pg.live) { f -> zoom = f } }
-                if (rows.isEmpty() && pg.sent.isEmpty()) item("empty") { NotePill("Nothing yet", "") }
+                if (rows.isEmpty() && pg.sent.isEmpty() && !draft) item("empty") { NotePill("Nothing yet", "") }
             }
             PageComposer(vm, pg, a)
         }
     }
-    if (pg.details) Details(vm, pg)
+    if (pg.details) if (thread) ThreadDetails(vm, pg) else Details(vm, pg)
     zoom?.let { Zoom(vm, it) { zoom = null } }
 }
 
@@ -726,6 +787,13 @@ fun PageComposer(vm: Seimei, pg: Page, a: Agent) {
         val note = pg.note ?: why
         if (note != null) Text(note, fontSize = 13.sp, color = if (pg.note != null) cs.error else LocalExtra.current.text3,
             modifier = Modifier.padding(start = 4.dp, end = 4.dp, bottom = 8.dp))
+        // A draft thread about a message of seimei's shows which one
+        val quote = pg.row.optJSONObject("quote")?.str("text")?.takeIf { pg.kind == "thread" && pg.id.isEmpty() && it.isNotEmpty() }
+        if (quote != null) Row(Modifier.padding(start = 4.dp, end = 4.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.reply, null, Modifier.size(16.dp), tint = LocalExtra.current.text3)
+            Spacer(Modifier.width(8.dp))
+            Text(anchorText(quote), fontSize = 13.sp, color = LocalExtra.current.text3, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
         if (pg.files.isNotEmpty()) Row(Modifier.padding(bottom = 8.dp).horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             for (d in pg.files) Box {
@@ -774,7 +842,12 @@ fun PageComposer(vm: Seimei, pg: Page, a: Agent) {
                         }, leadingIcon = { Icon(Icons.doc, null) })
                     }
                 }
-                val hint = if (why != null) "Can't reply from here right now" else if (asking) "Your answer" else "Message $name"
+                val hint = when {
+                    pg.kind == "thread" && pg.id.isEmpty() -> "Ask on the side"
+                    why != null -> if (pg.kind == "thread") why else "Can't reply from here right now"
+                    asking -> "Your answer"
+                    else -> "Message $name"
+                }
                 DraftField(pg.draft, { pg.draft = it }, hint, pg.chatKey, d,
                     Modifier.weight(1f).padding(start = 8.dp, end = if (vm.asrOn) 0.dp else 16.dp, top = 15.dp, bottom = 15.dp),
                     maxLines = 6, enabled = why == null)
@@ -783,10 +856,12 @@ fun PageComposer(vm: Seimei, pg: Page, a: Agent) {
             Spacer(Modifier.width(8.dp))
             val typing = pg.draft.isNotBlank() || pg.files.isNotEmpty()
             // Asking: the answer goes through Send; Stop is in the details sheet.
-            if (pg.kind == "worker" && pg.row.str("state") in ACTIVE && pg.row.str("state") != "asking" && !typing) {
+            val runs = if (pg.kind == "thread") pg.row.str("state") in setOf("running", "starting")
+                else pg.kind == "worker" && pg.row.str("state") in ACTIVE && pg.row.str("state") != "asking"
+            if (runs && !typing) {
                 // The square Stop: 16 corners on primary-container
                 Box(Modifier.size(52.dp).clip(RoundedCornerShape(16.dp)).background(cs.primaryContainer)
-                    .clickable(onClickLabel = "Stop") { vm.workerStop(pg.id) }.semantics { contentDescription = "Stop" },
+                    .clickable(onClickLabel = "Stop") { vm.workerStop(pg.id, pg.kind) }.semantics { contentDescription = "Stop" },
                     contentAlignment = Alignment.Center) {
                     Box(Modifier.size(14.dp).clip(RoundedCornerShape(4.dp)).background(cs.onPrimaryContainer))
                 }

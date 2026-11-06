@@ -30,6 +30,20 @@ class ChatTest {
         assertEquals(2, c.items.filterIsInstance<Item.Activity>().size)
     }
 
+    @Test fun threadTagsSenderAndOffer() {
+        val c = Chat(utc)
+        c.add(ev("user", kv = arrayOf("text" to "reuse the sheet", "thread" to "t1", "thread_name" to "kryosheet")))
+        c.add(ev("assistant", kv = arrayOf("text" to "ok")))
+        val re = id
+        c.add(ev("offer", kv = arrayOf("re" to re, "lane" to "c")))
+        c.add(ev("user", kv = arrayOf("text" to "check the mount", "from" to "seimei")))
+        val msgs = c.items.filterIsInstance<Item.Msg>()
+        assertEquals("t1" to "kryosheet", msgs[0].thread to msgs[0].threadName)
+        assertEquals(listOf(false, true, false), msgs.map { it.offer })
+        assertEquals("seimei", msgs[2].sender)
+        assertTrue(c.items.none { it is Item.Trig })
+    }
+
     @Test fun summonToolIsSkipped() {
         val c = Chat(utc)
         c.add(ev("tool", kv = arrayOf("name" to "mcp__seimei__summon", "tool_id" to "s", "summary" to "x")))

@@ -11,9 +11,12 @@ sealed interface Item {
 
     data class Day(override val key: String, val t: Double) : Item
     /** anchor: the message this one answers, when something sits between them.
-     * reply: the event id that "Reply in chat" answers (a message of seimei's in the trajectory), 0 for none. */
+     * reply: the event id that "Reply in chat" answers (a message of seimei's in the trajectory), 0 for none.
+     * thread and threadName: the side thread a message of the user's came from.
+     * sender: who wrote a user turn that is not the user's ("seimei" in a thread). offer: seimei offers to take this reply to a side thread. */
     data class Msg(override val key: String, val role: String, val text: String, val images: List<String>, val t: Double,
-                   val files: List<FileRef> = emptyList(), val anchor: Anchor? = null, val reply: Long = 0) : Item
+                   val files: List<FileRef> = emptyList(), val anchor: Anchor? = null, val reply: Long = 0,
+                   val thread: String = "", val threadName: String = "", val sender: String = "", val offer: Boolean = false) : Item
     /** A run of trajectory events, as one line in the chat; goto is the key of the first one. */
     data class Fold(override val key: String, val text: String, val goto: String) : Item
     /** What started a dispatcher turn in the trajectory: "after app-tester finished". */
@@ -124,6 +127,8 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
     private val notes = HashMap<String, Int>()
     private val approvals = HashMap<String, Int>()
     private val outcomes = HashMap<String, Done>()
+    /** Where each message sits in items, by event id: an offer marks the reply it is about. */
+    private val msgAt = HashMap<Long, Int>()
     private var seq = 0
 
     val waiting get() = approvals.keys.count { it !in outcomes }
@@ -220,6 +225,10 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
             approvals[aid]?.let { i -> items[i] = (items[i] as Item.Approval).copy(outcome = done.outcome, done = done) }
             return
         }
+        if (type == "offer") {
+            msgAt[ev.optLong("re")]?.let { i -> (items[i] as? Item.Msg)?.let { items[i] = it.copy(offer = true) } }
+            return
+        }
         if (type != "tool_result") fold = -1
         daily(t)
         // Each dispatcher turn in the trajectory opens with what started it.
@@ -279,9 +288,13 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
             } else if (anchor != null) between = false
             val imgs = ev.optJSONArray("images")
             val files = ev.optJSONArray("files")
-            put(Item.Msg(key, type, ev.str("text"), List(imgs?.length() ?: 0) { imgs!!.getString(it) }, t,
+            val at = put(Item.Msg(key, type, ev.str("text"), List(imgs?.length() ?: 0) { imgs!!.getString(it) }, t,
                 List(files?.length() ?: 0) { files!!.getJSONObject(it).fileRef() }, anchor,
-                if (lane == "t" && type == "assistant") id else 0))
+                if (lane == "t" && type == "assistant") id else 0,
+                thread = ev.str("thread"), threadName = ev.str("thread_name"),
+                // "from" is a number on seimei's events (the turn's trigger), a name on a thread's
+                sender = (ev.opt("from") as? String).orEmpty()))
+            if (id > 0) msgAt[id] = at
             return
         }
         // What the turn itself shows (lane c: a summoned card, a picture) does not come between.

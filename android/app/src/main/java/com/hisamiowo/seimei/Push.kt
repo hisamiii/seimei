@@ -86,7 +86,7 @@ object Push {
         val open = PendingIntent.getActivity(
             ctx, tag.hashCode(),
             Intent(ctx, MainActivity::class.java).putExtra("tab", d["tab"] ?: "chat").putExtra("event", d["event"])
-                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                .putExtra("thread", d["thread"]).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val title = d["title"].orEmpty()
@@ -137,10 +137,11 @@ object Push {
                     .addRemoteInput(input).setAuthenticationRequired(true).setAllowGeneratedReplies(false).build())
             }
         }
-        // The reply ping: answer from the shade (RemoteInput), or open the chat
-        if (tag == "reply" && unlocked) {
-            val input = RemoteInput.Builder(Reply.KEY).setLabel("Reply to seimei").build()
-            val pi = PendingIntent.getBroadcast(ctx, "reply".hashCode(), Intent(ctx, Reply::class.java),
+        // The reply ping and a side thread's: answer from the shade (RemoteInput), or open the chat or the thread
+        val thread = d["thread"]?.takeIf { tag.startsWith("thread:") }
+        if ((tag == "reply" || thread != null) && unlocked) {
+            val input = RemoteInput.Builder(Reply.KEY).setLabel(if (thread != null) "Reply to $title" else "Reply to seimei").build()
+            val pi = PendingIntent.getBroadcast(ctx, tag.hashCode(), Intent(ctx, Reply::class.java).putExtra("thread", thread).putExtra("tag", tag),
                 PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
             n.addAction(Notification.Action.Builder(Icon.createWithResource(ctx, R.drawable.ic_notify), "Reply", pi)
                 .addRemoteInput(input).setAuthenticationRequired(true).setAllowGeneratedReplies(false).build())
@@ -207,23 +208,27 @@ class Decide : BroadcastReceiver() {
     }
 }
 
-/** Reply on the reply ping: the text goes to the chat through the unlocked session, and the notification shows what was sent.
+/** Reply on the reply ping (or a side thread's): the text goes to the chat (or the thread) through the unlocked session.
+ * The notification then shows what was sent.
  * On failure it keeps the text, so nothing typed is lost. */
 class Reply : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         val text = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(KEY)?.toString()?.trim().orEmpty()
         if (text.isEmpty()) return
         val api = Push.session()
+        val thread = intent.getStringExtra("thread")
+        val tag = intent.getStringExtra("tag") ?: "reply"
         val done = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             val sent = try {
-                api?.post("api/send", JSONObject().put("text", text).put("cid", java.util.UUID.randomUUID().toString())
+                if (thread != null) api?.post("api/threads/$thread/send", JSONObject().put("text", text)) != null
+                else api?.post("api/send", JSONObject().put("text", text).put("cid", java.util.UUID.randomUUID().toString())
                     .put("images", org.json.JSONArray())) != null
             } catch (e: IOException) {
                 false
             }
             val nm = ctx.getSystemService(NotificationManager::class.java)
-            nm.notify("reply", 0, Notification.Builder(ctx, "ping").setSmallIcon(R.drawable.ic_notify).setColor(Push.MAUVE)
+            nm.notify(tag, 0, Notification.Builder(ctx, "ping").setSmallIcon(R.drawable.ic_notify).setColor(Push.MAUVE)
                 .setContentTitle(if (sent) "Sent" else "Couldn't send").setContentText(text)
                 .setStyle(Notification.BigTextStyle().bigText(text)).setOnlyAlertOnce(true).setAutoCancel(true)
                 .setTimeoutAfter(if (sent) 8_000 else 0).setVisibility(Notification.VISIBILITY_PRIVATE).build())

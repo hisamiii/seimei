@@ -74,7 +74,7 @@ Push goes to phones only while they are away, so the server holds pushes while t
 - Web Push (RFC 8291) through a UnifiedPush distributor.
 - seimei's own background stream, when the phone has neither.
 
-A browser turns on notifications in the menu, under Notifications. The page subscribes through the Push API, and `/sw.js` shows what comes while the page is closed or its tab is hidden. The subscription ends with the browser's login. Opening the page clears what it shows. A browser gets no take-backs, because it would show an empty notification.
+A browser turns on notifications in Settings, under Notifications. The page subscribes through the Push API, and `/sw.js` shows what comes while the page is closed or its tab is hidden. The subscription ends with the browser's login. Opening the page clears what it shows. A browser gets no take-backs, because it would show an empty notification.
 
 ## Cards
 

@@ -21,7 +21,7 @@ A release is one signed binary, `seimei-x86_64-linux`. Check its signature, put 
 2. Check the signature with `minisign -V -p minisign.pub -m seimei-x86_64-linux`. The key is `contrib/minisign.pub` in this repo.
 3. Put the binary where it stays, for example `~/.local/bin/seimei`, and make it executable.
 4. Run `seimei setup`. It checks Claude Code and asks how the phone reaches the server, your plan, the terminal and the plugins. Then it writes `~/.config/seimei/config.toml`, sets the password, writes the user service and offers to start it.
-5. Open the address setup prints and log in. From the menu, add a passkey, pair the phone app and turn on notifications. `seimei pair` prints the pairing code.
+5. Open the address setup prints and log in. From Settings in the drawer, add a passkey, pair the phone app and turn on notifications. `seimei pair` prints the pairing code.
 
 Running `seimei setup` again leaves what is there alone.
 
@@ -51,7 +51,7 @@ FCM delivers through Google Play services, with no distributor app and no backgr
 1. In the Firebase console, make a project and add an Android app with the package name `com.hisamiowo.seimei`. Save its `google-services.json` as `~/.local/share/seimei/firebase/google-services.json`.
 2. In the project's settings, under Service accounts, generate a private key. Save it as `~/.local/share/seimei/firebase/service-account.json` and `chmod 600` it. seimei sends with this key, and the default `deny_paths` keeps Claude Code sessions out of `firebase/`.
 3. Install JDK 21 and the Android SDK, and point `ANDROID_HOME` at the SDK. The command-line tools are enough.
-4. Run `android/publish.sh minor`. With the Firebase config in place it builds the fcm flavor and puts the APK where the menu's Phone app offers it.
+4. Run `android/publish.sh minor`. With the Firebase config in place it builds the fcm flavor and puts the APK where Settings' Phone app offers it.
 5. Restart seimei so it picks up the service account.
 
 `publish.sh` signs the APK with a key it makes once in `~/.local/share/seimei/signing/`. Back that folder up, because updates install only over the same key. The release APK has another key, so uninstall it from the phone before your build installs.

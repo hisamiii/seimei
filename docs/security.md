@@ -47,7 +47,7 @@ The music and queue plugins have no cards of their own. Writing tags, deleting a
 
 seimei writes every tool call of the dispatcher and the shikigami to `audit.jsonl` in its data folder. It writes them from the tool-call events the harness sends, and marks the calls that failed.
 
-The page and the app show the log under Activity log in the menu.
+The page and the app show the log under Activity log in Settings.
 
 ### The login tripwire
 

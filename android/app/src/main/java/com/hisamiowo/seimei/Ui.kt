@@ -89,6 +89,9 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
@@ -257,6 +260,23 @@ object Icons {
     val shield = icon("M12 3 4.5 6v5.5c0 4.4 3.1 8.2 7.5 9.5 4.4-1.3 7.5-5.1 7.5-9.5V6L12 3z", "M9 12h6M9 15.5h4", stroke = 1.8f)
     val logout = icon("M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h11", stroke = 1.8f)
     val question = icon("M4 5h16v11H9l-5 4zM10 9.2a2 2 0 1 1 2.6 1.9c-.4.2-.6.5-.6.9M12 13.6v.1")
+    val menu = icon("M4 7h16M4 12h16M4 17h16")
+    /** A new side thread: a pen on a square. */
+    val compose = icon("M12 4H6.5A2.5 2.5 0 0 0 4 6.5v11A2.5 2.5 0 0 0 6.5 20h11a2.5 2.5 0 0 0 2.5-2.5V12M17.6 3.9a1.9 1.9 0 0 1 2.7 2.7L12.5 14.4 9 15l.6-3.5z", stroke = 1.8f)
+    /** A side thread: two speech bubbles. */
+    val thread = icon("M4.5 4.5h9A1.5 1.5 0 0 1 15 6v5.5A1.5 1.5 0 0 1 13.5 13H8.5L5 16v-3h-.5A1.5 1.5 0 0 1 3 11.5V6a1.5 1.5 0 0 1 1.5-1.5zM18 8.5h1.5A1.5 1.5 0 0 1 21 10v5.5a1.5 1.5 0 0 1-1.5 1.5H19v3l-3.5-3h-4A1.5 1.5 0 0 1 10 15.5V16", stroke = 1.8f)
+    val files = icon("M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zM4 16l4.5-4.5 4 4 2.5-2.5L20 18M15.5 8.5v.01", stroke = 1.8f)
+    val tune = icon("M4 7h9M17 7h3M4 17h3M11 17h9M15 5a2 2 0 1 1 0 4 2 2 0 0 1 0-4zM9 15a2 2 0 1 1 0 4 2 2 0 0 1 0-4z", stroke = 1.8f)
+    val copy = icon("M10 8h8.5A1.5 1.5 0 0 1 20 9.5v9a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 8 18.5V10a2 2 0 0 1 2-2zM16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8", stroke = 1.8f)
+    val trash = icon("M5 7h14M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3", stroke = 1.8f)
+    val phone = icon("M8 3h8a1.5 1.5 0 0 1 1.5 1.5v15A1.5 1.5 0 0 1 16 21H8a1.5 1.5 0 0 1-1.5-1.5v-15A1.5 1.5 0 0 1 8 3zM11 18h2", stroke = 1.8f)
+    /** Watch rules by group (watches.rs): a timer, a command's exit, a reboot, a ping. */
+    val watch = mapOf(
+        "time" to icon("M10 2.5h4M12 14.5V10M12 6.5a7.5 7.5 0 1 1 0 15 7.5 7.5 0 0 1 0-15z", stroke = 1.8f),
+        "exits" to icon("M4 5h16v14H4zM7.5 9.5 10 12l-2.5 2.5M12.5 15H16", stroke = 1.8f),
+        "reboot" to icon("M12 3v8M7 6.5a7 7 0 1 0 10 0", stroke = 1.8f),
+        "ping" to icon("M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15L6 16zM10 20.5a2 2 0 0 0 4 0", stroke = 1.8f),
+    )
 }
 
 // ---------- activity ----------
@@ -318,6 +338,9 @@ class MainActivity : ComponentActivity() {
     /** A tapped notification names the tab it is about. */
     private fun openTab(intent: Intent?) {
         intent?.getStringExtra("tab")?.takeIf { it in TABS }?.let { vm.show(it) }
+        // A side thread's ping opens its page.
+        intent?.getStringExtra("thread")?.takeIf { it.isNotEmpty() }?.let { vm.openThread(it) }
+        intent?.removeExtra("thread")
         // "Reply ready": the chat opens at that message.
         intent?.getStringExtra("event")?.toLongOrNull()?.let {
             if (vm.lane == "k") vm.showLane("c")
@@ -412,7 +435,7 @@ fun PairScreen(vm: Seimei, activity: Activity) {
     var withPassword by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf(Build.MODEL ?: "phone") }
     val line = if (withPassword) "The password isn't stored"
-        else "On the seimei page: menu, Phone app, Pair a phone"
+        else "On the seimei page: Settings, Phone app, Pair a phone"
     FirstRun("Pair this phone", line) {
         ServerChip(vm)
         Spacer(Modifier.height(20.dp))
@@ -540,7 +563,7 @@ fun LockScreen(vm: Seimei, activity: Activity) {
     }
 }
 
-// ---------- the app: header, tabs, navigation bar ----------
+// ---------- the app: header, pages, navigation drawer ----------
 
 data class Status(val s: String, val text: String)
 
@@ -554,13 +577,17 @@ fun status(vm: Seimei): Status = when {
     else -> Status("idle", "")
 }
 
-val TABS = listOf("chat", "agents", "usage")
-val TITLES = mapOf("chat" to "seimei", "agents" to "Agents", "usage" to "Usage")
+val TABS = listOf("chat", "threads", "agents", "watches", "files", "usage", "settings")
+val TITLES = mapOf("chat" to "seimei", "threads" to "Side threads", "agents" to "Agents", "watches" to "Watches", "files" to "Files",
+    "usage" to "Usage", "settings" to "Settings")
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun AppScreen(vm: Seimei) {
-    BackHandler(vm.tab != "chat") { vm.show("chat") }
+    val drawer = rememberDrawerState(DrawerValue.Closed)
+    val drawerScope = rememberCoroutineScope()
+    BackHandler(vm.tab != "chat" && !drawer.isOpen) { vm.show("chat") }
+    BackHandler(drawer.isOpen) { drawerScope.launch { drawer.close() } }
     // Notifications need a yes on Android 13 and later; asked once, after the first login.
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     val ctx = LocalContext.current
@@ -591,13 +618,14 @@ fun AppScreen(vm: Seimei) {
     }
     LaunchedEffect(vm.tab, vm.page == null) { snacks.currentSnackbarData?.dismiss() }
     val still = reducedMotion()
-    // From medium width (600dp, M3 window classes) the navigation moves to a rail on the left edge.
-    val wide = LocalConfiguration.current.screenWidthDp >= 600
+    // A pick in the drawer runs once it has closed
+    val pick: (() -> Unit) -> Unit = { run -> drawerScope.launch { drawer.close() }; run() }
+    LaunchedEffect(drawer.isOpen) { if (drawer.isOpen) vm.loadWatches() }
+    ModalNavigationDrawer({ DrawerSheet(vm, pick) }, drawerState = drawer, gesturesEnabled = vm.page == null || drawer.isOpen) {
     Box(Modifier.fillMaxSize()) {
-    Row(Modifier.fillMaxSize()) {
-    if (wide) NavRail(vm)
-    Column(Modifier.weight(1f).fillMaxHeight().imePadding()) {
-        Header(vm)
+    Column(Modifier.fillMaxSize().imePadding()) {
+        // Under a page the header can still take a key press: the drawer opens only on the pages themselves
+        Header(vm) { if (vm.page == null) drawerScope.launch { drawer.open() } }
         // The page sheet: surface-low under the header, 28 corners on top
         Box(Modifier.weight(1f).clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)).background(MaterialTheme.colorScheme.surfaceContainerLow)) {
             // Top level between nav destinations: the old one fades out, then the new one fades in
@@ -607,21 +635,22 @@ fun AppScreen(vm: Seimei) {
             }, label = "tab") { tab ->
                 when (tab) {
                     "chat" -> Lanes(vm, still)
+                    "threads" -> ThreadsTab(vm)
                     "agents" -> AgentsTab(vm)
+                    "watches" -> WatchesTab(vm)
+                    "files" -> FilesTab(vm)
                     "usage" -> UsageTab(vm)
+                    "settings" -> SettingsTab(vm)
                 }
             }
         }
-        // The bottom container: composer and navigation bar on surface-container, 24 corners on top (the sheet shows in its corners)
+        // The bottom container: the chat's composer on surface-container, 24 corners on top (the sheet shows in its corners)
+        val composing = vm.tab == "chat" && vm.lane != "k"
         Column(Modifier.onSizeChanged { vm.barPx = it.height }.background(MaterialTheme.colorScheme.surfaceContainerLow)
-            .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainer)) {
-            if (vm.tab == "chat" && vm.lane != "k") Composer(vm)
-            // The keyboard covers the bottom of the screen: while typing, the navigation bar steps aside.
-            if (!wide && !WindowInsets.isImeVisible) NavBar(vm)
-            else if (wide) Spacer(Modifier.navigationBarsPadding())
+            .then(if (composing) Modifier.clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)).background(MaterialTheme.colorScheme.surfaceContainer) else Modifier)) {
+            if (composing) Composer(vm)
+            if (!WindowInsets.isImeVisible) Spacer(Modifier.navigationBarsPadding())
         }
-    }
     }
     // Forward and backward: a page comes in from the right and goes back out to it.
     // Predictive back has already taken the page away when it commits, so that exit only finishes it.
@@ -661,6 +690,7 @@ fun AppScreen(vm: Seimei) {
                 }
             }
         }
+    }
     }
     }
     if (vm.about) AboutSheet(vm) { vm.about = false }
@@ -727,33 +757,26 @@ fun barColor(vm: Seimei): Color {
 fun harnessLabel(harness: String): String? = if (harness.startsWith("acp:")) "on ${harness.removePrefix("acp:")}" else null
 
 @Composable
-fun Header(vm: Seimei) {
+fun Header(vm: Seimei, openDrawer: () -> Unit) {
     val st = status(vm)
-    val (working, asks) = agentCounts(vm)
-    val (dot, text) = when (vm.tab) {
-        "chat" -> st.s to st.text
-        // The sections and the nav badge say how many work and need you
-        "agents" -> "idle" to ""
-        else -> "idle" to ""
-    }.let { (d, t) ->
-        // Away: the other tabs show the last known state, and say so.
+    val (dot, text) = (if (vm.tab == "chat") st.s to st.text else "idle" to "").let { (d, t) ->
+        // Away: the other pages show the last known state, and say so.
         if (vm.tab != "chat" && !vm.online && vm.awaySince != null) "away" to "Offline since ${clock(vm.awaySince!! / 1000.0)}"
         else d to t
     }
     // Idle and working go without saying in the chat (its working line shows a turn); only problems and asks show.
     val showStatus = text.isNotEmpty() && !(vm.tab == "chat" && (dot == "idle" || dot == "working"))
-    var menu by remember { mutableStateOf(false) }
-    var themes by remember { mutableStateOf(false) }
-    if (themes) ThemeSheet(vm) { themes = false }
-    var audit by remember { mutableStateOf(false) }
-    if (audit) ActivitySheet(vm) { audit = false }
-    var notifications by remember { mutableStateOf(false) }
-    if (notifications) NotificationsSheet(vm) { notifications = false }
-    Row(Modifier.background(barColor(vm)).statusBarsPadding().fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer), contentAlignment = Alignment.Center) {
-            Glyph(24.dp)
+    val cs = MaterialTheme.colorScheme
+    Row(Modifier.background(barColor(vm)).statusBarsPadding().fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        val news = drawerNews(vm) || vm.release != null
+        IconButton(openDrawer, Modifier.size(48.dp)) {
+            Box {
+                Icon(Icons.menu, if (news) "Open the menu, something new" else "Open the menu")
+                if (news) Box(Modifier.align(Alignment.TopEnd).offset(x = 2.dp, y = (-2).dp).size(8.dp).clip(CircleShape).background(cs.primary))
+            }
         }
-        Spacer(Modifier.width(14.dp))
+        Spacer(Modifier.width(4.dp))
         Column(Modifier.weight(1f)) {
             Row {
                 Text(TITLES[vm.tab]!!, fontSize = 20.sp, modifier = Modifier.alignByBaseline())
@@ -768,40 +791,8 @@ fun Header(vm: Seimei) {
                 Text(text, fontSize = 13.sp, color = LocalExtra.current.text3)
             }
         }
-        Box {
-            IconButton({ menu = true }) {
-                Box {
-                    Icon(Icons.more, if (vm.release != null) "Menu, update available" else "Menu")
-                    if (vm.release != null) Box(Modifier.align(Alignment.TopEnd).size(8.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary))
-                }
-            }
-            // 220 wide, 16 corners on container-high, 48 rows with a 20 icon in text-3, 14sp
-            val x = LocalTokens.current
-            @Composable
-            fun Item(text: String, icon: ImageVector, color: Color = x.text, dot: Boolean = false, onClick: () -> Unit) = DropdownMenuItem(
-                text = { Text(text, fontSize = 14.sp, lineHeight = 20.sp, color = color) },
-                leadingIcon = { Icon(icon, null, Modifier.size(20.dp), tint = if (color == x.text) x.text3 else color) },
-                trailingIcon = if (dot) ({ Box(Modifier.size(8.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary)) }) else null,
-                onClick = { menu = false; onClick() },
-                modifier = Modifier.height(48.dp),
-                contentPadding = PaddingValues(horizontal = 16.dp),
-            )
-            DropdownMenu(menu, { menu = false }, Modifier.width(220.dp), offset = DpOffset((-8).dp, 0.dp),
-                shape = RoundedCornerShape(16.dp), containerColor = MaterialTheme.colorScheme.surfaceContainerHigh, shadowElevation = 6.dp) {
-                val r = vm.release
-                Item(if (r != null) "Update to ${r.version}" else "About seimei", Icons.info,
-                    if (r != null) MaterialTheme.colorScheme.primary else x.text, dot = r != null) {
-                    vm.about = true
-                    vm.checkUpdate()
-                }
-                if (Delivery.available) Item("Notifications", Icons.bell) {
-                    vm.pushTest = null
-                    notifications = true
-                }
-                Item("Theme", Icons.palette) { themes = true }
-                Item("Activity log", Icons.shield) { audit = true }
-                Item("Log out", Icons.logout) { vm.logOut() }
-            }
+        if (vm.tab == "chat" || vm.tab == "threads") IconButton({ vm.openDraft() }, Modifier.size(48.dp)) {
+            Icon(Icons.compose, "New side thread", Modifier.size(22.dp))
         }
     }
 }
@@ -814,69 +805,4 @@ fun dotColor(s: String): Color = when (s) {
     "waiting" -> LocalExtra.current.warn
     "working", "starting", "connecting" -> MaterialTheme.colorScheme.primary
     else -> LocalExtra.current.ok
-}
-
-/**
- * The navigation bar: 64 tall on the bottom container, a 56 x 32 primary pill under the selected icon (on-primary).
- * The selected label in text, the others in text-3; what needs the user is a warn badge on the pill's corner.
- */
-@Composable
-fun NavBar(vm: Seimei) {
-    Row(Modifier.fillMaxWidth().navigationBarsPadding().height(64.dp).padding(horizontal = 8.dp).selectableGroup()) {
-        for (tab in TABS) NavItem(vm, tab, Modifier.weight(1f).fillMaxHeight())
-    }
-}
-
-/** The navigation rail from medium width (600dp, M3 window classes): the same items down the left edge. */
-@Composable
-fun NavRail(vm: Seimei) {
-    Column(Modifier.fillMaxHeight().width(88.dp).background(MaterialTheme.colorScheme.surface).statusBarsPadding().navigationBarsPadding()
-        .padding(top = 88.dp).selectableGroup(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        for (tab in TABS) NavItem(vm, tab, Modifier.fillMaxWidth().height(64.dp))
-    }
-}
-
-/** One destination: the pill with its icon and badge, then the label. */
-@Composable
-private fun NavItem(vm: Seimei, tab: String, modifier: Modifier) {
-    val (working, asks) = agentCounts(vm)
-    val cs = MaterialTheme.colorScheme
-    val x = LocalTokens.current
-    val on = vm.tab == tab
-    val press = remember { MutableInteractionSource() }
-    val pressed by press.collectIsPressedAsState()
-    // Under the finger the pill widens inside its item
-    val pill by animateDpAsState(if (pressed) 64.dp else 56.dp, spring(dampingRatio = .9f, stiffness = 1400f), label = "pill")
-    val label = if (tab == "chat") "seimei" else TITLES[tab]!!
-    Column(
-        modifier
-            .selectable(on, interactionSource = press, indication = null, role = Role.Tab) { vm.show(tab) }
-            .padding(vertical = 6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Box(Modifier.size(pill, 32.dp).clip(RoundedCornerShape(16.dp)).background(if (on) cs.primary else Color.Transparent)
-            .indication(press, ripple()), contentAlignment = Alignment.Center) {
-            val tint = if (on) cs.onPrimary else x.text3
-            if (tab == "usage") UsageRing(vm, on) else Icon(if (tab == "chat") Icons.chat else Icons.agents, null, Modifier.size(24.dp), tint = tint)
-            val badge = when {
-                // What needs the user counts first, in orange; otherwise how many work.
-                tab == "agents" && asks > 0 -> "$asks" to x.warn
-                tab == "agents" && working > 0 -> "$working" to cs.primary
-                tab == "chat" && vm.tab != "chat" && (vm.unread || vm.waiting > 0) -> "" to cs.primary
-                else -> null
-            }
-            badge?.let { (n, c) ->
-                val big = n.isNotEmpty()
-                Box(Modifier.align(Alignment.TopStart).offset(x = (pill - 56.dp) / 2 + 34.dp, y = if (big) (-1).dp else 4.dp)
-                    .size(if (big) 16.dp else 8.dp).clip(CircleShape).background(c), contentAlignment = Alignment.Center) {
-                    if (big) Text(if (n.length > 2) "99+" else n, color = if (c == x.warn) x.onWarn else cs.onPrimary,
-                        fontSize = 11.sp, lineHeight = 16.sp, fontWeight = FontWeight.SemiBold)
-                }
-            }
-        }
-        Text(label, color = if (on) x.text else x.text3, fontSize = 12.sp, lineHeight = 16.sp,
-            fontWeight = if (on) FontWeight.Bold else FontWeight.Medium,
-            letterSpacing = .24.sp, maxLines = 1)
-    }
 }
