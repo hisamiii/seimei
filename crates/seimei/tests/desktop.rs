@@ -21,12 +21,30 @@ const TOOLS: [&str; 13] = [
 
 /// Each window manager's tools, in order.
 const SPEC_TOOLS: [(&str, &str); 6] = [
-    ("niri", "desktop screenshot niri niri_query open_app agent_display type_text press_keys click scroll ui_tree ui_action notifications clipboard_read unlock_screen restore_desktop"),
-    ("sway", "desktop screenshot sway sway_query open_app type_text press_keys click scroll ui_tree ui_action notifications clipboard_read unlock_screen restore_desktop"),
-    ("hyprland", "desktop screenshot hyprland hyprland_query open_app type_text press_keys click scroll ui_tree ui_action notifications clipboard_read unlock_screen restore_desktop"),
-    ("x11", "desktop screenshot x11 x11_query open_app type_text press_keys click scroll ui_tree ui_action unlock_screen restore_desktop"),
-    ("kde", "desktop screenshot kde kde_query open_app agent_display type_text press_keys click scroll ui_tree ui_action unlock_screen restore_desktop"),
-    ("gnome", "desktop screenshot gnome gnome_query open_app agent_display type_text press_keys click scroll ui_tree ui_action unlock_screen restore_desktop"),
+    (
+        "niri",
+        "desktop screenshot niri niri_query open_app agent_display type_text press_keys click scroll ui_tree ui_action notifications clipboard_read unlock_screen restore_desktop",
+    ),
+    (
+        "sway",
+        "desktop screenshot sway sway_query open_app type_text press_keys click scroll ui_tree ui_action notifications clipboard_read unlock_screen restore_desktop",
+    ),
+    (
+        "hyprland",
+        "desktop screenshot hyprland hyprland_query open_app type_text press_keys click scroll ui_tree ui_action notifications clipboard_read unlock_screen restore_desktop",
+    ),
+    (
+        "x11",
+        "desktop screenshot x11 x11_query open_app type_text press_keys click scroll ui_tree ui_action unlock_screen restore_desktop",
+    ),
+    (
+        "kde",
+        "desktop screenshot kde kde_query open_app agent_display type_text press_keys click scroll ui_tree ui_action unlock_screen restore_desktop",
+    ),
+    (
+        "gnome",
+        "desktop screenshot gnome gnome_query open_app agent_display type_text press_keys click scroll ui_tree ui_action unlock_screen restore_desktop",
+    ),
 ];
 
 const NIRI_PROMPT: &str = r#"## Desktop
@@ -149,9 +167,7 @@ impl Session for Denies {
         std::path::Path::new("/nonexistent")
     }
     fn card(&self, _what: Value) -> Fut<'_, Result<String, String>> {
-        Box::pin(async move {
-            Ok("denied".into())
-        })
+        Box::pin(async move { Ok("denied".into()) })
     }
 }
 
@@ -184,7 +200,8 @@ fn main() {
 
     let mut t = T { sink: root.join("keys.bin"), root: root.clone(), home, run, pass: 0, fail: 0 };
     let cases: Value =
-        serde_json::from_str(&std::fs::read_to_string(repo().join("plugins/desktop/tests/cases.json")).unwrap()).unwrap();
+        serde_json::from_str(&std::fs::read_to_string(repo().join("plugins/desktop/tests/cases.json")).unwrap())
+            .unwrap();
 
     for (i, c) in cases["checks"].as_array().unwrap().iter().enumerate() {
         let d = t.desktop(c["backend"].as_str().unwrap(), &c["ours"]);
@@ -208,10 +225,8 @@ fn main() {
             "type" => dev.type_text(a[0].as_str().unwrap(), 0.0),
             "combo" => dev.combo(a[0].as_str().unwrap()),
             "move" => dev.move_to(a[0].as_f64().unwrap(), a[1].as_f64().unwrap()),
-            "click" => dev.click(
-                seimei_plugin_desktop::uinput::button(a[0].as_str().unwrap()).unwrap(),
-                a[1].as_i64().unwrap(),
-            ),
+            "click" => dev
+                .click(seimei_plugin_desktop::uinput::button(a[0].as_str().unwrap()).unwrap(), a[1].as_i64().unwrap()),
             "scroll" => dev.scroll(a[0].as_i64().unwrap()),
             op => panic!("no op {op}"),
         };
@@ -293,8 +308,9 @@ async fn end_to_end(t: &mut T, g: &Value) {
     let events = Arc::new(EventLog::open(&state.join("events.jsonl")).unwrap());
     let approvals = Arc::new(Approvals::new(events.clone()));
     let cfg: toml::Table = "enabled = [\"desktop\"]\n[desktop]\nbackend = \"niri\"".parse().unwrap();
-    let plugins =
-        Arc::new(Plugins::load_at(&cfg, &state, env!("CARGO_BIN_EXE_seimei"), &seimei::BUILTINS).about("laptop (Arch, niri)"));
+    let plugins = Arc::new(
+        Plugins::load_at(&cfg, &state, env!("CARGO_BIN_EXE_seimei"), &seimei::BUILTINS).about("laptop (Arch, niri)"),
+    );
     let desk = plugins.get::<DesktopPlugin>("desktop").unwrap().0.clone();
     assert_eq!(desk.b.ctx().run, t.run, "the plugin's desktop is not the test's");
     let specs = serde_json::from_str::<Value>(seimei_plugin_desktop::PLUGIN.spec).unwrap();
@@ -366,7 +382,11 @@ async fn end_to_end(t: &mut T, g: &Value) {
     // Closing the user's window needs a card, closing seimei's does not.
     let close = json!({"action": "close-window", "args": ["--id", "4"]});
     let card = desk.native_card("niri", &close);
-    t.check("a card for the user's window", card.as_ref().is_some_and(|c| c["target"] == "close kitty \"~\""), &json!(card));
+    t.check(
+        "a card for the user's window",
+        card.as_ref().is_some_and(|c| c["target"] == "close kitty \"~\""),
+        &json!(card),
+    );
     desk.own_window(4, json!({"command": "kitty"}));
     t.check("no card for seimei's window", desk.native_card("niri", &close).is_none(), &json!(null));
     desk.disown(4);
