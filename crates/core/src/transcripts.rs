@@ -149,7 +149,9 @@ pub fn brief(path: &Path) -> std::io::Result<Value> {
             continue;
         }
         let msg = &row["message"];
-        if let Some(u) = msg["usage"].as_object().filter(|u| !u.is_empty()) {
+        // The agent CLI's own notes (an API error, an interrupt) carry the model "<synthetic>" and no real usage.
+        let synthetic = msg["model"] == "<synthetic>";
+        if let Some(u) = msg["usage"].as_object().filter(|u| !u.is_empty() && !synthetic) {
             used = ["input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens", "output_tokens"]
                 .iter()
                 .map(|k| u.get(*k).and_then(Value::as_u64).unwrap_or(0))
@@ -220,5 +222,22 @@ mod tests {
         assert_eq!(project_of("/tmp/x/y"), None);
         let v = |s: &str| s.to_string();
         assert_eq!(most_common(&[v("a"), v("b"), v("b"), v("a")]).map(String::as_str), Some("a"));
+    }
+
+    /// A transcript that ends on a synthetic message keeps the last real model and its usage.
+    #[test]
+    fn synthetic_messages_keep_the_model() {
+        let dir = std::env::temp_dir().join(format!("seimei-brief-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("t.jsonl");
+        let row = |model: &str, tokens: u64, text: &str| {
+            json!({"type": "assistant", "message": {"model": model, "usage": {"input_tokens": tokens, "output_tokens": 0},
+                "content": [{"type": "text", "text": text}]}})
+        };
+        let rows = [row("claude-opus-4-1", 5000, "done"), row("<synthetic>", 0, "API Error: overloaded")];
+        std::fs::write(&path, rows.iter().map(|r| r.to_string() + "\n").collect::<String>()).unwrap();
+        let b = brief(&path).unwrap();
+        assert_eq!((b["model"].as_str(), b["tokens"].as_u64()), (Some("claude-opus-4-1"), Some(5000)));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
