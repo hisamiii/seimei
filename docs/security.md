@@ -39,7 +39,7 @@ Some tools of seimei's ask the user themselves, whatever the permission mode. A 
 - The browser plugin acts or navigates in a tab the user opened only after their card, once per tab and site. It never reads or fills password, payment card, one-time code or file fields.
 - The browser plugin closes a tab the user opened only after their card.
 - The desktop plugin closes a window seimei did not open, or ends the desktop session, only after the user's card.
-- The desktop plugin reads the user's clipboard only after their card, once per call. Restoring the desktop layout is one card for all of it.
+- The desktop plugin reads the user's clipboard only after their card, once per call.
 
 The music and queue plugins have no cards of their own. Writing tags, deleting a playlist and stopping the GPU holder go as the harness's permissions decide.
 

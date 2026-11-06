@@ -663,19 +663,6 @@
     "required": [],
     "type": "object"
    }
-  },
-  {
-   "name": "restore_desktop",
-   "description": "Bring back the desktop layout from before the last {wm} restart or reboot: apps on their workspaces, kitty windows in their folders, the user's Claude sessions resumed. Without go=true it only lists the plan; with go=true the user gets one Approve/Deny card for all of it.",
-   "inputSchema": {
-    "properties": {
-     "go": {
-      "type": "boolean",
-      "default": false
-     }
-    },
-    "type": "object"
-   }
   }
  ]
 }

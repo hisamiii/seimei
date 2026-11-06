@@ -49,7 +49,8 @@ Drive the {about} with your desktop tools (start with desktop), not {cli} in Bas
 - Closing a window you did not open{ends} {wait} for the user's OK on their phone; ask in chat first when the reason is not obvious.
 - screenshot returns the image's path: Read it when you need to look (show=true puts it in the chat and returns the image).
 - Never type into a window you have not just looked at. Prefer keyboard shortcuts and typing over clicks.
-- The user has a stop key on the {about}. When they press it, your turn ends and desktop input is blocked for a minute: do not resume driving until they say so.";
+- The user has a stop key on the {about}. When they press it, your turn ends and desktop input is blocked for a minute: do not resume driving until they say so.
+- After {restarts} restarts or the {about} reboots, {previous} lists what was open before: apps on their workspaces, kitty windows in their folders, Claude session ids. Reopen what the user asks for with open_app.";
 
 pub const PLUGIN: Factory = Factory {
     name: "desktop",
@@ -64,7 +65,7 @@ pub const PLUGIN: Factory = Factory {
     hosted: true,
     make: |own, state| {
         let s = |k: &str| own.get(k).and_then(|v| v.as_str()).filter(|v| !v.is_empty());
-        let d = Desktop::new(s("backend"), Ctx::system(), state, s("shell"), None)?;
+        let d = Desktop::new(s("backend"), Ctx::system(), state, None)?;
         if let Some(m) = own.get("agent_idle_minutes").and_then(|v| v.as_float().or(v.as_integer().map(|i| i as f64))) {
             d.agent.set_idle(m);
         }
@@ -150,7 +151,6 @@ pub struct Desktop {
     secret: PathBuf,
     /// For the bar's "seimei is driving" indicator.
     driving: PathBuf,
-    shell: String,
     hooks: OnceLock<Hooks>,
     /// Windows seimei opened, with how: closing them needs no card. Ids are the WM's and die with it.
     ours: Mutex<HashMap<i64, Value>>,
@@ -212,13 +212,7 @@ fn reply(r: Result<String, String>) -> Value {
 
 impl Desktop {
     /// The desktop on backend name (found from the running session when None). Nothing runs until run().
-    pub fn new(
-        name: Option<&str>,
-        ctx: Ctx,
-        state: &Path,
-        shell: Option<&str>,
-        sink: Option<PathBuf>,
-    ) -> Result<Desktop, String> {
+    pub fn new(name: Option<&str>, ctx: Ctx, state: &Path, sink: Option<PathBuf>) -> Result<Desktop, String> {
         let name = match name {
             Some(n) => n,
             None => backend::detect(&ctx, &|k| std::env::var(k).unwrap_or_default()).unwrap_or_else(|| {
@@ -228,10 +222,6 @@ impl Desktop {
                 "x11"
             }),
         };
-        let shell = shell.map(String::from).unwrap_or_else(|| {
-            let sh = std::env::var("SHELL").ok().filter(|s| !s.is_empty()).unwrap_or("sh".into());
-            sh.rsplit('/').next().unwrap_or("sh").to_string()
-        });
         let driving = ctx.run.join("seimei-driving");
         let agent = agent::Agent::new(state, ctx.clone(), 30.0);
         let input = (Device::new(true, sink.clone()), Device::new(false, sink));
@@ -240,7 +230,6 @@ impl Desktop {
             state: state.into(),
             secret: state.join("unlock"),
             driving,
-            shell,
             hooks: OnceLock::new(),
             ours: Mutex::default(),
             seen: Mutex::default(),
@@ -277,6 +266,7 @@ impl Desktop {
             .replace("{about}", about.split(" (").next().unwrap_or(about))
             .replace("{cli}", m.cli)
             .replace("{restarts}", m.restarts)
+            .replace("{previous}", &self.previous_path().display().to_string())
             .replace("{ends}", &if m.ends.is_empty() { String::new() } else { format!(" and {}", m.ends) })
             .replace("{wait}", if m.ends.is_empty() { "waits" } else { "wait" })
     }
@@ -305,7 +295,7 @@ impl Desktop {
         self.ours.lock().unwrap().insert(wid, how);
     }
 
-    /// A window seimei opened counts as the user's again (the layout memory brought it back).
+    /// A window seimei opened counts as the user's again.
     pub fn disown(&self, wid: i64) {
         self.ours.lock().unwrap().remove(&wid);
     }
@@ -847,7 +837,6 @@ impl Desktop {
             // mako runs beside wlroots compositors and niri only.
             "notifications" if matches!(self.b.meta().name, "niri" | "sway" | "hyprland") => notifications(args).await,
             "clipboard_read" => self.clipboard(None, session).await,
-            "restore_desktop" => self.restore_tool(args, session).await,
             _ => reply(self.text_tool(tool, args).await),
         }
     }
@@ -1021,28 +1010,6 @@ impl Desktop {
             lines.push(format!("{indent}{} {} {}", as_text(&n["path"]), as_text(&n["role"]), extra.join(" ")));
         }
         Ok(lines.join("\n"))
-    }
-
-    async fn restore_tool(self: &Arc<Self>, args: &Value, session: &dyn Session) -> Value {
-        let plan = match self.blocking(|d| d.plan()).await {
-            Ok(p) => p,
-            Err(e) => return text(&e, true),
-        };
-        if plan.is_empty() {
-            return text(
-                "Nothing to bring back: no earlier layout from the last 3 days, or everything is already open.",
-                false,
-            );
-        }
-        if !truthy(&args["go"]) {
-            return text(&layout::describe(&plan), false);
-        }
-        match session.card(layout::card(&plan)).await {
-            Err(e) => text(&e, true),
-            Ok(o) if o == "expired" => text("No answer in 10 minutes; not restored.", false),
-            Ok(o) if o != "approved" => text(&format!("The user {o} the restore."), false),
-            Ok(_) => text(&self.restore(&plan).await.join("\n"), false),
-        }
     }
 }
 

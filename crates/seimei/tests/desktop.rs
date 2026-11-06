@@ -11,7 +11,7 @@ use std::time::Duration;
 use seimei_core::approvals::Approvals;
 use seimei_core::events::EventLog;
 use seimei_core::plugins::{Fut, Plugins, Session};
-use seimei_plugin_desktop::{Ctx, Desktop, DesktopPlugin, layout, uinput::Device};
+use seimei_plugin_desktop::{Ctx, Desktop, DesktopPlugin, uinput::Device};
 use serde_json::{Value, json};
 
 const TOOLS: [&str; 13] = [
@@ -23,27 +23,27 @@ const TOOLS: [&str; 13] = [
 const SPEC_TOOLS: [(&str, &str); 6] = [
     (
         "niri",
-        "desktop screenshot niri niri_query open_app agent_display type_text press_keys click scroll ui_tree ui_action notifications clipboard_read unlock_screen restore_desktop",
+        "desktop screenshot niri niri_query open_app agent_display type_text press_keys click scroll ui_tree ui_action notifications clipboard_read unlock_screen",
     ),
     (
         "sway",
-        "desktop screenshot sway sway_query open_app type_text press_keys click scroll ui_tree ui_action notifications clipboard_read unlock_screen restore_desktop",
+        "desktop screenshot sway sway_query open_app type_text press_keys click scroll ui_tree ui_action notifications clipboard_read unlock_screen",
     ),
     (
         "hyprland",
-        "desktop screenshot hyprland hyprland_query open_app type_text press_keys click scroll ui_tree ui_action notifications clipboard_read unlock_screen restore_desktop",
+        "desktop screenshot hyprland hyprland_query open_app type_text press_keys click scroll ui_tree ui_action notifications clipboard_read unlock_screen",
     ),
     (
         "x11",
-        "desktop screenshot x11 x11_query open_app type_text press_keys click scroll ui_tree ui_action unlock_screen restore_desktop",
+        "desktop screenshot x11 x11_query open_app type_text press_keys click scroll ui_tree ui_action unlock_screen",
     ),
     (
         "kde",
-        "desktop screenshot kde kde_query open_app agent_display type_text press_keys click scroll ui_tree ui_action unlock_screen restore_desktop",
+        "desktop screenshot kde kde_query open_app agent_display type_text press_keys click scroll ui_tree ui_action unlock_screen",
     ),
     (
         "gnome",
-        "desktop screenshot gnome gnome_query open_app agent_display type_text press_keys click scroll ui_tree ui_action unlock_screen restore_desktop",
+        "desktop screenshot gnome gnome_query open_app agent_display type_text press_keys click scroll ui_tree ui_action unlock_screen",
     ),
 ];
 
@@ -53,7 +53,8 @@ Drive the laptop with your desktop tools (start with desktop), not `niri msg`, g
 - Closing a window you did not open and quitting niri wait for the user's OK on their phone; ask in chat first when the reason is not obvious.
 - screenshot returns the image's path: Read it when you need to look (show=true puts it in the chat and returns the image).
 - Never type into a window you have not just looked at. Prefer keyboard shortcuts and typing over clicks.
-- The user has a stop key on the laptop. When they press it, your turn ends and desktop input is blocked for a minute: do not resume driving until they say so."#;
+- The user has a stop key on the laptop. When they press it, your turn ends and desktop input is blocked for a minute: do not resume driving until they say so.
+- After niri restarts or the laptop reboots, {previous} lists what was open before: apps on their workspaces, kitty windows in their folders, Claude session ids. Reopen what the user asks for with open_app."#;
 
 struct T {
     root: PathBuf,
@@ -93,9 +94,7 @@ impl T {
     }
 
     fn desktop(&self, backend: &str, ours: &Value) -> Desktop {
-        let d =
-            Desktop::new(Some(backend), self.ctx(), &self.root.join("state"), Some("fish"), Some(self.sink.clone()))
-                .unwrap();
+        let d = Desktop::new(Some(backend), self.ctx(), &self.root.join("state"), Some(self.sink.clone())).unwrap();
         for w in ours.as_array().into_iter().flatten() {
             d.own_window(w.as_i64().unwrap(), json!({"command": "x"}));
         }
@@ -210,14 +209,6 @@ fn main() {
         t.compare(&format!("check {i} {} {}", c["backend"], c["input"]), &c["want"], got);
     }
     t.log();
-    for (i, c) in cases["layout_command"].as_array().unwrap().iter().enumerate() {
-        let got = layout::command(&c["rec"], c["shell"].as_str().unwrap(), &t.home.clone());
-        t.compare(&format!("layout command {i}"), &c["want"], json!(got));
-    }
-    for (i, c) in cases["layout_describe"].as_array().unwrap().iter().enumerate() {
-        let got = layout::describe(c["plan"].as_array().unwrap());
-        t.compare(&format!("layout describe {i}"), &c["want"], json!(got));
-    }
     for (i, c) in cases["keys"].as_array().unwrap().iter().enumerate() {
         let mut dev = Device::new(c["device"] == "pointer", Some(t.sink.clone()));
         let a = &c["args"];
@@ -260,7 +251,7 @@ fn main() {
         let got = json!({"text": text.join("\n"), "error": r["isError"] == true, "log": t.log(), "keys": t.keys()});
         t.compare(&format!("niri call {i} {} {}", c["tool"], c["args"]), &c["want"], got);
     }
-    layout_offers(&mut t, &rt);
+    layout_aside(&mut t, &rt);
     rt.block_on(end_to_end(&mut t, g));
     let _ = fake.kill();
     let _ = fake.wait();
@@ -272,32 +263,28 @@ fn main() {
     }
 }
 
-/// The old layout is offered once per WM session: a seimei restart in the same one offers nothing, and a session the user resumed already is not in the plan.
-fn layout_offers(t: &mut T, rt: &tokio::runtime::Runtime) {
+/// A new WM session sets the last one's layout aside as layout-previous.json, once: a seimei restart in the same one keeps it.
+fn layout_aside(t: &mut T, rt: &tokio::runtime::Runtime) {
     let state = t.root.join("layout");
     std::fs::create_dir_all(&state).unwrap();
-    // A terminal window with an agent session in it, which a restore resumes.
-    let term = |sid: &str| json!({"app_id": "kitty", "workspace": 1, "claude": {"session_id": sid, "cwd": "/tmp", "args": []}}); // lint: allow scoped-name
-    let windows = [term("resumed"), term("closed")];
-    let old = json!({"session": "niri.wayland-1.1.sock", "time": seimei_core::util::now(), "windows": windows});
+    let term = json!({"app_id": "kitty", "workspace": 1, "claude": {"session_id": "s1", "cwd": "/tmp", "args": []}}); // lint: allow scoped-name
+    let old = json!({"session": "niri.wayland-1.1.sock", "time": seimei_core::util::now(), "windows": [term]});
     std::fs::write(state.join("layout.json"), old.to_string()).unwrap();
-    // The resumed one runs again, in a process of its own.
-    std::fs::create_dir_all(t.root.join("proc/5151")).unwrap();
-    std::fs::create_dir_all(t.root.join("claude/sessions")).unwrap();
-    std::fs::write(t.root.join("claude/sessions/5151.json"), json!({"pid": 5151, "sessionId": "resumed"}).to_string())
-        .unwrap();
     let (ctx, sink) = (t.ctx(), t.sink.clone());
     let desk = || {
-        let d = Arc::new(Desktop::new(Some("niri"), ctx.clone(), &state, Some("fish"), Some(sink.clone())).unwrap());
+        let d = Arc::new(Desktop::new(Some("niri"), ctx.clone(), &state, Some(sink.clone())).unwrap());
         d.event("up", json!(null));
         d
     };
     let first = desk();
-    t.check("a new WM session: the card", rt.block_on(first.tick()) == Ok(true), &json!(null));
-    t.check("then no second card", rt.block_on(first.tick()) == Ok(false), &json!(null));
-    let plan: Vec<Value> = first.plan().unwrap().iter().map(|r| r["claude"]["session_id"].clone()).collect();
-    t.check("the plan skips running sessions", plan == [json!("closed")], &json!(plan));
-    t.check("restart in same wm session: no card", rt.block_on(desk().tick()) == Ok(false), &json!(null));
+    t.check("a new WM session: set aside", rt.block_on(first.tick()) == Ok(true), &json!(null));
+    let previous = seimei_core::util::read_json(&first.previous_path()).unwrap_or_default();
+    t.check("the old layout kept", previous == old, &previous);
+    let now = seimei_core::util::read_json(&state.join("layout.json")).unwrap_or_default();
+    t.check("layout.json follows the new session", now["session"] != old["session"], &now);
+    t.check("then nothing more", rt.block_on(first.tick()) == Ok(false), &json!(null));
+    t.check("restart in same wm session: kept", rt.block_on(desk().tick()) == Ok(false), &json!(null));
+    t.check("no offer file", !state.join("layout-offered.json").exists(), &json!(null));
     let _ = std::fs::remove_dir_all(&state);
 }
 
@@ -326,7 +313,8 @@ async fn end_to_end(t: &mut T, g: &Value) {
         t.check(&format!("{wm} spec"), ok, &json!(names));
     }
     let spec = &specs["niri"];
-    t.check("desktop prompt", plugins.prompt(None) == NIRI_PROMPT, &json!(plugins.prompt(None)));
+    let prompt = NIRI_PROMPT.replace("{previous}", &desk.previous_path().display().to_string());
+    t.check("desktop prompt", plugins.prompt(None) == prompt, &json!(plugins.prompt(None)));
     let env = plugins.servers("seimei", None, None)["desktop"]["env"].clone();
     t.check("SEIMEI_VARIANT", env["SEIMEI_VARIANT"] == "niri", &env);
     plugins.root("seimei", None, Some(std::process::id()));

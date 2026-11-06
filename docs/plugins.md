@@ -25,7 +25,7 @@ seimei has four built-in plugins: desktop, browser, music and queue. Each one ne
 | `music` | Quod Libet and MPRIS players | the Quod Libet bridge for tags and playlists |
 | `queue` | GPU turns: one command holds the GPU at a time | claude-queue installed, with its shim and command prefix |
 
-The desktop plugin also keeps a layout memory and unlocks the screen. On niri, sway and Hyprland it also reads the clipboard and mako's notifications. On niri, KDE Plasma and GNOME it also runs the agent display, see [below](#the-agent-display-and-the-agent-browser).
+The desktop plugin also keeps a layout memory and unlocks the screen. After a WM restart or a reboot, `layout-previous.json` in its state folder lists what was open, and seimei reopens what the user asks for. On niri, sway and Hyprland it also reads the clipboard and mako's notifications. On niri, KDE Plasma and GNOME it also runs the agent display, see [below](#the-agent-display-and-the-agent-browser).
 
 The desktop plugin supports niri, sway, Hyprland, KDE Plasma 6 and GNOME 45 or later on Wayland, or an X11 EWMH window manager. GNOME needs seimei's Shell extension, which `seimei setup` installs.
 

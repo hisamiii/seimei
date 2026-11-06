@@ -1,5 +1,5 @@
 {
- "about": "The desktop plugin on fakes: no compositor, a fake niri socket and fake command line tools (tests/fakes here), input devices writing to a file. {home} is the test's HOME. checks: the card a desktop tool call needs (null: none), with ours the windows seimei opened, and no window manager running, so a close names no window. layout_command, layout_describe: how a remembered window starts again and how a restore card lists them. keys: the input events (type, code, value; each call ends with a sync) a device sends. niri: tool calls and checks against a fake niri with this state; log is what the fake tools were run with, keys what the input devices sent.",
+ "about": "The desktop plugin on fakes: no compositor, a fake niri socket and fake command line tools (tests/fakes here), input devices writing to a file. {home} is the test's HOME. checks: the card a desktop tool call needs (null: none), with ours the windows seimei opened, and no window manager running, so a close names no window. keys: the input events (type, code, value; each call ends with a sync) a device sends. niri: tool calls and checks against a fake niri with this state; log is what the fake tools were run with, keys what the input devices sent.",
  "checks": [
   {"backend": "niri", "tool": "mcp__desktop__niri", "input": {"action": "quit"}, "want": {"action": "desktop", "target": "quit niri (ends the desktop session)", "detail": "niri msg action quit"}},
   {"backend": "niri", "tool": "mcp__desktop__niri", "input": {"action": "close-window", "args": ["--id", "7"]}, "ours": [7], "want": null},
@@ -22,21 +22,6 @@
   {"backend": "x11", "tool": "mcp__desktop__x11", "input": {"action": "windowclose", "args": ["13"]}, "ours": [12], "want": {"action": "desktop", "target": "close a window", "detail": "xdotool windowclose 13"}},
   {"backend": "x11", "tool": "mcp__desktop__x11", "input": {"action": "key", "args": ["ctrl+t"]}, "want": null},
   {"backend": "kde", "tool": "mcp__desktop__kde", "input": {"action": "quit"}, "want": null}
- ],
- "layout_command": [
-  {"rec": {"app_id": "firefox", "argv": ["/usr/lib/firefox/firefox", "--new-window", "https://x.org"]}, "shell": "fish", "want": "/usr/lib/firefox/firefox"},
-  {"rec": {"app_id": "anki", "argv": ["/usr/bin/python3", "/usr/bin/anki", "-p", "me"]}, "shell": "fish", "want": "/usr/bin/python3 /usr/bin/anki"},
-  {"rec": {"app_id": "vesktop", "argv": ["electron", "/usr/lib/vesktop/app.asar", "--x"]}, "shell": "fish", "want": "electron /usr/lib/vesktop/app.asar"},
-  {"rec": {"app_id": "odd", "argv": ["/opt/my app/run it", "a b"]}, "shell": "fish", "want": "'/opt/my app/run it'"},
-  {"rec": {"app_id": "gone", "argv": []}, "shell": "fish", "want": null},
-  {"rec": {"app_id": "kitty", "cwd": "/srv/my code", "argv": ["kitty"]}, "shell": "fish", "want": "kitty -d '/srv/my code'"},
-  {"rec": {"app_id": "kitty", "cwd": null, "argv": ["kitty"]}, "shell": "zsh", "want": "kitty -d {home}"},
-  {"rec": {"app_id": "kitty", "cwd": "/tmp", "argv": ["kitty"], "claude": {"session_id": "0b8d7f8e-1111-2222-3333-444455556666", "cwd": "/home/me/src/it's", "name": "fix", "args": ["--model", "opus"]}}, "shell": "fish", "want": "kitty -d \"/home/me/src/it's\" fish -c 'claude --model opus --resume 0b8d7f8e-1111-2222-3333-444455556666; exec fish'"},
-  {"rec": {"app_id": "kitty", "cwd": "/tmp", "argv": ["kitty"], "claude": {"session_id": "abc", "cwd": null, "name": null, "args": []}}, "shell": "bash", "want": "kitty -d /tmp bash -c 'claude --resume abc; exec bash'"}
- ],
- "layout_describe": [
-  {"plan": [], "want": ""},
-  {"plan": [{"app_id": "firefox", "workspace": 1}, {"app_id": "kitty", "workspace": 2, "claude": {"session_id": "0b8d7f8e-1111-2222", "name": null}}, {"app_id": "kitty", "workspace": null, "claude": {"session_id": "x", "name": "fix the build"}}], "want": "workspace 1: firefox\nworkspace 2: resume Claude session \"0b8d7f8e\"\nworkspace ?: resume Claude session \"fix the build\""}
  ],
  "keys": [
   {"device": "keyboard", "op": "type", "args": ["Hi! a\n"], "want": {"events": [[1, 42, 1], [1, 35, 1], [1, 35, 0], [1, 42, 0], [1, 23, 1], [1, 23, 0], [1, 42, 1], [1, 2, 1], [1, 2, 0], [1, 42, 0], [1, 57, 1], [1, 57, 0], [1, 30, 1], [1, 30, 0], [1, 28, 1], [1, 28, 0]], "error": null}},
@@ -81,8 +66,7 @@
    {"tool": "click", "args": {"y": 10}, "want": {"text": "x is missing", "error": true, "log": [], "keys": []}},
    {"tool": "click", "args": {"x": "left", "y": 10}, "want": {"text": "x must be a number", "error": true, "log": [], "keys": []}},
    {"tool": "scroll", "args": {"x": 100, "y": 100, "amount": -2}, "want": {"text": "Scrolled.", "error": false, "log": [], "keys": [[3, 0, 4180], [3, 1, 6687], [2, 8, 1], [2, 8, 1]]}},
-   {"tool": "unlock_screen", "args": {}, "want": {"text": "The screen is not locked.", "error": false, "log": [], "keys": []}},
-   {"tool": "restore_desktop", "args": {}, "want": {"text": "Nothing to bring back: no earlier layout from the last 3 days, or everything is already open.", "error": false, "log": [], "keys": []}}
+   {"tool": "unlock_screen", "args": {}, "want": {"text": "The screen is not locked.", "error": false, "log": [], "keys": []}}
   ]
  }
 }

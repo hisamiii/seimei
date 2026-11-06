@@ -1,6 +1,7 @@
-//! The desktop layout, remembered so a new desktop session (a WM restart or a reboot) can be brought back: apps on their workspaces, terminal windows in their folders, and agent sessions resumed.
+//! The desktop layout, remembered across a new desktop session (a WM restart or a reboot): apps on their workspaces, terminal windows in their folders, and the agent sessions in them.
+//! layout.json follows the current WM session; a new one sets the last one aside as layout-previous.json, for seimei to read and reopen by hand.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -9,12 +10,10 @@ use serde_json::{Map, Value, json};
 
 use super::{Desktop, WORKSPACE};
 use seimei_core::util::as_text;
-use seimei_core::util::{chars, now, read_json, sh_quote, truthy, write_json};
+use seimei_core::util::{now, read_json, truthy, write_json};
 
 const EVERY: Duration = Duration::from_secs(30);
-const MAX_AGE: f64 = 3.0 * 86400.0;
 const SKIP_APPS: [&str; 1] = ["kitty-quick-access"];
-const INTERPRETERS: [&str; 6] = ["python", "python3", "node", "electron", "sh", "bash"];
 
 fn sessions_dir(home: &Path) -> PathBuf {
     match std::env::var_os("CLAUDE_CONFIG_DIR").filter(|d| !d.is_empty()) {
@@ -84,80 +83,12 @@ fn terminal(proc: &Path, sessions: &Path, pid: i64, kids: &HashMap<i64, Vec<i64>
     out
 }
 
-/// The agent sessions running now: their ids, and the newest transcript each continued into.
-fn running(proc: &Path, sessions: &Path) -> HashSet<String> {
-    let mut out = HashSet::new();
-    let Ok(dir) = std::fs::read_dir(sessions) else { return out };
-    for f in dir.flatten() {
-        let Some(rec) = read_json(&f.path()).filter(|r| truthy(&r["sessionId"])) else { continue };
-        if !rec["pid"].as_i64().is_some_and(|pid| proc.join(pid.to_string()).is_dir()) {
-            continue;
-        }
-        if let Some(stem) = seimei_core::sessions::transcript_of(&rec).as_deref().and_then(Path::file_stem) {
-            out.insert(stem.to_string_lossy().into_owned());
-        }
-        out.insert(as_text(&rec["sessionId"]));
-    }
-    out
-}
-
 /// Which WM session a snapshot is from; older layouts keep it under "niri".
 fn session_of(snap: &Value) -> Value {
     match snap.get("session") {
         Some(s) => s.clone(),
         None => snap.get("niri").cloned().unwrap_or(Value::Null),
     }
-}
-
-/// How to start a remembered window again.
-pub fn command(rec: &Value, shell: &str, home: &Path) -> Option<String> {
-    if rec["app_id"] == "kitty" {
-        let c = &rec["claude"];
-        let dir =
-            [&c["cwd"], &rec["cwd"]].into_iter().find(|v| truthy(v)).map_or(home.to_string_lossy().into(), as_text);
-        if truthy(c) {
-            // Through the user's shell, so a shell function that wraps the agent's CLI still applies.
-            let mut words = vec!["claude".to_string()];
-            words.extend(c["args"].as_array().into_iter().flatten().map(as_text));
-            words.extend(["--resume".into(), as_text(&c["session_id"])]);
-            let resume = words.iter().map(|w| sh_quote(w)).collect::<Vec<_>>().join(" ");
-            return Some(format!(
-                "kitty -d {} {shell} -c {}",
-                sh_quote(&dir),
-                sh_quote(&format!("{resume}; exec {shell}"))
-            ));
-        }
-        return Some(format!("kitty -d {}", sh_quote(&dir)));
-    }
-    let argv: Vec<String> = rec["argv"].as_array().into_iter().flatten().map(as_text).collect();
-    let first = argv.first()?;
-    // Just the program: apps restore their own state, and arguments like a file played at launch are stale.
-    let keep = if INTERPRETERS.contains(&base(first)) && argv.len() > 1 { 2 } else { 1 };
-    Some(argv[..keep].iter().map(|w| sh_quote(w)).collect::<Vec<_>>().join(" "))
-}
-
-pub fn describe(plan: &[Value]) -> String {
-    let lines: Vec<String> = plan
-        .iter()
-        .map(|r| {
-            let c = &r["claude"];
-            let what = if truthy(c) {
-                let name = if truthy(&c["name"]) { as_text(&c["name"]) } else { chars(&as_text(&c["session_id"]), 8) };
-                format!("resume Claude session \"{name}\"")
-            } else {
-                as_text(&r["app_id"])
-            };
-            let ws = if r["workspace"].is_null() { "?".into() } else { as_text(&r["workspace"]) };
-            format!("workspace {ws}: {what}")
-        })
-        .collect();
-    lines.join("\n")
-}
-
-/// The card that asks to bring the plan back.
-pub fn card(plan: &[Value]) -> Value {
-    json!({"action": "desktop", "target": format!("bring back your desktop ({} windows)", plan.len()),
-           "detail": describe(plan)})
 }
 
 fn sort_key(r: &Value) -> (String, f64, Vec<f64>) {
@@ -174,13 +105,8 @@ impl Desktop {
         self.state.join("layout.json")
     }
 
-    fn previous_path(&self) -> PathBuf {
+    pub fn previous_path(&self) -> PathBuf {
         self.state.join("layout-previous.json")
-    }
-
-    /// The WM session the old layout was last offered in, kept across seimei's restarts.
-    fn offered_path(&self) -> PathBuf {
-        self.state.join("layout-offered.json")
     }
 
     pub fn snapshot(&self) -> Result<Value, String> {
@@ -218,7 +144,7 @@ impl Desktop {
         Ok(json!({"session": b.session(), "time": now(), "windows": out}))
     }
 
-    /// Snapshot every EVERY; when the WM is a new session, offer to bring the old layout back.
+    /// Snapshot every EVERY.
     pub async fn layout(self: Arc<Self>) {
         loop {
             tokio::time::sleep(EVERY).await;
@@ -228,102 +154,22 @@ impl Desktop {
         }
     }
 
-    /// One snapshot; true when it offered the old layout, once per WM session.
+    /// One snapshot; true when a new WM session set the last one's layout aside.
     pub async fn tick(self: &Arc<Self>) -> Result<bool, String> {
         if !self.up() {
             return Ok(false);
         }
         let snap = self.blocking(|d| d.snapshot()).await?;
-        let (path, previous) = (self.layout_path(), self.previous_path());
+        let path = self.layout_path();
         let mut saved = read_json(&path);
-        if saved.as_ref().is_some_and(|s| truthy(s) && session_of(s) != snap["session"]) {
-            // A new WM session: keep the old layout aside until it is restored or declined.
-            std::fs::rename(&path, &previous).map_err(|e| e.to_string())?;
+        let aside = saved.as_ref().is_some_and(|s| truthy(s) && session_of(s) != snap["session"]);
+        if aside {
+            std::fs::rename(&path, self.previous_path()).map_err(|e| e.to_string())?;
             saved = None;
-        }
-        let offered = read_json(&self.offered_path()).map(|o| o["session"].clone());
-        let offer = previous.exists() && offered.as_ref() != Some(&snap["session"]);
-        if offer {
-            write_json(&self.offered_path(), &json!({"session": snap["session"]})).map_err(|e| e.to_string())?;
-            tokio::spawn(self.clone().offer());
         }
         if snap["windows"].as_array().is_some_and(|w| !w.is_empty()) || !saved.as_ref().is_some_and(truthy) {
             write_json(&path, &snap).map_err(|e| e.to_string())?;
         }
-        Ok(offer)
-    }
-
-    pub fn plan(&self) -> Result<Vec<Value>, String> {
-        let old = read_json(&self.previous_path()).filter(truthy).unwrap_or(json!({}));
-        if !truthy(&old) || now() - old["time"].as_f64().unwrap_or(0.0) > MAX_AGE {
-            return Ok(vec![]);
-        }
-        let ctx = self.b.ctx();
-        let running = running(&ctx.proc, &sessions_dir(&ctx.home));
-        let mut have: HashMap<String, i64> = HashMap::new();
-        for w in self.b.windows()? {
-            *have.entry(as_text(&w["app_id"])).or_default() += 1;
-        }
-        let mut out = vec![];
-        for rec in old["windows"].as_array().into_iter().flatten() {
-            // Windows that came back on their own (autostart, an app's own session restore) count first.
-            let n = have.entry(as_text(&rec["app_id"])).or_default();
-            if *n > 0 && !truthy(&rec["claude"]) {
-                *n -= 1;
-                continue;
-            }
-            // A session the user resumed already.
-            if truthy(&rec["claude"]) && running.contains(&as_text(&rec["claude"]["session_id"])) {
-                continue;
-            }
-            if let Some(cmd) = command(rec, &self.shell, &ctx.home) {
-                let mut r = rec.clone();
-                r["command"] = json!(cmd);
-                out.push(r);
-            }
-        }
-        Ok(out)
-    }
-
-    /// One card for the whole layout: it resumes the user's agent sessions, which always needs their OK.
-    async fn offer(self: Arc<Self>) {
-        tokio::time::sleep(Duration::from_secs(15)).await;
-        let Ok(plan) = self.blocking(|d| d.plan()).await else { return };
-        let Some(h) = self.hooks.get().filter(|_| !plan.is_empty()) else { return };
-        if h.approvals.hold(card(&plan), "seimei", None).await == "approved" {
-            self.restore(&plan).await;
-        } else {
-            h.events.add(json!({"type": "system", "text": "The old desktop layout was not restored; ask seimei to restore it later."}));
-        }
-    }
-
-    pub async fn restore(self: &Arc<Self>, plan: &[Value]) -> Vec<String> {
-        let mut done = vec![];
-        for r in plan {
-            let app = as_text(&r["app_id"]);
-            let moved = async {
-                if let Some(w) = self.spawn(&as_text(&r["command"]), false).await? {
-                    // Spawned apps are the user's again, not seimei's.
-                    let wid = w["id"].as_i64().unwrap_or(-1);
-                    self.disown(wid);
-                    if truthy(&r["workspace"]) && !truthy(&r["floating"]) {
-                        let ws = as_text(&r["workspace"]);
-                        self.blocking(move |d| d.b.move_to_workspace(wid, &ws)).await?;
-                    }
-                }
-                Ok::<_, String>(())
-            };
-            done.push(match moved.await {
-                Ok(()) => format!(
-                    "{app} on workspace {}{}",
-                    as_text(&r["workspace"]),
-                    if truthy(&r["claude"]) { " (resumed)" } else { "" }
-                ),
-                Err(e) => format!("{app} failed: {e}"),
-            });
-        }
-        let _ = std::fs::remove_file(self.previous_path());
-        self.system(json!({"type": "system", "text": format!("Brought back {} windows.", done.len())}), None);
-        done
+        Ok(aside)
     }
 }
