@@ -464,7 +464,7 @@ code, .wcard.approval .body.cmd, .arow code, .report .rbody code { font-size: 14
 .btn.busy:disabled, .btn.held:disabled { opacity: 1; }
 .btn.held:disabled { opacity: .38; }
 .btn.busy::before { content: ""; flex: none; width: 16px; height: 16px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin .8s linear infinite; }
-.jump { position: fixed; right: 16px; bottom: 156px; display: flex; align-items: center; gap: 8px; height: 48px; padding: 0 18px 0 14px; border: 0; border-radius: 16px; background: var(--tonal); color: var(--on-tonal); font: 500 14px/20px var(--sans); box-shadow: 0 2px 6px rgb(0 0 0 / .3); z-index: 5; }
+.jump { position: fixed; right: 16px; bottom: 96px; display: flex; align-items: center; gap: 8px; height: 48px; padding: 0 18px 0 14px; border: 0; border-radius: 16px; background: var(--tonal); color: var(--on-tonal); font: 500 14px/20px var(--sans); box-shadow: 0 2px 6px rgb(0 0 0 / .3); z-index: 5; }
 .jump b { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--primary); color: var(--on-primary); font: 600 12px/20px var(--sans); text-align: center; }
 
 /* Contrast and touch-target fixes */
@@ -500,9 +500,6 @@ code, .wcard.approval .body.cmd, .arow code, .report .rbody code { font-size: 14
 .tseed { width: 48px; height: 48px; }
 
 /* Nav: the active pill on primary (7.3:1 on the bar), its icon on-primary; the label keeps its color */
-.nav-item.on .ind { background: var(--primary); color: var(--on-primary); }
-.nav-item.on .ring-ico .t { stroke: color-mix(in srgb, var(--on-primary) 30%, transparent); }
-.nav-item.on .ring-ico .f, #nav-usage.on[data-tone] .ring-ico .f { stroke: var(--on-primary); }
 
 /* Usage is neutral, as primary is for working: meters, percentages and the idle nav ring are on-surface-variant on an outline-variant track.
    Error only near the limit (90%+); the 5-hour note is plain supporting text.
@@ -512,10 +509,9 @@ code, .wcard.approval .body.cmd, .arow code, .report .rbody code { font-size: 14
 .meter, .meter.ok, .meter.warn { --tone: var(--text-2); }
 .meter.bad { --tone: var(--error); }
 .meter .bar-track::after { background: var(--outline-variant); }
-#nav-usage:not(.on) .ring-ico .t { stroke: var(--outline-variant); opacity: 1; }
-.ring-ico .f, #nav-usage[data-tone="warn"] .ring-ico .f { stroke: var(--text-2); }
-#nav-usage[data-tone="bad"] .ring-ico .f { stroke: var(--error); }
-#nav-usage.on .ring-ico .f { stroke: var(--on-primary); }
+.ditem .ring-ico .t { stroke: var(--outline-variant); opacity: 1; }
+.ring-ico .f, .ditem[data-tone="warn"] .ring-ico .f { stroke: var(--text-2); }
+.ditem[data-tone="bad"] .ring-ico .f { stroke: var(--error); }
 
 /* Wavy progress on a running task's step bar (amplitude 3, wavelength 40, 4 thick, a 4 gap, the flat track).
    Usage meters are amounts and stay flat; the wave masks the theme's primary, so accents and themes carry over. */
@@ -670,10 +666,9 @@ code, .wcard.approval .body.cmd, .arow code, .report .rbody code { font-size: 14
 
 /* Press: shape first (a corner step down), then a small squish toward the finger, both on the fast spatial spring.
    The nav pill widens inside its item; nothing at rest changes size. */
-.fab, .btn, .nav-item .ind, .chip { transition: border-radius var(--spring-fast-ms) var(--spring-fast), scale var(--spring-fast-ms) var(--spring-fast), flex-grow var(--spring-fast-ms) var(--spring-fast), width var(--spring-fast-ms) var(--spring-fast); }
+.fab, .btn, .chip { transition: border-radius var(--spring-fast-ms) var(--spring-fast), scale var(--spring-fast-ms) var(--spring-fast), flex-grow var(--spring-fast-ms) var(--spring-fast), width var(--spring-fast-ms) var(--spring-fast); }
 .fab:active { border-radius: var(--shape-md); scale: .92; }
 .btn:active { scale: .96 1; }
-.nav-item:active .ind { width: 64px; }
 .chip:active { border-radius: var(--shape-sm); scale: .96; }
 
 @media (prefers-reduced-motion: reduce) {
@@ -716,3 +711,64 @@ body:not([data-tab="chat"]) .jump, body[data-lane="k"] .jump, body.spage-open .j
 /* Focus moved by the app (a page title, a settled card's outcome) shows no ring; the keyboard's own focus does */
 [tabindex="-1"]:focus:not(:focus-visible) { outline: none; }
 h1[tabindex="-1"]:focus { outline: none; }
+
+/* ---------- Navigation drawer (M3 modal): seimei, side threads, agents, watches, files; usage and settings at its foot ---------- */
+.dwrap { position: fixed; inset: 0; z-index: 9; }
+.dwrap .scrim { animation: fadeIn .3s; }
+.drawer { position: absolute; top: 0; bottom: 0; left: 0; width: min(340px, calc(100vw - 56px)); display: flex; flex-direction: column;
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); background: var(--container); border-radius: 0 16px 16px 0;
+  box-shadow: 0 6px 24px rgb(0 0 0 / .35); animation: drawerIn .45s var(--ease); touch-action: pan-y; }
+@keyframes drawerIn { from { transform: translateX(-100%); } to { transform: none; } }
+.dscroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 12px 12px 4px; }
+.dfoot { padding: 4px 12px 12px; border-top: 1px solid var(--container-high); }
+.drawer hr { border: 0; border-top: 1px solid var(--container-high); margin: 6px 16px; }
+.ditem { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; padding: 0 16px; border: 0; border-radius: 22px;
+  background: none; color: var(--text-2); font: 500 14px/20px var(--sans); text-align: left; }
+.ditem > svg, .ditem > .glyph { flex: none; color: var(--text-3); }
+.ditem > .glyph { background: var(--text-2); width: 22px; height: 22px; }
+.ditem.on { background: var(--primary-container); color: var(--on-primary-container); }
+.ditem.on > svg, .ditem.on > .glyph { color: inherit; background-color: currentColor; }
+.ditem.on > svg { background: none; }
+.ditem .lbl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ditem time { flex: none; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.ditem .nbadge, .ditem .ndot { position: static; flex: none; }
+.ditem .ndot { width: 8px; height: 8px; border-radius: 4px; margin-right: 4px; }
+.ditem.darch .lbl { color: var(--text-3); }
+.ditem.warn time { color: var(--warn); }
+.ditem.bad time { color: var(--error); }
+.dhd { display: flex; align-items: center; gap: 4px; width: 100%; min-height: 36px; padding: 0 16px; border: 0; border-radius: 18px; background: none;
+  color: var(--text-3); font: 500 13px var(--sans); text-align: left; }
+.dhd svg { opacity: .7; }
+.tile.mini { flex: none; width: 28px; height: 28px; display: grid; place-items: center; }
+.tile.mini svg { width: 16px; height: 16px; }
+.tile.mini .loader { transform: scale(.6); }
+.ditem.ag .lbl { display: flex; align-items: baseline; gap: 6px; }
+.ditem.ag .lbl b { font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+.ditem.ag .lbl small { flex: 1 1 0; min-width: 40px; font-size: 12px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; }
+.ditem.ag.ask .lbl b { color: var(--warn); }
+
+/* Files: day headers as the agents list's group headers, the chat's image grid, file chips */
+#files, #watches, #threads, #settings { padding-top: 4px; }
+.fday { margin: 20px 0 8px; padding: 0 4px; font-size: 14px; font-weight: 500; color: var(--text-2); }
+.fgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.fgrid img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 12px; display: block; cursor: pointer; background: var(--container); }
+.flist { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.flist .fchip { max-width: none; }
+#watches .agroup:first-child { margin-top: 8px; }
+
+/* Side threads: a thread's tile is the agents' idle tile with the thread icon; Send is the agent page's Take over pill */
+.offerbtn { align-self: flex-start; display: inline-flex; align-items: center; gap: 8px; }
+/* Sheet rows keep their height when a long sheet scrolls (overflow hidden would let a flex column squeeze them) */
+.seg, .sfield { flex: none; }
+.sfield { width: 100%; box-sizing: border-box; padding: 10px 14px; border: 1.5px solid var(--outline); border-radius: 12px; background: none;
+  color: var(--text); font: 15px/22px var(--sans); resize: none; outline: none; }
+.sfield:focus { border-color: var(--primary); }
+.sfield.mono { font: 14px/22px var(--mono); }
+textarea.sfield { min-height: 120px; max-height: 40dvh; overflow-y: auto; }
+.squote { display: flex; align-items: center; gap: 8px; margin: 0 4px 8px; padding: 8px 12px; border-radius: var(--shape-md); background: var(--container); color: var(--text-3); font-size: 13px; }
+.squote span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.squote svg { flex: none; }
+.sbar .back { position: relative; overflow: visible; }
+.sbar .back .ndot { left: 33px; top: 11px; width: 8px; height: 8px; border-radius: 4px; }
+#settings .mopt { align-items: center; min-height: 56px; padding: 4px 12px; }
+.trig.sender { align-self: flex-end; margin-bottom: -6px; }

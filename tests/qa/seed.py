@@ -110,7 +110,70 @@ def seed():
     asked = len(ev)
     add({"type": "worker", "worker": recs[2]["id"], "name": recs[2]["name"], "event": "asking", "text": recs[2]["question"]}, 60)
     add({"type": "assistant", "text": "It is waiting on you: pick q1 or q2 on the card above.", "lane": "c", "re": asked}, 50)
+    # Side threads: one about a chat message, sent back to the chat; pictures and a file for the Files page; an offer.
+    files = state / "files"
+    files.mkdir()
+    pics = []
+    for i, src in enumerate(["photo.jpg", "wide.png", "tall.png"]):
+        name = f"{i:032x}{Path(src).suffix}"
+        (files / name).write_bytes((QA / "img" / src).read_bytes())
+        pics.append(name)
+    add({"type": "user", "text": "also repasting the z13 tonight, the apu hits 95 under load"}, 40)
+    add({"type": "assistant", "text": "good timing. the z13 ships with a kryosheet on the apu, so if it's intact you can reuse it."}, 38)
+    kryo = ev[-1]
+    add({"type": "image", "file": pics[0], "w": 1200, "h": 800, "caption": "the apu after the repaste", "from": "app-tester", "worker": recs[0]["id"]}, 36)
+    add({"type": "file", "file": "qa-report", "name": "qa-report.md", "size": 4100, "kind": "text", "from": "app-tester", "worker": recs[0]["id"]}, 35)
+    add({"type": "user", "text": "kryosheet: no official pressure spec, it wants firm even contact. reuse it if flat and untorn.",
+         "thread": "t1kryo", "thread_name": "kryosheet pressure", "quote": kryo["text"], "quote_id": kryo["id"], "images": [pics[1]]}, 30)
+    add({"type": "assistant", "text": "got it, the sheet stays. if the apu still hits 95 after, i'll look at the fan curve."}, 28)
+    add({"type": "user", "text": "also which usb-c dac should i get for the pixel?"}, 20)
+    add({"type": "assistant", "text": "quick take: the moondrop dawn pro or the fiio ka17 are the usual picks for sensitive iems."}, 18)
+    add({"type": "offer", "re": ev[-1]["id"], "lane": "c"}, 17)
     (state / "events.jsonl").write_text("".join(json.dumps(e) + "\n" for e in ev))
+    (state / "threads").mkdir()
+    threads = []
+    def thread(tid, name, rows, age, seen, sent=0, quote=None, model="opus"):
+        r = {"id": tid, "name": name, "task": rows[0]["text"], "cwd": HOME, "model": model, "effort": None, "context_cap": "200k",
+             "subagents": "", "session_id": str(uuid.uuid4()), "state": "idle", "created": now - age - 600, "updated": now - age,
+             "summary": [e["text"] for e in rows if e["type"] == "assistant"][-1].split("\n")[0], "started": True,
+             "thread": {"quote": quote, "by": "", "named": True, "seen": seen, "sent": sent, "shikigami": None, "seimei_asked": False}}
+        threads.append(r)
+        log = state / "threads" / f"{tid}.jsonl"
+        log.write_text("".join(json.dumps({**e, "id": i + 1, "t": now - age - 600 + i * 30}) + "\n" for i, e in enumerate(rows)))
+    answer = ("thermal grizzly doesn't publish a number. what reviews and repair folks agree on:\n\n"
+              "- it wants **firm, even** pressure. it's a graphene sheet, not a paste, so it can't fill gaps\n"
+              "- low pressure mounts are the weak case: thin office laptops, some macbooks\n\n"
+              "the z13's apu cooler is spring loaded with four screws, the kind of mount it's made for.")
+    thread("t1kryo", "kryosheet pressure", [
+        {"type": "user", "text": "how much pressure does a kryosheet need?", "quote": kryo["text"], "quote_id": kryo["id"]},
+        {"type": "tool", "tool_id": "w1", "name": "WebSearch", "summary": "kryosheet mounting pressure"},
+        {"type": "tool_result", "tool_id": "w1", "error": False, "text": "ok"},
+        {"type": "assistant", "text": answer},
+        {"type": "user", "text": "so reuse it or swap for paste?"},
+        {"type": "assistant", "text": "reuse it if it's flat and not torn. tighten the screws in a cross pattern, a bit at a time."},
+        {"type": "system", "text": "Sent to seimei"}], 120, seen=4, sent=1, quote={"id": kryo["id"], "text": kryo["text"]})
+    thread("t2dac", "fiio ka17 vs moondrop dawn pro", [
+        {"type": "user", "text": "fiio ka17 or moondrop dawn pro for sensitive iems?"},
+        {"type": "assistant", "text": "the dawn pro has the lower noise floor; the ka17 has more power and a desktop mode."}], 60, seen=0, model="sonnet")
+    thread("t3gpu", "used 7900 xtx, fair price?", [
+        {"type": "user", "text": "used 7900 xtx, what's a fair price?"},
+        {"type": "assistant", "text": "around 520 to 600 on the local market, check the hotspot temps before you buy."}], 5 * 3600, seen=2)
+    thread("t4old", "split keyboard switches", [
+        {"type": "user", "text": "which switches for a split keyboard?"},
+        {"type": "assistant", "text": "light linears, 35 to 45 g, if you type a lot."}], 3 * 86400, seen=2)
+    (state / "threads.json").write_text(json.dumps(threads))
+    # Watch rules: two timers, a command that still runs, a ping.
+    with open(QA / "server.log", "a") as out:
+        cmd = subprocess.Popen(["sleep", "7200"], stdout=out, stderr=out, stdin=subprocess.DEVNULL, start_new_session=True)
+    start = Path(f"/proc/{cmd.pid}/stat").read_text().rsplit(")", 1)[1].split()[19]
+    boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+    (state / "watches.json").write_text(json.dumps([
+        {"id": "W1", "trigger": "time", "target": "21:40", "note": "check halo-profile's numbers", "by": "", "due": now + 1700, "created": now - 600},
+        {"id": "W2", "trigger": "time", "target": "fri 10:00", "note": "repaste the 7900 xtx", "by": "you", "due": now + 3 * 86400, "created": now - 900},
+        {"id": "W3", "trigger": "command_exits", "target": "python bench.py --pp 4096 on halo", "note": "then rerun with --pp 8192",
+         "pid": cmd.pid, "start": start, "boot": boot, "started": now - 720, "created": now - 720},
+        {"id": "W4", "trigger": "shikigami_done", "target": "runner", "title": "{name} done", "body": "{detail}", "level": "normal",
+         "key": None, "reply": False, "repeat": False, "created": now - 300, "expires": now + 86400}]))
     # Fake user sessions
     proj = FAKE / "projects" / "-home-q-src-yah"
     proj.mkdir(parents=True, exist_ok=True)

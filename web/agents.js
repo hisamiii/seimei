@@ -4,6 +4,7 @@ import { Renderer, doing as doingPhrase, elapsed, loader } from './chat.js';
 import { sheet, showSheet, closeSheet } from './sheet.js';
 import { metricFacts } from './usage.js';
 import { current as themeNow } from './theme.js';
+import { THR, threadDetails, sendSheet, threadSeen } from './threads.js';
 
 const page = $('agents');
 const sp = $('spage');
@@ -108,7 +109,7 @@ async function refreshAll() {
 
 // The theme's project colors (Catppuccin's by default); a project keeps its place in the list everywhere.
 const TINTS = ['#89b4fa', '#a6e3a1', '#94e2d5', '#cba6f7', '#f5c2e7', '#b4befe', '#f9e2af', '#74c7ec', '#eba0ac', '#fab387'];
-function tint(project) {
+export function tint(project) {
   if (!project) return themeNow?.['text-3'] || '#a6adc8';
   const tints = themeNow?.tints || TINTS;
   let h = 0;
@@ -116,7 +117,7 @@ function tint(project) {
   return tints[h % tints.length];
 }
 
-function fromWorker(w) {
+export function fromWorker(w) {
   const state = w.state === 'asking' ? 'ask' : ACTIVE.has(w.state) ? 'work' : 'done';
   return {
     kind: 'worker', id: w.id, name: w.name, project: w.project, context: w.context, state, since: w.updated,
@@ -125,7 +126,7 @@ function fromWorker(w) {
   };
 }
 
-function fromSession(s) {
+export function fromSession(s) {
   const asking = s.question || s.status === 'waiting';
   const state = asking ? 'ask' : s.status === 'busy' ? 'work' : 'idle';
   return {
@@ -134,6 +135,16 @@ function fromSession(s) {
       : state === 'work' ? sessionLine(s.doing) : (s.line || ''),
     fresh: state === 'idle' && s.active > (seen[s.session_id] || 0) + 1,
     archived: !!s.archived, find: [s.name, s.project, s.line],
+  };
+}
+
+// A side thread as a row of the lists and the page's header: the agents' idle tile wearing the thread icon.
+export function fromThread(t) {
+  const work = t.state === 'running' || t.state === 'starting';
+  const line = work ? (t.doing ? workerLine({ doing: t.doing }) : 'Working') : t.shikigami ? 'Became a shikigami' : (t.last || '');
+  return {
+    kind: 'thread', id: t.id, name: t.name, context: t.context, state: work ? 'work' : 'idle', since: t.updated, line,
+    icon: THR, archived: !!t.archived, fresh: t.unread > 0, sent: t.sent, find: [t.name, t.last, t.quote],
   };
 }
 
@@ -156,7 +167,7 @@ const CLOCK = 'M12 4a8 8 0 1 1 0 16 8 8 0 0 1 0-16zM12 8v4l2.5 2';
 // How a finished shikigami ended, when not by finishing.
 const END = { stopped: 'M7.5 7.5h9v9h-9z', interrupted: 'M4 12a8 8 0 1 0 2.4-5.7M4 4.5v4h4' };
 
-function tile(x) {
+export function tile(x) {
   // A live one wears its identity shape (a working one morphs it); finished ones are plain circles
   const live = x.state !== 'done';
   const t = el('span', `tile${live ? ' sh' : ''} ${x.state}${x.bad ? ' bad' : ''}`);
@@ -166,7 +177,7 @@ function tile(x) {
     t.append(loader('bare small'));
     return t;
   }
-  const icon = x.state === 'ask' ? Q_ICON : x.state === 'idle' ? CLOCK : x.bad ? 'M12 7v6M12 17v.01' : END[x.end] || ICON.check;
+  const icon = x.icon || (x.state === 'ask' ? Q_ICON : x.state === 'idle' ? CLOCK : x.bad ? 'M12 7v6M12 17v.01' : END[x.end] || ICON.check);
   t.append(svg(icon, 20));
   return t;
 }
@@ -181,11 +192,12 @@ export function marked(text, q) {
   return [`${from ? '…' : ''}${text.slice(from, i)}`, m, text.slice(i + q.length)];
 }
 
-function row(x, q = '') {
+export function row(x, q = '') {
   const b = el('button', `agent sl ${x.state}${x.archived ? ' arch' : ''}`);
   b.type = 'button';
   const top = el('span', 'top');
   top.append(el('b', null, x.name));
+  if (x.sent) top.append(el('span', 'tag sent', 'sent'));
   const t = el('time', x.fresh ? 'fresh' : null, x.state === 'done' ? when(x.since) : short(x.since));
   top.append(t);
   const sub = el('span', 'sub');
@@ -204,6 +216,7 @@ function row(x, q = '') {
   b.append(tile(x), txt);
   let held = false;
   b.addEventListener('click', () => { if (!held) openPage(x.kind, x.id); held = false; });
+  b.dataset.id = x.id;
   // Right-click, or a long press on touch: the row's menu.
   // Only a finished or idle agent can be archived: one that works or asks always shows.
   if (x.state !== 'done' && x.state !== 'idle') return b;
@@ -230,7 +243,7 @@ function group(title, cls, items, q) {
 
 // ---------- the archive: rows hidden from the list; nothing is stopped or deleted ----------
 
-const ARCH = 'M3 4h18v4H3zM5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4';
+export const ARCH = 'M3 4h18v4H3zM5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4';
 let archView = false;
 let archQuery = '';
 
@@ -248,24 +261,27 @@ function openArch() {
   page.scrollTop = 0;
 }
 
-async function setArchived(x, on, undo = true) {
-  const path = x.kind === 'worker' ? `api/workers/${encodeURIComponent(x.id)}/archive` : `api/sessions/${x.id}/archive`;
+export async function setArchived(x, on, undo = true) {
+  const path = x.kind === 'worker' ? `api/workers/${encodeURIComponent(x.id)}/archive`
+    : x.kind === 'thread' ? `api/threads/${x.id}/archive` : `api/sessions/${x.id}/archive`;
   const r = await postJSON(path, { archived: on });
   if (!r.ok) return snack(r.error);
   // An archived conversation is not kept in this browser.
   if (on && !(P && P.kind === x.kind && String(P.id) === String(x.id))) keep.drop(`${x.kind}-${x.id}`);
   // The server's update follows; show it now.
   if (x.kind === 'worker') for (const w of [...S.workers, ...(all || [])]) { if (w.id === x.id) w.archived = on; }
+  else if (x.kind === 'thread') for (const t of [...S.threads, ...(S.threadsAll || [])]) { if (t.id === x.id) t.archived = on; }
   else for (const s of S.sessions) { if (s.pid === x.id) s.archived = on; }
   if (P && P.kind === x.kind && P.id === x.id) {
     P.row.archived = on;
     head();
   }
   changed();
+  hooks.threads?.();
   if (undo) snack(`${on ? 'Archived' : 'Unarchived'} ${x.name}`, { label: 'Undo', run: () => setArchived(x, !on, false) });
 }
 
-function rowMenu(x) {
+export function rowMenu(x) {
   const opt = (icon, label, hint, run) => {
     const b = el('button', 'mopt sl');
     b.type = 'button';
@@ -407,6 +423,7 @@ function ring(pct) {
 
 function head() {
   if (!P) return;
+  if (P.kind === 'thread') return threadHead();
   const x = P.kind === 'worker' ? fromWorker(P.row) : fromSession(P.row);
   P.title.textContent = x.name;
   const sub = P.sub;
@@ -444,10 +461,59 @@ function head() {
   composerState();
 }
 
+// A side thread's header: its model and state, Send while it can be sent, and why the composer is closed when it is.
+function threadHead() {
+  const r = P.row;
+  const draft = !P.id;
+  const x = fromThread({ ...r, id: P.id });
+  P.title.textContent = draft ? 'New side thread' : r.name;
+  const word = draft ? 'New' : x.state === 'work' ? 'Working' : r.shikigami ? 'Shikigami' : 'Idle';
+  P.sub.replaceChildren(el('span', x.state, [r.model, word].filter(Boolean).join(' · ')));
+  const ringEl = ring(draft ? null : x.context);
+  ringEl.addEventListener('click', () => !draft && threadDetails(P.row, threadChanged));
+  ringEl.hidden = draft;
+  P.ring.replaceWith(ringEl);
+  P.ring = ringEl;
+  P.hand.textContent = 'Send';
+  P.hand.setAttribute('aria-label', 'Send to seimei');
+  P.hand.hidden = draft || !!r.shikigami || !P.renderer.target.querySelector('.msg.assistant');
+  P.stop.hidden = x.state !== 'work';
+  P.dot.hidden = !hooks.seimeiNews?.();
+  P.banner.hidden = !r.archived && !r.shikigami;
+  if (r.shikigami) {
+    const open = el('button', 'sl', 'Open');
+    open.type = 'button';
+    open.addEventListener('click', () => openPage('worker', r.shikigami));
+    P.banner.replaceChildren(svg(ICON.check, 20), el('span', null, 'Became a shikigami'), open);
+  } else if (r.archived) {
+    const un = el('button', 'sl', 'Unarchive');
+    un.type = 'button';
+    un.addEventListener('click', () => setArchived(x, false));
+    P.banner.replaceChildren(svg(ARCH, 20), el('span', null, 'Archived. A message brings it back.'), un);
+  }
+  P.quote.hidden = !draft || !r.quote;
+  composerState();
+}
+
+// The thread's row changed on the server (a sheet's action, the stream): the page takes it.
+function threadChanged(row) {
+  if (P?.kind !== 'thread' || !row || row.id !== P.id) return;
+  P.row = { ...P.row, ...row };
+  head();
+}
+
+// The stream's threads listing: the open page takes its row.
+export function threadRows(list) {
+  if (P?.kind !== 'thread' || !P.id) return;
+  const t = list.find((x) => x.id === P.id);
+  if (t) threadChanged(t);
+}
+
 // Take over: the shikigami goes on as the user's own session (their tap is the OK).
 // Hand off: the session becomes a shikigami once the user approves the card in the chat, as when seimei adopts one.
 async function handoff() {
   if (!P) return;
+  if (P.kind === 'thread') return sendSheet(P.row);
   const { kind, id, row } = P;
   P.hand.disabled = true;
   const r = await postJSON(kind === 'worker' ? `api/workers/${encodeURIComponent(id)}/release` : `api/sessions/${id}/adopt`, {});
@@ -519,7 +585,7 @@ async function answer(body, btn) {
   return true;
 }
 
-async function postJSON(path, body) {
+export async function postJSON(path, body) {
   const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).catch(() => null);
   if (r?.status === 401) toLogin();
   const j = await r?.json().catch(() => null);
@@ -534,6 +600,7 @@ function note(text, cls = 'error') {
 
 // Why the composer cannot type into this session, if it cannot.
 function blocked() {
+  if (P.kind === 'thread') return P.row.shikigami ? 'Now a shikigami' : null;
   if (P.kind === 'worker') return null;
   const s = P.row;
   if (s.reach && (s.via !== 'seimei' || P.ask)) return P.ask ? 'Answer on the server' : s.reach;
@@ -547,9 +614,9 @@ function composerState() {
   const why = blocked();
   P.input.disabled = !!why;
   P.attach.disabled = !!why;
-  const nm = P.row.name.length > 22 ? `${P.row.name.slice(0, 21).trim()}…` : P.row.name;
-  P.input.placeholder = why ? 'Can\'t reply from here right now' : P.ask ? 'Your answer'
-    : `Message ${nm}`;
+  const nm = (P.row.name || '').length > 22 ? `${P.row.name.slice(0, 21).trim()}…` : P.row.name;
+  P.input.placeholder = P.kind === 'thread' && !P.id ? 'Ask on the side'
+    : why ? (P.kind === 'thread' ? why : 'Can\'t reply from here right now') : P.ask ? 'Your answer' : `Message ${nm}`;
   if (P.kind === 'session') {
     if (why) note(why, 'info');
     else if (P.note.classList.contains('info')) note(null);
@@ -618,7 +685,10 @@ function sendState() {
   if (!P) return;
   const typing = P.input.value.trim() !== '' || P.files.length > 0;
   P.send.disabled = P.input.disabled || !typing;
-  if (P.kind === 'worker') {
+  if (P.kind === 'thread') {
+    P.stop.hidden = !ACTIVE.has(P.row.state) || typing;
+    P.send.hidden = !P.stop.hidden;
+  } else if (P.kind === 'worker') {
     // Asking: the answer goes through Send (disabled until typed); Stop is in the details sheet.
     P.stop.hidden = !ACTIVE.has(P.row.state) || P.row.state === 'asking' || typing;
     P.send.hidden = !P.stop.hidden;
@@ -639,7 +709,10 @@ async function submit(e) {
   await Promise.all(files.map((a) => a.upload).filter(Boolean));
   const ids = files.filter((a) => a.id).map((a) => a.id);
   let r;
-  if (P.kind === 'worker') r = await postJSON(`api/workers/${encodeURIComponent(P.id)}/send`, { text, files: ids });
+  const p = P;
+  if (P.kind === 'thread' && !P.id) r = await postJSON('api/threads', { text, files: ids, quote: P.row.quote?.id });
+  else if (P.kind === 'thread') r = await postJSON(`api/threads/${P.id}/send`, { text, files: ids });
+  else if (P.kind === 'worker') r = await postJSON(`api/workers/${encodeURIComponent(P.id)}/send`, { text, files: ids });
   else if (answering) r = await postJSON(`api/sessions/${P.id}/answer`, { tool_id: P.ask.tool_id, text, files: ids });
   else r = await postJSON(`api/sessions/${P.id}/send`, { text, files: ids });
   if (!r.ok) {
@@ -653,6 +726,14 @@ async function submit(e) {
   }
   files.forEach((a) => a.url && URL.revokeObjectURL(a.url));
   note(null);
+  // The draft is a thread now: its log so far, and the stream's events for it from here.
+  if (r.thread && P === p && !P.id) {
+    P.id = r.thread.id;
+    P.row = { ...P.row, ...r.thread };
+    hooks.threads?.();
+    const h = await getJSON(`api/threads/${P.id}`);
+    if (h && P === p) add(h.events);
+  }
   if (r.via === 'seimei') snack(r.held ? 'Held until you allow it in its terminal' : 'In its inbox');
   composerState();
   stick(true);
@@ -702,11 +783,12 @@ function add(events) {
     }
   }
   if (fresh.length) {
+    if (P.kind === 'thread') seenSoon();
     P.empty?.remove();
     P.thread.append(...P.pending);
     P.raw = P.raw.concat(fresh).slice(-KEEP_PAGE);
     const p = P;
-    keep.later(`${p.kind}-${p.id}`, () => ({ events: p.raw, last: p.last, next: p.next, row: p.row, shape: SHAPE }));
+    if (p.id != null) keep.later(`${p.kind}-${p.id}`, () => ({ events: p.raw, last: p.last, next: p.next, row: p.row, shape: SHAPE }));
   }
 }
 
@@ -764,10 +846,21 @@ setInterval(() => {
 }, 1000);
 
 export function sheetEvent(ev) {
-  if (P?.kind !== 'worker' || P.id !== ev.worker) return;
+  if ((P?.kind !== 'worker' && P?.kind !== 'thread') || P.id !== ev.worker) return;
   add([ev.ev]);
+  if (P.kind === 'thread') head();
   stick();
 }
+
+// What the user saw of an open thread, told to the server a moment later (its unread count and push go by it).
+let seenTimer = 0;
+function seenSoon() {
+  clearTimeout(seenTimer);
+  seenTimer = setTimeout(() => {
+    if (P?.kind === 'thread' && P.id && !document.hidden && !sp.hidden) threadSeen(P.id, P.last);
+  }, 800);
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden && P?.kind === 'thread') seenSoon(); });
 
 function details() {
   const r = P.row;
@@ -962,9 +1055,13 @@ function build(kind, id, row) {
   const bar = el('header', 'sbar');
   const back = el('button', 'back sl');
   back.type = 'button';
-  back.setAttribute('aria-label', 'Back to agents');
+  back.setAttribute('aria-label', 'Back');
   back.append(svg('M15 5l-7 7 7 7', 22));
   back.addEventListener('click', () => history.back());
+  // News in seimei's chat while away from it, as the navigation's dot was
+  const dot = el('i', 'ndot');
+  dot.hidden = true;
+  back.append(dot);
   const titles = el('div', 'titles');
   const title = el('h1');
   const sub = el('div', 'sub');
@@ -1016,12 +1113,16 @@ function build(kind, id, row) {
   stop.hidden = true;
   form.append(field, file, send, stop);
   const foot = el('div', 'sfoot');
-  foot.append(noteEl, trayEl, form);
+  // A draft thread about a message of seimei's shows which one
+  const quote = el('div', 'squote');
+  quote.hidden = true;
+  if (row.quote) quote.append(svg('M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11', 16), el('span', null, row.quote.text.replace(/\s+/g, ' ').trim()));
+  foot.append(noteEl, quote, trayEl, form);
   const banner = el('div', 'archbar');
   banner.hidden = true;
   sp.replaceChildren(bar, banner, main, foot);
 
-  P = { kind, id, row, title, sub, ring: r, hand, banner, main, thread, empty, qbox, note: noteEl, tray: trayEl, input, attach, send, stop,
+  P = { kind, id, row, title, sub, ring: r, hand, banner, dot, quote, main, thread, empty, qbox, note: noteEl, tray: trayEl, input, attach, send, stop,
     files: [], next: null, ask: null, askKey: undefined, pinned: true, renderer: new Renderer(thread), ids: new Set(), raw: [], last: 0, pending: [] };
 
   main.addEventListener('scroll', () => { if (P) P.pinned = nearBottom(); }, { passive: true });
@@ -1043,15 +1144,15 @@ function build(kind, id, row) {
     }
   });
   form.addEventListener('submit', submit);
-  stop.addEventListener('click', () => postJSON(`api/workers/${encodeURIComponent(id)}/stop`, {}));
+  stop.addEventListener('click', () => postJSON(kind === 'thread' ? `api/threads/${P.id}/stop` : `api/workers/${encodeURIComponent(id)}/stop`, {}));
 }
 
-async function openPage(kind, id) {
+export async function openPage(kind, id) {
   const reopen = P && P.kind === kind && P.id === id;
   // The page as last seen draws at once; the server then sends only what came since.
   const copy = keep.read(`${kind}-${id}`);
   const kept = kind === 'session' && copy?.shape !== SHAPE ? null : copy;
-  const live = kind === 'worker' ? S.workers.find((x) => x.id === id) : null;
+  const live = kind === 'worker' ? S.workers.find((x) => x.id === id) : kind === 'thread' ? S.threads.find((x) => x.id === id) : null;
   if (kept?.events) {
     build(kind, id, { ...kept.row, ...live });
     P.next = kept.next ?? null;
@@ -1059,8 +1160,8 @@ async function openPage(kind, id) {
     shown(reopen);
   }
   const p = P;
-  const path = kind === 'worker'
-    ? `api/workers/${encodeURIComponent(id)}${kept ? `?after=${kept.last || 0}` : ''}`
+  const path = kind === 'worker' || kind === 'thread'
+    ? `api/${kind}s/${encodeURIComponent(id)}${kept ? `?after=${kept.last || 0}` : ''}`
     : `api/sessions/${id}${kept?.next != null ? `?from=${kept.next}` : ''}`;
   let gone = false;
   let r = await getJSON(path, () => { gone = true; });
@@ -1077,9 +1178,10 @@ async function openPage(kind, id) {
     return snack(kept ? 'Offline: this is the last copy' : "Couldn't reach the server");
   }
   // Drawn anew when there was no copy, or the server says the copy is too old to extend.
-  if (!kept || r.reset) build(kind, id, kind === 'worker' ? { ...r.worker, ...live } : { ...r.session, reach: r.reach, via: r.via });
-  else P.row = kind === 'worker' ? { ...P.row, ...r.worker, ...live } : { ...P.row, ...r.session, reach: r.reach, via: r.via };
-  if (kind === 'worker') add(r.events);
+  const rec = r.worker || r.thread;
+  if (!kept || r.reset) build(kind, id, kind !== 'session' ? { ...live, ...rec } : { ...r.session, reach: r.reach, via: r.via });
+  else P.row = kind !== 'session' ? { ...P.row, ...live, ...rec } : { ...P.row, ...r.session, reach: r.reach, via: r.via };
+  if (kind !== 'session') add(r.events);
   else {
     // A poll still on its way read from the old offset.
     pollRun++;
@@ -1125,19 +1227,30 @@ export async function refreshPage() {
   if (P?.kind === 'session') return poll();
   if (!P) return;
   const p = P;
-  const r = await getJSON(`api/workers/${encodeURIComponent(p.id)}?after=${p.last}`);
+  if (!p.id) return;
+  const r = await getJSON(`api/${p.kind}s/${encodeURIComponent(p.id)}?after=${p.last}`);
   if (!r || P !== p) return;
-  p.row = { ...p.row, ...r.worker, ...S.workers.find((x) => x.id === p.id) };
+  p.row = p.kind === 'thread' ? { ...p.row, ...r.thread } : { ...p.row, ...r.worker, ...S.workers.find((x) => x.id === p.id) };
   add(r.events);
   head();
   stick();
 }
 
 export const openWorker = (id) => openPage('worker', id);
+export const openThread = (id) => openPage('thread', id);
+export const pageKind = () => (sp.hidden ? null : P?.kind);
+
+// A new side thread, from the top bar or about a message of seimei's (quote: its event id and text): a page with no thread yet.
+export function openDraft(quote = null) {
+  build('thread', null, { name: '', model: '', state: 'new', quote });
+  shown(false);
+  requestAnimationFrame(() => P?.input.focus());
+}
 export const pageOpen = () => !sp.hidden;
 
 export function closePage() {
   clearTimeout(pollTimer);
+  clearTimeout(seenTimer);
   closeSheet(true);
   P?.files.forEach((a) => a.url && URL.revokeObjectURL(a.url));
   P = null;

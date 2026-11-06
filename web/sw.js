@@ -1,4 +1,4 @@
-// The page's service worker: it shows seimei's pushes while the page is closed or hidden, and a tap opens the page.
+// The page's service worker: it shows seimei's pushes while the page is closed or hidden, and a tap opens the page (a thread's, the thread).
 // The server sends none while the page is on screen, and no take-backs (a browser shows every push it gets).
 
 self.addEventListener('install', () => self.skipWaiting());
@@ -13,7 +13,7 @@ self.addEventListener('push', (e) => {
     tag,
     renotify: d.alert === '1',
     icon: 'static/0/apple-touch-icon.png',
-    data: { tab: d.tab || 'chat' },
+    data: { tab: d.tab || 'chat', thread: d.thread || null },
   }));
 });
 
@@ -22,7 +22,12 @@ self.addEventListener('notificationclick', (e) => {
   e.waitUntil((async () => {
     const open = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     const page = open.find((c) => new URL(c.url).origin === self.location.origin);
-    if (page) return page.focus();
-    return self.clients.openWindow('./');
+    // A side thread's answer opens that thread.
+    const thread = e.notification.data?.thread;
+    if (page) {
+      if (thread) page.postMessage({ thread });
+      return page.focus();
+    }
+    return self.clients.openWindow(thread ? `./#thread=${encodeURIComponent(thread)}` : './');
   })());
 });

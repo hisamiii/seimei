@@ -1,22 +1,19 @@
-// The account menu: fingerprint login, the phone app and its pairing, this browser's notifications, the theme, the activity log, and logging out.
+// Settings: fingerprint login, the phone app and its pairing, this browser's notifications, the theme, the activity log, and logging out.
 import { deviceName, register, supported } from './passkey.js';
-import { $, el, clock, dayLabel, when, post, getJSON, toLogin, snack, ask } from './util.js';
+import { $, el, svg, clock, dayLabel, when, post, getJSON, toLogin, snack, ask } from './util.js';
 import { main, toBottom } from './chat.js';
 import { sheet, showSheet } from './sheet.js';
 import { openThemes } from './themepick.js';
 
-const menu = $('menu'), card = $('fp-card');
+const card = $('fp-card');
+// Who is logged in (api/auth/me): without a login (a local server) there is nothing to pair or log out of.
+let me = null;
 
 export async function account() {
   const r = await fetch('api/auth/me').then((x) => x.json()).catch(() => null);
-  $('menu-btn').hidden = false;
-  if (!r?.auth) {
-    $('add-passkey').hidden = $('logout').hidden = true;
-    return;
-  }
-  $('add-passkey').hidden = !supported();
-  $('phones').hidden = false;
-  $('notify').hidden = !canPush();
+  me = r;
+  renderSettings();
+  if (!r?.auth) return;
   let dismissed = false;
   try { dismissed = localStorage.getItem('seimei.fp-card') === 'no'; } catch {}
   if (supported() && r.passkeys === 0 && !dismissed) {
@@ -28,8 +25,35 @@ export async function account() {
 // Adding a passkey or a phone needs a login from the last 10 minutes.
 const FRESH = 'Log out and in again first';
 
+const ICONS = {
+  passkey: 'M7 20c.6-1.6 1-3.6 1-6.5a4 4 0 0 1 8 0c0 1.2-.1 2.4-.3 3.5M11.2 21c.5-2 .8-4.5.8-7.5M4.5 16.5c.3-1 .5-2 .5-3a7 7 0 0 1 12-4.9M19 11c.2.8.2 1.7.1 2.6M15 20.5c.3-.8.5-1.6.6-2.5',
+  phone: 'M9 3h6a2.5 2.5 0 0 1 2.5 2.5v13A2.5 2.5 0 0 1 15 21H9a2.5 2.5 0 0 1-2.5-2.5v-13A2.5 2.5 0 0 1 9 3zM11 17.5h2',
+  notify: 'M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15L6 16zM10 20.5a2 2 0 0 0 4 0',
+  theme: 'M12 21a9 9 0 1 1 0-18c4.97 0 9 3.58 9 8 0 2.76-2.24 4-4.5 4H15a2 2 0 0 0-1.5 3.3A1.6 1.6 0 0 1 12 21zM7.5 11.5v.01M10 7.5v.01M14.5 7.5v.01M17 11v.01',
+  audit: 'M12 3 4.5 6v5.5c0 4.4 3.1 8.2 7.5 9.5 4.4-1.3 7.5-5.1 7.5-9.5V6L12 3zM9 12h6M9 15.5h4',
+  logout: 'M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h11',
+};
+
+// The Settings page: what the account menu held, one row each.
+export function renderSettings() {
+  const row = (icon, label, run) => {
+    const b = el('button', 'mopt sl');
+    b.type = 'button';
+    b.append(svg(ICONS[icon], 22), el('span', null, label));
+    b.addEventListener('click', run);
+    return b;
+  };
+  const auth = !!me?.auth;
+  const rows = [];
+  if (auth && supported()) rows.push(row('passkey', 'Add fingerprint login', addPasskey));
+  if (auth) rows.push(row('phone', 'Phone app', openPhones));
+  if (auth && canPush()) rows.push(row('notify', 'Notifications', openNotifications));
+  rows.push(row('theme', 'Theme', openThemes), row('audit', 'Activity log', openAudit));
+  if (auth) rows.push(row('logout', 'Log out', () => post('api/auth/logout', {}).finally(toLogin)));
+  $('settings').replaceChildren(...rows);
+}
+
 async function addPasskey() {
-  menu.hidden = true;
   const r = await register(deviceName()).catch(() => ({ ok: false }));
   if (r.status === 401) return toLogin();
   if (r.ok) card.hidden = true;
@@ -43,34 +67,10 @@ async function addPasskey() {
   }
 }
 
-$('menu-btn').addEventListener('click', (e) => {
-  e.stopPropagation();
-  menu.hidden = !menu.hidden;
-});
-document.addEventListener('click', (e) => { if (!menu.contains(e.target)) menu.hidden = true; });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') menu.hidden = true; });
-$('add-passkey').addEventListener('click', addPasskey);
 $('fp-yes').addEventListener('click', addPasskey);
 $('fp-no').addEventListener('click', () => {
   card.hidden = true;
   try { localStorage.setItem('seimei.fp-card', 'no'); } catch {}
-});
-$('logout').addEventListener('click', () => post('api/auth/logout', {}).finally(toLogin));
-$('phones').addEventListener('click', () => {
-  menu.hidden = true;
-  openPhones();
-});
-$('notify').addEventListener('click', () => {
-  menu.hidden = true;
-  openNotifications();
-});
-$('theme').addEventListener('click', () => {
-  menu.hidden = true;
-  openThemes();
-});
-$('audit').addEventListener('click', () => {
-  menu.hidden = true;
-  openAudit();
 });
 
 // ---------- this browser's notifications (Web Push; the phone app has its own) ----------

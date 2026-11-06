@@ -1,8 +1,11 @@
 // The page: the stream from the server, the three tabs, and the header and navigation bar around them.
 import { $, S, hooks, clock, finePointer, viewing, closeView, keep, reduced } from './util.js';
 import { render, onDelta, clearLive, addEvent, loadHistory, autosize, waitingApprovals, toBottom, showLane, following, nearBottom } from './chat.js';
-import { setWorkers, setSessions, sheetEvent, sessionEvent, agentCounts, showAgents, pageOpen, closePage, archOpen, closeArch, refreshPage } from './agents.js';
-import { setUsage, renderUsage, tone } from './usage.js';
+import { setWorkers, setSessions, sheetEvent, sessionEvent, agentCounts, showAgents, pageOpen, closePage, archOpen, closeArch, refreshPage, openPage, openThread, openDraft } from './agents.js';
+import { setThreads, showThreads, renderThreads, threadsArchOpen, closeThreadsArch, openThreadsArch } from './threads.js';
+import { showWatches, showFiles } from './pages.js';
+import { nav, renderDrawer, drawerOpen, drawerGone } from './drawer.js';
+import { setUsage, renderUsage } from './usage.js';
 import { setTasks, loadTasks, tasksArchOpen, closeTasksArch } from './tasks.js';
 import { account } from './account.js';
 import { sheet, closeSheet } from './sheet.js';
@@ -16,11 +19,13 @@ const KEEP_CHAT = 300;
 const KEPT_FOR = 4 * 3600e3;
 const saveChat = () => keep.later('chat', () => ({ events: raw.slice(-KEEP_CHAT), at: Date.now() }));
 
-// ---------- tabs ----------
+// ---------- pages ----------
 
-const TABS = ['chat', 'agents', 'usage'];
-const TITLES = { chat: 'seimei', agents: 'Agents', usage: 'Usage' };
-const pages = { chat: $('log'), agents: $('agents'), usage: $('usage') };
+// The drawer's destinations; chat is home.
+const TABS = ['chat', 'threads', 'agents', 'watches', 'files', 'usage', 'settings'];
+const TITLES = { chat: 'seimei', threads: 'Side threads', agents: 'Agents', watches: 'Watches', files: 'Files', usage: 'Usage', settings: 'Settings' };
+const pages = Object.fromEntries(TABS.map((t) => [t, $(t === 'chat' ? 'log' : t)]));
+const SHOW = { threads: showThreads, agents: showAgents, watches: showWatches, files: showFiles, usage: renderUsage };
 
 function show(tab) {
   if (!TABS.includes(tab)) tab = 'chat';
@@ -30,25 +35,17 @@ function show(tab) {
   document.body.dataset.tab = tab;
   // Top level: the new destination fades in; no slide between nav destinations
   if (was && was !== tab && !reduced()) pages[tab].animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: 'cubic-bezier(.2, 0, 0, 1)' });
-  for (const b of document.querySelectorAll('.nav-item')) {
-    const on = b.dataset.tab === tab;
-    b.classList.toggle('on', on);
-    if (on) b.setAttribute('aria-current', 'page');
-    else b.removeAttribute('aria-current');
-  }
   if (tab === 'chat') {
-    S.unread = false;
     // Back at the bottom only if the reader was following when they left
     if (was !== 'chat' && following()) requestAnimationFrame(toBottom);
     if (S.lane === 't') showLane('t');
-  } else if (tab === 'agents') showAgents();
-  else if (tab === 'usage') renderUsage();
+  } else SHOW[tab]?.();
   chrome();
   lift();
 }
 
 // The top bar fills with surface-container once its screen has moved off its rest (M3 app bars on scroll).
-// The chat rests at its end; Agents, Usage and Tasks at their top.
+// The chat rests at its end; the other pages at their top.
 function lift() {
   const sc = pages[S.tab];
   const off = S.tab === 'chat' && S.lane !== 'k' ? !nearBottom() : sc.scrollTop > 0;
@@ -56,7 +53,7 @@ function lift() {
 }
 for (const t of TABS) pages[t].addEventListener('scroll', lift, { passive: true });
 
-// Chat is home: other tabs sit one step of history above it, so the phone's back button returns to the chat.
+// Chat is home: other pages sit one step of history above it, so the phone's back button returns to the chat.
 function go(tab) {
   if (tab === S.tab) {
     pages[tab].scrollTo({ top: tab === 'chat' ? pages[tab].scrollHeight : 0, behavior: 'smooth' });
@@ -75,34 +72,58 @@ function go(tab) {
   show(tab);
 }
 
-for (const b of document.querySelectorAll('.nav-item')) b.addEventListener('click', () => go(b.dataset.tab));
+// What runs once the history entry being left is gone (a page or the drawer closing, then where the user goes).
+let afterPop = null;
+function thenGo(run) {
+  afterPop = run;
+  history.back();
+}
+
+// Where the drawer's picks go.
+nav.go = go;
+nav.thread = openThread;
+nav.agent = openPage;
+nav.threadsArchive = () => {
+  go('threads');
+  openThreadsArch();
+};
+// The send sheet's Show: from a thread's page back to the chat.
+hooks.home = () => (pageOpen() ? thenGo(() => go('chat')) : go('chat'));
+$('new-thread').addEventListener('click', () => openDraft());
 
 window.addEventListener('popstate', () => {
-  if (viewing()) return closeView(true);
-  if (!sheet.wrap.hidden) return closeSheet(true);
+  const run = afterPop;
+  afterPop = null;
+  if (viewing()) closeView(true);
+  else if (!sheet.wrap.hidden) closeSheet(true);
+  else if (drawerOpen() && !history.state?.drawer) drawerGone();
   // Closing a sheet over the page goes back to the page's own entry: the page stays.
-  if (pageOpen() && !history.state?.spage) return closePage();
-  if (pageOpen()) return;
-  if (archOpen() && !history.state?.arch) return closeArch();
-  if (tasksArchOpen() && !history.state?.tarch) return closeTasksArch();
-  show(location.hash.slice(1) || 'chat');
+  else if (pageOpen() && !history.state?.spage) closePage();
+  else if (pageOpen()) {}
+  else if (archOpen() && !history.state?.arch) closeArch();
+  else if (tasksArchOpen() && !history.state?.tarch) closeTasksArch();
+  else if (threadsArchOpen() && !history.state?.tarchive) closeThreadsArch();
+  else show(location.hash.slice(1) || 'chat');
+  chrome();
+  run?.();
 });
 
-// ---------- header and navigation bar ----------
+// ---------- header and drawer ----------
+
+// News for the user in seimei's chat while it is out of view: the drawer's seimei count, and the dot on a thread page's back button.
+const chatInView = () => S.tab === 'chat' && !pageOpen() && !document.hidden;
+hooks.seimeiNews = () => !chatInView() && (S.unread > 0 || waitingApprovals().length > 0);
 
 function chrome() {
-  const { working, asks } = agentCounts();
+  const { asks } = agentCounts();
   let s = 'idle', text = '';
   if (S.tab === 'chat') ({ s, text } = S.status);
-  else if (S.tab === 'agents') {
-    // The sections and the nav badge say how many work and need you
-    s = 'idle';
-  }
-  // Away: the other tabs show the last known state, and say so.
+  // Away: the other pages show the last known state, and say so.
   if (S.tab !== 'chat' && !S.online && S.awaySince) {
     s = 'away';
     text = `Offline since ${clock(S.awaySince / 1000)}`;
   }
+  if (chatInView()) S.unread = 0;
   $('title').textContent = TITLES[S.tab];
   // The dispatcher on an ACP agent or Codex says which; the default harness goes without saying.
   const harness = S.session.harness || '';
@@ -113,25 +134,16 @@ function chrome() {
   // Idle and working go without saying in the chat (its working line shows a turn); only problems and asks show.
   $('status').hidden = !text || (S.tab === 'chat' && (s === 'idle' || s === 'working'));
 
-  // What needs the user counts first, in orange; otherwise how many work.
-  const count = $('nav-count');
-  const n = asks || working;
-  count.hidden = !n;
-  count.textContent = n > 99 ? '99+' : n;
-  count.classList.toggle('attn', asks > 0);
-  $('nav-chat-dot').hidden = !(S.tab !== 'chat' && (S.unread || waitingApprovals().length));
-  const label = [working && `${working} working`, asks && `${asks} ${asks === 1 ? 'needs' : 'need'} you`].filter(Boolean).join(', ');
-  $('nav-agents').setAttribute('aria-label', label ? `Agents, ${label}` : 'Agents');
-
-  const w = S.usage?.windows?.five_hour;
-  const ring = $('nav-ring');
-  ring.setAttribute('stroke-dasharray', `${w ? Math.round(w.utilization * 100) : 0} 100`);
-  $('nav-usage').dataset.tone = !w ? '' : S.usage.status === 'rejected' ? 'bad' : tone(w.utilization);
-  $('nav-usage').setAttribute('aria-label', w ? `Usage, 5-hour window ${Math.round(w.utilization * 100)}% used` : 'Usage');
+  // The menu icon's dot: a thread answered, an agent asks, or seimei said something while the chat is out of view.
+  const news = S.threads.some((t) => t.unread > 0) || asks > 0 || (S.tab !== 'chat' && hooks.seimeiNews());
+  $('drawer-dot').hidden = !news;
+  $('drawer-btn').setAttribute('aria-label', news ? 'Open the menu, news' : 'Open the menu');
+  if (S.tab === 'threads') renderThreads();
+  renderDrawer();
 }
 hooks.chrome = chrome;
 
-// The keyboard covers the bottom of a phone screen: while typing, the navigation bar steps aside.
+// The keyboard covers the bottom of a phone screen: short landscape hides the header while typing.
 if (!finePointer) {
   const composer = $('composer');
   composer.addEventListener('focusin', () => document.body.classList.add('typing'));
@@ -148,8 +160,11 @@ function handle(ev) {
     raw.push(ev);
     if (raw.length > 2 * KEEP_CHAT) raw = raw.slice(-KEEP_CHAT);
     saveChat();
-    // The chat dot is for the conversation; the trajectory keeps its own count.
-    if (S.tab !== 'chat' && ev.lane !== 't' && /^(assistant|approval|worker|image)$/.test(ev.type)) S.unread = true;
+    // seimei's count is for the conversation; the trajectory keeps its own.
+    if (!chatInView() && ev.lane !== 't' && /^(assistant|approval|worker|image|file)$/.test(ev.type)) {
+      S.unread = (S.unread || 0) + 1;
+      chrome();
+    }
     render();
   } else if (ev.type === 'state') {
     S.session = ev;
@@ -169,6 +184,8 @@ function handle(ev) {
     setSessions(ev.list);
   } else if (ev.type === 'tasks') {
     setTasks(ev);
+  } else if (ev.type === 'threads') {
+    setThreads(ev);
   } else if (ev.type === 'theme') {
     phoneTheme(ev);
   }
@@ -258,6 +275,8 @@ document.addEventListener('visibilitychange', () => {
   navigator.serviceWorker?.getRegistration().then((r) => r?.getNotifications()).then((ns) => ns?.forEach((n) => n.close())).catch(() => null);
 });
 window.addEventListener('pageshow', (e) => { if (e.persisted) resume(); });
+// A tap on a thread's notification while the page is open (sw.js).
+navigator.serviceWorker?.addEventListener('message', (e) => { if (e.data?.thread) openThread(e.data.thread); });
 // Try now, on the away block: reconnect at once instead of waiting for the next retry.
 $('retry').addEventListener('click', connect);
 
@@ -296,9 +315,14 @@ async function start() {
     }
     S.session = r.state;
     setWorkers({ list: r.workers, total: r.workers.length });
+    if (r.threads) setThreads(r.threads);
   }
   autosize();
-  if (!kept?.length) show(location.hash.slice(1) || 'chat');
+  // A thread's notification opens its page (sw.js).
+  const thread = location.hash.match(/^#thread=(.+)$/)?.[1];
+  if (thread) history.replaceState(null, '', location.pathname);
+  if (!kept?.length || thread) show(thread ? 'chat' : location.hash.slice(1) || 'chat');
+  if (thread) openThread(decodeURIComponent(thread));
   render();
   ready = true;
   connect();

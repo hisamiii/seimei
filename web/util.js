@@ -59,14 +59,15 @@ export const S = {
   session: { connected: false, busy: false },
   status: { s: 'connecting', text: 'connecting' },
   tab: 'chat',
-  unread: false,
+  unread: 0,
+  threads: [],
   workers: [],
   workersTotal: 0,
   sessions: [],
   usage: null,
 };
 
-// Set by app.js: redraw the header and the navigation bar after state changes.
+// Set by app.js: redraw the header and the drawer after state changes.
 export const hooks = { chrome: () => {} };
 
 export function el(tag, cls, text) {

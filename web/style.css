@@ -101,7 +101,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
 /* Top app bar */
-.bar { display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 0 16px 0 12px; padding-top: env(safe-area-inset-top); }
+.bar { display: flex; align-items: center; gap: 4px; min-height: 64px; padding: 0 4px; padding-top: env(safe-area-inset-top); }
 /* The seiman, in the element's colour. */
 .glyph { display: block; flex: none; background: currentColor; -webkit-mask: url(mark.svg) center / contain no-repeat; mask: url(mark.svg) center / contain no-repeat; }
 .glyph.g22 { width: 22px; height: 22px; }
@@ -363,22 +363,17 @@ body.login { display: grid; place-items: center; grid-template-rows: 1fr; paddin
 .pwform input::placeholder { color: var(--text-3); }
 .err { margin: 0; min-height: 1.5em; color: var(--error); font-size: 14px; }
 
-/* Account menu */
+/* Top bar icons: the drawer's menu icon leads, the new side thread trails */
 .bar { position: relative; }
 .icon-btn {
   margin-left: auto; width: 44px; height: 44px; border: 0; border-radius: 50%;
   background: none; color: var(--text-2); display: grid; place-items: center;
 }
-.menu {
-  position: absolute; right: 12px; top: calc(56px + env(safe-area-inset-top)); z-index: 5; min-width: 220px;
-  background: var(--container-high); border-radius: 16px; padding: 8px 0;
-  box-shadow: 0 6px 24px rgb(0 0 0 / .35); animation: rise .2s var(--ease);
-}
-.menu button {
-  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 48px; padding: 0 16px;
-  border: 0; background: none; text-align: left; font-size: 14px;
-}
-.menu button svg { color: var(--text-3); }
+.bar .icon-btn { color: var(--text); }
+.bar .icon-btn.lead { margin-left: 0; position: relative; overflow: visible; }
+.bar .icon-btn.lead .ndot { left: 31px; top: 12px; width: 8px; height: 8px; border-radius: 4px; }
+.bar .titles { padding-left: 4px; }
+body:not([data-tab="chat"]):not([data-tab="threads"]) #new-thread { display: none; }
 
 /* Fingerprint setup card */
 .card {
@@ -593,7 +588,7 @@ body.login { display: grid; place-items: center; grid-template-rows: 1fr; paddin
 body[data-lane="k"] .composer, body[data-lane="k"] #working, body[data-lane="k"] #hello, body[data-lane="k"] #fp-card { display: none; }
 .tasks-empty { margin: 48px 32px; text-align: center; font-size: 14px; color: var(--text-3); }
 
-/* Tabs: an M3 short navigation bar, sharing one bottom block with the composer */
+/* Pages: the drawer's destinations; the chat's composer is the only bottom block */
 .log { padding-bottom: 40px; }
 .page {
   overflow-y: auto; overscroll-behavior: contain; background: var(--surface-low); border-radius: 28px 28px 0 0;
@@ -602,22 +597,11 @@ body[data-lane="k"] .composer, body[data-lane="k"] #working, body[data-lane="k"]
 .page > * { flex: none; width: 100%; max-width: 720px; margin-left: auto; margin-right: auto; }
 .page > .older { width: auto; margin-top: 14px; }
 #usage { padding-top: 12px; gap: 14px; }
+body > main.page { grid-row: 3 / 5; }
 .bottom { position: relative; z-index: 1; margin-top: -24px; background: var(--container); border-radius: 24px 24px 0 0; padding-bottom: env(safe-area-inset-bottom); }
+body:not([data-tab="chat"]) .bottom { margin-top: 0; background: none; padding: 0; }
 body:not([data-tab="chat"]) .composer { display: none; }
-body.typing .navbar { display: none; }
-body.typing .composer { padding-bottom: 10px; }
-.navbar { display: flex; min-height: 64px; max-width: 720px; margin: 0 auto; padding: 0 8px; }
-.nav-item {
-  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 6px 0;
-  border: 0; border-radius: 16px; background: none; color: var(--text-3); font: 500 12px/16px var(--sans); letter-spacing: .02em;
-}
-.nav-item.sl::after { display: none; }
-.nav-item .ind { position: relative; width: 56px; height: 32px; border-radius: 16px; display: grid; place-items: center; transition: background .2s; }
-.nav-item .ind::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: currentColor; opacity: 0; transition: opacity .15s; }
-.nav-item:hover .ind::after { opacity: .08; }
-.nav-item:active .ind::after { opacity: .14; }
-.nav-item.on { color: var(--text); font-weight: 700; }
-.nav-item.on .ind { background: var(--primary-container); color: var(--on-primary-container); }
+.composer { padding-bottom: 12px; }
 .nbadge {
   position: absolute; left: 34px; top: -1px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px;
   background: var(--primary); color: var(--on-primary); font: 600 11px/16px var(--sans); font-style: normal; text-align: center; font-variant-numeric: tabular-nums;
@@ -628,9 +612,8 @@ body.typing .composer { padding-bottom: 10px; }
 .ring-ico circle { fill: none; stroke-width: 2.4; }
 .ring-ico .t { stroke: currentColor; opacity: .3; }
 .ring-ico .f { stroke: var(--ok); stroke-linecap: round; transition: stroke-dasharray .6s var(--ease); }
-#nav-usage[data-tone="warn"] .ring-ico .f { stroke: var(--warn); }
-#nav-usage[data-tone="bad"] .ring-ico .f { stroke: var(--error); }
-#nav-usage[data-tone=""] .ring-ico .f { stroke: none; }
+.ditem[data-tone="bad"] .ring-ico .f { stroke: var(--error); }
+.ditem[data-tone=""] .ring-ico .f { stroke: none; }
 
 /* Agents: M3 lists; running work shows a progress indicator, not a colored chip */
 .sec { display: flex; align-items: baseline; justify-content: space-between; padding: 16px 4px 8px; font-size: 14px; font-weight: 500; color: var(--primary); }
@@ -832,21 +815,6 @@ mark { background: color-mix(in srgb, var(--primary) 30%, transparent); color: i
 .mopt small { display: block; color: var(--text-3); font-size: 13.5px; margin-top: 2px; line-height: 1.4; }
 .mopt svg { flex: none; margin-top: 1px; color: var(--text-2); }
 
-/* Navigation rail from medium width (600, M3 window classes) and in short landscape: the bottom bar moves to the left edge.
-   The chat pane and its composer read as one surface beside it. */
-@media (min-width: 600px), (orientation: landscape) and (max-height: 520px) {
-  body { grid-template-columns: 88px minmax(0, 1fr); }
-  body > .bar, .ltabs, body > main { grid-column: 2; }
-  .bottom { display: contents; }
-  .composer { grid-column: 2; grid-row: 4; background: var(--surface-low); margin: 0; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
-  body > main.page { grid-row: 3 / 5; }
-  .navbar {
-    grid-column: 1; grid-row: 1 / -1; flex-direction: column; justify-content: flex-start; gap: 12px;
-    height: auto; max-width: none; margin: 0; padding: 88px 0 12px; background: var(--surface);
-  }
-  .nav-item { flex: none; height: 56px; }
-  body.typing .navbar { display: flex; }
-}
 /* The composer continues the chat pane: the same side margins, so the two read as one surface. */
 @media (min-width: 900px) {
   .composer { margin: 0 24px; }
@@ -858,12 +826,9 @@ mark { background: color-mix(in srgb, var(--primary) 30%, transparent); color: i
 /* Short landscape: a compact one-line header, gone while typing so the chat keeps its space. */
 @media (orientation: landscape) and (max-height: 520px) {
   .bar { height: 48px; }
-  .bar .avatar { width: 32px; height: 32px; }
   .bar .titles { display: flex; align-items: baseline; gap: 12px; }
   .bar h1 { font-size: 18px; }
   .ltab { height: 34px; }
-  .navbar { padding-top: 8px; gap: 4px; }
-  .nav-item { height: 52px; }
   body.typing .bar, body.typing .ltabs { display: none; }
 }
 

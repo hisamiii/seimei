@@ -1,7 +1,9 @@
 // The conversation with seimei: rendering events, live text, approval cards, and the composer.
 import { md } from './md.js';
 import { $, S, hooks, el, svg, clock, dayKey, dayLabel, home, plural, post, view, snack, finePointer, toLogin, ICON, wearShape, say, enter, leave } from './util.js';
-import { openWorker } from './agents.js';
+import { openWorker, openThread, openDraft } from './agents.js';
+import { THR } from './threads.js';
+import { sheet, showSheet, closeSheet } from './sheet.js';
 import { renderTasks } from './tasks.js';
 import { sentDictated } from './mic.js';
 
@@ -259,6 +261,17 @@ function evline(ev, cls, ...parts) {
   b.dataset.worker = ev.worker;
   const text = el('span');
   text.append(...parts);
+  b.append(text, svg(CHEV, 20));
+  return b;
+}
+
+// The side thread a message of the user's came from.
+function threadLine(ev) {
+  const b = el('button', 'evline sl');
+  b.type = 'button';
+  b.dataset.thread = ev.thread;
+  const text = el('span');
+  text.append(el('b', null, ev.thread_name || 'Side thread'), el('small', null, 'Side thread'));
   b.append(text, svg(CHEV, 20));
   return b;
 }
@@ -546,7 +559,7 @@ const KIND_LABEL = { pdf: 'PDF', archive: 'Zip', audio: 'Audio', video: 'Video',
 const KEEP = 30 * 86400;
 
 // A file as a download chip; the server always serves it as an attachment, never rendered.
-function fileChip(f, t) {
+export function fileChip(f, t, from = null) {
   const expired = t && Date.now() / 1000 - t > KEEP;
   const a = el(expired ? 'div' : 'a', `fchip${expired ? ' expired' : ' sl'}`);
   if (!expired) {
@@ -556,7 +569,8 @@ function fileChip(f, t) {
   const ic = el('span', 'ic');
   ic.append(svg(fileIcon(f.kind), 20));
   const txt = el('span', 'txt');
-  txt.append(el('b', null, f.name), el('small', null, expired ? 'Expired' : `${size(f.size)} · ${KIND_LABEL[f.kind] || 'File'}`));
+  const what = from ? `${from} · ${size(f.size)}` : `${size(f.size)} · ${KIND_LABEL[f.kind] || 'File'}`;
+  txt.append(el('b', null, f.name), el('small', null, expired ? 'Expired' : what));
   a.append(ic, txt);
   if (!expired) a.append(svg('M12 4v11M7 10.5l5 5 5-5M5 20h14', 18));
   return a;
@@ -651,13 +665,13 @@ function foldLabel(ev) {
 }
 
 // What the user can answer: seimei's messages and the report, question and approval cards.
-// Each gets a reply button on hover; a long press replies on touch.
+// Each gets a reply button on hover; a long press opens its menu (Reply, Ask on the side, Copy).
 // Event id -> the composer's quote and the lane it shows in.
 const quotable = new Map();
 const VERB = { done: 'finished' };
 
 function replyable(node, ev, text) {
-  quotable.set(ev.id, { text, lane: ev.lane === 't' ? 't' : 'c' });
+  quotable.set(ev.id, { text, lane: ev.lane === 't' ? 't' : 'c', type: ev.type });
   node.classList.add('replyable');
   node.dataset.rid = ev.id;
   const b = el('button', 'rbtn sl');
@@ -773,8 +787,20 @@ export class Renderer {
     this.liveAct?.tick();
   }
 
+  // seimei's offer of a side thread: a tonal button under the reply it is about.
+  offer(ev) {
+    const at = this.target.querySelector(`[data-id="${ev.re}"]`);
+    if (!at || at.nextElementSibling?.dataset.ask) return;
+    const b = el('button', 'btn tonal sl offerbtn');
+    b.type = 'button';
+    b.dataset.ask = ev.re;
+    b.append(svg(THR, 20), el('span', null, 'Ask on the side'));
+    at.after(b);
+  }
+
   add(ev) {
     if (ev.type === 'approval_done') return settle(ev);
+    if (ev.type === 'offer') return this.offer(ev);
     this.cur = ev.id;
     if (ev.type !== 'tool_result') this.folded = null;
     this.daily(ev);
@@ -785,7 +811,7 @@ export class Renderer {
       this.trig(ev);
     } else if (this.lane === 't' && !ev.turn) this.turn = null;
     // The part of an event turn that came to the chat (a picture, a reply for the user) says what started it.
-    if (this.lane === 'c' && ev.from && ev.from !== this.from && ev.type !== 'tool_result') {
+    if (this.lane === 'c' && ev.from && ev.from !== this.from && ev.type !== 'tool_result' && ev.type !== 'user') {
       this.from = ev.from;
       this.activity = null;
       this.trig(ev);
@@ -808,6 +834,10 @@ export class Renderer {
     this.activity = null;
     if (ev.type === 'user' || ev.type === 'assistant') {
       if (ev.text) said.set(ev.id, ev.text);
+      // Sent from a side thread: the thread's name above the message, one tap from it
+      if (ev.type === 'user' && ev.thread) this.put(threadLine(ev));
+      // In a side thread: what seimei wrote to it, over its message
+      if (ev.type === 'user' && ev.from) this.put(el('div', 'trig sender', ev.from));
       const node = this.put(message(ev));
       if (ev.type === 'user') {
         this.lastUser = ev.id;
@@ -1325,6 +1355,10 @@ function onTap(e) {
   if (goto) return showLane(goto.dataset.lane, +goto.dataset.goto);
   const reply = e.target.closest('.reply-btn, .rbtn');
   if (reply) return replyIn(+reply.dataset.reply);
+  const side = e.target.closest('[data-thread]');
+  if (side) return openThread(side.dataset.thread);
+  const offer = e.target.closest('[data-ask]');
+  if (offer) return askOnSide(+offer.dataset.ask);
   if (e.target.matches('img.pic')) {
     const n = e.target.dataset.name;
     return view(e.target.src, n ? { full: `api/files/${n}`, save: `api/files/${n}?download=1` } : {});
@@ -1345,7 +1379,30 @@ function onTap(e) {
 thread.addEventListener('click', onTap);
 traj.addEventListener('click', onTap);
 
-// A long press on something answerable replies to it (touch only; a mouse has the hover button).
+// Ask on the side: a new side thread about this message of seimei's.
+function askOnSide(id) {
+  const text = said.get(id) || quotable.get(id)?.text || '';
+  openDraft({ id, text });
+}
+
+// A long press (or a right click) on something answerable: Reply, Ask on the side for seimei's own words, Copy.
+const COPY = 'M10 8h8.5A1.5 1.5 0 0 1 20 9.5v9a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 8 18.5V10a2 2 0 0 1 2-2zM16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8';
+function msgMenu(id) {
+  const q = quotable.get(id) || { text: said.get(id) || '' };
+  const opt = (icon, label, run) => {
+    const b = el('button', 'mopt sl');
+    b.type = 'button';
+    b.append(svg(icon, 22), el('span', null, label));
+    b.addEventListener('click', () => { closeSheet(); run(); });
+    return b;
+  };
+  const flat = q.text.replace(/\s+/g, ' ').trim();
+  const opts = [opt(REPLY, 'Reply', () => replyIn(id))];
+  if (q.type === 'assistant') opts.push(opt(THR, 'Ask on the side', () => askOnSide(id)));
+  opts.push(opt(COPY, 'Copy', () => navigator.clipboard?.writeText(q.text).then(() => snack('Copied'), () => null)));
+  sheet.body.replaceChildren(el('div', 'mwho', flat.length > 90 ? `${flat.slice(0, 90)}…` : flat), ...opts);
+  showSheet('rowmenu');
+}
 const PRESS = 450;
 let press = null;
 function pressStart(e) {
@@ -1355,7 +1412,7 @@ function pressStart(e) {
   p.timer = setTimeout(() => {
     p.fired = true;
     navigator.vibrate?.(12);
-    replyIn(+node.dataset.rid);
+    msgMenu(+node.dataset.rid);
   }, PRESS);
   press = p;
 }
@@ -1372,8 +1429,14 @@ function pressEnd() {
 for (const box of [thread, traj]) {
   box.addEventListener('pointerdown', pressStart);
   box.addEventListener('pointermove', pressMove);
-  // The press fired from a timer, which mobile browsers do not count as a gesture: focus again on the lift so the keyboard comes up.
-  box.addEventListener('pointerup', () => { if (press?.fired) input.focus(); pressEnd(); });
+  box.addEventListener('pointerup', pressEnd);
   box.addEventListener('pointercancel', pressEnd);
-  box.addEventListener('contextmenu', (e) => { if (press?.fired) e.preventDefault(); });
+  box.addEventListener('contextmenu', (e) => {
+    if (press?.fired) return e.preventDefault();
+    // A right click with the mouse: the same menu, unless text is selected (the browser's own menu copies it)
+    const node = e.target.closest('.replyable');
+    if (!node || e.target.closest('a, pre') || getSelection().toString()) return;
+    e.preventDefault();
+    msgMenu(+node.dataset.rid);
+  });
 }
