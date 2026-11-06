@@ -422,6 +422,51 @@ impl Watches {
         gone.is_some() && self.take(&json!(id))
     }
 
+    /// The rules for the Watches page, one row each: its group (time, exits, reboot or ping), what it is, its second line, its time and whether its command runs.
+    pub fn rows(&self) -> Vec<Value> {
+        let line = |v: &Value| crate::workers::first_line(&as_text(v), 120);
+        let mut out = vec![];
+        for r in self.rules() {
+            let (trigger, target) = (as_text(&r["trigger"]), as_text(&r["target"]));
+            let (note, title) = (line(&r["note"]), line(&r["title"]));
+            let by = as_text(&r["by"]);
+            let by = by.strip_prefix("shikigami ").unwrap_or(&by).to_string();
+            let or = |a: &str, b: String| if a.is_empty() { b } else { a.to_string() };
+            let any = |what: &str| if target == "*" { format!("any {what}") } else { target.clone() };
+            let (group, head, sub, at) = match trigger.as_str() {
+                "time" => ("time", or(&note, or(&title, format!("at {target}"))), or(&by, "seimei".into()), &r["due"]),
+                "command_exits" => ("exits", crate::workers::first_line(&target, 120), note.clone(), &r["started"]),
+                "after_reboot" => {
+                    let session = format!("resume {}", as_text(&r["session"]["name"]));
+                    let head = or(&note, if r["session"].is_object() { session } else { "after a reboot".into() });
+                    (
+                        "reboot",
+                        head,
+                        if by.is_empty() { "seimei".into() } else { format!("left by {by}") },
+                        &r["created"],
+                    )
+                }
+                t => {
+                    let when = match t {
+                        "shikigami_done" => format!("when {} finishes", any("shikigami")),
+                        "shikigami_failed" => format!("when {} fails", any("shikigami")),
+                        "shikigami_asks" => format!("when {} asks", any("shikigami")),
+                        "shikigami_ends" => format!("when {} ends", any("shikigami")),
+                        "session_asks" => format!("when {} asks", any("session")),
+                        "session_idle" => format!("when {} goes idle", any("session")),
+                        _ => format!("{} {target}", t.replace('_', " ")),
+                    };
+                    // The title is the notification's template: the page says when it pings.
+                    ("ping", when, String::new(), &r["expires"])
+                }
+            };
+            let running = trigger == "command_exits" && Watches::running(&r);
+            out.push(json!({"id": r["id"], "group": group, "title": head, "sub": sub, "at": at,
+                "every": r["every"], "running": running}));
+        }
+        out
+    }
+
     /// The rules as text for the dispatcher, with what is left of each one's time.
     pub fn listing(&self) -> String {
         let rules = self.rules.lock().unwrap();

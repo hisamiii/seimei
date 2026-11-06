@@ -89,6 +89,15 @@ fn watch_cases() {
             got["removed"] = json!(w.remove(&real));
         } else if step.get("listing").is_some() {
             got["text"] = json!(norm(&ids, &w.listing()));
+        } else if step.get("page").is_some() {
+            // The Watches page's rows, without their times.
+            let rows: Vec<Value> = (w.rows().into_iter())
+                .map(|mut r| {
+                    r.as_object_mut().unwrap().shift_remove("at");
+                    json!(norm(&ids, &r.to_string()))
+                })
+                .collect();
+            got["rows"] = json!(rows);
         }
         let said: Vec<String> = told.lock().unwrap()[before..].iter().map(|t| norm(&ids, t)).collect();
         got["told"] = json!(said);
@@ -107,7 +116,7 @@ fn watch_cases() {
             })
             .collect();
         got["rules"] = json!(rules);
-        for k in ["added", "error", "removed", "text", "told", "rules"] {
+        for k in ["added", "error", "removed", "text", "rows", "told", "rules"] {
             if got.get(k) != step.get(k) {
                 fails.push(format!("step {i} {k}: {}\n  want: {}", got[k], step[k]));
             }
