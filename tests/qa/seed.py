@@ -129,6 +129,16 @@ def seed():
     add({"type": "user", "text": "also which usb-c dac should i get for the pixel?"}, 20)
     add({"type": "assistant", "text": "quick take: the moondrop dawn pro or the fiio ka17 are the usual picks for sensitive iems."}, 18)
     add({"type": "offer", "re": ev[-1]["id"], "lane": "c"}, 17)
+    # #216: an answered question and an allowed card, with the trajectory note the allowed action left right after it.
+    add({"type": "approval", "aid": "qa-q1", "who": "seimei", "action": "question", "target": "ask you", "tool": "AskUserQuestion",
+         "detail": "Which one should I order?", "sub": "DAC", "expires": time.time() + 600,
+         "options": [{"id": "c0", "label": "moondrop dawn pro", "kind": "choice", "sub": "lower noise floor"},
+                     {"id": "c1", "label": "fiio ka17", "kind": "choice", "sub": "more power"}, {"id": "deny", "label": "Skip", "kind": "deny"}]}, 16)
+    add({"type": "approval_done", "aid": "qa-q1", "outcome": "approved", "chosen": "moondrop dawn pro", "by": "user"}, 15)
+    add({"type": "approval", "aid": "qa-a1", "who": "seimei", "action": "desktop", "target": "close firefox \"Docs\"",
+         "detail": "niri msg action close-window --id 3", "expires": time.time() + 600}, 12)
+    add({"type": "approval_done", "aid": "qa-a1", "outcome": "approved", "chosen": "Allow", "by": "user"}, 11)
+    add({"type": "system", "text": "Closed firefox.", "lane": "t"}, 10)
     (state / "events.jsonl").write_text("".join(json.dumps(e) + "\n" for e in ev))
     (state / "threads").mkdir()
     threads = []

@@ -137,10 +137,6 @@ body:not([data-tab="chat"]) .ltabs { display: none; }
 }
 .ltab.on { color: var(--text); }
 .ltab.on::after { content: ""; position: absolute; top: auto; left: 12px; right: 12px; bottom: 0; height: 3px; border-radius: 3px 3px 0 0; background: var(--primary); opacity: 1; }
-.ltab .cnt {
-  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--primary); color: var(--on-primary);
-  font: 600 11px/18px var(--sans); text-align: center; font-variant-numeric: tabular-nums;
-}
 .fold {
   align-self: center; display: flex; align-items: center; gap: 8px; max-width: 100%; min-height: 32px; padding: 4px 14px;
   border: 0; border-radius: 999px; background: var(--container); color: var(--text-3); font: 500 13px var(--sans);

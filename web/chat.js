@@ -520,6 +520,8 @@ function settle(done) {
   if (card.classList.contains('question')) {
     text = { approved: `Answered: ${done.chosen || `“${done.note || ''}”`}`, expired: 'No answer in time',
       denied: done.by === 'chat' ? 'You answered in the chat' : 'Skipped' }[outcome] || text;
+    // Answered, it is the question and its answer: no header, no warm card
+    card.querySelector('.head')?.remove();
   }
   const left = foot.querySelector('.left');
   left.textContent = text;
@@ -698,6 +700,9 @@ function anchor(text, id, lane) {
 
 // One instance appends live; a fresh one renders older pages for prepending.
 // The chat and the trajectory share the open question cards (asks), so a report in one settles a card in the other.
+// What the trajectory does within this long after a card settles is the card's own doing: its outcome line says it, no fold line.
+const AFTER_CARD = 300;
+
 export class Renderer {
   constructor(target, before = null, { lane = 'c', asks = new Map() } = {}) {
     this.target = target;
@@ -719,6 +724,8 @@ export class Renderer {
   }
 
   put(node) {
+    // The last thing drawn, when it is an approval card (add sets it after this)
+    this.card = null;
     if (this.cur && !node.dataset.id) node.dataset.id = this.cur;
     this.target.insertBefore(node, this.before);
     // What the last drawn node says happened ("dev finished"): a trigger line naming it right after repeats it
@@ -741,6 +748,7 @@ export class Renderer {
   // An event of the trajectory, seen from the chat: one line per run, naming what happened.
   fold(ev) {
     if (ev.type === 'tool_result' || ev.type === 'approval_done') return;
+    if (this.card?.done && (ev.t || 0) - this.card.done <= AFTER_CARD) return;
     this.cur = ev.id;
     this.daily(ev);
     if (!this.folded?.node.isConnected) {
@@ -799,7 +807,10 @@ export class Renderer {
   }
 
   add(ev) {
-    if (ev.type === 'approval_done') return settle(ev);
+    if (ev.type === 'approval_done') {
+      if (this.card?.aid === ev.aid) this.card.done = ev.t || Date.now() / 1000;
+      return settle(ev);
+    }
     if (ev.type === 'offer') return this.offer(ev);
     this.cur = ev.id;
     if (ev.type !== 'tool_result') this.folded = null;
@@ -877,7 +888,10 @@ export class Renderer {
     }
     else if (ev.type === 'image') this.put(shown(ev));
     else if (ev.type === 'file') this.put(sentFile(ev));
-    else if (ev.type === 'approval') replyable(this.put(approvalCard(ev)), ev, `${ev.who} wants to ${ev.target}`);
+    else if (ev.type === 'approval') {
+      replyable(this.put(approvalCard(ev)), ev, `${ev.who} wants to ${ev.target}`);
+      this.card = { aid: ev.aid, done: outcomes.get(ev.aid)?.t ?? null };
+    }
     else if (ev.type === 'rate_limit') this.put(el('div', `note ${ev.status === 'rejected' ? 'error' : 'warn'}`, limitText(ev)));
   }
 }
@@ -952,7 +966,6 @@ export function addEvent(ev) {
   if (ev.type === 'assistant') clearLive();
   route(ev);
   if (live) live.parentNode.append(live);
-  count(ev);
   hello();
   if (stick) toBottom();
   else if (/^(user|assistant|approval|worker|image)$/.test(ev.type) && inTraj(ev) === (S.lane === 't')) {
@@ -983,37 +996,8 @@ function hello() {
 // ---------- chat | trajectory ----------
 
 S.lane = 'c';
-const SEEN = 'seimei.trajSeen';
-let seen = 0, unseen = 0, lastTraj = 0;
-try { seen = +localStorage.getItem(SEEN) || 0; } catch {}
 // Where each lane was left; null: at the bottom.
 const scrolls = { c: null, t: null, k: 0 };
-
-// What counts toward the Trajectory badge: reports, notes and seimei's own words, not its tool calls.
-const worth = (ev) => inTraj(ev) && /^(assistant|worker|system|rate_limit)$/.test(ev.type);
-
-function count(ev) {
-  if (!worth(ev)) return;
-  lastTraj = Math.max(lastTraj, ev.id);
-  if (ev.id <= seen) return;
-  if (S.lane === 't' && S.tab === 'chat' && !document.hidden) return markSeen(ev.id);
-  unseen++;
-  badge();
-}
-
-function markSeen(id = null) {
-  seen = Math.max(seen, id ?? lastTraj);
-  unseen = 0;
-  try { localStorage.setItem(SEEN, String(seen)); } catch {}
-  badge();
-}
-
-function badge() {
-  const c = $('traj-count');
-  c.hidden = !unseen;
-  c.textContent = unseen > 99 ? '99+' : unseen;
-  $('lt-traj').setAttribute('aria-label', unseen ? `Trajectory, ${unseen} new` : 'Trajectory');
-}
 
 const LANES = ['c', 't', 'k'];
 // The lane being left, as a still copy over the log: the switch itself stays at once (callers append right after).
@@ -1066,7 +1050,6 @@ export function showLane(lane, goto = null) {
     enter(into, `translateX(${dir * 25}%)`);
     into.animate([{ opacity: 0 }, { opacity: 0, offset: 0.25 }, { opacity: 1 }], { duration: 300 });
   }
-  if (lane === 't') markSeen();
   const node = goto && (lane === 't' ? traj : thread).querySelector(`[data-id="${goto}"]`);
   if (node) {
     node.scrollIntoView({ block: 'center' });
@@ -1079,7 +1062,6 @@ export function showLane(lane, goto = null) {
 $('lt-chat').addEventListener('click', () => showLane('c'));
 $('lt-traj').addEventListener('click', () => showLane('t'));
 $('lt-tasks').addEventListener('click', () => showLane('k'));
-document.addEventListener('visibilitychange', () => { if (!document.hidden && S.lane === 't' && S.tab === 'chat') markSeen(); });
 
 // ---------- history ----------
 
@@ -1089,12 +1071,6 @@ export function loadHistory(r) {
   r.events.forEach((ev) => route(ev));
   firstId = r.events[0]?.id ?? null;
   older.hidden = olderT.hidden = !firstId || firstId <= 1;
-  // The first visit starts with nothing unseen; later ones count what came while away.
-  const t = r.events.filter(worth);
-  lastTraj = t.at(-1)?.id || 0;
-  if (!seen) markSeen(lastTraj);
-  unseen = t.filter((ev) => ev.id > seen).length;
-  badge();
   hello();
   toBottom();
 }
