@@ -283,33 +283,25 @@ fun ChatTab(vm: Seimei, lane: String) {
 @Composable
 fun LaneTabs(vm: Seimei) {
     Row(Modifier.fillMaxWidth().background(barColor(vm)).padding(start = 12.dp, end = 12.dp, bottom = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        LaneTab("Chat", vm.lane == "c", 0) { vm.showLane("c") }
-        LaneTab("Trajectory", vm.lane == "t", vm.unseen) { vm.showLane("t") }
-        LaneTab("Tasks", vm.lane == "k", 0) { vm.showLane("k") }
+        LaneTab("Chat", vm.lane == "c") { vm.showLane("c") }
+        LaneTab("Trajectory", vm.lane == "t") { vm.showLane("t") }
+        LaneTab("Tasks", vm.lane == "k") { vm.showLane("k") }
     }
 }
 
 @Composable
-fun LaneTab(label: String, on: Boolean, count: Int, click: () -> Unit) {
+fun LaneTab(label: String, on: Boolean, click: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     Column(
         Modifier.width(IntrinsicSize.Max).clip(RoundedCornerShape(12.dp)).clickable(onClick = click)
             .semantics(mergeDescendants = true) {
                 role = Role.Tab
                 selected = on
-                if (count > 0) stateDescription = "$count new"
             }
             .padding(horizontal = 12.dp),
     ) {
         Row(Modifier.height(41.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(label, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = if (on) cs.onSurface else LocalExtra.current.text3)
-            if (count > 0) {
-                Spacer(Modifier.width(8.dp))
-                Box(Modifier.heightIn(min = 18.dp).widthIn(min = 18.dp).clip(RoundedCornerShape(9.dp)).background(cs.primary).padding(horizontal = 5.dp),
-                    contentAlignment = Alignment.Center) {
-                    Text(if (count > 99) "99+" else "$count", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = cs.onPrimary)
-                }
-            }
         }
         Box(Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp)).background(if (on) cs.primary else Color.Transparent))
     }
@@ -1076,12 +1068,16 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
     // While an answer is on its way the tapped control keeps its colours and the rest are held at .38
     fun held(key: String) = Modifier.alpha(if (sent && tapped != key) .38f else 1f)
     val who = if (a.subagent) "${a.who}'s subagent" else a.who
+    // An answered question keeps only the question and the answer.
+    val brief = question && a.outcome != null
     Card(highlight = a.outcome == null, corner = 28.dp, pad = 16.dp) {
-        CardHead(if (a.action == "plan") PLAN else if (question) Icons.question else Icons.lock, bg, fg,
+        if (!brief) CardHead(if (a.action == "plan") PLAN else if (question) Icons.question else Icons.lock, bg, fg,
             if (question) "$who asks you" else "$who wants to ${a.target}", sub, big = true)
         val box = Modifier.fillMaxWidth().heightIn(max = if (a.outcome == null) 220.dp else 80.dp)
         if (perm && a.action == "plan") {
             Box(box.verticalScroll(rememberScrollState())) { Md(a.detail, 14, if (a.outcome == null) cs.onSurface else LocalExtra.current.text2) }
+        } else if (brief) {
+            Text(a.detail, fontSize = 14.sp, lineHeight = 21.sp, color = LocalExtra.current.text2)
         } else {
             val mono = !question
             val text = if (perm && a.action == "edit") diffText(a.detail) else androidx.compose.ui.text.AnnotatedString(a.detail)
@@ -1125,8 +1121,9 @@ fun ApprovalCard(a: Item.Approval, vm: Seimei) {
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (a.outcome != null) {
-                Text(settledText(a), fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium,
-                    color = if (a.outcome == "approved") LocalExtra.current.ok else cs.error, modifier = Modifier.weight(1f).padding(vertical = 10.dp))
+                Text(settledText(a), fontSize = if (brief) 14.sp else 12.sp, lineHeight = if (brief) 20.sp else 16.sp, fontWeight = FontWeight.Medium,
+                    color = if (a.outcome == "approved") LocalExtra.current.ok else cs.error,
+                    modifier = Modifier.weight(1f).padding(vertical = if (brief) 0.dp else 10.dp))
             } else if (noting) {
                 Spacer(Modifier.weight(1f))
                 TextButton({ noting = false }, enabled = !sent) { Text("Cancel") }

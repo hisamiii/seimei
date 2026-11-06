@@ -169,9 +169,6 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     /** Board sections opened or shut by hand (project name -> open); the rest follow their default. */
     var boardOpen by mutableStateOf(try { JSONObject(prefs.boardOpen) } catch (e: JSONException) { JSONObject() })
         private set
-    /** Trajectory events the user has not seen yet. */
-    var unseen by mutableStateOf(0)
-        private set
     /** The message of seimei's or the card that the next send answers (a swipe, or "Reply in chat"). */
     var replyTo by mutableStateOf<ReplyTo?>(null)
         private set
@@ -276,7 +273,6 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     private var events = ArrayList<JSONObject>()
     private var chat = Chat()
     private var trailChat = Chat(lane = "t")
-    private var lastTraj = 0L
     private var lastId = 0L
     private var firstId = 0L
     private var stream: Job? = null
@@ -678,11 +674,6 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         firstId = events.firstOrNull()?.optLong("id") ?: 0
         hasOlder = firstId > 1
         rebuild()
-        // The first visit starts with nothing unseen; later ones count what came while away.
-        val worth = events.filter { it.worth() }
-        lastTraj = maxOf(lastTraj, worth.lastOrNull()?.optLong("id") ?: 0)
-        if (prefs.trajSeen == 0L) prefs.trajSeen = lastTraj
-        unseen = worth.count { it.optLong("id") > prefs.trajSeen }
     }
 
     /** Keeps the chat's last events on the phone, a moment after they change (or [now], when leaving the app). */
@@ -751,21 +742,7 @@ class Seimei(app: Application) : AndroidViewModel(app) {
 
     fun showLane(l: String, key: String? = null) {
         lane = l
-        if (l == "t") markSeen()
         goto = key
-    }
-
-    private fun markSeen() {
-        prefs.trajSeen = maxOf(prefs.trajSeen, lastTraj)
-        unseen = 0
-    }
-
-    private fun count(ev: JSONObject) {
-        if (!ev.worth()) return
-        val id = ev.optLong("id")
-        lastTraj = maxOf(lastTraj, id)
-        if (id <= prefs.trajSeen) return
-        if (lane == "t" && tab == "chat" && foreground && page == null) markSeen() else unseen++
     }
 
     /** A swipe on a message of seimei's or a card, or "Reply in chat" in the trajectory: the next send answers it. */
@@ -806,7 +783,6 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             events.add(ev)
             route(ev)
             publish()
-            count(ev)
             // A card answered here withdraws its notification at once, without waiting for the server's cancel
             if (type == "approval_done") Push.settled(getApplication(), ev.str("aid"))
             if (System.currentTimeMillis() / 1000.0 - ev.optDouble("t", 0.0) < 60) spoken(ev)?.let { said = it }
@@ -900,7 +876,6 @@ class Seimei(app: Application) : AndroidViewModel(app) {
         when (t) {
             "chat" -> {
                 if (page == null) unread = 0
-                if (lane == "t") markSeen()
             }
             "agents" -> refreshAll(force = true)
             "threads" -> {

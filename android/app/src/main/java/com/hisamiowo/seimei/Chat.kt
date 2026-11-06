@@ -77,8 +77,6 @@ fun anchorText(text: String) = text.replace(Regex("\\s+"), " ").trim().let { if 
 /** Events in lane "t" happened on their own (events.rs): the trajectory gets them whole, the chat a fold line. */
 fun JSONObject.inTraj() = str("lane") == "t"
 
-/** What counts toward the Trajectory badge: reports, notes and seimei's own words, not its tool calls. */
-fun JSONObject.worth() = inTraj() && str("type") in setOf("assistant", "worker", "system", "rate_limit")
 
 /** Shikigami id -> its open "asks" card, wherever it was drawn: a report in the trajectory settles a card in the chat. */
 class Asks : HashMap<String, Pair<Chat, Int>>()
@@ -102,6 +100,9 @@ data class Call(val id: String, val name: String, val summary: String, val runni
 
 /** A system line repeated within this many seconds counts up on the first one instead of showing again. */
 const val REPEAT = 900.0
+
+/** Seconds after a card settles in which trajectory events get no fold line under it, as on the web. */
+const val AFTER_CARD = 300.0
 
 fun dayOf(t: Double, zone: ZoneId = ZoneId.systemDefault()): LocalDate =
     Instant.ofEpochMilli((t * 1000).toLong()).atZone(zone).toLocalDate()
@@ -127,6 +128,9 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
     private val notes = HashMap<String, Int>()
     private val approvals = HashMap<String, Int>()
     private val outcomes = HashMap<String, Done>()
+    private val doneAt = HashMap<String, Double>()
+    /** The approval card drawn last, if nothing came after it, and when it settled (0 while it waits). */
+    private var card: Pair<String, Double>? = null
     /** Where each message sits in items, by event id: an offer marks the reply it is about. */
     private val msgAt = HashMap<Long, Int>()
     private var seq = 0
@@ -139,6 +143,7 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
     private fun put(item: Item): Int {
         items.add(item)
         lastSaid = null
+        card = null
         return items.size - 1
     }
 
@@ -188,6 +193,8 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
     fun fold(ev: JSONObject) {
         val type = ev.str("type")
         if (type == "tool_result" || type == "approval_done") return
+        // What a settled card set off right after it stays in the trajectory: the card's state line says enough.
+        card?.let { (_, done) -> if (done > 0 && ev.optDouble("t", 0.0) - done <= AFTER_CARD) return }
         daily(ev.optDouble("t", 0.0).let { if (it.isNaN()) 0.0 else it })
         val key = keyOf(ev)
         if (fold < 0) {
@@ -222,6 +229,8 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
             val aid = ev.str("aid")
             val done = Done(ev.str("outcome"), ev.str("chosen"), ev.str("note"), ev.str("by"))
             outcomes[aid] = done
+            doneAt[aid] = if (t > 0) t else System.currentTimeMillis() / 1000.0
+            if (card?.first == aid) card = aid to doneAt.getValue(aid)
             approvals[aid]?.let { i -> items[i] = (items[i] as Item.Approval).copy(outcome = done.outcome, done = done) }
             return
         }
@@ -330,6 +339,7 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
                         Opt(o.str("id"), o.str("label"), o.str("kind"), o.str("rule"), o.str("where").ifEmpty { o.str("sub") }, o.optBoolean("broad")) } }
                         ?: emptyList(),
                     ev.str("sub"), ev.optBoolean("subagent"), outcomes[aid]))
+                card = aid to (doneAt[aid] ?: 0.0)
             }
             "rate_limit" -> put(Item.Note(key, limitText(ev), if (ev.str("status") == "rejected") "error" else "warn"))
         }

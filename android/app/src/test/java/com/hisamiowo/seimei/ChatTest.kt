@@ -64,6 +64,17 @@ class ChatTest {
         assertEquals(0, c.waiting)
     }
 
+    @Test fun settledCardHasNoFollowUp() {
+        val c = Chat(utc)
+        val t = 1_800_000_000.0
+        c.add(ev("approval", t, "aid" to "a1", "who" to "seimei", "action" to "desktop", "target" to "close firefox", "detail" to "d", "expires" to 1e10))
+        c.add(ev("approval_done", t + 5, "aid" to "a1", "outcome" to "approved"))
+        c.fold(ev("system", t + 8, "text" to "Closed firefox.", "lane" to "t"))
+        assertTrue(c.items.none { it is Item.Fold })
+        c.fold(ev("system", t + 8 + AFTER_CARD, "text" to "The desktop is back.", "lane" to "t"))
+        assertEquals(1, c.items.filterIsInstance<Item.Fold>().size)
+    }
+
     @Test fun repeatedNotesCountUp() {
         val c = Chat(utc)
         c.add(ev("system", 1_800_000_000.0, "text" to "The desktop is back."))
