@@ -463,10 +463,33 @@ impl Dispatcher {
         cid: Option<&str>,
         reply: Option<&Value>,
     ) {
+        self.post(text, names, images, files, cid, reply, None);
+    }
+
+    /// The user sends a side thread's summary: their message, tagged with the thread (id, name), answering what the thread started from.
+    pub fn send_from_thread(&self, text: &str, thread: (&str, &str), reply: Option<&Value>) {
+        self.post(text, &[], vec![], &[], None, reply, Some(thread));
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn post(
+        &self,
+        text: &str,
+        names: &[String],
+        images: Vec<(String, String)>,
+        files: &[Value],
+        cid: Option<&str>,
+        reply: Option<&Value>,
+        thread: Option<(&str, &str)>,
+    ) {
         let (shown, said) = reply.map(quoted).unwrap_or_default();
         let mut ev = json!({"type": "user", "text": text});
         if let Some(c) = cid {
             ev["cid"] = json!(c);
+        }
+        if let Some((id, name)) = thread {
+            ev["thread"] = json!(id);
+            ev["thread_name"] = json!(name);
         }
         if let Some(r) = reply.filter(|_| !shown.is_empty()) {
             ev["quote"] = json!(chars(&shown, 120));
@@ -485,6 +508,9 @@ impl Dispatcher {
         }
         let ev = self.events.add(ev);
         let mut text = text.to_string();
+        if let Some((id, name)) = thread {
+            text = format!("[from the side thread \"{name}\" ({id})]\n{text}");
+        }
         if !said.is_empty() {
             text = format!("[re: \"{said}\"]\n{text}");
         }
@@ -1218,6 +1244,9 @@ impl Turns {
     fn end(&mut self, failed: Option<String>) -> After {
         // The held reply ended the turn: it is what the turn has to say, so it goes to the chat, unless only noise started the turn.
         self.route_held(self.class != Class::Noise);
+        if self.d.tools.offer.swap(false, Ordering::SeqCst) {
+            let _ = self.d.tools.offer_on(None);
+        }
         if let Some(why) = failed {
             let lane = self.events.turn().get("lane").cloned().unwrap_or(json!("c"));
             if self.stopping {

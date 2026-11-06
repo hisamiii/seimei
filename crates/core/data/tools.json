@@ -647,6 +647,40 @@
    "name": "tasks"
   },
   {
+   "description": "Side threads: the user's small read-only chats for tangents (web search, web fetch and reading files; no commands, no edits), each with its own context, so tangents stay out of yours. The user starts them from your messages or the top bar, and sends you a summary when one matters: it arrives as their message, tagged with the thread. action: list | read | send | start | offer. list: open and archived threads, with unread answers and last activity. read: thread, its whole text. send: thread and text, shown there as from seimei; its answer comes back to you as a [seimei] line. start: text, its first message (from seimei), and an optional quote: 5-60 words copied exactly from a message in the chat, which the thread gets as context; its answer comes back to you. offer: an \"Ask on the side\" chip under one of your chat replies, which opens a thread on that reply when the user taps it; no quote: your reply of this turn, else the reply holding the quote. Offer one when a side question would take a few lookups the main chat does not need.",
+   "inputSchema": {
+    "properties": {
+     "action": {
+      "type": "string",
+      "enum": [
+       "list",
+       "read",
+       "send",
+       "start",
+       "offer"
+      ]
+     },
+     "thread": {
+      "type": "string",
+      "description": "read, send: its id or name"
+     },
+     "text": {
+      "type": "string",
+      "description": "send, start: the message"
+     },
+     "quote": {
+      "type": "string",
+      "description": "start, offer: words copied exactly from a chat message"
+     }
+    },
+    "required": [
+     "action"
+    ],
+    "type": "object"
+   },
+   "name": "threads"
+  },
+  {
    "description": "Ask the user to pick between options when your harness has no question cards of its own: they get a card with the options as buttons, and their pick (or what they typed) comes back as this tool's answer. It waits up to 30 minutes.",
    "inputSchema": {
     "properties": {

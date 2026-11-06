@@ -42,10 +42,12 @@ use crate::util::{as_text, chars, far, hex, now, random_bytes, read_state, save_
 
 mod acp_session;
 pub mod claude; // lint: allow scoped-name
+mod thread;
 pub(crate) use acp_session::acp_servers;
 pub use acp_session::{Mode, acp_mode, shaped};
 pub use claude as harness; // lint: allow scoped-name
 use harness::transcript;
+pub use thread::{NewThread, Quote, THREAD_AUTO, THREAD_TOOLS, Thread, split_title, thread_name};
 
 const PROMPT: &str = "\
 # You are a shikigami
@@ -200,6 +202,8 @@ enum Cmd {
         text: String,
         shown: Option<String>,
         files: Vec<Value>,
+        /// More fields for its user event in the log.
+        extra: Map<String, Value>,
         done: oneshot::Sender<Result<(), String>>,
     },
     Stop {
@@ -226,6 +230,11 @@ enum Cmd {
     /// Let go of its process (it opens in a terminal next); the next message resumes it here.
     Close {
         done: oneshot::Sender<()>,
+    },
+    /// A side thread's turn that only answers the caller: nothing of it shows in its log.
+    Quiet {
+        text: String,
+        done: oneshot::Sender<Result<String, String>>,
     },
 }
 
@@ -275,6 +284,9 @@ pub struct Record {
     pub released: Option<Released>,
     /// The name of the user's session it was adopted from.
     pub adopted: Option<String>,
+    /// A side thread's own fields; None for a shikigami.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thread: Option<Thread>,
     #[serde(flatten)]
     pub other: Map<String, Value>,
 }
@@ -362,6 +374,11 @@ impl Worker {
         self.rec.lock().unwrap().state.clone()
     }
 
+    /// A side thread, not a shikigami.
+    pub fn is_thread(&self) -> bool {
+        self.rec.lock().unwrap().thread.is_some()
+    }
+
     fn edit<R>(&self, f: impl FnOnce(&mut Record) -> R) -> R {
         f(&mut self.rec.lock().unwrap())
     }
@@ -399,7 +416,9 @@ impl Worker {
         });
         let pool = self.pool();
         pool.changed();
-        pool.board.lock().unwrap().follow(&self.id, state);
+        if !self.is_thread() {
+            pool.board.lock().unwrap().follow(&self.id, state);
+        }
     }
 
     fn add(&self, ev: Value) {
@@ -411,7 +430,7 @@ impl Worker {
     fn doing(&self, what: Value) {
         self.edit(|r| r.doing = what);
         let pool = self.pool();
-        pool.events.flash(pool.listing());
+        pool.events.flash(if self.is_thread() { pool.thread_listing() } else { pool.listing() });
     }
 
     /// The user picked a mode on one of its cards (Allow edits for this session, Go ahead on a plan).
@@ -443,6 +462,9 @@ impl Worker {
     pub fn prompt(&self) -> String {
         let r = self.rec();
         let pool = self.pool();
+        if r.thread.is_some() {
+            return thread::prompt(&pool.about);
+        }
         let subagents = if r.subagents.is_empty() { &crate::plan::get().quick } else { &r.subagents };
         let mut text =
             PROMPT.replace("{name}", &r.name).replace("{subagents}", subagents).replace("{about}", &pool.about);
@@ -471,6 +493,9 @@ impl Worker {
     }
 
     fn options(&self) -> Options {
+        if self.is_thread() {
+            return self.thread_options();
+        }
         let r = self.rec();
         let sid = r.session_id.clone();
         let (resume, session_id) = if r.started { (Some(sid), None) } else { (None, Some(sid)) };
@@ -515,6 +540,17 @@ impl Worker {
     /// Start the session if needed and hand it a message; folds into a running turn.
     /// The log keeps what the user wrote (shown) and their files as chips; the session gets text, with the files' paths.
     pub async fn send(self: &Arc<Self>, text: &str, shown: Option<&str>, files: Vec<Value>) -> Result<(), String> {
+        self.send_with(text, shown, files, Map::new()).await
+    }
+
+    /// send, with more fields for its user event in the log.
+    async fn send_with(
+        self: &Arc<Self>,
+        text: &str,
+        shown: Option<&str>,
+        files: Vec<Value>,
+        extra: Map<String, Value>,
+    ) -> Result<(), String> {
         if self.state() == "released" {
             return Err(format!(
                 "{} is the user's own session now; it becomes a shikigami again only when adopted (the user taps Hand \
@@ -526,7 +562,7 @@ impl Worker {
             return Err(format!("{} is open on the server; message it there, or close that window first", self.name()));
         }
         let (done, rx) = oneshot::channel();
-        self.cmd(Cmd::Send { text: text.into(), shown: shown.map(String::from), files, done });
+        self.cmd(Cmd::Send { text: text.into(), shown: shown.map(String::from), files, extra, done });
         rx.await.unwrap_or_else(|_| Err("its session ended".into()))
     }
 
@@ -825,6 +861,8 @@ struct Session {
     steps: HashMap<String, String>,
     grace: Option<Instant>,
     idle: Option<Instant>,
+    /// A side thread's quiet turn runs: its answer goes here, not to the log.
+    aside: Option<oneshot::Sender<Result<String, String>>>,
 }
 
 /// The next message of a process that runs; without one, nothing ever.
@@ -859,6 +897,7 @@ impl Session {
             steps: HashMap::new(),
             grace: None,
             idle: None,
+            aside: None,
         }
     }
 
@@ -906,7 +945,13 @@ impl Session {
     /// The stream ended: the agent process is gone.
     async fn ended(&mut self) {
         self.close().await;
-        if ACTIVE.contains(&self.w.state().as_str()) {
+        if let Some(done) = self.aside.take() {
+            let _ = done.send(Err("its process exited".into()));
+        }
+        if self.w.is_thread() && ACTIVE.contains(&self.w.state().as_str()) {
+            self.w.add(json!({"type": "system", "level": "error", "text": "Its process exited mid-turn"}));
+            self.w.set("idle", |_| {});
+        } else if ACTIVE.contains(&self.w.state().as_str()) {
             self.w.set("failed", |r| r.summary = "The session's process exited.".into());
             self.pool.report(&self.w, "failed", "The session's process exited mid-turn (crashed or killed).");
         }
@@ -914,9 +959,10 @@ impl Session {
 
     async fn command(&mut self, c: Cmd) {
         match c {
-            Cmd::Send { text, shown, files, done } => {
-                let _ = done.send(self.send(&text, shown, files).await);
+            Cmd::Send { text, shown, files, extra, done } => {
+                let _ = done.send(self.send(&text, shown, files, extra).await);
             }
+            Cmd::Quiet { text, done } => self.quiet_turn(&text, done).await,
             Cmd::Stop { done } => {
                 self.stop().await;
                 let _ = done.send(());
@@ -944,11 +990,20 @@ impl Session {
         }
     }
 
-    async fn send(&mut self, text: &str, shown: Option<String>, files: Vec<Value>) -> Result<(), String> {
+    async fn send(
+        &mut self,
+        text: &str,
+        shown: Option<String>,
+        files: Vec<Value>,
+        extra: Map<String, Value>,
+    ) -> Result<(), String> {
         self.idle = None;
         let mut ev = json!({"type": "user", "text": shown.unwrap_or_else(|| text.into())});
         if !files.is_empty() {
             ev["files"] = json!(files);
+        }
+        for (k, v) in extra {
+            ev[k] = v;
         }
         self.w.add(ev);
         self.connect().await?;
@@ -1133,7 +1188,7 @@ impl Session {
                 self.pool.audit.call(Call { who, worker, session, agent, id, tool: name, input });
             }
         }
-        if msg.parent_tool_use_id.is_some() {
+        if msg.parent_tool_use_id.is_some() || self.aside.is_some() {
             return;
         }
         let blocks = msg.message.content;
@@ -1154,6 +1209,10 @@ impl Session {
         for b in &blocks {
             match b {
                 ContentBlock::Text { text } if !text.trim().is_empty() => {
+                    let text = &self.w.titled(text);
+                    if text.trim().is_empty() {
+                        continue;
+                    }
                     self.w.add(json!({"type": "assistant", "text": text}));
                     if TRIVIAL.contains(&text.trim()) {
                         continue;
@@ -1174,7 +1233,7 @@ impl Session {
     }
 
     fn user(&mut self, msg: UserMessage) {
-        if msg.parent_tool_use_id.is_some() {
+        if msg.parent_tool_use_id.is_some() || self.aside.is_some() {
             return;
         }
         let UserContent::Blocks(blocks) = msg.message.content else { return };
@@ -1223,9 +1282,19 @@ impl Session {
             r.turns += 1;
             r.turns == 1
         });
-        let label = format!("shikigami {}", self.w.name());
+        let label = format!("{} {}", if self.w.is_thread() { "side thread" } else { "shikigami" }, self.w.name());
         self.pool.usage.turn(&label, &msg.session_id, msg.model_usage.as_ref(), fresh);
+        if let Some(done) = self.aside.take() {
+            let said = split_title(msg.result.as_deref().unwrap_or("")).1.trim().to_string();
+            let _ = done.send(if msg.is_error { Err(crate::util::turn_error(&said)) } else { Ok(said) });
+            self.go_idle();
+            return;
+        }
         if std::mem::take(&mut self.cut) && msg.is_error && msg.subtype == "error_during_execution" {
+            return;
+        }
+        if self.w.is_thread() {
+            self.thread_end(msg);
             return;
         }
         let said = msg.result.as_deref().unwrap_or("").trim().to_string();
@@ -1286,6 +1355,10 @@ impl Session {
 
     /// Stopped: its record and its report.
     fn stopped(&self) {
+        if self.w.is_thread() {
+            self.w.set("idle", |_| {});
+            return;
+        }
         self.w.set("stopped", |r| {
             r.summary = "Stopped.".into();
             r.question = None;
@@ -1509,6 +1582,8 @@ pub struct Pool {
     me: Weak<Pool>,
     /// In workers.json's order.
     workers: Mutex<Vec<Arc<Worker>>>,
+    /// The side threads, in threads.json's order.
+    threads: Mutex<Vec<Arc<Worker>>>,
     pub archive: Archive,
     /// The dispatcher's own names for sessions.
     pub aliases: Aliases,
@@ -1530,6 +1605,8 @@ pub struct Pool {
     pub dispatcher: OnceLock<Arc<dyn Listener>>,
     /// The watch rules, for a shikigami's after_reboot note; set by the wiring.
     pub watches: OnceLock<Arc<crate::watches::Watches>>,
+    /// The phones, for a side thread's answer; set by the wiring.
+    pub push: OnceLock<Arc<crate::push::Push>>,
     terminal: String,
     /// The enabled plugins: their env, the groups summon grants, and how a session opens in a terminal.
     pub plugins: Arc<Plugins>,
@@ -1547,30 +1624,16 @@ pub struct Pool {
 impl Pool {
     pub fn new(state: &Path, mode: &str, about: &str, parts: Parts) -> std::io::Result<Arc<Pool>> {
         let dir = state.join("workers");
-        std::fs::create_dir_all(&dir)?;
         let path = state.join("workers.json");
-        let recs = read_state(&path).and_then(|v| v.as_array().cloned()).unwrap_or_default();
-        let mut logs = vec![];
-        for v in recs {
-            let rec = match Record::parse(v) {
-                Ok(rec) => rec,
-                Err(e) => {
-                    // The next save leaves it out: keep the file as it was beside it.
-                    eprintln!("seimei: skipping a record in workers.json (a copy is in workers.json.bad): {e}");
-                    let _ = std::fs::copy(&path, state.join("workers.json.bad"));
-                    continue;
-                }
-            };
-            if !rec.id.is_empty() {
-                let log = EventLog::open(&dir.join(format!("{}.jsonl", rec.id)))?;
-                logs.push((rec, log));
-            }
-        }
+        let logs = load_records(state, "workers")?;
+        let threads = load_records(state, "threads")?;
         let pool = Arc::new_cyclic(|me: &Weak<Pool>| {
             let workers = logs.into_iter().map(|(rec, log)| Worker::new(rec, log, me.clone())).collect();
+            let threads = threads.into_iter().map(|(rec, log)| Worker::new(rec, log, me.clone())).collect();
             Pool {
                 me: me.clone(),
                 workers: Mutex::new(workers),
+                threads: Mutex::new(threads),
                 archive: Archive::new(&state.join("archive.json")),
                 aliases: Aliases::new(&state.join("aliases.json")),
                 mode: mode.into(),
@@ -1587,6 +1650,7 @@ impl Pool {
                 uploads: Arc::new(Uploads::new(state)),
                 dispatcher: OnceLock::new(),
                 watches: OnceLock::new(),
+                push: OnceLock::new(),
                 terminal: parts.terminal,
                 plugins: parts.plugins,
                 agents: OnceLock::new(),
@@ -1645,9 +1709,10 @@ impl Pool {
         self.path.parent().unwrap_or(Path::new("."))
     }
 
-    /// seimei stops: every shikigami's process closes as after an idle spell (its transcript complete); the records stay for the restart.
+    /// seimei stops: every shikigami's and thread's process closes as after an idle spell (its transcript complete); the records stay for the restart.
     pub async fn close_all(&self) {
-        let closing: Vec<_> = self.all().into_iter().map(|w| tokio::spawn(async move { w.close().await })).collect();
+        let all = self.all().into_iter().chain(self.threads());
+        let closing: Vec<_> = all.map(|w| tokio::spawn(async move { w.close().await })).collect();
         for c in closing {
             let _ = c.await;
         }
@@ -1694,13 +1759,16 @@ impl Pool {
         json!({"type": "workers", "list": list, "total": self.workers.lock().unwrap().len()})
     }
 
-    /// Saves workers.json and sends the pages the new list; call it after any change to a record.
+    /// Saves workers.json and threads.json and sends the pages the new lists; call it after any change to a record.
     pub fn changed(&self) {
         let saving = self.saving.lock().unwrap();
         let recs: Vec<Record> = self.all().iter().map(|w| w.rec()).collect();
         save_json(&self.path, &recs);
+        let recs: Vec<Record> = self.threads.lock().unwrap().iter().map(|w| w.rec()).collect();
+        save_json(&self.state.join("threads.json"), &recs);
         drop(saving);
         self.events.flash(self.listing());
+        self.events.flash(self.thread_listing());
     }
 
     pub fn set_archived(&self, w: &Worker, on: bool) -> std::io::Result<()> {
@@ -1709,11 +1777,12 @@ impl Pool {
         Ok(())
     }
 
-    /// Auto-archiving needs no event: tell the pages when a shikigami's 12 hours run out.
+    /// Auto-archiving needs no event: tell the pages when a shikigami's 12 hours or a thread's 24 run out.
     pub async fn sweep(self: Arc<Self>) {
         loop {
-            let hidden: HashSet<String> =
+            let mut hidden: HashSet<String> =
                 self.all().iter().filter(|w| self.archive.worker(&w.rec())).map(|w| w.id.clone()).collect();
+            hidden.extend(self.threads().iter().filter(|w| self.archive.thread(&w.rec())).map(|w| w.id.clone()));
             let changed = {
                 let mut h = self.hidden.lock().unwrap();
                 let changed = *h != hidden;
@@ -1722,6 +1791,7 @@ impl Pool {
             };
             if changed {
                 self.events.flash(self.listing());
+                self.events.flash(self.thread_listing());
             }
             tokio::time::sleep(Duration::from_secs(300)).await;
         }
@@ -1752,6 +1822,10 @@ impl Pool {
             .filter(|r| r.state != "released")
             .map(|r| (r.session_id, format!("shikigami {}", r.name)))
             .collect();
+        for w in self.threads() {
+            let r = w.rec();
+            labels.insert(r.session_id, format!("side thread {}", r.name));
+        }
         if let Some(sid) = self.dispatcher.get().and_then(|d| d.session_id()) {
             labels.insert(sid, "seimei (you)".into());
         }
@@ -1824,6 +1898,9 @@ impl Pool {
 
     /// A card in the conversation; the dispatcher hears about it now (a stop: at its next turn).
     pub fn report(&self, w: &Worker, event: &str, text: &str) {
+        if w.is_thread() {
+            return;
+        }
         let name = w.name();
         self.events
             .add(json!({"type": "worker", "worker": w.id, "name": name, "event": event, "text": chars(text, 4000)}));
@@ -2130,6 +2207,14 @@ impl Pool {
     /// Returns the names resumed.
     pub fn startup(self: &Arc<Self>) -> Vec<String> {
         let at = now();
+        // A thread cut off mid-answer is not resumed: the user asks again when they want.
+        for w in self.threads() {
+            if ACTIVE.contains(&w.state().as_str()) || w.state() == "starting" {
+                w.log.close_open_tools("Interrupted by a restart");
+                w.add(json!({"type": "system", "text": "Interrupted by a restart"}));
+                w.set("idle", |_| {});
+            }
+        }
         let mut resumed = vec![];
         for w in self.all() {
             if w.state() != "running" {
@@ -2195,6 +2280,31 @@ impl Pool {
             }
         }
     }
+}
+
+/// The records in <kind>.json with their logs in <kind>/; a record that does not parse is left out, its file kept as <kind>.json.bad.
+fn load_records(state: &Path, kind: &str) -> std::io::Result<Vec<(Record, EventLog)>> {
+    let dir = state.join(kind);
+    std::fs::create_dir_all(&dir)?;
+    let path = state.join(format!("{kind}.json"));
+    let recs = read_state(&path).and_then(|v| v.as_array().cloned()).unwrap_or_default();
+    let mut out = vec![];
+    for v in recs {
+        let rec = match Record::parse(v) {
+            Ok(rec) => rec,
+            Err(e) => {
+                // The next save leaves it out: keep the file as it was beside it.
+                eprintln!("seimei: skipping a record in {kind}.json (a copy is in {kind}.json.bad): {e}");
+                let _ = std::fs::copy(&path, state.join(format!("{kind}.json.bad")));
+                continue;
+            }
+        };
+        if !rec.id.is_empty() {
+            let log = EventLog::open(&dir.join(format!("{}.jsonl", rec.id)))?;
+            out.push((rec, log));
+        }
+    }
+    Ok(out)
 }
 
 /// The CLI's answer to /effort: words that may change, and no model turn.

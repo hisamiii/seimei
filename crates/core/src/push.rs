@@ -756,6 +756,13 @@ impl Push {
         self.fire(data, 3600, if reply { Only::OffChat } else { Only::Closed })
     }
 
+    /// A side thread's answer, titled with its name, to the phones without the app open; Reply answers in the thread.
+    pub fn thread(self: &Arc<Self>, id: &str, name: &str, text: &str) -> usize {
+        let data = json!({"kind": level_channel("normal"), "tag": format!("thread:{id}"), "thread": id,
+                          "title": chars(name, 120), "body": chars(text.trim(), 600), "alert": 1, "tab": "chat"});
+        self.fire(data, 3600, Only::Closed)
+    }
+
     /// Check a background connection's credentials: "Push <device> <secret>".
     pub fn stream_device(&self, authorization: &str) -> Option<String> {
         let parts: Vec<&str> = authorization.split_whitespace().collect();

@@ -58,6 +58,8 @@ macro_rules! attempt {
     };
 }
 
+mod threads;
+
 fn conflict(e: impl std::fmt::Display) -> Response {
     json_status(StatusCode::CONFLICT, json!({"error": e.to_string()}))
 }
@@ -187,6 +189,7 @@ impl App {
             cost: cost.clone(),
             push: push.clone(),
             ask: disp.on_acp(),
+            offer: Default::default(),
         });
         // A harness that cannot serve the dispatcher's tools in-process reaches them through the plugin socket.
         let weak = Arc::downgrade(&tools);
@@ -200,6 +203,7 @@ impl App {
         let d = dispatcher.clone();
         let _ = watches.wake.set(Box::new(move |line| d.wake(line)));
         let _ = pool.watches.set(watches.clone());
+        let _ = pool.push.set(push.clone());
         let watcher = Arc::new(Watcher::new(events.clone(), pool.clone()));
         Ok(App {
             events,
@@ -365,6 +369,20 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/workers/{id}/archive", post(worker_archive))
         .route("/api/workers/{id}/laptop", post(worker_laptop))
         .route("/api/workers/{id}/release", post(worker_release))
+        .route("/api/threads", get(threads::list).post(threads::start))
+        .route("/api/threads/{id}", get(threads::history))
+        .route("/api/threads/{id}/send", post(threads::send))
+        .route("/api/threads/{id}/stop", post(threads::stop))
+        .route("/api/threads/{id}/summary", post(threads::summary))
+        .route("/api/threads/{id}/post", post(threads::post))
+        .route("/api/threads/{id}/seen", post(threads::seen))
+        .route("/api/threads/{id}/tune", post(threads::tune))
+        .route("/api/threads/{id}/rename", post(threads::rename))
+        .route("/api/threads/{id}/archive", post(threads::archive))
+        .route("/api/threads/{id}/shikigami", post(threads::shikigami))
+        .route("/api/watches", get(threads::watches))
+        .route("/api/watches/{id}/remove", post(threads::watch_remove))
+        .route("/api/gallery", get(threads::gallery))
         .route("/api/sessions/{pid}/adopt", post(session_adopt))
         .route("/api/sessions/{pid}", get(session))
         .route("/api/sessions/{pid}/send", post(session_send))
@@ -801,7 +819,8 @@ async fn history(State(app): Shared, Query(q): Query<HashMap<String, String>>) -
     };
     let events: Vec<Event> = app.events.before(before, limit.clamp(0, 1000) as usize);
     let events: Vec<Cow<Value>> = events.iter().map(|e| app.sized(e)).collect();
-    ok(json!({"events": events, "last": app.events.last_id(), "state": app.state(), "workers": app.workers()["list"]}))
+    ok(json!({"events": events, "last": app.events.last_id(), "state": app.state(), "workers": app.workers()["list"],
+              "threads": app.pool.thread_listing()}))
 }
 
 fn sse(ev: &Value) -> Bytes {
@@ -856,7 +875,7 @@ async fn stream_events(
             }
             last = ev["id"].as_i64().unwrap_or(last);
         }
-        for snap in [app.state(), app.workers(), app.usage.snapshot(), app.sessions()] {
+        for snap in [app.state(), app.workers(), app.pool.thread_listing(), app.usage.snapshot(), app.sessions()] {
             if !send(sse(&snap)).await {
                 return;
             }

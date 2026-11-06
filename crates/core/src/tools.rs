@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
 use seimei_proto::Permission;
@@ -24,7 +25,7 @@ use crate::usage::Usage;
 use crate::util::{as_text, chars, flag, now, truthy};
 use crate::watches::{DEFAULT_HOURS, NewRule, TRIGGERS, WAKES, Watches, mins};
 use crate::workers::harness::transcript;
-use crate::workers::{ACTIVE, EFFORTS, MODELS, Pool, Summon, Worker};
+use crate::workers::{ACTIVE, EFFORTS, MODELS, NewThread, Pool, Quote, Summon, Worker};
 
 /// data/tools.json: the dispatcher's server, and under "shikigami" the shikigami's own (ask, board, show_image, send_file).
 pub(crate) static SERVER: LazyLock<Value> =
@@ -55,6 +56,8 @@ pub struct Tools {
     pub watches: Arc<Watches>,
     /// The dispatcher's harness has no question cards of its own: the ask tool stands in.
     pub ask: bool,
+    /// A side-thread offer waits for the end of the turn, to go under its reply.
+    pub offer: AtomicBool,
 }
 
 pub fn text(t: &str, error: bool) -> Value {
@@ -334,6 +337,7 @@ impl Tools {
         match name {
             "summon" => self.summon(a).await,
             "ask" => self.ask(a).await,
+            "threads" => self.threads(a).await,
             "message" => {
                 let Some(w) = self.pool.find(&arg(a, "worker")) else { return text("No such shikigami.", true) };
                 // The board moves before the message goes, so the turn it starts follows the new item.
@@ -585,6 +589,123 @@ impl Tools {
             "session_peek" => self.session_peek(a),
             _ => text(&format!("Tool '{name}' not found"), true),
         }
+    }
+
+    /// Side threads: list, read, send, start, offer.
+    async fn threads(&self, a: &Value) -> Value {
+        let found = self.pool.thread(&arg(a, "thread"));
+        let said = arg(a, "text").trim().to_string();
+        match (a["action"].as_str(), found) {
+            (Some("list"), _) => text(&self.thread_lines(), false),
+            (Some("read" | "send"), None) => text("No such side thread.", true),
+            (Some("read"), Some(w)) => {
+                let r = w.rec();
+                let head = format!("side thread \"{}\" ({}), {}, started {}:", r.name, w.id, r.state, since(r.created));
+                text(&format!("{head}\n{}", self.pool.thread_transcript(&w)), false)
+            }
+            (Some("send"), Some(w)) if !said.is_empty() => {
+                match self.pool.thread_say(&w, &said, None, vec![], true, Default::default()).await {
+                    Ok(()) => text(&format!("Sent to \"{}\"; its answer comes back to you.", w.name()), false),
+                    Err(e) => text(&e, true),
+                }
+            }
+            (Some("start"), _) if !said.is_empty() => {
+                let q = arg(a, "quote");
+                let quote = match self.chat_message(&q, false) {
+                    Some(ev) => Some(Quote { id: ev["id"].as_i64().unwrap_or(0), text: as_text(&ev["text"]) }),
+                    None if q.trim().is_empty() => None,
+                    None => return text("No message in the chat holds those words.", true),
+                };
+                let t = NewThread { text: said, quote, by_seimei: true, ..NewThread::default() };
+                match self.pool.start_thread(t).await {
+                    Ok(w) => text(
+                        &format!("Started the side thread \"{}\" ({}); its answer comes back to you.", w.name(), w.id),
+                        false,
+                    ),
+                    Err(e) => text(&e, true),
+                }
+            }
+            (Some("send" | "start"), _) => text("text is the message.", true),
+            (Some("offer"), _) => {
+                let q = arg(a, "quote");
+                if q.trim().is_empty() {
+                    self.offer.store(true, Ordering::SeqCst);
+                    return text("The chip goes under your reply when this turn ends.", false);
+                }
+                match self.offer_on(Some(&q)) {
+                    Ok(()) => text("Offered under that reply.", false),
+                    Err(e) => text(&e, true),
+                }
+            }
+            _ => text("action is list, read, send, start or offer.", true),
+        }
+    }
+
+    /// The threads for the dispatcher, newest first: open ones, then the newest archived.
+    fn thread_lines(&self) -> String {
+        let mut lines = vec![];
+        let mut archived = 0;
+        for w in self.pool.threads() {
+            let row = self.pool.thread_row(&w);
+            if row["archived"] == true {
+                archived += 1;
+                if archived > 20 {
+                    continue;
+                }
+            }
+            let mut line = format!("{} \"{}\": {}", w.id, as_text(&row["name"]), as_text(&row["state"]));
+            let n = row["unread"].as_u64().unwrap_or(0);
+            if n > 0 {
+                line += &format!(", {n} unread");
+            }
+            if row["archived"] == true {
+                line += ", archived";
+            }
+            if row["sent"].as_u64().unwrap_or(0) > 0 {
+                line += &format!(", sent to you {}x", row["sent"]);
+            }
+            if let Some(s) = row["shikigami"].as_str() {
+                line += &format!(", became shikigami {s}");
+            }
+            if row["by"] == "seimei" {
+                line += ", started by you";
+            }
+            line += &format!(", last activity {}", since(row["updated"].as_f64().unwrap_or(0.0)));
+            let last = as_text(&row["last"]);
+            if !last.is_empty() {
+                line += &format!(": {last}");
+            }
+            lines.push(line);
+        }
+        if lines.is_empty() { "No side threads.".into() } else { lines.join("\n") }
+    }
+
+    /// The newest chat message (only seimei's, or the user's too) holding these words.
+    fn chat_message(&self, quote: &str, only_seimei: bool) -> Option<crate::events::Event> {
+        let flat = |t: &str| t.to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ");
+        let q = flat(quote.trim_matches(['"', '\'', ' ']).trim_end_matches(['…', '.']));
+        if q.chars().count() < 3 {
+            return None;
+        }
+        let kinds: &[&str] = if only_seimei { &["assistant"] } else { &["assistant", "user"] };
+        let recent = self.events.before(None, 3000);
+        recent.into_iter().rev().find(|e| {
+            kinds.contains(&e["type"].as_str().unwrap_or(""))
+                && e["lane"] != "t"
+                && flat(&as_text(&e["text"])).contains(&q)
+        })
+    }
+
+    /// An "Ask on the side" chip under one of the dispatcher's chat replies: the one holding the quote, else its newest.
+    pub fn offer_on(&self, quote: Option<&str>) -> Result<(), String> {
+        let ev = match quote {
+            Some(q) => self.chat_message(q, true).ok_or("No reply of yours in the chat holds those words.")?,
+            None => (self.events.before(None, 200).into_iter().rev())
+                .find(|e| e["type"] == "assistant" && e["lane"] != "t")
+                .ok_or("No reply of yours in the chat yet.")?,
+        };
+        self.events.add(json!({"type": "offer", "re": ev["id"], "lane": "c"}));
+        Ok(())
     }
 
     /// Watch rules: add, list, remove.

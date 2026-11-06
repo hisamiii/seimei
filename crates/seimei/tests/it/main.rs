@@ -19,4 +19,5 @@ mod relay;
 mod seimei_tools;
 mod setup;
 mod share;
+mod threads;
 mod update;

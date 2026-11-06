@@ -1,5 +1,5 @@
 {
- "about": "Shikigami helpers from workers.rs and tools.rs: slug (a summoned name), title_of (its board title), first_line, summon_problem (why a summon cannot go ahead), capped (a peek's text) and batch (what the dispatcher gets for a burst of tell/notify calls; tell names the shikigami by id, keys collapse); record (a record as workers.json holds it: it loads, and every field it had saves back as it was).",
+ "about": "Shikigami helpers from workers.rs and tools.rs: slug (a summoned name), title_of (its board title), first_line, summon_problem (why a summon cannot go ahead), capped (a peek's text) and batch (what the dispatcher gets for a burst of tell/notify calls; tell names the shikigami by id, keys collapse); thread_name (a side thread's name before its first reply), split_title (a thread reply's leading title line); record (a record as workers.json holds it: it loads, and every field it had saves back as it was).",
  "slug": [
   {"name": "NPU DMA", "slug": "npu-dma"},
   {"name": "readme-fix", "slug": "readme-fix"},
@@ -67,6 +67,18 @@
  ],
  "record": [
   {"id": "a1b2c3d4", "name": "app-tester", "task": "Test the app.", "cwd": "/home/u/src/app", "model": "opus", "effort": null, "context_cap": "200k", "subagents": "haiku", "session_id": "0b3c-uuid", "state": "done", "created": 1800000000.5, "updated": 1800000900.0, "summary": "All green.", "result": "All green. 41 tests.", "started": true, "question": null, "card": null, "doing": {"text": "Running the tests", "tool": "Bash"}, "mode": "acceptEdits", "harness": null, "tools": ["desktop", "browser"], "tunes": [{"t": 1800000100.0, "by": "the user", "what": "effort low → high"}], "effort_next": "high", "turns": 3, "resumes": [1800000500.0], "nudge": {"task": "#12", "calls": 4}, "laptop_window": 94371845, "released": {"at": 1800000800.0, "path": "/home/u/.claude/projects/x/0b3c.jsonl", "offset": 1234}, "adopted": "my session", "later": {"a field": "this build does not know"}},
-  {"id": "e5f6", "name": "fixer", "task": "Fix it.", "cwd": "/x", "model": "acp:codex", "context_cap": null, "subagents": null, "session_id": "s2", "state": "released", "created": 1800000000.0, "updated": 1800000000.0, "summary": "", "harness": "acp:codex", "tunes": null, "released": null, "laptop_window": "w-0x3a"}
+  {"id": "e5f6", "name": "fixer", "task": "Fix it.", "cwd": "/x", "model": "acp:codex", "context_cap": null, "subagents": null, "session_id": "s2", "state": "released", "created": 1800000000.0, "updated": 1800000000.0, "summary": "", "harness": "acp:codex", "tunes": null, "released": null, "laptop_window": "w-0x3a"},
+  {"id": "t1", "name": "kryosheet pressure", "state": "idle", "thread": {"quote": {"id": 42, "text": "good timing"}, "by": "", "named": true, "seen": 7, "sent": 1, "shikigami": null, "seimei_asked": false}}
+ ],
+ "thread_name": [
+  {"text": "how much pressure does a kryosheet need?", "name": "how much pressure does a kryosheet need?"},
+  {"text": "\n  which usb-c dac should i get for the pixel? the built-in one hisses", "name": "which usb-c dac should i get for the…"},
+  {"text": "", "name": "side thread"}
+ ],
+ "split_title": [
+  {"text": "title: kryosheet pressure\nfirm, even pressure.", "title": "kryosheet pressure", "rest": "firm, even pressure."},
+  {"text": "**Title:** \"dac picks\"\n\nthe ka17.", "title": "dac picks", "rest": "the ka17."},
+  {"text": "no title here\ntitle: later", "title": null, "rest": "no title here\ntitle: later"},
+  {"text": "title:\nempty", "title": null, "rest": "empty"}
  ]
 }

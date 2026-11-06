@@ -21,6 +21,8 @@ POSTs need a JSON body, and the page's Origin for cookie sessions or a bearer to
 
 The dispatcher and every shikigami run as the user, with Bash, in the permission mode set in config. The harness's own permissions decide each tool call, and its permission prompts become cards in every mode except bypass.
 
+A side thread can only look things up: web search, web fetch, Read, Grep and Glob, in Claude Code's dontAsk mode with no MCP servers. Every other tool is denied without a card, and the denied paths apply to it too.
+
 ### Denied paths
 
 `[approvals] deny_paths` in [config.md](config.md) lists the paths no agent may read or edit. By default it holds seimei's own secrets in its data folder and the dev server's: `auth.json`, `unlock`, `push-vapid.pem`, `kitty-rc.conf`, `signing/` and `firebase/`.

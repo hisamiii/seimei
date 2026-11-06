@@ -38,6 +38,7 @@ seimei runs three kinds of session: the dispatcher, the shikigami and the user's
 
 - **The dispatcher**, named "seimei", is one session that never ends. It resumes the same session id after every restart and compacts its own context. Its tools are an in-process MCP server, `mcp__seimei__*`: summon, message, tune, notes, tasks, notify, cards, sessions and files.
 - **Shikigami** are worker sessions inside seimei, each with a name, a folder, a model and an effort. Each runs on its own Claude Code process, or on an ACP or Codex agent. Their tools, `mcp__shikigami__*`, let them ask the user, move along the board, and show the user an image or a file. The chat marks those as the shikigami's.
+- **Side threads** are small chats for tangents, apart from the dispatcher's context. Each runs on its own Claude Code process with look-up tools only, named by its first reply. The user starts one from the top bar or from a message of seimei's, and sends seimei its summary as their own message. The dispatcher lists, reads, starts and messages them, and offers one under a reply. A thread archives itself after a day without activity and keeps its text. It can become a shikigami with its text as context, and is read-only from then on.
 - **The user's own sessions** come from Claude Code's registry in `~/.claude/sessions/*.json` and from the transcripts. The page lists them. A session's page shows its transcript, with the prompts queued mid-turn or relayed by seimei. The server looks at each transcript four times a second. When one grows, it tells the clients on the stream, and an open page reads on at once. A background task's end shows as a note. Adopting one makes it a shikigami, and stopping, resuming or deleting one takes a card.
 
 A message to the dispatcher or a shikigami during its turn cuts in at once, as the terminal's "send now" does. A tool call that runs finishes first.
@@ -99,7 +100,7 @@ seimei keeps its config in `~/.config/seimei/` and its state in `~/.local/share/
 | `~/.local/state/seimei/seimei.log` | the OpenRC service's log |
 | `$XDG_RUNTIME_DIR/seimei/browser.sock` | the browser connector's socket |
 
-The state folder holds the events, the session id, workers, tasks, notes, `auth.json`, uploads and the audit log. `watches.json` holds the watch rules, and `boot.json` with `sessions-seen.json` what a start after a reboot reports. Each plugin process uses its session's token on `plugins.sock`. Under systemd the log goes to the journal instead of `seimei.log`.
+The state folder holds the events, the session id, workers, side threads (`threads.json`, `threads/`), tasks, notes, `auth.json`, uploads and the audit log. `watches.json` holds the watch rules, and `boot.json` with `sessions-seen.json` what a start after a reboot reports. Each plugin process uses its session's token on `plugins.sock`. Under systemd the log goes to the journal instead of `seimei.log`.
 
 ## Themes
 
@@ -141,7 +142,7 @@ The code map lists where each part lives. Paths are relative to the repo root.
 
 - `dispatcher.rs`: the permanent session and the routing of event turns, on the harness `[dispatcher] harness` names. Its prompt is `dispatcher.md`.
 - `harness/`: the `Harness` trait the dispatcher's turns read, as `Ev` events. `harness/claude.rs` is the Claude Code implementation, and `harness/acp.rs` the one for ACP agents and Codex.
-- `workers/`: shikigami, with summon, resume and hand-over.
+- `workers/`: shikigami, with summon, resume and hand-over. `workers/thread.rs` holds the side threads, which run on the same sessions.
 - `workers/claude.rs`: the Claude Code adapter. It holds the CLI flags and env, the transcript and session-registry layout, hooks, settings paths, tool names and model prices.
 - `workers/acp_session.rs`: the adapter for ACP and Codex agents.
 - `tools.rs`: the dispatcher's MCP tools, with schemas in `data/tools.json`.
@@ -170,7 +171,7 @@ Dictation and plugins:
 
 The binary, the server and the clients:
 
-- `crates/server/src/lib.rs`: every HTTP route.
+- `crates/server/src/lib.rs`: every HTTP route. `threads.rs` has the handlers for side threads, watch rules and the files gallery.
 - `crates/seimei/src`: `main.rs` for startup and the account commands, `lib.rs` for the list of built-in plugins, `setup.rs` and `update.rs`.
 - `web/`: `app.js` for start, stream and routing. Then `chat.js`, `agents.js`, `tasks.js`, `account.js` and `usage.js`, with `mic.js` for dictation and `sw.js` for notifications.
 - `android/`: the app, with the same screens in Compose. `Dictate.kt` is the mic.

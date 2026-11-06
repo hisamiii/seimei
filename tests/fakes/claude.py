@@ -296,6 +296,8 @@ class Fake:
     async def play(self, text: str, images: int):
         if self.name.startswith("shikigami "):
             return await self.shikigami(text)
+        if self.name.startswith("side thread "):
+            return await self.thread(text)
         if log := os.environ.get("FAKE_CLAUDE_LOG"):
             with open(log, "a") as f:
                 f.write(json.dumps(text) + "\n")
@@ -428,6 +430,25 @@ async def dispatcher(self: Fake, text: str, images: int):
     self.result("")
 
 
+async def thread(self: Fake, text: str):
+    """A side thread's scripts: its first reply starts with a title line, as its prompt asks."""
+    t = command(text)
+    first = not getattr(self, "titled", False)
+    self.titled = True
+    if text.startswith("[seimei] The user sends this thread"):
+        said = "the thread in short: reuse the sheet."
+    elif t == "slow":
+        said = "Looking it up slowly. " * 20
+        await self.say(said, 0.4)
+        return self.result(said)
+    else:
+        if t == "search":
+            await self.tool("WebSearch", {"query": "kryosheet pressure"}, "4 results")
+        said = ("title: fake topic\n" if first else "") + f"Echo: {text[:300]}"
+    await self.say(said)
+    self.result(said)
+
+
 async def shikigami(self: Fake, text: str):
     """A shikigami's scripts: its last text is its report."""
     t = command(text)
@@ -475,6 +496,7 @@ async def shikigami(self: Fake, text: str):
 
 Fake.dispatcher = dispatcher
 Fake.shikigami = shikigami
+Fake.thread = thread
 
 
 def main():

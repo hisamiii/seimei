@@ -1,7 +1,7 @@
 //! tests/cases/workers.json: the shikigami helpers.
 
 use seimei_core::tools::{capped, summon_problem};
-use seimei_core::workers::{Batch, Out, Record, first_line, flushed, queue, slug, title_of};
+use seimei_core::workers::{Batch, Out, Record, first_line, flushed, queue, slug, split_title, thread_name, title_of};
 use serde_json::{Value, json};
 
 #[test]
@@ -20,6 +20,13 @@ fn worker_cases() {
     }
     for c in doc["title_of"].as_array().unwrap() {
         check(format!("title_of {}", c["task"]), json!(title_of(&s(&c["task"]), &s(&c["name"]))), &c["title"]);
+    }
+    for c in doc["thread_name"].as_array().unwrap() {
+        check(format!("thread_name {}", c["text"]), json!(thread_name(&s(&c["text"]))), &c["name"]);
+    }
+    for c in doc["split_title"].as_array().unwrap() {
+        let (title, rest) = split_title(&s(&c["text"]));
+        check(format!("split_title {}", c["text"]), json!([title, rest]), &json!([c["title"], c["rest"]]));
     }
     for c in doc["first_line"].as_array().unwrap() {
         let n = c["n"].as_u64().unwrap() as usize;
