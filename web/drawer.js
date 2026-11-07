@@ -1,5 +1,5 @@
 // The navigation drawer (M3 modal): seimei, the recent side threads, agents and watches, files; usage and settings at its foot.
-// The menu icon opens it, and so does a swipe in from the left edge; the phone's back button closes it.
+// The menu icon opens it, and so does a sideways swipe anywhere; the phone's back button closes it.
 import { $, S, hooks, el, svg, short, when } from './util.js';
 import { fromWorker, fromSession, tile, tint, pageOpen } from './agents.js';
 import { THR } from './threads.js';
@@ -160,25 +160,60 @@ $('drawer-btn').addEventListener('click', openDrawer);
 $('drawer-scrim').addEventListener('click', closeDrawer);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !wrap.hidden) closeDrawer(); });
 
-// A swipe in from the left edge opens it; a swipe back to the left closes it.
-const EDGE = 24;
+// A sideways swipe anywhere opens it, and one back to the left closes it.
+// The screen's edges belong to the phone's back gesture, so the swipe cannot wait for an edge.
+// The first clear direction past SLOP decides: mostly sideways and toward the drawer's side is the drawer's, unless what is under the finger takes it.
+const SLOP = 10;
+const COMMIT = 56;
+const HOLD = 500;
 let swipe = null;
+
+// Whether something under the finger takes a sideways swipe itself: a box that can still scroll that way, or a task row (a swipe right ticks it).
+function takes(el, right) {
+  for (; el && el !== document.body; el = el.parentElement) {
+    if (right && el.classList.contains('swipe')) return true;
+    if (el.scrollWidth > el.clientWidth + 1 && /auto|scroll/.test(getComputedStyle(el).overflowX)) {
+      if (right ? el.scrollLeft > 0 : el.scrollLeft + el.clientWidth < el.scrollWidth - 1) return true;
+    }
+  }
+  return false;
+}
+
 document.addEventListener('touchstart', (e) => {
-  const p = e.touches[0];
+  swipe = null;
   if (e.touches.length !== 1) return;
-  if (wrap.hidden ? p.clientX <= EDGE && !pageOpen() && sheet.wrap.hidden : true) swipe = { x: p.clientX, y: p.clientY, open: !wrap.hidden };
+  const open = !wrap.hidden;
+  if (!open && (pageOpen() || !sheet.wrap.hidden)) return;
+  const p = e.touches[0];
+  swipe = { x: p.clientX, y: p.clientY, t: e.timeStamp, el: e.target, open, ours: false };
 }, { passive: true });
+// Not passive: once the swipe is the drawer's, the page under it does not scroll.
 document.addEventListener('touchmove', (e) => {
   if (!swipe) return;
+  if (e.touches.length !== 1) {
+    swipe = null;
+    return;
+  }
   const p = e.touches[0];
   const dx = p.clientX - swipe.x, dy = p.clientY - swipe.y;
-  if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 12) swipe = null;
-  else if (!swipe.open && dx > 48) {
+  if (!swipe.ours) {
+    if (Math.hypot(dx, dy) < SLOP) return;
+    const right = dx > 0;
+    // A held finger is a long press (picking text, a message's menu), not a swipe.
+    if (Math.abs(dx) <= Math.abs(dy) || right === swipe.open || e.timeStamp - swipe.t > HOLD || (!swipe.open && takes(swipe.el, right))) {
+      swipe = null;
+      return;
+    }
+    swipe.ours = true;
+  }
+  if (e.cancelable) e.preventDefault();
+  if (!swipe.open && dx > COMMIT) {
     swipe = null;
     openDrawer();
-  } else if (swipe.open && dx < -48) {
+  } else if (swipe.open && dx < -COMMIT) {
     swipe = null;
     closeDrawer();
   }
-}, { passive: true });
+}, { passive: false });
 document.addEventListener('touchend', () => { swipe = null; }, { passive: true });
+document.addEventListener('touchcancel', () => { swipe = null; }, { passive: true });
