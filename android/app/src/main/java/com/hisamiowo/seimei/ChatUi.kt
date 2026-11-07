@@ -45,7 +45,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.graphics.compositeOver
@@ -650,7 +649,7 @@ fun Blocks(blocks: List<Block>, size: Int, color: Color) {
                 b.text, fontFamily = FontFamily.Monospace, fontSize = (size - 2).sp, lineHeight = ((size - 2) * 1.55f).sp,
                 color = color, softWrap = false,
                 modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceContainerLowest)
-                    .horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 10.dp),
+                    .sideScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 10.dp),
             )
             is Block.Quote -> Row(Modifier.padding(start = 2.dp)) {
                 Box(Modifier.width(2.dp).heightIn(min = 20.dp).background(MaterialTheme.colorScheme.outline))
@@ -675,7 +674,7 @@ fun Blocks(blocks: List<Block>, size: Int, color: Color) {
                 val cell = maxOf(140.dp, maxWidth / cols)
                 // A shade at an edge with more columns beyond it, so a cut on a column edge does not look complete.
                 Box(Modifier.clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceContainer).height(IntrinsicSize.Min)) {
-                    Box(Modifier.horizontalScroll(scroll)) {
+                    Box(Modifier.sideScroll(scroll)) {
                         // Max intrinsic width, so the row dividers span the whole table.
                         Column(Modifier.width(IntrinsicSize.Max)) {
                             TableRow(b.head, head = true, size, cell)
@@ -1269,7 +1268,7 @@ fun Composer(vm: Seimei) {
                 IconButton(vm::cancelReply, Modifier.size(40.dp)) { Icon(Icons.close, "Cancel the reply", Modifier.size(16.dp)) }
             }
         }
-        if (vm.attachments.isNotEmpty()) Row(Modifier.padding(bottom = 8.dp).horizontalScroll(rememberScrollState()),
+        if (vm.attachments.isNotEmpty()) Row(Modifier.padding(bottom = 8.dp).sideScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             for (a in vm.attachments) Box {
                 when (a) {

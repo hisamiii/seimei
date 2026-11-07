@@ -46,10 +46,46 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.material3.DrawerDefaults
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerInputScope
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.paneTitle
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlin.math.abs
 import org.json.JSONObject
 import java.time.LocalDate
 
-// The navigation drawer (M3 modal): seimei, the recent side threads, agents and watches, files; usage and settings at its foot.
+// The navigation drawer (M3 modal look, its own swipe): seimei, the recent side threads, agents and watches, files; usage and settings at its foot.
 // And the drawer's quieter pages: watches, files, settings.
 
 /** How many recent rows each section shows; its header opens the rest. */
@@ -321,5 +357,152 @@ fun SettingsTab(vm: Seimei) {
                 if (update) Box(Modifier.size(8.dp).clip(CircleShape).background(cs.primary))
             }
         }
+    }
+}
+
+// ---------- the drawer's host and its swipe ----------
+
+/** Where the drawer is: 0 shut, 1 open, in between while it follows a finger or settles. */
+@Stable
+class SideDrawer(private val scope: CoroutineScope) {
+    var progress by mutableFloatStateOf(0f)
+        private set
+    /** Open, or on its way there. */
+    var isOpen by mutableStateOf(false)
+        private set
+    private var settling: Job? = null
+    /** Children under the finger that take a sideways swipe of their own (see ownSwipe). */
+    internal val takers = ArrayList<Taker>()
+
+    fun open() = settle(true)
+    fun close() = settle(false)
+
+    /** Goes to open or shut; velocity is in drawer widths per second. */
+    fun settle(open: Boolean, velocity: Float = 0f) {
+        isOpen = open
+        settling?.cancel()
+        settling = scope.launch {
+            animate(progress, if (open) 1f else 0f, velocity, spring(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow)) { v, _ -> progress = v }
+        }
+    }
+
+    /** The drawer's width, from its host: a finger x in pixels maps to progress. */
+    internal var widthPx = 1f
+
+    /** Puts the drawer's edge under a finger at x. */
+    fun follow(x: Float) = drag(x / widthPx)
+
+    /** Follows a finger: no animation, held between shut and open. */
+    fun drag(to: Float) {
+        settling?.cancel()
+        progress = to.coerceIn(0f, 1f)
+    }
+}
+
+@Composable
+fun rememberSideDrawer(): SideDrawer {
+    val scope = rememberCoroutineScope()
+    return remember { SideDrawer(scope) }
+}
+
+internal class Taker(val takes: (rightward: Boolean) -> Boolean) {
+    var at: LayoutCoordinates? = null
+}
+
+private val LocalSideDrawer = staticCompositionLocalOf<SideDrawer?> { null }
+
+/** Marks a child with a sideways swipe of its own: a swipe that starts on it stays its own when takes(rightward) says so. */
+@Composable
+fun Modifier.ownSwipe(takes: (rightward: Boolean) -> Boolean): Modifier {
+    val drawer = LocalSideDrawer.current ?: return this
+    val now by rememberUpdatedState(takes)
+    val taker = remember { Taker { now(it) } }
+    DisposableEffect(drawer, taker) {
+        drawer.takers += taker
+        onDispose { drawer.takers -= taker }
+    }
+    return onGloballyPositioned { taker.at = it }
+}
+
+/** A sideways scroll that keeps a swipe only while it can still scroll that way: at its edge the swipe opens the drawer. */
+@Composable
+fun Modifier.sideScroll(state: ScrollState): Modifier =
+    ownSwipe { right -> if (right) state.canScrollBackward else state.canScrollForward }.horizontalScroll(state)
+
+/** The drawer over content (M3 modal look): a sideways swipe anywhere opens it and closes it, and the drawer follows the finger. */
+@Composable
+fun SwipeDrawer(state: SideDrawer, sheet: @Composable () -> Unit, content: @Composable () -> Unit) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        // M3's modal drawer: at most 360 wide, and 56 of the screen stays in view beside it
+        val width = minOf(360.dp, maxWidth - 56.dp)
+        val px = with(LocalDensity.current) { width.toPx() }
+        state.widthPx = px
+        var here by remember { mutableStateOf<LayoutCoordinates?>(null) }
+        Box(Modifier.fillMaxSize().onGloballyPositioned { here = it }.pointerInput(state, px) { swipes(state, px) { here } }) {
+            CompositionLocalProvider(LocalSideDrawer provides state) { content() }
+            val p = state.progress
+            if (p > 0f) {
+                val scrim = DrawerDefaults.scrimColor
+                Box(Modifier.fillMaxSize().graphicsLayer { alpha = state.progress }.background(scrim)
+                    .pointerInput(state) { detectTapGestures { state.close() } }
+                    .semantics { contentDescription = "Close the menu"; onClick { state.close(); true } })
+                Box(Modifier.width(width).fillMaxHeight().graphicsLayer { translationX = (state.progress - 1f) * px }
+                    .semantics { paneTitle = "Menu" }) { sheet() }
+            }
+        }
+    }
+}
+
+/** The drawer's swipe over the whole screen, decided at the touch slop before any child can claim the touch. */
+private suspend fun PointerInputScope.swipes(state: SideDrawer, px: Float, here: () -> LayoutCoordinates?) {
+    val fling = 400.dp.toPx()
+    awaitEachGesture {
+        // The initial pass sees the touch before any child, so a list or a row's own drag never claims it first.
+        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        val opening = !state.isOpen
+        val tracker = VelocityTracker()
+        tracker.addPosition(down.uptimeMillis, down.position)
+        var moved = Offset.Zero
+        while (true) {
+            val ev = awaitPointerEvent(PointerEventPass.Initial)
+            val ch = ev.changes.firstOrNull { it.id == down.id }
+            if (ev.changes.size > 1 || ch == null || !ch.pressed || ch.isConsumed) return@awaitEachGesture
+            moved += ch.positionChange()
+            tracker.addPosition(ch.uptimeMillis, ch.position)
+            if (moved.getDistance() < viewConfiguration.touchSlop) continue
+            // Past the slop the first clear direction decides: mostly sideways and toward the drawer's side is the drawer's.
+            val right = moved.x > 0
+            if (abs(moved.x) <= abs(moved.y) || right != opening) return@awaitEachGesture
+            // A held finger is a long press (a message's menu, picking text), not a swipe.
+            if (ch.uptimeMillis - down.uptimeMillis > viewConfiguration.longPressTimeoutMillis) return@awaitEachGesture
+            val at = here()?.takeIf { it.isAttached }?.localToWindow(down.position)
+            if (opening && at != null && state.takers.any { t -> t.at?.takeIf { it.isAttached }?.boundsInWindow()?.contains(at) == true && t.takes(right) }) {
+                return@awaitEachGesture
+            }
+            ch.consume()
+            break
+        }
+        var p = state.progress
+        while (true) {
+            val ev = awaitPointerEvent(PointerEventPass.Initial)
+            val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+            tracker.addPosition(ch.uptimeMillis, ch.position)
+            if (!ch.pressed) {
+                ch.consume()
+                break
+            }
+            p += ch.positionChange().x / px
+            ch.consume()
+            state.drag(p)
+        }
+        // A flick decides by its direction; a slow swipe by how far it went (a third of the way opens or closes it).
+        val v = tracker.calculateVelocity().x
+        val open = when {
+            v > fling -> true
+            v < -fling -> false
+            opening -> state.progress > 1f / 3
+            else -> state.progress > 2f / 3
+        }
+        state.settle(open, v / px)
     }
 }

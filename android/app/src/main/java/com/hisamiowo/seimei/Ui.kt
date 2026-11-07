@@ -44,6 +44,7 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -89,9 +90,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.DrawerValue
-import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
@@ -584,10 +582,28 @@ val TITLES = mapOf("chat" to "seimei", "threads" to "Side threads", "agents" to 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun AppScreen(vm: Seimei) {
-    val drawer = rememberDrawerState(DrawerValue.Closed)
-    val drawerScope = rememberCoroutineScope()
-    BackHandler(vm.tab != "chat" && !drawer.isOpen) { vm.show("chat") }
-    BackHandler(drawer.isOpen) { drawerScope.launch { drawer.close() } }
+    val drawer = rememberSideDrawer()
+    val activity = LocalActivity.current
+    // Android's back gesture owns the screen's edges: on the top screens one from the left edge opens the drawer, which follows it.
+    // The right edge and the back button keep their meaning: to the chat, then out of the app.
+    PredictiveBackHandler(vm.page == null && !drawer.isOpen) { events ->
+        var left = false
+        try {
+            events.collect { e ->
+                left = e.swipeEdge == BackEventCompat.EDGE_LEFT
+                if (left) drawer.follow(e.touchX)
+            }
+            when {
+                left -> drawer.open()
+                vm.tab != "chat" -> vm.show("chat")
+                else -> activity?.moveTaskToBack(true)
+            }
+        } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+            if (left) drawer.close()
+            throw e
+        }
+    }
+    BackHandler(drawer.isOpen) { drawer.close() }
     // Notifications need a yes on Android 13 and later; asked once, after the first login.
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     val ctx = LocalContext.current
@@ -618,14 +634,18 @@ fun AppScreen(vm: Seimei) {
     }
     LaunchedEffect(vm.tab, vm.page == null) { snacks.currentSnackbarData?.dismiss() }
     val still = reducedMotion()
-    // A pick in the drawer runs once it has closed
-    val pick: (() -> Unit) -> Unit = { run -> drawerScope.launch { drawer.close() }; run() }
+    // A pick in the drawer closes it, and the page it was opened over
+    val pick: (() -> Unit) -> Unit = { run ->
+        drawer.close()
+        if (vm.page != null) vm.closePage()
+        run()
+    }
     LaunchedEffect(drawer.isOpen) { if (drawer.isOpen) vm.loadWatches() }
-    ModalNavigationDrawer({ DrawerSheet(vm, pick) }, drawerState = drawer, gesturesEnabled = vm.page == null || drawer.isOpen) {
+    SwipeDrawer(drawer, { DrawerSheet(vm, pick) }) {
     Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().imePadding()) {
         // Under a page the header can still take a key press: the drawer opens only on the pages themselves
-        Header(vm) { if (vm.page == null) drawerScope.launch { drawer.open() } }
+        Header(vm) { if (vm.page == null) drawer.open() }
         // The page sheet: surface-low under the header, 28 corners on top
         Box(Modifier.weight(1f).clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)).background(MaterialTheme.colorScheme.surfaceContainerLow)) {
             // Top level between nav destinations: the old one fades out, then the new one fades in

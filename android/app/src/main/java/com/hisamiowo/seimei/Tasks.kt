@@ -451,8 +451,10 @@ private fun SwipeToTick(vm: Seimei, t: Task, shape: Shape, content: @Composable 
     LaunchedEffect(state) {
         snapshotFlow { state.targetValue }.collect { if (it == SwipeToDismissBoxValue.StartToEnd) haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate) }
     }
+    // A swipe to the right on the row ticks it: the drawer leaves it alone.
     SwipeToDismissBox(
         state,
+        modifier = Modifier.ownSwipe { right -> right },
         backgroundContent = {
             Row(Modifier.fillMaxSize().clip(shape).background(tk.okContainer).padding(start = 20.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.check, null, Modifier.size(20.dp), tint = tk.onOkContainer)

@@ -34,7 +34,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -794,7 +793,7 @@ fun PageComposer(vm: Seimei, pg: Page, a: Agent) {
             Spacer(Modifier.width(8.dp))
             Text(anchorText(quote), fontSize = 13.sp, color = LocalExtra.current.text3, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        if (pg.files.isNotEmpty()) Row(Modifier.padding(bottom = 8.dp).horizontalScroll(rememberScrollState()),
+        if (pg.files.isNotEmpty()) Row(Modifier.padding(bottom = 8.dp).sideScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             for (d in pg.files) Box {
                 val preview = d.preview
