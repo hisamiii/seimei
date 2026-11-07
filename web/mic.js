@@ -1,12 +1,12 @@
 // Dictation in the composer (docs/asr.md): tap the mic, talk, tap the square; the text lands at the cursor.
 // seimei transcribes it with the open chat's words; nothing is sent on its own.
 // Each phrase goes to the server as soon as a pause ends it (phrases.js), so only the last one is left to wait for at the square.
-// The texts come in as they will, and go into the composer in the order they were said.
+// The texts come in as they will, and go into the draft in the order they were said; while recording, the draft shows above the bar.
 import { $, post, snack, say, toLogin } from './util.js';
 import { Phrases } from './phrases.js';
 
 const input = $('input'), field = input.closest('.field'), mic = $('mic'), drop = $('mic-drop');
-const level = $('mic-level'), time = $('mic-time');
+const level = $('mic-level'), time = $('mic-time'), live = $('mic-live');
 const BARS = 24;
 // A whole dictation at most, and how long it listens without a phrase.
 const MAX_MS = 600000, IDLE_MS = 60000;
@@ -22,10 +22,28 @@ function show(mode) {
   $('attach').hidden = recording;
   input.hidden = recording;
   drop.hidden = level.hidden = time.hidden = !recording;
+  if (!recording) live.hidden = true;
   mic.classList.toggle('on', recording);
   mic.classList.toggle('busy', mode === 'busy');
   mic.disabled = mode === 'busy';
   mic.setAttribute('aria-label', recording ? 'Stop and transcribe' : mode === 'busy' ? 'Transcribing' : 'Dictate');
+  // The field was hidden while the texts went in: it sizes itself again.
+  if (!recording) input.dispatchEvent(new Event('input'));
+}
+
+// The draft as it will be, with the newest phrase tinted and dots while a phrase is on its way.
+function paint(s) {
+  const v = input.value, waiting = [...s.slots].some(([seq, slot]) => seq >= s.next && !slot.cancelled);
+  const mark = document.createElement('span');
+  mark.className = 'wait';
+  if (waiting) mark.append(...[0, 1, 2].map(() => document.createElement('i')));
+  const fresh = document.createElement('span');
+  fresh.className = 'new';
+  fresh.textContent = v.slice(s.fresh, s.at);
+  live.replaceChildren(v.slice(0, s.fresh), fresh, mark, v.slice(s.at));
+  live.hidden = !v && !waiting;
+  // Keep where the text goes in view.
+  live.scrollTop = Math.max(0, mark.offsetTop + mark.offsetHeight + 8 - live.clientHeight);
 }
 
 async function start() {
@@ -52,12 +70,16 @@ async function start() {
     recording: true, slots: new Map(), next: 0, failed: [],
     // Where the text goes: the cursor when the mic was tapped, then after each phrase.
     at: input.selectionEnd ?? input.value.length,
+    // The draft before, for x; and where the newest phrase starts.
+    draft: input.value, said: '',
   };
+  s.fresh = s.at;
   s.cut = new Phrases({ send: (seq, frames) => send(s, seq, frames), cancel: (seq) => cancel(s, seq) });
   proc.onaudioprocess = (e) => frames(s, e.inputBuffer.getChannelData(0));
   rec = s;
   s.cap = setTimeout(() => finish(true), MAX_MS);
   show('rec');
+  paint(s);
   tick();
 }
 
@@ -99,7 +121,9 @@ async function finish(keep) {
   s.ctx.close();
   s.recording = false;
   if (!keep) {
+    // x: what this recording put in the draft goes too, unless the draft changed since.
     s.dropped = true;
+    if (input.value === s.value) input.value = s.draft;
     return show('idle');
   }
   busy = true;
@@ -111,6 +135,7 @@ async function finish(keep) {
 function send(s, seq, frames) {
   const slot = { done: false, cancelled: false, shown: false, text: '', wav: null };
   s.slots.set(seq, slot);
+  if (s.recording) paint(s);
   (async () => {
     const pcm = new Float32Array(frames.length * s.per);
     frames.forEach((f, i) => pcm.set(f, i * s.per));
@@ -130,13 +155,13 @@ function cancel(s, seq) {
   const slot = s.slots.get(seq);
   if (!slot || slot.shown) return false;
   slot.cancelled = true;
+  if (s.recording) paint(s);
   return true;
 }
 
 // The texts in the order they were said: one that came back early waits for those before it.
-// While the mic records the composer is hidden, so they wait for the square; x drops them.
 function flush(s) {
-  if (s.recording || s.dropped) return;
+  if (s.dropped) return;
   while (s.slots.has(s.next)) {
     const slot = s.slots.get(s.next);
     if (!slot.cancelled) {
@@ -147,9 +172,16 @@ function flush(s) {
     }
     s.next++;
   }
+  if (s.recording) return paint(s);
   if (s.next < s.cut.seq) return;
+  dictated = `${dictated} ${s.said}`.trim();
   busy = false;
   show('idle');
+  // The cursor goes after the dictated text, as when the last phrase lands after the square.
+  if (s.said && document.activeElement !== input) {
+    input.focus();
+    input.setSelectionRange(s.at, s.at);
+  }
   const lost = s.failed.filter(Boolean);
   if (lost.length) snack(lost.length > 1 ? `Couldn't transcribe ${lost.length} phrases` : "Couldn't transcribe", { label: 'Retry', run: () => retry(lost) });
   else if (s.failed.length) snack("Couldn't read the recording");
@@ -164,7 +196,10 @@ async function retry(wavs) {
   for (const w of wavs) {
     try {
       const text = await ask(w, s);
-      if (text) insert(text, s);
+      if (text) {
+        insert(text, s);
+        dictated = `${dictated} ${text}`.trim();
+      }
     } catch {
       lost.push(w);
     }
@@ -220,15 +255,19 @@ function insert(text, s) {
   const before = input.value.slice(0, at), after = input.value.slice(at);
   const lead = before && !/\s$/.test(before) ? ' ' : '', trail = after && !/^\s/.test(after) ? ' ' : '';
   input.value = before + lead + text + trail + after;
-  s.at = at + lead.length + text.length;
+  s.fresh = at + lead.length;
+  s.at = s.fresh + text.length;
+  s.said = `${s.said || ''} ${text}`.trim();
+  s.value = input.value;
+  say(`Dictated: ${text}`);
+  // While recording the field is hidden: the live view shows it, and nothing takes the focus (a phone would open its keyboard).
+  if (s.recording) return input.dispatchEvent(new Event('input'));
   input.focus();
   input.setSelectionRange(s.at, s.at);
   input.dispatchEvent(new Event('input'));
-  dictated = `${dictated} ${text}`.trim();
   field.classList.add('fresh');
   clearTimeout(insert.fade);
   insert.fade = setTimeout(() => field.classList.remove('fresh'), 2000);
-  say(`Dictated: ${text}`);
 }
 
 // A message went out: if part of it was dictated, the server compares what the user changed.

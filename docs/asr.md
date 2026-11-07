@@ -76,7 +76,7 @@ The clients send the speech phrase by phrase, as the laptop's dictate tool does.
 - A phrase ends at a 400 ms pause or after 15 seconds. It goes out 250 ms into the pause, and is dropped if you go on talking.
 - Voice is the level over 100 ms, 8 dB above the room's noise floor (the 5th percentile of the last 10 s). A phrase keeps 500 ms from before it starts, and one with under 300 ms of voice is dropped.
 - Each phrase gets the word list of its own request, with the draft so far as context.
-- The texts land in the order you said them, whatever order they come back in. The recording bar hides the field, so they land at the square; x drops them.
+- The texts land in the order you said them, whatever order they come back in. While recording, the draft stays in view above a slim bar, and each text shows in it as it comes. The newest is tinted, and dots show while a phrase is on its way. x drops them all.
 - A phrase with no answer in 6 s goes again, and the first answer wins.
 - The edit report sees the whole dictated text.
 
