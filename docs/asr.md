@@ -71,4 +71,15 @@ Only terms go out, never chat text. Terms can still name people and clients, so 
 
 Tap the mic to record, the square to stop, and x to drop the recording. The text lands at the cursor and is marked for 2 s.
 
-Recording stops by itself after 2 minutes. If a call fails, a snackbar offers Retry, and the recording is kept until then. The app asks for the microphone permission on the first tap.
+The clients send the speech phrase by phrase, as the laptop's dictate tool does. A pause ends a phrase, and that phrase goes to `/api/asr` while you go on talking. At the square only the last phrase is left to wait for.
+
+- A phrase ends at a 400 ms pause or after 15 seconds. It goes out 250 ms into the pause, and is dropped if you go on talking.
+- Voice is the level over 100 ms, 8 dB above the room's noise floor (the 5th percentile of the last 10 s). A phrase keeps 500 ms from before it starts, and one with under 300 ms of voice is dropped.
+- Each phrase gets the word list of its own request, with the draft so far as context.
+- The texts land in the order you said them, whatever order they come back in. The recording bar hides the field, so they land at the square; x drops them.
+- A phrase with no answer in 6 s goes again, and the first answer wins.
+- The edit report sees the whole dictated text.
+
+Recording stops by itself after 10 minutes, or after 60 s without a phrase. If a phrase fails, a snackbar offers Retry for it. The app asks for the microphone permission on the first tap.
+
+The cutter is `web/phrases.js` on the page and `Phrases.kt` in the app, with the same numbers.
