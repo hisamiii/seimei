@@ -1,6 +1,6 @@
 //! Every agent session on the server, read from the harness's session registry and transcripts; the user's ones for the page, and what they run into for the dispatcher.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
@@ -353,15 +353,27 @@ pub fn forget_screen(pid: i64) {
     SCREEN_ASKS.lock().unwrap().remove(&pid);
 }
 
+/// Whether the user's list leaves a session out: seimei's own and parked terminals.
+/// seimei's records decide first: a session it released is the user's, whatever its name says.
+/// The name only tells another seimei's sessions (a dev server's), which this one has no records of.
+fn hidden(s: &Live, own: &Own, theirs: &HashSet<String>) -> bool {
+    let rec = &s.rec;
+    let parked = rec["parkedJobId"].as_str().is_some_and(|j| !j.is_empty()) || rec["parkedJobId"].is_number();
+    if parked || own.contains_key(&s.session_id) || own.contains_key(&as_text(&rec["sessionId"])) {
+        return true;
+    }
+    let released = theirs.contains(&s.session_id) || theirs.contains(&as_text(&rec["sessionId"]));
+    !released && OURS.is_match(&s.name)
+}
+
 /// The user's running sessions for the page: seimei's and parked terminals left out.
-pub fn listing(own: &Own) -> Vec<Value> {
+/// theirs: the sessions seimei released to the user.
+pub fn listing(own: &Own, theirs: &HashSet<String>) -> Vec<Value> {
     let home = home().display().to_string();
     let mut out = vec![];
     for s in live(own) {
         let rec = &s.rec;
-        // seimei's sessions show in their own places; another seimei (dev) by its name.
-        let parked = rec["parkedJobId"].as_str().is_some_and(|j| !j.is_empty()) || rec["parkedJobId"].is_number();
-        if own.values().any(|k| *k == s.kind) || parked || OURS.is_match(&s.name) {
+        if hidden(&s, own, theirs) {
             continue;
         }
         let b = transcript_of(rec).and_then(|p| brief(&p).ok()).unwrap_or_else(|| json!({}));
@@ -636,7 +648,7 @@ impl Watcher {
             let me = self.clone();
             let scanned = tokio::task::spawn_blocking(move || {
                 let own = me.pool.own_sessions();
-                let mut rows = listing(&own);
+                let mut rows = listing(&own, &me.pool.released_sessions());
                 let lines = me.happenings.lock().unwrap().scan(&rows);
                 me.mark(&mut rows);
                 let listed: Vec<(i64, PathBuf)> = live(&own)
@@ -733,6 +745,36 @@ mod tests {
         assert_eq!(grown(&mut sizes, &[(1, 100), (2, 80)]), vec![2]);
         assert!(grown(&mut sizes, &[(1, 100), (2, 80), (3, 10)]).is_empty(), "a new session");
         assert_eq!(grown(&mut sizes, &[(1, 40)]), vec![1], "another transcript of the same session");
+    }
+
+    fn session(name: &str, sid: &str) -> Live {
+        Live {
+            name: name.into(),
+            pid: 1,
+            session_id: sid.into(),
+            status: "idle".into(),
+            since: 0.0,
+            active: 0.0,
+            cwd: "/".into(),
+            kind: "interactive".into(),
+            rec: json!({"sessionId": sid, "name": name}),
+        }
+    }
+
+    #[test]
+    fn a_released_session_shows_whatever_its_name() {
+        let own: Own = [("s-own".to_string(), "shikigami dev".to_string())].into();
+        let theirs: HashSet<String> = ["s-rel".to_string()].into();
+        assert!(!hidden(&session("shikigami cleanup", "s-rel"), &own, &theirs), "released by seimei");
+        assert!(!hidden(&session("cleanup", "s-rel"), &own, &theirs));
+        assert!(hidden(&session("shikigami dev", "s-own"), &own, &theirs), "a shikigami of seimei's");
+        assert!(hidden(&session("anything", "s-own"), &own, &theirs), "its records, not its name");
+        assert!(hidden(&session("shikigami x", "s-other"), &own, &theirs), "another seimei's, known by name");
+        assert!(hidden(&session("seimei-dev", "s-dev"), &own, &theirs));
+        assert!(!hidden(&session("my work", "s-user"), &own, &theirs));
+        let mut parked = session("shikigami cleanup", "s-rel");
+        parked.rec["parkedJobId"] = json!("j1");
+        assert!(hidden(&parked, &own, &theirs), "a parked terminal");
     }
 
     #[test]

@@ -6,7 +6,6 @@ use std::time::Duration;
 use serde_json::json;
 
 use crate::events::EventLog;
-use crate::sessions;
 use crate::util::now;
 use crate::workers::Pool;
 
@@ -89,8 +88,7 @@ impl WakeWatch {
             ));
         }
         let pool = self.pool.clone();
-        let rows =
-            tokio::task::spawn_blocking(move || sessions::listing(&pool.own_sessions())).await.unwrap_or_default();
+        let rows = tokio::task::spawn_blocking(move || pool.user_sessions()).await.unwrap_or_default();
         if !rows.is_empty() {
             let each: Vec<String> = (rows.iter())
                 .map(|s| {

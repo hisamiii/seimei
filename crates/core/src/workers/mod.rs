@@ -630,7 +630,7 @@ impl Worker {
         if self.open_on_server().await {
             return Err("it is already open on the server".into());
         }
-        let win = self.to_server(&format!("shikigami {}", self.name()), &[]).await?;
+        let win = self.to_server(&format!("shikigami {}", self.name()), &[], None).await?;
         let window = win.as_ref().map_or(Value::Null, |w| w["id"].clone());
         self.set("laptop", |r| {
             r.summary = "Open on the server.".into();
@@ -650,7 +650,7 @@ impl Worker {
             None
         } else {
             let name = self.name();
-            self.to_server(&name, &["--name", &name]).await?
+            self.to_server(&name, &["--name", &name], Some(&name)).await?
         };
         let r = self.rec();
         let path = transcript(&r.session_id, &r.cwd);
@@ -673,7 +673,13 @@ impl Worker {
     }
 
     /// Stop it if it works, let go of its process, and resume the session in a terminal on the server.
-    async fn to_server(self: &Arc<Self>, title: &str, extra: &[&str]) -> Result<Option<Value>, String> {
+    /// rename: the session's new title, written before it resumes (a resume keeps the title its transcript names last).
+    async fn to_server(
+        self: &Arc<Self>,
+        title: &str,
+        extra: &[&str],
+        rename: Option<&str>,
+    ) -> Result<Option<Value>, String> {
         self.default_harness_only("open in a terminal")?;
         if !self.rec().started {
             return Err("it has no session yet".into());
@@ -690,6 +696,12 @@ impl Worker {
             }
         }
         self.close().await;
+        if let Some(name) = rename {
+            let r = self.rec();
+            if let Some(path) = transcript(&r.session_id, &r.cwd) {
+                retitle(&path, &r.session_id, name).map_err(|e| format!("could not rename its session: {e}"))?;
+            }
+        }
         self.pool().open_terminal(self, title, extra).await
     }
 
@@ -1832,6 +1844,16 @@ impl Pool {
         labels
     }
 
+    /// The sessions seimei released to the user: theirs, whatever their names say.
+    pub fn released_sessions(&self) -> HashSet<String> {
+        (self.all().iter()).map(|w| w.rec()).filter(|r| r.state == "released").map(|r| r.session_id).collect()
+    }
+
+    /// The user's running sessions, as the page lists them.
+    pub fn user_sessions(&self) -> Vec<Value> {
+        sessions::listing(&self.own_sessions(), &self.released_sessions())
+    }
+
     /// show_image and send_file for one of the user's own sessions (`seimei mcp`): the session is the one whose process runs the caller.
     pub fn share_for(&self, pid: u32, tool: &str, args: &Value) -> Value {
         let own = self.own_sessions();
@@ -2328,9 +2350,38 @@ fn open_card(open: &mut BTreeMap<u64, String>, seq: u64, text: Option<String>) -
     (now != before).then_some(now)
 }
 
+/// Names a session as the harness's own rename does: a title line at the end of its transcript, which the next resume reads.
+pub(crate) fn retitle(path: &std::path::Path, session_id: &str, title: &str) -> std::io::Result<()> {
+    use std::io::{Read, Seek, SeekFrom, Write};
+    let line = json!({"type": "custom-title", "customTitle": title, "sessionId": session_id});
+    let mut f = std::fs::OpenOptions::new().read(true).append(true).open(path)?;
+    // A transcript cut mid-line gets its own line ended first.
+    let mut last = *b"\n";
+    if f.metadata()?.len() > 0 {
+        f.seek(SeekFrom::End(-1))?;
+        f.read_exact(&mut last)?;
+    }
+    writeln!(f, "{}{line}", if last[0] == b'\n' { "" } else { "\n" })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_released_session_is_retitled_in_its_transcript() {
+        let dir = std::env::temp_dir().join(format!("seimei-retitle-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("s1.jsonl");
+        std::fs::write(&path, "{\"type\":\"custom-title\",\"customTitle\":\"shikigami cleanup\"}\n{\"cut\":").unwrap();
+        retitle(&path, "s1", "cleanup").unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let last: Value = serde_json::from_str(text.lines().last().unwrap()).unwrap();
+        assert_eq!(last, json!({"type": "custom-title", "customTitle": "cleanup", "sessionId": "s1"}));
+        assert_eq!(text.lines().count(), 3, "the cut line stays apart");
+        std::fs::remove_file(&path).unwrap();
+        std::fs::remove_dir(&dir).unwrap();
+    }
 
     #[test]
     fn an_effort_result_is_quiet_whatever_it_says() {

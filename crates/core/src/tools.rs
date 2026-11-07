@@ -234,7 +234,7 @@ fn writers(pool: &Pool, w: &Worker) -> Option<String> {
         .collect();
     let project = project_of(&format!("{root}/x"));
     busy.extend(
-        sessions::listing(&pool.own_sessions())
+        pool.user_sessions()
             .iter()
             .filter(|s| {
                 let sc = s["cwd"].as_str().unwrap_or("");

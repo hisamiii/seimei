@@ -192,7 +192,7 @@ impl Adopter {
     /// The user's sessions as the page lists them.
     async fn rows(&self) -> Vec<Value> {
         let pool = self.pool.clone();
-        tokio::task::spawn_blocking(move || sessions::listing(&pool.own_sessions())).await.unwrap_or_default()
+        tokio::task::spawn_blocking(move || pool.user_sessions()).await.unwrap_or_default()
     }
 
     async fn now(&self, pid: i64) -> Option<Value> {
