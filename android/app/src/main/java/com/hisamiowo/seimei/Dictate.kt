@@ -12,7 +12,22 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.sin
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -75,7 +90,7 @@ import java.nio.ByteOrder
 /**
  * Dictation in the composer (docs/asr.md): tap the mic, talk, tap the square; the text lands in the draft at the cursor, and nothing is sent on its own.
  * Each phrase goes to the server as soon as a pause ends it ([Phrases]), so only the last one is left to wait for at the square.
- * The texts reach the draft in the order they were said; the recording bar hides the field, so they wait for the square.
+ * The texts come back in the order they were said; while recording, the bar shows them under the draft, and they go into the field at the square.
  * One recording at a time, for whichever composer started it ([target]: "chat", or the page's "w:<id>" / "s:<pid>").
  */
 class Dictation(val vm: Seimei) {
@@ -90,8 +105,11 @@ class Dictation(val vm: Seimei) {
         private set
     var seconds by mutableStateOf(0)
         private set
-    /** Texts for [target]'s field to insert in this order, then clear. */
+    /** Texts for [target]'s field to insert in this order, then clear; while recording, the bar shows them. */
     val results = mutableStateListOf<String>()
+    /** A phrase is on its way to the server. */
+    var waiting by mutableStateOf(false)
+        private set
     /** What was dictated into each target's draft since it was last sent: the server logs what the user changed. */
     private val dictated = HashMap<String, String>()
     private var job: Job? = null
@@ -119,6 +137,13 @@ class Dictation(val vm: Seimei) {
         val failed = ArrayList<ByteArray>()
         /** The draft's text so far plus what this dictation added: each phrase's context. */
         var said = hint.optString("draft")
+        /** What this dictation added, for [dictated] once it is done. */
+        var added = ""
+    }
+
+    private fun recount(r: Run) {
+        val n = synchronized(r) { r.slots.any { (seq, slot) -> seq >= r.next && !slot.cancelled } }
+        if (run === r) waiting = n
     }
 
     private var run: Run? = null
@@ -131,11 +156,14 @@ class Dictation(val vm: Seimei) {
         seconds = 0
         levels = List(BARS) { 0f }
         results.clear()
+        waiting = false
         val r = Run(target, hint)
         run = r
         val cut = Phrases(
             send = { seq, frames -> vm.viewModelScope.launch { send(r, seq, frames) } },
-            cancel = { seq -> synchronized(r) { r.slots[seq]?.takeIf { !it.shown }?.let { it.cancelled = true; true } ?: false } },
+            cancel = { seq ->
+                synchronized(r) { r.slots[seq]?.takeIf { !it.shown }?.let { it.cancelled = true; true } ?: false }.also { recount(r) }
+            },
         )
         job = vm.viewModelScope.launch {
             val ok = withContext(Dispatchers.IO) {
@@ -199,11 +227,13 @@ class Dictation(val vm: Seimei) {
         if (state == State.RECORDING) state = State.TRANSCRIBING
     }
 
-    /** x: drop the recording, and the phrases already on their way. */
+    /** x: drop the recording, the texts shown so far and the phrases on their way. */
     fun drop() {
         if (state != State.RECORDING) return
         run?.dropped = true
         run = null
+        results.clear()
+        waiting = false
         state = State.IDLE
         job?.cancel()
     }
@@ -211,6 +241,7 @@ class Dictation(val vm: Seimei) {
     private suspend fun send(r: Run, seq: Int, frames: List<ShortArray>) {
         val slot = Slot()
         synchronized(r) { r.slots[seq] = slot }
+        recount(r)
         val pcm = ByteBuffer.allocate(frames.size * FRAME * 2).order(ByteOrder.LITTLE_ENDIAN)
         for (f in frames) for (x in f) pcm.putShort(x)
         val audio = wav(pcm.array())
@@ -240,12 +271,11 @@ class Dictation(val vm: Seimei) {
         won.getOrElse { (if (first.isCompleted) second else first).await().getOrThrow() }.also { first.cancel(); second.cancel() }
     }
 
-    /** The texts in the order they were said, once the recording has ended; then the dictation is done. */
+    /** The texts in the order they were said, as they come; once the recording has ended and the last is in, the dictation is done. */
     private fun flush(r: Run) {
         if (r.dropped) return
         val out = ArrayList<String>()
         synchronized(r) {
-            if (r.recording) return
             while (true) {
                 val slot = r.slots[r.next] ?: break
                 if (!slot.cancelled) {
@@ -258,11 +288,13 @@ class Dictation(val vm: Seimei) {
             }
         }
         for (t in out) {
-            dictated[r.target] = ((dictated[r.target] ?: "") + " " + t).trim()
+            r.added = (r.added + " " + t).trim()
             r.said = (r.said + " " + t).trim()
         }
         results.addAll(out)
+        recount(r)
         if (r.next < r.total) return
+        if (r.added.isNotEmpty()) dictated[r.target] = ((dictated[r.target] ?: "") + " " + r.added).trim()
         if (run === r) run = null
         state = State.IDLE
         if (r.failed.isNotEmpty()) {
@@ -430,14 +462,49 @@ fun MicSlot(d: Dictation, target: String, enabled: Boolean, hint: () -> JSONObje
     }
 }
 
-/** The field while recording: x to drop, the level, the time, the square to stop. */
+/**
+ * The field while recording: the [draft] with the texts so far (the newest tinted, dots while a phrase is on its way) where they will go, at its end.
+ * Under it the bar: x to drop, the level, the time, the square to stop.
+ */
 @Composable
-fun RecordingBar(d: Dictation, modifier: Modifier) {
+fun RecordingBar(d: Dictation, draft: String, modifier: Modifier) {
+    val cs = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(26.dp)
+    Column(modifier.clip(shape).background(cs.surfaceContainerHigh).border(2.dp, cs.primary, shape)) {
+        if (draft.isNotEmpty() || d.results.isNotEmpty() || d.waiting) LiveText(d, draft)
+        RecordingRow(d)
+    }
+}
+
+@Composable
+private fun LiveText(d: Dictation, draft: String) {
+    val cs = MaterialTheme.colorScheme
+    val scroll = rememberScrollState()
+    // The end is where the text goes: keep it in view.
+    LaunchedEffect(scroll) { snapshotFlow { scroll.maxValue }.collect { scroll.scrollTo(it) } }
+    val pulse by rememberInfiniteTransition(label = "dots").animateFloat(0f, 1f, infiniteRepeatable(tween(1200, easing = LinearEasing)), label = "dots")
+    val texts = d.results.toList()
+    val text = buildAnnotatedString {
+        append(draft)
+        if (texts.isNotEmpty()) {
+            if (draft.isNotEmpty() && !draft.last().isWhitespace()) append(" ")
+            texts.dropLast(1).forEach { append(it); append(" ") }
+            withStyle(SpanStyle(background = cs.primary.copy(alpha = .22f))) { append(texts.last()) }
+        }
+        if (d.waiting) {
+            append(" ")
+            for (i in 0..2) withStyle(SpanStyle(color = cs.primary.copy(alpha = .3f + .7f * abs(sin(PI.toFloat() * (pulse - i * .17f)))), letterSpacing = 1.sp)) { append("•") }
+        }
+    }
+    Text(text, Modifier.fillMaxWidth().heightIn(max = 154.dp).verticalScroll(scroll).padding(start = 20.dp, end = 20.dp, top = 14.dp),
+        fontSize = 15.sp, lineHeight = 22.sp, color = LocalTokens.current.text)
+}
+
+@Composable
+private fun RecordingRow(d: Dictation) {
     val cs = MaterialTheme.colorScheme
     val x = LocalTokens.current
-    Row(modifier.heightIn(min = 52.dp).clip(RoundedCornerShape(26.dp)).background(cs.surfaceContainerHigh)
-        .border(2.dp, cs.primary, RoundedCornerShape(26.dp)).padding(start = 4.dp, end = 4.dp),
-        verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(start = 4.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         IconButton(d::drop, Modifier.size(44.dp)) { Icon(Icons.close, "Drop the recording", Modifier.size(18.dp), tint = x.text3) }
         Row(Modifier.weight(1f).height(32.dp), horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
             for (l in d.levels) Box(Modifier.width(3.dp).fillMaxHeight(.12f + .88f * l).clip(RoundedCornerShape(2.dp)).background(cs.primary))

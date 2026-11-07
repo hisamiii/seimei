@@ -1296,7 +1296,7 @@ fun Composer(vm: Seimei) {
         Row(verticalAlignment = Alignment.Bottom) {
             val x = LocalTokens.current
             val d = vm.dictation
-            if (d.state == Dictation.State.RECORDING && d.target == "chat") RecordingBar(d, Modifier.weight(1f))
+            if (d.state == Dictation.State.RECORDING && d.target == "chat") RecordingBar(d, vm.draft, Modifier.weight(1f))
             else Row(Modifier.weight(1f).heightIn(min = 52.dp).clip(RoundedCornerShape(26.dp)).background(cs.surfaceContainerHigh),
                 verticalAlignment = Alignment.Bottom) {
                 Box(Modifier.padding(start = 4.dp, bottom = 2.dp)) {

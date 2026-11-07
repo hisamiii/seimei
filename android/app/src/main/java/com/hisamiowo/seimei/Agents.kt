@@ -823,7 +823,7 @@ fun PageComposer(vm: Seimei, pg: Page, a: Agent) {
             val asking = pg.ask != null || (pg.kind == "worker" && pg.row.str("state") == "asking")
             val d = vm.dictation
             // The 52 pill of the chat's composer, the attach button inside it
-            if (d.state == Dictation.State.RECORDING && d.target == pg.chatKey) RecordingBar(d, Modifier.weight(1f))
+            if (d.state == Dictation.State.RECORDING && d.target == pg.chatKey) RecordingBar(d, pg.draft, Modifier.weight(1f))
             else Row(Modifier.weight(1f).heightIn(min = 52.dp).clip(RoundedCornerShape(26.dp)).background(cs.surfaceContainerHigh),
                 verticalAlignment = Alignment.Bottom) {
                 Box(Modifier.padding(start = 4.dp, bottom = 2.dp)) {
