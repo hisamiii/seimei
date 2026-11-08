@@ -49,7 +49,7 @@ impl Aliases {
         let a = key(&map, alias)?;
         let v = map[&a].clone();
         let sid = v["sid"].as_str().unwrap_or("");
-        if let Some(s) = rows.iter().find(|s| s.session_id == sid || s.rec["sessionId"] == json!(sid)) {
+        if let Some(s) = rows.iter().find(|s| s.is(sid)) {
             return Some(s);
         }
         let started = !v["start"].is_null() && v["start"] != json!(0) && v["start"] != json!("");
@@ -66,9 +66,7 @@ impl Aliases {
             .find(|(_, v)| {
                 let sid = v["sid"].as_str().unwrap_or("");
                 let started = !v["start"].is_null() && v["start"] != json!(0) && v["start"] != json!("");
-                sid == s.session_id
-                    || s.rec["sessionId"] == json!(sid)
-                    || v["pid"] == json!(s.pid) && started && v["start"] == s.rec["procStart"]
+                s.is(sid) || v["pid"] == json!(s.pid) && started && v["start"] == s.rec["procStart"]
             })
             .map(|(a, _)| a.clone())
     }

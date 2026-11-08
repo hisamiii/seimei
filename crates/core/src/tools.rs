@@ -572,8 +572,13 @@ impl Tools {
                         };
                         let mode = sessions::transcript_of(&s.rec).and_then(|p| sessions::mode_of(&p));
                         let mode = mode.map(|m| format!(", mode {m}")).unwrap_or_default();
+                        let moved = if s.origin.is_empty() {
+                            String::new()
+                        } else {
+                            format!(", moved here from its terminal (pid {})", s.origin_pid)
+                        };
                         format!(
-                            "{head}: {} since {}, last activity {}, {}{mode}, in {}",
+                            "{head}: {} since {}, last activity {}, {}{mode}{moved}, in {}",
                             s.status,
                             sessions::ago(s.since),
                             sessions::ago(s.active),

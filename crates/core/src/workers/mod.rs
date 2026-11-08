@@ -613,7 +613,7 @@ impl Worker {
             return true;
         }
         let sid = self.rec().session_id;
-        sessions::live(&Own::new()).iter().any(|s| s.rec["sessionId"] == json!(sid) || s.session_id == sid)
+        sessions::live(&Own::new()).iter().any(|s| s.is(&sid))
     }
 
     async fn open_on_server(self: &Arc<Self>) -> bool {

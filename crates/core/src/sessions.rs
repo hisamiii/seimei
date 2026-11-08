@@ -52,9 +52,28 @@ pub struct Live {
     pub kind: String,
     /// Its record in the harness's session registry.
     pub rec: Value,
+    /// A background job's original session, when the harness moved an interactive one there: its id and its parked terminal's pid.
+    /// The job's row stands for that session, and the parked terminal has no row of its own.
+    pub origin: String,
+    pub origin_pid: i64,
 }
 
 impl Live {
+    /// Its session ids: its transcript's, its record's, and the one it was moved from.
+    pub fn ids(&self) -> Vec<&str> {
+        let mut out = vec![self.session_id.as_str()];
+        out.extend(self.rec["sessionId"].as_str());
+        if !self.origin.is_empty() {
+            out.push(&self.origin);
+        }
+        out.into_iter().filter(|i| !i.is_empty()).collect()
+    }
+
+    /// Whether this row is the session `sid`, moved to a background job or not.
+    pub fn is(&self, sid: &str) -> bool {
+        !sid.is_empty() && self.ids().contains(&sid)
+    }
+
     /// Where SendMessage reaches it, whatever its name.
     pub fn address(&self) -> String {
         let sock = self.rec["messagingSocketPath"].as_str().filter(|p| !p.is_empty()).map(String::from);
@@ -89,19 +108,28 @@ pub fn transcript_of(rec: &Value) -> Option<PathBuf> {
     transcript(rec["sessionId"].as_str().unwrap_or(""), rec["cwd"].as_str().unwrap_or(""))
 }
 
+/// The background job a terminal was moved to: the harness keeps the terminal running, parked, while the job's process does the work.
+fn parked_job(rec: &Value) -> Option<String> {
+    Some(as_text(&rec["parkedJobId"])).filter(|j| !j.is_empty() && !rec["parkedJobId"].is_null())
+}
+
 /// Running sessions, newest activity first.
+/// A session moved to a background job is one row, the job's, as the harness itself sends its messages there.
 pub fn live(own: &Own) -> Vec<Live> {
+    let Ok(dir) = std::fs::read_dir(harness::registry_dir()) else { return vec![] };
+    let recs = (dir.flatten().map(|f| f.path()))
+        .filter(|p| p.extension().is_some_and(|e| e == "json"))
+        .filter_map(|p| std::fs::read(&p).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()))
+        .filter(|rec| rec.is_object() && alive(rec));
+    rows(recs, own)
+}
+
+/// The rows of running sessions' registry records.
+fn rows(recs: impl Iterator<Item = Value>, own: &Own) -> Vec<Live> {
     let mut out = vec![];
-    let Ok(dir) = std::fs::read_dir(harness::registry_dir()) else { return out };
-    for f in dir.flatten() {
-        let path = f.path();
-        if path.extension().is_none_or(|e| e != "json") {
-            continue;
-        }
-        let Some(rec) = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()) else {
-            continue;
-        };
-        if !rec.is_object() || !alive(&rec) {
+    for rec in recs {
+        // A spare is a warm process the harness keeps for the next background job: nobody's work until it is claimed.
+        if rec["spare"] == true {
             continue;
         }
         let pid = rec["pid"].as_i64().unwrap_or(0);
@@ -133,8 +161,23 @@ pub fn live(own: &Own) -> Vec<Live> {
             cwd: as_text(&rec["cwd"]),
             kind,
             rec,
+            origin: String::new(),
+            origin_pid: 0,
         });
     }
+    let parked: Vec<(String, String, i64)> =
+        out.iter().filter_map(|s| Some((parked_job(&s.rec)?, as_text(&s.rec["sessionId"]), s.pid))).collect();
+    for (job, sid, pid) in parked {
+        let Some(j) = out.iter_mut().find(|s| s.rec["kind"] == "bg" && as_text(&s.rec["jobId"]) == job) else {
+            continue;
+        };
+        if let Some(k) = own.get(&sid) {
+            j.kind = k.clone();
+        }
+        (j.origin, j.origin_pid) = (sid, pid);
+    }
+    let moved: HashSet<i64> = out.iter().filter(|s| !s.origin.is_empty()).map(|s| s.origin_pid).collect();
+    out.retain(|s| !moved.contains(&s.pid));
     out.sort_by(|a, b| b.active.total_cmp(&a.active));
     out
 }
@@ -147,10 +190,12 @@ pub fn find(key: &str, own: &Own, aliases: Option<&Aliases>) -> Option<Live> {
         return Some(s.clone());
     }
     let low = key.to_lowercase();
-    let tests: [&dyn Fn(&Live) -> bool; 4] =
-        [&|s| s.name == key, &|s| s.pid.to_string() == key, &|s| s.session_id.starts_with(key), &|s| {
-            s.name.to_lowercase().contains(&low)
-        }];
+    let tests: [&dyn Fn(&Live) -> bool; 4] = [
+        &|s| s.name == key,
+        &|s| s.pid.to_string() == key || s.origin_pid.to_string() == key,
+        &|s| s.ids().iter().any(|i| i.starts_with(key)),
+        &|s| s.name.to_lowercase().contains(&low),
+    ];
     for test in tests {
         let hits: Vec<&Live> = rows.iter().filter(|s| test(s)).collect();
         match hits.len() {
@@ -354,15 +399,13 @@ pub fn forget_screen(pid: i64) {
 }
 
 /// Whether the user's list leaves a session out: seimei's own and parked terminals.
-/// seimei's records decide first: a session it released is the user's, whatever its name says.
+/// seimei's records decide first: a session it released is the user's, whatever its name says, also once moved to a background job.
 /// The name only tells another seimei's sessions (a dev server's), which this one has no records of.
 fn hidden(s: &Live, own: &Own, theirs: &HashSet<String>) -> bool {
-    let rec = &s.rec;
-    let parked = rec["parkedJobId"].as_str().is_some_and(|j| !j.is_empty()) || rec["parkedJobId"].is_number();
-    if parked || own.contains_key(&s.session_id) || own.contains_key(&as_text(&rec["sessionId"])) {
+    if parked_job(&s.rec).is_some() || s.ids().iter().any(|i| own.contains_key(*i)) {
         return true;
     }
-    let released = theirs.contains(&s.session_id) || theirs.contains(&as_text(&rec["sessionId"]));
+    let released = s.ids().iter().any(|i| theirs.contains(*i));
     !released && OURS.is_match(&s.name)
 }
 
@@ -397,6 +440,8 @@ pub fn listing(own: &Own, theirs: &HashSet<String>) -> Vec<Value> {
             "doing": b["doing"], "model": model, "effort": b["effort"], "ask_detail": ask,
             // A background session's daemon job (the harness's stop and attach take it), and the process start (pid reuse).
             "job": if rec["kind"] == "bg" { rec["jobId"].clone() } else { Value::Null },
+            // The session it continues, when the harness moved a terminal's session to this job.
+            "moved_from": if s.origin.is_empty() { Value::Null } else { json!({"session_id": s.origin, "pid": s.origin_pid}) },
             "proc_start": rec["procStart"], "reach": terminal::reachable(s.pid)}));
     }
     out
@@ -758,7 +803,50 @@ mod tests {
             cwd: "/".into(),
             kind: "interactive".into(),
             rec: json!({"sessionId": sid, "name": name}),
+            origin: String::new(),
+            origin_pid: 0,
         }
+    }
+
+    // The harness's records when it moves a terminal's session to a background job: the terminal stays, parked, with parkedJobId.
+    // The job's process forks the session under a new id, kind "bg" with that jobId, and a spare waits beside it for the next job.
+    fn moved_to_background() -> Vec<Value> {
+        vec![
+            json!({"pid": 101, "sessionId": "s-rel", "kind": "interactive", "name": "shikigami cleanup", "status": "busy",
+                "parkedJobId": "j1"}),
+            json!({"pid": 102, "sessionId": "j1-fork", "kind": "bg", "jobId": "j1", "name": "shikigami cleanup",
+                "status": "waiting", "waitingFor": "permission prompt"}),
+            json!({"pid": 103, "sessionId": "j2-spare", "kind": "bg", "jobId": "j2", "name": "j2", "spare": true,
+                "status": "waiting", "waitingFor": "permission prompt"}),
+            json!({"pid": 104, "sessionId": "s-user", "kind": "interactive", "name": "my work", "status": "idle"}),
+        ]
+    }
+
+    #[test]
+    fn a_session_moved_to_a_background_job_is_one_row() {
+        let own: Own = [("s-own".to_string(), "shikigami dev".to_string())].into();
+        let theirs: HashSet<String> = ["s-rel".to_string()].into();
+        let rows = rows(moved_to_background().into_iter(), &own);
+        let pids: Vec<i64> = rows.iter().map(|s| s.pid).collect();
+        assert!(pids.contains(&102) && pids.contains(&104), "{pids:?}");
+        assert!(!pids.contains(&101), "the parked terminal is folded into its job");
+        assert!(!pids.contains(&103), "a spare is nobody's work");
+        let job = rows.iter().find(|s| s.pid == 102).unwrap();
+        assert_eq!((job.origin.as_str(), job.origin_pid), ("s-rel", 101));
+        assert!(job.is("s-rel") && job.is("j1-fork"));
+        assert_eq!(job.status, "waiting: permission prompt", "its prompt shows");
+        assert!(!hidden(job, &own, &theirs), "released by seimei before it was moved: still the user's");
+        // Moved from one of seimei's own sessions, the job is seimei's too.
+        let own: Own = [("s-rel".to_string(), "shikigami cleanup".to_string())].into();
+        let rows = super::rows(moved_to_background().into_iter(), &own);
+        let job = rows.iter().find(|s| s.pid == 102).unwrap();
+        assert!(hidden(job, &own, &HashSet::new()));
+        assert_eq!(job.kind, "shikigami cleanup");
+        // Before the job's process is up, the parked terminal stays a row of its own, out of the user's list.
+        let rows = super::rows(moved_to_background().into_iter().filter(|r| r["pid"] != 102), &HashMap::new());
+        let parked = rows.iter().find(|s| s.pid == 101).unwrap();
+        assert!(parked.status.starts_with("parked"));
+        assert!(hidden(parked, &HashMap::new(), &theirs));
     }
 
     #[test]
