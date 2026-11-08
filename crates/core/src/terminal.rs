@@ -70,6 +70,30 @@ pub fn window(pid: i64) -> Result<Window, String> {
     }
 }
 
+/// The window's title: the agent's TUI sets it to the session's name, after a spinner glyph.
+fn title(w: &Window) -> Result<String, String> {
+    let out = run(w, "ls", &[], None, Duration::from_secs(10))?;
+    let tree: Value = serde_json::from_str(&out).map_err(|_| "kitty sent no window list".to_string())?;
+    let windows = (tree.as_array().into_iter().flatten())
+        .flat_map(|o| o["tabs"].as_array().into_iter().flatten())
+        .flat_map(|t| t["windows"].as_array().into_iter().flatten());
+    let id = w.id.parse::<i64>().ok();
+    let found = windows.into_iter().find(|x| x["id"].as_i64().is_some() && x["id"].as_i64() == id);
+    found.map(|x| x["title"].as_str().unwrap_or("").to_string()).ok_or_else(|| "The window is gone.".to_string())
+}
+
+/// The title names the session, glyphs before it aside.
+fn titled(title: &str, name: &str) -> bool {
+    let rest = title.trim_start_matches(|c: char| !c.is_alphanumeric()).trim_end();
+    !name.trim().is_empty() && rest == name.trim()
+}
+
+/// A parked terminal shows its background job, not the harness's list of agents in its place.
+/// Typing into that list would start a new session, and its keys act on the listed ones.
+pub fn shows(pid: i64, name: &str) -> bool {
+    window(pid).and_then(|w| title(&w)).is_ok_and(|t| titled(&t, name))
+}
+
 /// None when the app can type into the session, else the reason.
 pub fn reachable(pid: i64) -> Option<String> {
     match window(pid) {
@@ -345,8 +369,16 @@ pub async fn text(w: &Window, data: &str) -> Result<(), String> {
 }
 
 /// Paste the text at the session's prompt and send it, like the user at the keyboard.
-pub async fn type_message(pid: i64, text: &str) -> Result<(), String> {
+/// named: for a parked terminal, the session its window must show at that moment.
+pub async fn type_message(pid: i64, text: &str, named: Option<&str>) -> Result<(), String> {
     let w = window(pid)?;
+    if let Some(name) = named {
+        let w = w.clone();
+        let t = tokio::task::spawn_blocking(move || title(&w)).await.map_err(|e| e.to_string())??;
+        if !titled(&t, name) {
+            return Err("The session's terminal shows something else right now.".into());
+        }
+    }
     let mut now = rc(&w, "get-text", &["--ansi"], None).await?;
     // The session-rating survey takes digit keys: a message starting with "2" would rate the session. Dismiss it.
     if survey(&now) {
@@ -385,4 +417,22 @@ pub async fn answer_text(pid: i64, question: &str, other: i64, text: &str) -> Re
     rc(&w, "send-text", &[], Some(&other.to_string())).await?;
     tokio::time::sleep(Duration::from_millis(300)).await;
     type_text(&w, text, &["enter"]).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::titled;
+
+    #[test]
+    fn a_parked_terminal_is_typed_into_only_while_it_shows_the_job() {
+        // The job's own TUI, attached in the parked terminal: its name after a spinner glyph, or bare.
+        assert!(titled("✳ shikigami cleanup", "shikigami cleanup"));
+        assert!(titled("◐ shikigami cleanup", "shikigami cleanup"));
+        assert!(titled("shikigami cleanup", "shikigami cleanup"));
+        // The list of agents in its place: typing there would start a new session.
+        assert!(!titled("7 awaiting input · agents", "shikigami cleanup"));
+        assert!(!titled("✳ shikigami cleanup (2)", "shikigami cleanup"), "another job of a similar name");
+        assert!(!titled("✳ cleanup", "shikigami cleanup"));
+        assert!(!titled("", ""), "no name, no match");
+    }
 }

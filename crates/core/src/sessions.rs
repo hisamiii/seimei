@@ -69,6 +69,16 @@ impl Live {
         out.into_iter().filter(|i| !i.is_empty()).collect()
     }
 
+    /// Moved to a background job from a terminal that is still open.
+    pub fn moved(&self) -> bool {
+        !self.origin.is_empty() && self.origin_pid > 0
+    }
+
+    /// The process whose terminal window shows the session: a moved job has none of its own, and its parked terminal shows it once attached.
+    pub fn screen_pid(&self) -> i64 {
+        if self.moved() { self.origin_pid } else { self.pid }
+    }
+
     /// Whether this row is the session `sid`, moved to a background job or not.
     pub fn is(&self, sid: &str) -> bool {
         !sid.is_empty() && self.ids().contains(&sid)
@@ -372,8 +382,8 @@ type ScreenAsks = HashMap<i64, (f64, Option<Value>)>;
 static SCREEN_ASKS: LazyLock<Mutex<ScreenAsks>> = LazyLock::new(Default::default);
 
 /// The question a waiting session shows on screen, read once per status change.
-pub fn screen_ask(rec: &Value) -> Option<Value> {
-    let pid = rec["pid"].as_i64()?;
+/// pid: the process whose window shows it (its own, or its parked terminal's).
+pub fn screen_ask(rec: &Value, pid: i64) -> Option<Value> {
     let at = rec["statusUpdatedAt"].as_f64().unwrap_or(0.0);
     if rec["status"] != "waiting" || terminal::reachable(pid).is_some() {
         return None;
@@ -420,7 +430,7 @@ pub fn listing(own: &Own, theirs: &HashSet<String>) -> Vec<Value> {
             continue;
         }
         let b = transcript_of(rec).and_then(|p| brief(&p).ok()).unwrap_or_else(|| json!({}));
-        let ask = if b["ask"].is_null() { screen_ask(rec) } else { Some(b["ask"].clone()) };
+        let ask = if b["ask"].is_null() { screen_ask(rec, s.screen_pid()) } else { Some(b["ask"].clone()) };
         let first =
             ask.as_ref().and_then(|a| a["questions"].as_array().filter(|q| !q.is_empty()).map(|q| q[0].clone()));
         let project = if b["project"].as_str().is_some_and(|p| !p.is_empty()) {
@@ -442,7 +452,7 @@ pub fn listing(own: &Own, theirs: &HashSet<String>) -> Vec<Value> {
             "job": if rec["kind"] == "bg" { rec["jobId"].clone() } else { Value::Null },
             // The session it continues, when the harness moved a terminal's session to this job.
             "moved_from": if s.origin.is_empty() { Value::Null } else { json!({"session_id": s.origin, "pid": s.origin_pid}) },
-            "proc_start": rec["procStart"], "reach": terminal::reachable(s.pid)}));
+            "proc_start": rec["procStart"], "reach": terminal::reachable(s.screen_pid())}));
     }
     out
 }
@@ -543,7 +553,7 @@ impl SessionEvents {
                 if Some(&p) != st.perm.as_ref() {
                     let mut what = format!("{} {}", as_text(&d["tool"]), as_text(&d["what"])).trim().to_string();
                     if what.is_empty() {
-                        what = prompt_on_screen(pid)
+                        what = prompt_on_screen(r["moved_from"]["pid"].as_i64().unwrap_or(pid))
                             .or_else(|| r["waiting_for"].as_str().filter(|w| !w.is_empty()).map(String::from))
                             .unwrap_or_else(|| "something".into());
                     }
@@ -834,6 +844,8 @@ mod tests {
         let job = rows.iter().find(|s| s.pid == 102).unwrap();
         assert_eq!((job.origin.as_str(), job.origin_pid), ("s-rel", 101));
         assert!(job.is("s-rel") && job.is("j1-fork"));
+        assert_eq!(job.screen_pid(), 101, "its parked terminal shows it");
+        assert_eq!(rows.iter().find(|s| s.pid == 104).unwrap().screen_pid(), 104);
         assert_eq!(job.status, "waiting: permission prompt", "its prompt shows");
         assert!(!hidden(job, &own, &theirs), "released by seimei before it was moved: still the user's");
         // Moved from one of seimei's own sessions, the job is seimei's too.

@@ -1434,13 +1434,13 @@ async fn session(
     });
     // The transcript as of now, not as of the list's last scan: the page's byte offsets hold only within one transcript.
     info["session_id"] = json!(sess.session_id);
-    let (rec, spid) = (sess.rec.clone(), sess.pid);
+    let (rec, spid) = (sess.rec.clone(), sess.screen_pid());
     let read = tokio::task::spawn_blocking(move || {
         let (tl, b) = match &path {
             Some(p) => (sessions::timeline(p, start, 400), brief(p).map_err(|e| e.to_string())?),
             None => (json!({"events": [], "next": 0}), json!({"ask": null, "doing": null})),
         };
-        let ask = if b["ask"].is_null() { sessions::screen_ask(&rec) } else { Some(b["ask"].clone()) };
+        let ask = if b["ask"].is_null() { sessions::screen_ask(&rec, spid) } else { Some(b["ask"].clone()) };
         let live = (b["doing"]["tool"] == "Bash")
             .then(|| json!({"tool_id": b["doing"]["tool_id"], "output": sessions::running_output(spid, 4)}));
         Ok::<_, String>((tl, b, ask, live, terminal::reachable(spid)))
@@ -1494,8 +1494,14 @@ async fn session_send(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes: 
     if said.trim().is_empty() || said.chars().count() > 20000 {
         return text(StatusCode::BAD_REQUEST, "text, up to 20000 characters");
     }
-    let pid = sess.pid;
-    let typed = tokio::task::spawn_blocking(move || terminal::reachable(pid).is_none()).await.unwrap_or(false);
+    // A job moved to the background from a terminal: typed there while that terminal shows it, else through its inbox.
+    let (pid, moved, name) = (sess.screen_pid(), sess.moved(), sess.name.clone());
+    let named = name.clone();
+    let typed = tokio::task::spawn_blocking(move || {
+        terminal::reachable(pid).is_none() && (!moved || terminal::shows(pid, &named))
+    })
+    .await
+    .unwrap_or(false);
     if !typed && let Some(inbox) = harness::inbox(&sess.rec, &sess.address()) {
         return match harness::relay(&inbox, app.dispatcher.mode(), said.trim()).await {
             Ok(Delivery::Inbox) => ok(json!({"ok": true, "via": "seimei"})),
@@ -1504,7 +1510,7 @@ async fn session_send(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes: 
             Err(e) => conflict(format!("Its inbox did not take the message: {e}")),
         };
     }
-    match terminal::type_message(sess.pid, said.trim()).await {
+    match terminal::type_message(pid, said.trim(), moved.then_some(name.as_str())).await {
         Ok(()) => ok(json!({"ok": true})),
         Err(e) => conflict(e),
     }
@@ -1514,13 +1520,13 @@ async fn session_send(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes: 
 async fn session_answer(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes: Bytes) -> Response {
     let (sess, path) = attempt!(user_session(&app, &pid).await);
     let b = attempt!(body(&bytes));
-    let rec = sess.rec.clone();
+    let (rec, spid) = (sess.rec.clone(), sess.screen_pid());
     let ask = tokio::task::spawn_blocking(move || {
         let ask = path.and_then(|p| brief(&p).ok()).map(|b| b["ask"].clone()).filter(|a| !a.is_null());
         ask.or_else(|| {
             // Read the screen fresh: the cached one may predate this question.
-            sessions::forget_screen(rec["pid"].as_i64().unwrap_or(0));
-            sessions::screen_ask(&rec)
+            sessions::forget_screen(spid);
+            sessions::screen_ask(&rec, spid)
         })
     })
     .await
@@ -1543,7 +1549,7 @@ async fn session_answer(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes
             return text(StatusCode::BAD_REQUEST, "text");
         }
         let other = ask["other"].as_i64().filter(|&o| o != 0).unwrap_or(options.len() as i64 + 1);
-        terminal::answer_text(sess.pid, &question, other, said.trim()).await
+        terminal::answer_text(sess.screen_pid(), &question, other, said.trim()).await
     } else {
         let n = match &b["option"] {
             Value::Null => Some(0),
@@ -1554,7 +1560,7 @@ async fn session_answer(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes
         let Some(n) = n.filter(|&n| n >= 1 && n <= options.len() as i64) else {
             return text(StatusCode::BAD_REQUEST, "option");
         };
-        terminal::answer(sess.pid, &question, n, &options[n as usize - 1]).await
+        terminal::answer(sess.screen_pid(), &question, n, &options[n as usize - 1]).await
     };
     match done {
         Ok(()) => ok(json!({"ok": true})),
