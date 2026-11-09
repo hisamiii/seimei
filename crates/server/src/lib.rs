@@ -1494,11 +1494,11 @@ async fn session_send(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes: 
     if said.trim().is_empty() || said.chars().count() > 20000 {
         return text(StatusCode::BAD_REQUEST, "text, up to 20000 characters");
     }
-    // A job moved to the background from a terminal: typed there while that terminal shows it, else through its inbox.
-    let (pid, moved, name) = (sess.screen_pid(), sess.moved(), sess.name.clone());
+    // A background job shown in a parked terminal: typed there while its title names the job, else through its inbox.
+    let (pid, elsewhere, name) = (sess.screen_pid(), sess.elsewhere(), sess.name.clone());
     let named = name.clone();
     let typed = tokio::task::spawn_blocking(move || {
-        terminal::reachable(pid).is_none() && (!moved || terminal::shows(pid, &named))
+        terminal::reachable(pid).is_none() && (!elsewhere || terminal::shows(pid, &named))
     })
     .await
     .unwrap_or(false);
@@ -1512,7 +1512,7 @@ async fn session_send(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes: 
             Err(e) => conflict(format!("Its inbox did not take the message: {e}")),
         };
     }
-    match terminal::type_message(pid, said.trim(), moved.then_some(name.as_str())).await {
+    match terminal::type_message(pid, said.trim(), elsewhere.then_some(name.as_str())).await {
         Ok(()) => ok(json!({"ok": true})),
         Err(e) => conflict(e),
     }

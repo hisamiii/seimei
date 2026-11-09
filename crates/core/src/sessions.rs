@@ -56,6 +56,8 @@ pub struct Live {
     /// The job's row stands for that session, and the parked terminal has no row of its own.
     pub origin: String,
     pub origin_pid: i64,
+    /// A parked terminal that shows this background job now: the harness's agent list attaches any job there, and its window title names it.
+    pub view_pid: i64,
 }
 
 impl Live {
@@ -76,7 +78,18 @@ impl Live {
 
     /// The process whose terminal window shows the session: a moved job has none of its own, and its parked terminal shows it once attached.
     pub fn screen_pid(&self) -> i64 {
-        if self.moved() { self.origin_pid } else { self.pid }
+        if self.view_pid > 0 {
+            self.view_pid
+        } else if self.moved() {
+            self.origin_pid
+        } else {
+            self.pid
+        }
+    }
+
+    /// Shown in another process's window, which may switch to other sessions: type there only while its title names this one.
+    pub fn elsewhere(&self) -> bool {
+        self.screen_pid() != self.pid
     }
 
     /// Whether this row is the session `sid`, moved to a background job or not.
@@ -136,7 +149,8 @@ pub fn live(own: &Own) -> Vec<Live> {
         let saved = read_json(&links_file()).unwrap_or_default();
         serde_json::from_value::<HashMap<String, String>>(saved).unwrap_or_default()
     });
-    let out = rows(recs, own, known, &|rec| harness::forked_from(rec["pid"].as_i64().unwrap_or(0)));
+    let mut out = rows(recs, own, known, &|rec| harness::forked_from(rec["pid"].as_i64().unwrap_or(0)));
+    viewers(&mut out, &harness::attach_clients(), &terminal::showing);
     let mut changed = false;
     for s in out.iter().filter(|s| !s.origin.is_empty()) {
         changed |= known.insert(as_text(&s.rec["sessionId"]), s.origin.clone()).as_ref() != Some(&s.origin);
@@ -203,6 +217,7 @@ fn rows(
             rec,
             origin: String::new(),
             origin_pid: 0,
+            view_pid: 0,
         });
     }
     let parked: Vec<(String, String, i64)> =
@@ -233,6 +248,26 @@ fn rows(
     out.retain(|s| !moved.contains(&s.pid));
     out.sort_by(|a, b| b.active.total_cmp(&a.active));
     out
+}
+
+/// Which terminal shows each background job, by what its window shows: the harness's records keep the job a terminal was first moved to, not the one attached there now.
+/// Terminals: parked ones, and `attach` clients. A name two jobs share tells neither.
+fn viewers(out: &mut [Live], clients: &[i64], showing: &dyn Fn(i64) -> Vec<String>) {
+    let mut terms: Vec<i64> = out.iter().filter(|s| parked_job(&s.rec).is_some()).map(|s| s.pid).collect();
+    terms.extend(out.iter().filter(|s| s.moved()).map(|s| s.origin_pid));
+    terms.extend(clients);
+    terms.sort_unstable();
+    terms.dedup();
+    let shown: Vec<(i64, Vec<String>)> = terms.into_iter().map(|p| (p, showing(p))).collect();
+    let jobs: Vec<String> = out.iter().filter(|s| s.rec["kind"] == "bg").map(|s| s.name.clone()).collect();
+    for j in out.iter_mut().filter(|s| s.rec["kind"] == "bg") {
+        let at: Vec<i64> = shown.iter().filter(|(_, n)| n.contains(&j.name)).map(|(p, _)| *p).collect();
+        if let [p] = at[..]
+            && jobs.iter().filter(|n| **n == j.name).count() == 1
+        {
+            j.view_pid = p;
+        }
+    }
 }
 
 /// By alias, exact name, pid, session id prefix, then a unique part of the name.
@@ -500,7 +535,8 @@ pub fn listing(own: &Own, theirs: &HashSet<String>) -> Vec<Value> {
             "job": if rec["kind"] == "bg" { rec["jobId"].clone() } else { Value::Null },
             // The session it continues, when the harness moved a terminal's session to this job.
             "moved_from": if s.origin.is_empty() { Value::Null } else { json!({"session_id": s.origin, "pid": s.origin_pid}) },
-            "proc_start": rec["procStart"], "reach": terminal::reachable(s.screen_pid())}));
+            // The process whose window shows it: its own, or a parked terminal's.
+            "screen": s.screen_pid(), "proc_start": rec["procStart"], "reach": terminal::reachable(s.screen_pid())}));
     }
     out
 }
@@ -601,7 +637,7 @@ impl SessionEvents {
                 if Some(&p) != st.perm.as_ref() {
                     let mut what = format!("{} {}", as_text(&d["tool"]), as_text(&d["what"])).trim().to_string();
                     if what.is_empty() {
-                        what = prompt_on_screen(r["moved_from"]["pid"].as_i64().unwrap_or(pid))
+                        what = prompt_on_screen(r["screen"].as_i64().unwrap_or(pid))
                             .or_else(|| r["waiting_for"].as_str().filter(|w| !w.is_empty()).map(String::from))
                             .unwrap_or_else(|| "something".into());
                     }
@@ -863,6 +899,7 @@ mod tests {
             rec: json!({"sessionId": sid, "name": name}),
             origin: String::new(),
             origin_pid: 0,
+            view_pid: 0,
         }
     }
 
@@ -941,6 +978,36 @@ mod tests {
         assert!(job(&rows).origin.is_empty());
         assert_eq!(rows.len(), 3);
         assert!(find_in("0", &rows).is_none(), "no pid 0 stands for a terminal");
+    }
+
+    #[test]
+    fn a_terminal_shows_the_job_its_window_names() {
+        // The terminal parked for job j0, which has closed since; the user attached it to j1 from the agent list.
+        let mut recs = moved_to_background();
+        recs[0]["parkedJobId"] = json!("j0");
+        let on = |at: i64, names: &[&str]| {
+            let names: Vec<String> = names.iter().map(|n| n.to_string()).collect();
+            move |pid: i64| if pid == at { names.clone() } else { vec![] }
+        };
+        let rows = |recs: &[Value], clients: &[i64], showing: &dyn Fn(i64) -> Vec<String>| {
+            let mut rows = super::rows(recs.iter().cloned(), &Own::new(), &HashMap::new(), &|_| None);
+            viewers(&mut rows, clients, showing);
+            rows
+        };
+        let job = |rows: &[Live]| rows.iter().find(|s| s.pid == 102).cloned().unwrap();
+        let shown = rows(&recs, &[], &on(101, &["shikigami cleanup"]));
+        assert!(job(&shown).elsewhere() && job(&shown).screen_pid() == 101, "typed into the window that shows it");
+        assert!(!shown.iter().find(|s| s.pid == 104).unwrap().elsewhere());
+        // Back on the agent list, or showing another job: the job has no window.
+        for names in [&["3 awaiting input · claude agents"][..], &["my work", "my work"]] {
+            assert_eq!(job(&rows(&recs, &[], &on(101, names))).screen_pid(), 102, "{names:?}");
+        }
+        // An attach client keeps no record: its window's prompt rule names the job.
+        assert_eq!(job(&rows(&recs, &[300], &on(300, &["kattach.sh", "shikigami cleanup"]))).screen_pid(), 300);
+        assert_eq!(job(&rows(&recs, &[300], &on(301, &["shikigami cleanup"]))).screen_pid(), 102);
+        // Two jobs of one name: the window tells neither.
+        recs.push(json!({"pid": 105, "sessionId": "j3-fork", "kind": "bg", "jobId": "j3", "name": "shikigami cleanup"}));
+        assert!(rows(&recs, &[], &on(101, &["shikigami cleanup"])).iter().all(|s| !s.elsewhere()));
     }
 
     #[test]

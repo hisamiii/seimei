@@ -88,10 +88,44 @@ fn titled(title: &str, name: &str) -> bool {
     !name.trim().is_empty() && rest == name.trim()
 }
 
-/// A parked terminal shows its background job, not the harness's list of agents in its place.
+/// A parked or attached terminal shows this background job, not the harness's list of agents or another job in its place.
 /// Typing into that list would start a new session, and its keys act on the listed ones.
 pub fn shows(pid: i64, name: &str) -> bool {
-    window(pid).and_then(|w| title(&w)).is_ok_and(|t| titled(&t, name))
+    let Ok(w) = window(pid) else { return false };
+    title(&w).is_ok_and(|t| titled(&t, name))
+        || run(&w, "get-text", &[], None, Duration::from_secs(10)).is_ok_and(|s| ruled(&s).is_some_and(|r| r == name.trim()))
+}
+
+/// The session name on the prompt's top rule (dashes, the name, a dash): the agent's TUI draws it there, also where it sets no title.
+fn ruled(screen: &str) -> Option<String> {
+    let flat: Vec<String> = rows(screen, 30).iter().map(|r| plain(r)).collect();
+    let at = (0..flat.len()).rev().find(|&i| i > 0 && PROMPT.is_match(&flat[i]) && RULE.is_match(&flat[i - 1]))?;
+    let name = flat[at - 1].trim().trim_matches(['─', '━']).trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+/// The names a window shows: its title's, after the spinner glyph, and its prompt rule's.
+fn names_shown(title: &str, screen: &str) -> Vec<String> {
+    let t = title.trim_start_matches(|c: char| !c.is_alphanumeric()).trim_end().to_string();
+    [Some(t), ruled(screen)].into_iter().flatten().filter(|n| !n.is_empty()).collect()
+}
+
+/// What the window of the session with this pid shows (see names_shown), read at most every few seconds.
+/// Empty: no window seimei can reach, or no remote control.
+pub fn showing(pid: i64) -> Vec<String> {
+    type Seen = HashMap<i64, (Instant, Vec<String>)>;
+    static SEEN: LazyLock<std::sync::Mutex<Seen>> = LazyLock::new(Default::default);
+    if let Some((at, t)) = SEEN.lock().unwrap().get(&pid)
+        && at.elapsed() < Duration::from_secs(3)
+    {
+        return t.clone();
+    }
+    let read = |w: &Window| Some(names_shown(&title(w).ok()?, &run(w, "get-text", &[], None, Duration::from_secs(10)).ok()?));
+    let t = window(pid).ok().filter(|_| password().is_some()).and_then(|w| read(&w)).unwrap_or_default();
+    let mut seen = SEEN.lock().unwrap();
+    seen.retain(|_, (at, _)| at.elapsed() < Duration::from_secs(60));
+    seen.insert(pid, (Instant::now(), t.clone()));
+    t
 }
 
 /// None when the app can type into the session, else the reason.
@@ -372,14 +406,14 @@ pub async fn text(w: &Window, data: &str) -> Result<(), String> {
 /// named: for a parked terminal, the session its window must show at that moment.
 pub async fn type_message(pid: i64, text: &str, named: Option<&str>) -> Result<(), String> {
     let w = window(pid)?;
+    let mut now = rc(&w, "get-text", &["--ansi"], None).await?;
     if let Some(name) = named {
         let w = w.clone();
         let t = tokio::task::spawn_blocking(move || title(&w)).await.map_err(|e| e.to_string())??;
-        if !titled(&t, name) {
+        if !titled(&t, name) && ruled(&now).is_none_or(|r| r != name.trim()) {
             return Err("The session's terminal shows something else right now.".into());
         }
     }
-    let mut now = rc(&w, "get-text", &["--ansi"], None).await?;
     // The session-rating survey takes digit keys: a message starting with "2" would rate the session. Dismiss it.
     if survey(&now) {
         rc(&w, "send-text", &[], Some("0")).await?;
@@ -421,7 +455,7 @@ pub async fn answer_text(pid: i64, question: &str, other: i64, text: &str) -> Re
 
 #[cfg(test)]
 mod tests {
-    use super::titled;
+    use super::{names_shown, titled};
 
     #[test]
     fn a_parked_terminal_is_typed_into_only_while_it_shows_the_job() {
@@ -435,4 +469,15 @@ mod tests {
         assert!(!titled("✳ cleanup", "shikigami cleanup"));
         assert!(!titled("", ""), "no name, no match");
     }
+
+    #[test]
+    fn an_attached_window_names_its_job_on_the_prompt_rule() {
+        let rule = |name: &str| format!("{}{name}{}", "─".repeat(40), if name.is_empty() { "" } else { " ─" });
+        let screen = |name: &str| format!("● MANGO\n\n{}\n❯ \n{}\n  ⏵⏵ auto mode on", rule(name), rule(""));
+        let attached = screen(" throwaway-mango echo test");
+        assert_eq!(names_shown("kattach.sh", &attached), ["kattach.sh", "throwaway-mango echo test"]);
+        assert_eq!(names_shown("◐ shikigami cleanup", &screen("")), ["shikigami cleanup"], "an unnamed session");
+        assert!(names_shown("", "❯ describe a task for a new session").is_empty(), "the agent list draws no rule above");
+    }
 }
+

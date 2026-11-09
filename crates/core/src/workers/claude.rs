@@ -149,6 +149,20 @@ pub fn forked_from(pid: i64) -> Option<String> {
     fork_origin(&args)
 }
 
+/// Terminals running `claude attach <job>`: each shows a background job, and the user can switch it to another.
+/// They keep no record in the session registry.
+pub fn attach_clients() -> Vec<i64> {
+    let Ok(dir) = std::fs::read_dir("/proc") else { return vec![] };
+    let pids = dir.flatten().filter_map(|e| e.file_name().to_str()?.parse::<i64>().ok());
+    pids.filter(|pid| {
+        let Ok(raw) = std::fs::read(format!("/proc/{pid}/cmdline")) else { return false };
+        let mut args = raw.split(|b| *b == 0);
+        let exe = args.next().unwrap_or_default();
+        (exe.ends_with(b"/claude") || exe == b"claude") && args.next() == Some(b"attach")
+    })
+    .collect()
+}
+
 /// The resumed session of a forking command line: an id or a transcript's path.
 pub fn fork_origin(args: &[String]) -> Option<String> {
     if !args.iter().any(|a| a == "--fork-session") {
