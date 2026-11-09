@@ -15,11 +15,19 @@ pub struct Plan {
     pub quick: String,
     /// The largest context a shikigami gets, in tokens.
     pub max_context: f64,
+    /// The model the fable choice runs: the CLI's own alias may still name an older one.
+    pub fable: String,
 }
 
 impl Default for Plan {
     fn default() -> Plan {
-        Plan { work: "opus".into(), routine: "sonnet".into(), quick: "haiku".into(), max_context: 1_000_000.0 }
+        Plan {
+            work: "opus".into(),
+            routine: "sonnet".into(),
+            quick: "haiku".into(),
+            max_context: 1_000_000.0,
+            fable: "claude-fable-5-2".into(),
+        }
     }
 }
 
@@ -35,6 +43,9 @@ pub fn from_config(models: Option<&toml::Table>) -> Plan {
             Some(m) => eprintln!("seimei: [models] {key} = {m:?} is not one of {}; using {slot}", MODELS.join(", ")),
             None => {}
         }
+    }
+    if let Some(m) = t.get("fable").and_then(|v| v.as_str()).filter(|m| !m.is_empty()) {
+        p.fable = m.into();
     }
     if let Some(c) = t.get("context").and_then(|v| v.as_str()) {
         match CONTEXTS.iter().find(|x| x.0 == c) {
@@ -60,13 +71,19 @@ impl Plan {
         CONTEXTS.iter().filter(|c| c.1 <= self.max_context).map(|c| c.0).collect()
     }
 
+    /// The model a choice runs: the plan's fable for fable, else the choice as the CLI takes it.
+    pub fn model_id(&self, model: &str) -> String {
+        if model == "fable" { self.fable.clone() } else { model.into() }
+    }
+
     /// How summon's model choice reads.
     pub fn model_guide(&self) -> String {
-        if self.work == self.routine {
+        let most = if self.work == self.routine {
             format!("{} for real work and routine jobs, {} for quick lookups", self.work, self.quick)
         } else {
             format!("{} for real work, {} for routine jobs, {} for quick lookups", self.work, self.routine, self.quick)
-        }
+        };
+        format!("{most}, fable for the hardest reasoning work")
     }
 
     /// How summon's context choice reads.
@@ -94,6 +111,16 @@ impl Plan {
 mod tests {
     use super::*;
 
+    /// seimei names the fable model itself, from [models] fable when set.
+    #[test]
+    fn fable_runs_the_plans_fable_model() {
+        let p = Plan::default();
+        assert_eq!((p.model_id("fable"), p.model_id("opus")), ("claude-fable-5-2".into(), "opus".into()));
+        let t: toml::Table = "work = \"fable\"\nfable = \"claude-fable-5-3\"".parse().unwrap();
+        let next = from_config(Some(&t));
+        assert_eq!((next.work.as_str(), next.model_id(&next.work)), ("fable", "claude-fable-5-3".into()));
+    }
+
     #[test]
     fn a_pro_plan_offers_sonnet_and_200k() {
         let max = Plan::default();
@@ -109,7 +136,10 @@ mod tests {
         let t: toml::Table = "work = \"sonnet\"\ncontext = \"200k\"\nquick = \"gpt\"".parse().unwrap();
         let pro = from_config(Some(&t));
         assert_eq!((pro.work.as_str(), pro.quick.as_str(), pro.contexts()), ("sonnet", "haiku", vec!["200k"]));
-        assert_eq!(pro.model_guide(), "sonnet for real work and routine jobs, haiku for quick lookups");
+        assert_eq!(
+            pro.model_guide(),
+            "sonnet for real work and routine jobs, haiku for quick lookups, fable for the hardest reasoning work"
+        );
         assert_eq!(pro.context_for(500_000), "200k");
     }
 }

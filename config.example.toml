@@ -17,6 +17,7 @@ cwd = "~"
 # routine = "sonnet"                # for routine jobs
 # quick = "haiku"                   # for lookups, and every shikigami's own subagents
 # context = "1m"                    # the most context a shikigami gets: 200k, 256k, 400k or 1m
+# fable = "claude-fable-5-2"        # the model summon's fable choice runs
 
 [host]
 about = "computer"                  # how the prompts name this machine, e.g. "desktop (a Linux workstation)"

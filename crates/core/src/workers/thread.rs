@@ -103,7 +103,7 @@ impl Worker {
         let (resume, session_id) = if r.started { (Some(sid), None) } else { (None, Some(sid)) };
         Options {
             cwd: Some(PathBuf::from(&r.cwd)),
-            model: Some(r.model.clone()),
+            model: Some(crate::plan::get().model_id(&r.model)),
             // Only the allowed tools run; anything else is denied without a card.
             permission_mode: Some("dontAsk".into()),
             allowed_tools: THREAD_TOOLS.map(String::from).to_vec(),

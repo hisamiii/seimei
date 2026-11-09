@@ -64,7 +64,7 @@ To show the user a picture (a screenshot, a render) or hand them a file, use mcp
 Before a reboot of the machine, leave what must happen after it with mcp__shikigami__after_reboot.
 ";
 pub const EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
-pub const MODELS: [&str; 3] = ["opus", "sonnet", "haiku"];
+pub const MODELS: [&str; 4] = ["opus", "sonnet", "haiku", "fable"];
 /// The context a shikigami may fill before it compacts, in tokens: most at 256-400k, 1m only where really needed,
 /// 200k where the plan's models hold no more (crate::plan says which it offers).
 pub const CONTEXTS: [(&str, f64); 4] =
@@ -502,7 +502,7 @@ impl Worker {
         let (plugins, groups) = (&self.pool().plugins, self.granted());
         Options {
             cwd: Some(PathBuf::from(&r.cwd)),
-            model: Some(r.model.clone()),
+            model: Some(crate::plan::get().model_id(&r.model)),
             permission_mode: Some(self.mode()),
             // Whatever the agent would ask in a terminal becomes a card (in bypass only its safety checks ask: blocked).
             can_use_tool: true,
@@ -1094,7 +1094,7 @@ impl Session {
         let mut changed = vec![];
         if let Some(m) = model.filter(|m| r.model != *m) {
             if let Some(c) = &self.client {
-                c.set_model(Some(&m)).await.map_err(|e| e.to_string())?;
+                c.set_model(Some(&crate::plan::get().model_id(&m))).await.map_err(|e| e.to_string())?;
             }
             changed.push(format!("model {} → {m}", r.model));
             self.w.edit(|r| r.model = m);
