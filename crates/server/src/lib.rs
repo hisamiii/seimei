@@ -1408,7 +1408,7 @@ async fn user_session(app: &App, pid: &str) -> Result<(Live, Option<PathBuf>), R
     let found = tokio::task::spawn_blocking(move || {
         let own = pool.own_sessions();
         let s = sessions::live(&own).into_iter().find(|x| x.pid == pid)?;
-        if !sessions::listing(&own, &pool.released_sessions()).iter().any(|x| x["pid"] == json!(pid)) {
+        if !sessions::listing(&own).iter().any(|x| x["pid"] == json!(pid)) {
             return None;
         }
         // A session gets its transcript with its first message.

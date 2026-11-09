@@ -492,24 +492,22 @@ pub fn forget_screen(pid: i64) {
 }
 
 /// Whether the user's list leaves a session out: seimei's own and parked terminals.
-/// seimei's records decide first: a session it released is the user's, whatever its name says, also once moved to a background job.
-/// The name only tells another seimei's sessions (a dev server's), which this one has no records of.
-fn hidden(s: &Live, own: &Own, theirs: &HashSet<String>) -> bool {
+/// seimei's records tell its own. A session in a terminal or a background job is the user's whatever its name, as one seimei released keeps its name.
+/// The name only tells the sessions another seimei drives (a dev server's), which this one has no records of.
+fn hidden(s: &Live, own: &Own) -> bool {
     if parked_job(&s.rec).is_some() || s.ids().iter().any(|i| own.contains_key(*i)) {
         return true;
     }
-    let released = s.ids().iter().any(|i| theirs.contains(*i));
-    !released && OURS.is_match(&s.name)
+    s.rec["entrypoint"] != "cli" && OURS.is_match(&s.name)
 }
 
 /// The user's running sessions for the page: seimei's and parked terminals left out.
-/// theirs: the sessions seimei released to the user.
-pub fn listing(own: &Own, theirs: &HashSet<String>) -> Vec<Value> {
+pub fn listing(own: &Own) -> Vec<Value> {
     let home = home().display().to_string();
     let mut out = vec![];
     for s in live(own) {
         let rec = &s.rec;
-        if hidden(&s, own, theirs) {
+        if hidden(&s, own) {
             continue;
         }
         let b = transcript_of(rec).and_then(|p| brief(&p).ok()).unwrap_or_else(|| json!({}));
@@ -787,7 +785,7 @@ impl Watcher {
             let me = self.clone();
             let scanned = tokio::task::spawn_blocking(move || {
                 let own = me.pool.own_sessions();
-                let mut rows = listing(&own, &me.pool.released_sessions());
+                let mut rows = listing(&own);
                 let lines = me.happenings.lock().unwrap().scan(&rows);
                 me.mark(&mut rows);
                 let listed: Vec<(i64, PathBuf)> = live(&own)
@@ -908,9 +906,9 @@ mod tests {
     fn moved_to_background() -> Vec<Value> {
         vec![
             json!({"pid": 101, "sessionId": "s-rel", "kind": "interactive", "name": "shikigami cleanup", "status": "busy",
-                "parkedJobId": "j1"}),
+                "parkedJobId": "j1", "entrypoint": "cli"}),
             json!({"pid": 102, "sessionId": "j1-fork", "kind": "bg", "jobId": "j1", "name": "shikigami cleanup",
-                "status": "waiting", "waitingFor": "permission prompt"}),
+                "status": "waiting", "waitingFor": "permission prompt", "entrypoint": "cli"}),
             json!({"pid": 103, "sessionId": "j2-spare", "kind": "bg", "jobId": "j2", "name": "j2", "spare": true,
                 "status": "waiting", "waitingFor": "permission prompt"}),
             json!({"pid": 104, "sessionId": "s-user", "kind": "interactive", "name": "my work", "status": "idle"}),
@@ -920,7 +918,6 @@ mod tests {
     #[test]
     fn a_session_moved_to_a_background_job_is_one_row() {
         let own: Own = [("s-own".to_string(), "shikigami dev".to_string())].into();
-        let theirs: HashSet<String> = ["s-rel".to_string()].into();
         let rows = rows(moved_to_background().into_iter(), &own, &HashMap::new(), &|_| None);
         let pids: Vec<i64> = rows.iter().map(|s| s.pid).collect();
         assert!(pids.contains(&102) && pids.contains(&104), "{pids:?}");
@@ -932,12 +929,12 @@ mod tests {
         assert_eq!(job.screen_pid(), 101, "its parked terminal shows it");
         assert_eq!(rows.iter().find(|s| s.pid == 104).unwrap().screen_pid(), 104);
         assert_eq!(job.status, "waiting: permission prompt", "its prompt shows");
-        assert!(!hidden(job, &own, &theirs), "released by seimei before it was moved: still the user's");
+        assert!(!hidden(job, &own), "released by seimei before it was moved: still the user's");
         // Moved from one of seimei's own sessions, the job is seimei's too.
         let own: Own = [("s-rel".to_string(), "shikigami cleanup".to_string())].into();
         let rows = super::rows(moved_to_background().into_iter(), &own, &HashMap::new(), &|_| None);
         let job = rows.iter().find(|s| s.pid == 102).unwrap();
-        assert!(hidden(job, &own, &HashSet::new()));
+        assert!(hidden(job, &own));
         assert_eq!(job.kind, "shikigami cleanup");
         // Before the job's process is up, the parked terminal stays a row of its own, out of the user's list.
         let rows = super::rows(
@@ -948,33 +945,35 @@ mod tests {
         );
         let parked = rows.iter().find(|s| s.pid == 101).unwrap();
         assert!(parked.status.starts_with("parked"));
-        assert!(hidden(parked, &HashMap::new(), &theirs));
+        assert!(hidden(parked, &HashMap::new()));
     }
 
     #[test]
     fn a_moved_job_stays_the_users_once_its_terminal_closes() {
         let own = Own::new();
-        let theirs: HashSet<String> = ["s-rel".to_string()].into();
         let closed = || moved_to_background().into_iter().filter(|r| r["pid"] != 101);
         let job = |rows: &[Live]| rows.iter().find(|s| s.pid == 102).cloned().unwrap();
-        // Nothing tells: the job reads as another seimei's shikigami, by its name.
+        // Nothing tells which session it continues: still the user's, by its record, whatever its name.
         let rows = super::rows(closed(), &own, &HashMap::new(), &|_| None);
-        assert!(hidden(&job(&rows), &own, &theirs));
+        assert!(!hidden(&job(&rows), &own) && !job(&rows).is("s-rel"));
         // The link seen while the terminal was parked.
         let known: HashMap<String, String> = [("j1-fork".to_string(), "s-rel".to_string())].into();
         let rows = super::rows(closed(), &own, &known, &|_| None);
         let j = job(&rows);
-        assert!(!hidden(&j, &own, &theirs), "still the released session");
+        assert!(!hidden(&j, &own), "still the released session");
         assert!(j.is("s-rel") && !j.moved());
-        assert_eq!(j.screen_pid(), 102, "no terminal shows it: messages go to its inbox");
+        assert_eq!(j.screen_pid(), 102, "no terminal shows it: messages go to its background job");
         // Or the job's own command line, as its process was started.
         let fork = |rec: &Value| (rec["pid"] == 102).then(|| "s-rel".to_string());
         let rows = super::rows(closed(), &own, &HashMap::new(), &fork);
-        assert!(!hidden(&job(&rows), &own, &theirs));
+        assert!(job(&rows).is("s-rel"));
+        // Adopted again, it is seimei's.
+        let own: Own = [("s-rel".to_string(), "shikigami cleanup".to_string())].into();
+        assert!(hidden(&job(&super::rows(closed(), &own, &known, &|_| None)), &own));
         // A copy forked while the original runs on is a session of its own.
         let mut original = moved_to_background()[0].clone();
         original["parkedJobId"] = Value::Null;
-        let rows = super::rows(closed().chain([original]), &own, &HashMap::new(), &fork);
+        let rows = super::rows(closed().chain([original]), &Own::new(), &HashMap::new(), &fork);
         assert!(job(&rows).origin.is_empty());
         assert_eq!(rows.len(), 3);
         assert!(find_in("0", &rows).is_none(), "no pid 0 stands for a terminal");
@@ -1006,24 +1005,33 @@ mod tests {
         assert_eq!(job(&rows(&recs, &[300], &on(300, &["kattach.sh", "shikigami cleanup"]))).screen_pid(), 300);
         assert_eq!(job(&rows(&recs, &[300], &on(301, &["shikigami cleanup"]))).screen_pid(), 102);
         // Two jobs of one name: the window tells neither.
-        recs.push(json!({"pid": 105, "sessionId": "j3-fork", "kind": "bg", "jobId": "j3", "name": "shikigami cleanup"}));
+        recs.push(
+            json!({"pid": 105, "sessionId": "j3-fork", "kind": "bg", "jobId": "j3", "name": "shikigami cleanup"}),
+        );
         assert!(rows(&recs, &[], &on(101, &["shikigami cleanup"])).iter().all(|s| !s.elsewhere()));
     }
 
     #[test]
     fn a_released_session_shows_whatever_its_name() {
         let own: Own = [("s-own".to_string(), "shikigami dev".to_string())].into();
-        let theirs: HashSet<String> = ["s-rel".to_string()].into();
-        assert!(!hidden(&session("shikigami cleanup", "s-rel"), &own, &theirs), "released by seimei");
-        assert!(!hidden(&session("cleanup", "s-rel"), &own, &theirs));
-        assert!(hidden(&session("shikigami dev", "s-own"), &own, &theirs), "a shikigami of seimei's");
-        assert!(hidden(&session("anything", "s-own"), &own, &theirs), "its records, not its name");
-        assert!(hidden(&session("shikigami x", "s-other"), &own, &theirs), "another seimei's, known by name");
-        assert!(hidden(&session("seimei-dev", "s-dev"), &own, &theirs));
-        assert!(!hidden(&session("my work", "s-user"), &own, &theirs));
-        let mut parked = session("shikigami cleanup", "s-rel");
+        // A terminal's or a background job's session (entrypoint "cli"): the user's, also one seimei released.
+        let cli = |name: &str, sid: &str| {
+            let mut s = session(name, sid);
+            s.rec["entrypoint"] = json!("cli");
+            s
+        };
+        assert!(!hidden(&cli("shikigami cleanup", "s-rel"), &own), "released by seimei, its name kept");
+        assert!(!hidden(&cli("cleanup", "s-rel"), &own));
+        assert!(!hidden(&cli("my work", "s-user"), &own));
+        assert!(hidden(&cli("anything", "s-own"), &own), "adopted: seimei's records, not its name");
+        // Driven through the SDK, as seimei drives its own: another seimei's, known by name.
+        assert!(hidden(&session("shikigami dev", "s-own"), &own), "a shikigami of seimei's");
+        assert!(hidden(&session("shikigami x", "s-other"), &own), "another seimei's");
+        assert!(hidden(&session("seimei-dev", "s-dev"), &own));
+        assert!(!hidden(&session("my work", "s-user"), &own));
+        let mut parked = cli("shikigami cleanup", "s-rel");
         parked.rec["parkedJobId"] = json!("j1");
-        assert!(hidden(&parked, &own, &theirs), "a parked terminal");
+        assert!(hidden(&parked, &own), "a parked terminal");
     }
 
     #[test]

@@ -1844,14 +1844,9 @@ impl Pool {
         labels
     }
 
-    /// The sessions seimei released to the user: theirs, whatever their names say.
-    pub fn released_sessions(&self) -> HashSet<String> {
-        (self.all().iter()).map(|w| w.rec()).filter(|r| r.state == "released").map(|r| r.session_id).collect()
-    }
-
     /// The user's running sessions, as the page lists them.
     pub fn user_sessions(&self) -> Vec<Value> {
-        sessions::listing(&self.own_sessions(), &self.released_sessions())
+        sessions::listing(&self.own_sessions())
     }
 
     /// show_image and send_file for one of the user's own sessions (`seimei mcp`): the session is the one whose process runs the caller.
