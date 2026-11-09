@@ -93,7 +93,8 @@ fn titled(title: &str, name: &str) -> bool {
 pub fn shows(pid: i64, name: &str) -> bool {
     let Ok(w) = window(pid) else { return false };
     title(&w).is_ok_and(|t| titled(&t, name))
-        || run(&w, "get-text", &[], None, Duration::from_secs(10)).is_ok_and(|s| ruled(&s).is_some_and(|r| r == name.trim()))
+        || run(&w, "get-text", &[], None, Duration::from_secs(10))
+            .is_ok_and(|s| ruled(&s).is_some_and(|r| r == name.trim()))
 }
 
 /// The session name on the prompt's top rule (dashes, the name, a dash): the agent's TUI draws it there, also where it sets no title.
@@ -120,7 +121,8 @@ pub fn showing(pid: i64) -> Vec<String> {
     {
         return t.clone();
     }
-    let read = |w: &Window| Some(names_shown(&title(w).ok()?, &run(w, "get-text", &[], None, Duration::from_secs(10)).ok()?));
+    let read =
+        |w: &Window| Some(names_shown(&title(w).ok()?, &run(w, "get-text", &[], None, Duration::from_secs(10)).ok()?));
     let t = window(pid).ok().filter(|_| password().is_some()).and_then(|w| read(&w)).unwrap_or_default();
     let mut seen = SEEN.lock().unwrap();
     seen.retain(|_, (at, _)| at.elapsed() < Duration::from_secs(60));
@@ -477,7 +479,9 @@ mod tests {
         let attached = screen(" throwaway-mango echo test");
         assert_eq!(names_shown("kattach.sh", &attached), ["kattach.sh", "throwaway-mango echo test"]);
         assert_eq!(names_shown("◐ shikigami cleanup", &screen("")), ["shikigami cleanup"], "an unnamed session");
-        assert!(names_shown("", "❯ describe a task for a new session").is_empty(), "the agent list draws no rule above");
+        assert!(
+            names_shown("", "❯ describe a task for a new session").is_empty(),
+            "the agent list draws no rule above"
+        );
     }
 }
-
