@@ -15,7 +15,9 @@ use crate::terminal;
 use crate::transcripts::{
     brief, input_of, project_of, prompt_text, rows_from, rows_since, summary, text_of, time_of, tool_results,
 };
-use crate::util::{as_text, chars, children, data_dir, mtime, now, read_json, read_tail, save_json, stat_field};
+use crate::util::{
+    as_text, chars, children, data_dir, mtime, now, read_json, read_tail, save_json, sha256_hex, stat_field,
+};
 use crate::workers::Pool;
 use crate::workers::harness::{self, transcript, waiting_text};
 
@@ -365,6 +367,15 @@ pub fn timeline(path: &Path, start: Option<u64>, events: usize) -> Value {
     let from = if tail { size.saturating_sub(TAIL) } else { start.unwrap_or(0).min(size) };
     // The turns the harness logged only in its API requests too: their ids keep a page from taking one twice.
     let (rows, next) = rows_since(path, from, now());
+    // Ids by tool call where there is one, the same whether a turn comes from its rows or its request (which may come first).
+    // The harness writes one row per block of a message: its blocks share the message's id.
+    let mut calls: HashMap<String, String> = HashMap::new();
+    for row in &rows {
+        let first = row["message"]["content"].as_array().into_iter().flatten().find_map(|b| b["id"].as_str());
+        if let (Some(m), Some(id)) = (row["message"]["id"].as_str(), first) {
+            calls.entry(m.to_string()).or_insert_with(|| id.to_string());
+        }
+    }
     let mut out = vec![];
     for row in &rows {
         let (t, uid) = (time_of(row), as_text(&row["uuid"]));
@@ -383,7 +394,8 @@ pub fn timeline(path: &Path, start: Option<u64>, events: usize) -> Value {
                 };
                 let text =
                     if text.chars().count() <= RESULT { text } else { format!("{}\n[...]", chars(&text, RESULT)) };
-                out.push(json!({"id": format!("{uid}:r{i}"), "type": "tool_result", "tool_id": b["tool_use_id"],
+                let id = b["tool_use_id"].as_str().map_or_else(|| format!("{uid}:r{i}"), |t| format!("r:{t}"));
+                out.push(json!({"id": id, "type": "tool_result", "tool_id": b["tool_use_id"],
                     "error": b["is_error"] == true, "text": text, "t": t}));
             }
             if results.is_empty() {
@@ -392,13 +404,21 @@ pub fn timeline(path: &Path, start: Option<u64>, events: usize) -> Value {
             }
             continue;
         }
-        for (i, b) in content.as_array().into_iter().flatten().enumerate() {
+        let blocks = content.as_array().into_iter().flatten();
+        let call = (row["message"]["id"].as_str().and_then(|m| calls.get(m)).map(String::as_str))
+            .or_else(|| blocks.clone().find_map(|b| b["id"].as_str()));
+        for (i, b) in blocks.enumerate() {
             if b["type"] == "text" && b["text"].as_str().is_some_and(|x| !x.trim().is_empty()) {
                 let text = chars(b["text"].as_str().unwrap_or("").trim(), 20000);
-                out.push(json!({"id": format!("{uid}:{i}"), "type": "assistant", "text": text, "t": t}));
+                let id = call.map_or_else(
+                    || format!("{uid}:{i}"),
+                    |c| format!("{c}:{}", chars(&sha256_hex(text.as_bytes()), 12)),
+                );
+                out.push(json!({"id": id, "type": "assistant", "text": text, "t": t}));
             } else if b["type"] == "tool_use" {
                 let inp = input_of(b);
-                out.push(json!({"id": format!("{uid}:{i}"), "type": "tool", "name": b["name"], "tool_id": b["id"],
+                let id = b["id"].as_str().map_or_else(|| format!("{uid}:{i}"), String::from);
+                out.push(json!({"id": id, "type": "tool", "name": b["name"], "tool_id": b["id"],
                     "summary": summary(&inp), "t": t}));
             }
         }
@@ -1010,6 +1030,49 @@ mod tests {
             json!({"pid": 105, "sessionId": "j3-fork", "kind": "bg", "jobId": "j3", "name": "shikigami cleanup"}),
         );
         assert!(rows(&recs, &[], &on(101, &["shikigami cleanup"])).iter().all(|s| !s.elsewhere()));
+    }
+
+    /// A turn the harness logged first only in its API request, then in rows it wrote late: a page holds it once.
+    #[test]
+    fn a_turn_keeps_its_ids_when_its_rows_come_late() {
+        let dir = std::env::temp_dir().join(format!("seimei-late-rows-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("t.jsonl");
+        let t0 = now() - 600.0;
+        let at = |s: f64| {
+            chrono::DateTime::from_timestamp(s as i64, 0).unwrap().format("%Y-%m-%dT%H:%M:%S.000Z").to_string()
+        };
+        let said = json!([{"type": "text", "text": "checking"}, {"type": "tool_use", "id": "t2", "name": "Bash", "input": {"command": "ls"}}]);
+        let result = json!([{"type": "tool_result", "tool_use_id": "t2", "content": "ok"}]);
+        let early = [
+            json!({"type": "user", "uuid": "u1", "timestamp": at(t0), "message": {"role": "user", "content": "go"}}),
+            json!({"type": "api-request-blob", "hash": "h3", "message": {"role": "assistant", "content": said}}),
+            json!({"type": "api-request-blob", "hash": "h4", "message": {"role": "user", "content": result}}),
+            json!({"type": "api-request", "querySource": "repl_main_thread", "keep": 2, "tail": ["h3", "h4"], "timestamp": at(t0 + 10.0)}),
+        ];
+        // The rows, written late: one per block of the message, sharing its id.
+        let late = [
+            json!({"type": "assistant", "uuid": "a1", "timestamp": at(t0 + 5.0),
+                "message": {"id": "m1", "role": "assistant", "content": [said[0]]}}),
+            json!({"type": "assistant", "uuid": "a2", "timestamp": at(t0 + 5.0),
+                "message": {"id": "m1", "role": "assistant", "content": [said[1]]}}),
+            json!({"type": "user", "uuid": "a3", "timestamp": at(t0 + 9.0), "message": {"role": "user", "content": result}}),
+        ];
+        let ids = |lines: &[Value]| {
+            std::fs::write(&path, lines.iter().map(|l| l.to_string() + "\n").collect::<String>()).unwrap();
+            let tl = timeline(&path, None, 400);
+            tl["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|e| (as_text(&e["type"]), as_text(&e["id"])))
+                .collect::<Vec<_>>()
+        };
+        let before = ids(&early);
+        assert_eq!(before.len(), 4, "{before:?}");
+        let after = ids(&[&early[..], &late[..]].concat());
+        assert_eq!(after, before, "the same events, by the same ids");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
