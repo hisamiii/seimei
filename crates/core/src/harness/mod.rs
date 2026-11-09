@@ -54,6 +54,8 @@ pub struct Spec {
     pub name: String,
     pub cwd: PathBuf,
     pub model: String,
+    /// None leaves it to the harness's own settings.
+    pub effort: Option<String>,
     pub mode: String,
     /// seimei's system prompt, on top of the harness's own.
     pub prompt: String,

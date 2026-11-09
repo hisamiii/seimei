@@ -22,6 +22,7 @@ use crate::paths::expand;
 use crate::tools::Tools;
 use crate::usage::Usage;
 use crate::util::{as_text, chars, read_json, save_json};
+use crate::workers::EFFORTS;
 
 /// A reply that starts with one of these overrides where its turn's class puts it: chat: moves the rest of an event turn to the chat, trajectory: keeps a reply out of the chat (one that asks something, or answers events that need the user, still goes there).
 /// A first line "re: <words from one of the user's messages>" anchors the reply to that message.
@@ -91,6 +92,17 @@ fn asks(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::asks;
+
+    /// [dispatcher] model and effort as the CLI gets them: fable named as the plan's, an unknown effort left to the CLI.
+    #[test]
+    fn the_dispatcher_runs_its_configured_model_and_effort() {
+        let cfg = |t: &str| super::Config::new(&t.parse().unwrap(), "default", "test machine", false);
+        let fable = cfg("model = \"fable\"\neffort = \"high\"");
+        assert_eq!((fable.model.as_str(), fable.effort.as_deref()), ("claude-fable-5-2", Some("high")));
+        let odd = cfg("model = \"claude-opus-5-5\"\neffort = \"huge\"");
+        assert_eq!((odd.model.as_str(), odd.effort), ("claude-opus-5-5", None));
+        assert_eq!((cfg("").model.as_str(), cfg("").effort), ("opus", None));
+    }
 
     #[test]
     fn a_question_in_the_last_paragraph_asks() {
@@ -280,7 +292,10 @@ enum Cmd {
 #[derive(Clone)]
 pub struct Config {
     pub name: String,
+    /// The model as the CLI takes it: fable already named as the plan's.
     pub model: String,
+    /// None leaves it to the CLI's settings.
+    pub effort: Option<String>,
     pub cwd: PathBuf,
     pub mode: String,
     pub about: String,
@@ -306,9 +321,17 @@ impl Config {
                 COMPACT_WINDOW
             }),
         };
+        let effort = s("effort").filter(|e| {
+            let known = EFFORTS.contains(&e.as_str());
+            if !known {
+                eprintln!("seimei: [dispatcher] effort = {e:?} is not one of {}; using the CLI's", EFFORTS.join(", "));
+            }
+            known
+        });
         Config {
             name: s("name").unwrap_or_else(|| if dev { "seimei-dev" } else { "seimei" }.into()),
-            model: s("model").unwrap_or_else(|| plan.work.clone()),
+            model: plan.model_id(&s("model").unwrap_or_else(|| plan.work.clone())),
+            effort,
             cwd: PathBuf::from(expand(&s("cwd").unwrap_or_else(|| "~".into()))),
             mode: mode.into(),
             about: about.into(),
@@ -613,6 +636,7 @@ impl Dispatcher {
             name: self.cfg.name.clone(),
             cwd: self.cfg.cwd.clone(),
             model: self.cfg.model.clone(),
+            effort: self.cfg.effort.clone(),
             mode: self.cfg.mode.clone(),
             prompt: self.prompt(),
             env: plugins.env("seimei"),

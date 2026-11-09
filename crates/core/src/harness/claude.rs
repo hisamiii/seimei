@@ -179,6 +179,7 @@ fn options(spec: Spec) -> Options {
     Options {
         cwd: Some(spec.cwd),
         model: Some(spec.model),
+        effort: spec.effort,
         permission_mode: Some(spec.mode),
         // Whatever the agent would ask in a terminal becomes a card, which a chat message also settles.
         can_use_tool: true,

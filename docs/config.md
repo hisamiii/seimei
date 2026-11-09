@@ -12,6 +12,7 @@ The table lists each section's keys, their defaults and what they set. Notes on 
 | | `origin` | `http://localhost:8417` | the HTTPS address phones and browsers use |
 | | `web` | `true` | `false` runs only the plugins, without the phone server |
 | `[dispatcher]` | `model` | `[models] work` | the dispatcher's model |
+| | `effort` | the CLI's settings | its reasoning effort: low, medium, high, xhigh or max |
 | | `name` | `seimei` | its session's name in Claude Code's registry |
 | | `cwd` | `~` | its working folder |
 | | `compact_window` | 400000 | tokens at which its context compacts |
@@ -48,6 +49,7 @@ Notes on the keys:
 - On an ACP agent or Codex, `[approvals] dispatcher` works as for an ACP shikigami: seimei applies the mode, and what is left becomes a card. The agent uses its own model and compacts at its own point, so `model` and `compact_window` apply to Claude Code only.
 - A changed `harness` starts a fresh session on the next start, seeded with the last handoff and the After compaction block.
 - `model` takes opus, sonnet, haiku, fable or a full model id. seimei runs `fable` as `[models] fable`, since Claude Code's own alias may still name an older Fable.
+- Without `effort`, the dispatcher gets the effort from Claude Code's settings (`effortLevel` and `modelSettings`). `effort` applies to Claude Code only.
 - `context` takes 200k, 256k, 400k or 1m. For a Pro plan, `seimei setup` writes sonnet and 200k.
 - `[sessions] terminal` opens a session the user takes over, as with "Open on server". It is a command line such as `foot -D {cwd} --title {title}`, and the session's command follows it. The default is `$TERMINAL`'s, else the first one installed of kitty, foot, alacritty, ghostty, wezterm, gnome-terminal, konsole and xfce4-terminal.
 - `[approvals]` takes Claude Code's mode names, see [Permission modes](#permission-modes).
