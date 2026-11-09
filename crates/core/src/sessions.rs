@@ -15,7 +15,7 @@ use crate::terminal;
 use crate::transcripts::{
     brief, input_of, project_of, prompt_text, rows_from, summary, text_of, time_of, tool_results,
 };
-use crate::util::{as_text, chars, children, mtime, now, read_tail, stat_field};
+use crate::util::{as_text, chars, children, data_dir, mtime, now, read_json, read_tail, save_json, stat_field};
 use crate::workers::Pool;
 use crate::workers::harness::{self, transcript, waiting_text};
 
@@ -131,11 +131,41 @@ pub fn live(own: &Own) -> Vec<Live> {
         .filter(|p| p.extension().is_some_and(|e| e == "json"))
         .filter_map(|p| std::fs::read(&p).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()))
         .filter(|rec| rec.is_object() && alive(rec));
-    rows(recs, own)
+    let mut links = LINKS.lock().unwrap();
+    let known = links.get_or_insert_with(|| {
+        let saved = read_json(&links_file()).unwrap_or_default();
+        serde_json::from_value::<HashMap<String, String>>(saved).unwrap_or_default()
+    });
+    let out = rows(recs, own, known, &|rec| harness::forked_from(rec["pid"].as_i64().unwrap_or(0)));
+    let mut changed = false;
+    for s in out.iter().filter(|s| !s.origin.is_empty()) {
+        changed |= known.insert(as_text(&s.rec["sessionId"]), s.origin.clone()).as_ref() != Some(&s.origin);
+    }
+    if changed {
+        if known.len() > 500 {
+            known.retain(|job, _| out.iter().any(|s| s.rec["sessionId"] == json!(job)));
+        }
+        save_json(&links_file(), &*known);
+    }
+    out
+}
+
+/// Background jobs and the sessions they continue, by the job's session id.
+/// Kept once seen: the parked terminal that tells may close, and a job the harness respawns no longer says.
+static LINKS: LazyLock<Mutex<Option<HashMap<String, String>>>> = LazyLock::new(Default::default);
+
+fn links_file() -> PathBuf {
+    data_dir().join("moved-sessions.json")
 }
 
 /// The rows of running sessions' registry records.
-fn rows(recs: impl Iterator<Item = Value>, own: &Own) -> Vec<Live> {
+/// known: the links seen before; forked: the session a background job's process says it continues.
+fn rows(
+    recs: impl Iterator<Item = Value>,
+    own: &Own,
+    known: &HashMap<String, String>,
+    forked: &dyn Fn(&Value) -> Option<String>,
+) -> Vec<Live> {
     let mut out = vec![];
     for rec in recs {
         // A spare is a warm process the harness keeps for the next background job: nobody's work until it is claimed.
@@ -186,7 +216,20 @@ fn rows(recs: impl Iterator<Item = Value>, own: &Own) -> Vec<Live> {
         }
         (j.origin, j.origin_pid) = (sid, pid);
     }
-    let moved: HashSet<i64> = out.iter().filter(|s| !s.origin.is_empty()).map(|s| s.origin_pid).collect();
+    // Its terminal closed (or never parked, as with a plain move to the background): the link seen before, or the job's own word.
+    // A copy forked while the original runs on is a session of its own.
+    let running: HashSet<String> =
+        out.iter().filter(|s| parked_job(&s.rec).is_none()).map(|s| as_text(&s.rec["sessionId"])).collect();
+    for j in out.iter_mut().filter(|s| s.origin.is_empty() && s.rec["kind"] == "bg") {
+        let sid = as_text(&j.rec["sessionId"]);
+        let origin = known.get(&sid).cloned().or_else(|| forked(&j.rec));
+        let Some(origin) = origin.filter(|o| !o.is_empty() && *o != sid && !running.contains(o)) else { continue };
+        if let Some(k) = own.get(&origin) {
+            j.kind = k.clone();
+        }
+        j.origin = origin;
+    }
+    let moved: HashSet<i64> = out.iter().filter(|s| s.moved()).map(|s| s.origin_pid).collect();
     out.retain(|s| !moved.contains(&s.pid));
     out.sort_by(|a, b| b.active.total_cmp(&a.active));
     out
@@ -199,10 +242,15 @@ pub fn find(key: &str, own: &Own, aliases: Option<&Aliases>) -> Option<Live> {
     if let Some(s) = aliases.and_then(|a| a.resolve(key, &rows)) {
         return Some(s.clone());
     }
+    find_in(key, &rows)
+}
+
+/// The one row the key names: exact name, pid, session id prefix, then a unique part of the name.
+fn find_in(key: &str, rows: &[Live]) -> Option<Live> {
     let low = key.to_lowercase();
     let tests: [&dyn Fn(&Live) -> bool; 4] = [
         &|s| s.name == key,
-        &|s| s.pid.to_string() == key || s.origin_pid.to_string() == key,
+        &|s| s.pid.to_string() == key || s.moved() && s.origin_pid.to_string() == key,
         &|s| s.ids().iter().any(|i| i.starts_with(key)),
         &|s| s.name.to_lowercase().contains(&low),
     ];
@@ -836,7 +884,7 @@ mod tests {
     fn a_session_moved_to_a_background_job_is_one_row() {
         let own: Own = [("s-own".to_string(), "shikigami dev".to_string())].into();
         let theirs: HashSet<String> = ["s-rel".to_string()].into();
-        let rows = rows(moved_to_background().into_iter(), &own);
+        let rows = rows(moved_to_background().into_iter(), &own, &HashMap::new(), &|_| None);
         let pids: Vec<i64> = rows.iter().map(|s| s.pid).collect();
         assert!(pids.contains(&102) && pids.contains(&104), "{pids:?}");
         assert!(!pids.contains(&101), "the parked terminal is folded into its job");
@@ -850,15 +898,49 @@ mod tests {
         assert!(!hidden(job, &own, &theirs), "released by seimei before it was moved: still the user's");
         // Moved from one of seimei's own sessions, the job is seimei's too.
         let own: Own = [("s-rel".to_string(), "shikigami cleanup".to_string())].into();
-        let rows = super::rows(moved_to_background().into_iter(), &own);
+        let rows = super::rows(moved_to_background().into_iter(), &own, &HashMap::new(), &|_| None);
         let job = rows.iter().find(|s| s.pid == 102).unwrap();
         assert!(hidden(job, &own, &HashSet::new()));
         assert_eq!(job.kind, "shikigami cleanup");
         // Before the job's process is up, the parked terminal stays a row of its own, out of the user's list.
-        let rows = super::rows(moved_to_background().into_iter().filter(|r| r["pid"] != 102), &HashMap::new());
+        let rows = super::rows(
+            moved_to_background().into_iter().filter(|r| r["pid"] != 102),
+            &HashMap::new(),
+            &HashMap::new(),
+            &|_| None,
+        );
         let parked = rows.iter().find(|s| s.pid == 101).unwrap();
         assert!(parked.status.starts_with("parked"));
         assert!(hidden(parked, &HashMap::new(), &theirs));
+    }
+
+    #[test]
+    fn a_moved_job_stays_the_users_once_its_terminal_closes() {
+        let own = Own::new();
+        let theirs: HashSet<String> = ["s-rel".to_string()].into();
+        let closed = || moved_to_background().into_iter().filter(|r| r["pid"] != 101);
+        let job = |rows: &[Live]| rows.iter().find(|s| s.pid == 102).cloned().unwrap();
+        // Nothing tells: the job reads as another seimei's shikigami, by its name.
+        let rows = super::rows(closed(), &own, &HashMap::new(), &|_| None);
+        assert!(hidden(&job(&rows), &own, &theirs));
+        // The link seen while the terminal was parked.
+        let known: HashMap<String, String> = [("j1-fork".to_string(), "s-rel".to_string())].into();
+        let rows = super::rows(closed(), &own, &known, &|_| None);
+        let j = job(&rows);
+        assert!(!hidden(&j, &own, &theirs), "still the released session");
+        assert!(j.is("s-rel") && !j.moved());
+        assert_eq!(j.screen_pid(), 102, "no terminal shows it: messages go to its inbox");
+        // Or the job's own command line, as its process was started.
+        let fork = |rec: &Value| (rec["pid"] == 102).then(|| "s-rel".to_string());
+        let rows = super::rows(closed(), &own, &HashMap::new(), &fork);
+        assert!(!hidden(&job(&rows), &own, &theirs));
+        // A copy forked while the original runs on is a session of its own.
+        let mut original = moved_to_background()[0].clone();
+        original["parkedJobId"] = Value::Null;
+        let rows = super::rows(closed().chain([original]), &own, &HashMap::new(), &fork);
+        assert!(job(&rows).origin.is_empty());
+        assert_eq!(rows.len(), 3);
+        assert!(find_in("0", &rows).is_none(), "no pid 0 stands for a terminal");
     }
 
     #[test]

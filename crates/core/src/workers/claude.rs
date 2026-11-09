@@ -141,6 +141,36 @@ pub fn relayed(text: &str) -> Option<String> {
     Some(body.split("</cross-session-message>").next().unwrap_or(body).trim().to_string())
 }
 
+/// The session a background job's process continues: Claude Code starts a session it moves to the background as
+/// `--fork-session --resume <that session's transcript>`. A job it respawns resumes its own session instead, and says nothing.
+pub fn forked_from(pid: i64) -> Option<String> {
+    let raw = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+    let args: Vec<String> = raw.split(|b| *b == 0).map(|a| String::from_utf8_lossy(a).into_owned()).collect();
+    fork_origin(&args)
+}
+
+/// The resumed session of a forking command line: an id or a transcript's path.
+pub fn fork_origin(args: &[String]) -> Option<String> {
+    if !args.iter().any(|a| a == "--fork-session") {
+        return None;
+    }
+    let at = args.iter().position(|a| a == "--resume" || a == "-r");
+    let resumed = match at {
+        Some(i) => args.get(i + 1)?.clone(),
+        None => args.iter().find_map(|a| a.strip_prefix("--resume=").map(String::from))?,
+    };
+    let stem = Path::new(&resumed).file_stem()?.to_string_lossy().into_owned();
+    Some(stem).filter(|s| s.len() >= 8 && !s.starts_with('-'))
+}
+
+/// How the user lets in a message the session held: in its terminal, or by opening a background job in one.
+pub fn held_note(rec: &Value) -> String {
+    match rec["jobId"].as_str().filter(|j| rec["kind"] == "bg" && !j.is_empty()) {
+        Some(job) => format!("It waits for your OK in the session: claude attach {job} opens it in a terminal."),
+        None => "It waits for your OK in the session's terminal.".into(),
+    }
+}
+
 /// The scratch folders of the daemon's background jobs.
 pub fn jobs_dir() -> PathBuf {
     config_dir().join("jobs")
@@ -373,6 +403,20 @@ mod tests {
         );
         let s: Value = serde_json::from_str(&settings(&["/d/unlock".into()], None)).unwrap();
         assert_eq!(s, json!({"permissions": {"deny": ["Read(//d/unlock)", "Edit(//d/unlock)"]}}));
+    }
+
+    #[test]
+    fn a_moved_job_names_the_session_it_continues() {
+        let args = |a: &str| a.split(' ').map(String::from).collect::<Vec<_>>();
+        let moved = "claude --session-id j1 --fork-session --resume /home/u/.claude/projects/-home-u/5a47f31e-7887-411b-a4ea-680352fd7444.jsonl --reply-on-resume";
+        assert_eq!(fork_origin(&args(moved)).as_deref(), Some("5a47f31e-7887-411b-a4ea-680352fd7444"));
+        assert_eq!(
+            fork_origin(&args("claude --fork-session --resume=5a47f31e-7887")).as_deref(),
+            Some("5a47f31e-7887")
+        );
+        assert_eq!(fork_origin(&args("claude --resume 5a47f31e-7887")), None, "a resume that is no fork");
+        assert_eq!(fork_origin(&args("claude --session-id j1 --resume j1")), None, "a respawned job");
+        assert_eq!(fork_origin(&args("claude --fork-session --resume")), None);
     }
 
     #[test]

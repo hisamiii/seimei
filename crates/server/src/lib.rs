@@ -1505,7 +1505,9 @@ async fn session_send(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes: 
     if !typed && let Some(inbox) = harness::inbox(&sess.rec, &sess.address()) {
         return match harness::relay(&inbox, app.dispatcher.mode(), said.trim()).await {
             Ok(Delivery::Inbox) => ok(json!({"ok": true, "via": "seimei"})),
-            Ok(Delivery::Held(_)) => ok(json!({"ok": true, "via": "seimei", "held": true})),
+            Ok(Delivery::Held(_)) => {
+                ok(json!({"ok": true, "via": "seimei", "held": true, "note": harness::held_note(&sess.rec)}))
+            }
             Ok(Delivery::Refused(why)) => conflict(why),
             Err(e) => conflict(format!("Its inbox did not take the message: {e}")),
         };

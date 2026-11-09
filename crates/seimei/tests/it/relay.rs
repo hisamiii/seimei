@@ -83,7 +83,11 @@ fn the_server_writes_to_a_sessions_inbox() {
     assert!(!Path::new(from).exists());
 
     let r = send("please hold this one");
-    assert_eq!(serde_json::from_str::<Value>(&r.body).unwrap(), json!({"ok": true, "via": "seimei", "held": true}));
+    // The page says where the user lets it in.
+    assert_eq!(
+        serde_json::from_str::<Value>(&r.body).unwrap(),
+        json!({"ok": true, "via": "seimei", "held": true, "note": "It waits for your OK in the session's terminal."})
+    );
     frames.recv().unwrap();
 
     let r = send("refuse this");
