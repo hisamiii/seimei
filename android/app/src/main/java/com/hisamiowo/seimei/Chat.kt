@@ -189,12 +189,22 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
         (items[i] as? Item.Worker)?.let { items[i] = it.copy(settled = word) }
     }
 
-    /** An event of the trajectory, seen from the chat: one line per run, naming the shikigami reports first. */
+    /** An event of the trajectory, seen from the chat: one line per run, naming the shikigami reports first.
+     * A run with nothing to name (seimei handling the user's sessions on its own, say) leaves no line: the trajectory has it. */
     fun fold(ev: JSONObject) {
         val type = ev.str("type")
         if (type == "tool_result" || type == "approval_done") return
         // What a settled card set off right after it stays in the trajectory: the card's state line says enough.
         card?.let { (_, done) -> if (done > 0 && ev.optDouble("t", 0.0) - done <= AFTER_CARD) return }
+        val label = when (type) {
+            "worker" -> "${ev.str("name")} ${ENDED[ev.str("event")] ?: ev.str("event")}"
+            "system" -> noteText(ev).removeSuffix(".")
+            "rate_limit" -> limitText(ev)
+            // A reply of the user's turn that seimei marked trajectory:.
+            "assistant" -> if (ev.optLong("re") > 0) "a reply to you" else ""
+            else -> ""
+        }
+        if (label.isEmpty() && fold < 0) return
         daily(ev.optDouble("t", 0.0).let { if (it.isNaN()) 0.0 else it })
         val key = keyOf(ev)
         if (fold < 0) {
@@ -204,20 +214,11 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
             activity = -1
             between = true
         }
-        val label = when (type) {
-            "worker" -> "${ev.str("name")} ${ENDED[ev.str("event")] ?: ev.str("event")}"
-            "system" -> noteText(ev).removeSuffix(".")
-            "rate_limit" -> limitText(ev)
-            // A reply of the user's turn that seimei marked trajectory:.
-            "assistant" -> if (ev.optLong("re") > 0) "a reply to you" else ""
-            else -> ""
-        }
         val list = if (type == "worker") reports else notesSeen
         if (label.isNotEmpty() && label !in list) list.add(label)
         val all = reports + notesSeen
         val shown = all.take(maxOf(1, minOf(3, reports.size)))
-        val text = if (all.isEmpty()) "seimei acted on its own"
-            else shown.joinToString(", ") + if (all.size > shown.size) "${if (shown.size > 1) "," else ""} and ${all.size - shown.size} more" else ""
+        val text = shown.joinToString(", ") + if (all.size > shown.size) "${if (shown.size > 1) "," else ""} and ${all.size - shown.size} more" else ""
         items[fold] = (items[fold] as Item.Fold).copy(text = text)
     }
 

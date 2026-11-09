@@ -746,9 +746,12 @@ export class Renderer {
   }
 
   // An event of the trajectory, seen from the chat: one line per run, naming what happened.
+  // A run with nothing to name (seimei handling the user's sessions on its own, say) leaves no line: the trajectory has it.
   fold(ev) {
     if (ev.type === 'tool_result' || ev.type === 'approval_done') return;
     if (this.card?.done && (ev.t || 0) - this.card.done <= AFTER_CARD) return;
+    const l = foldLabel(ev);
+    if (!l && !this.folded?.node.isConnected) return;
     this.cur = ev.id;
     this.daily(ev);
     if (!this.folded?.node.isConnected) {
@@ -762,12 +765,11 @@ export class Renderer {
     }
     // Shikigami reports are named first; notes only when nothing else happened.
     const f = this.folded;
-    const l = foldLabel(ev);
     const list = ev.type === 'worker' ? f.reports : f.notes;
     if (l && !list.includes(l)) list.push(l);
     const all = [...f.reports, ...f.notes];
     const shown = all.slice(0, Math.max(1, Math.min(3, f.reports.length)));
-    const what = all.length ? shown.join(', ') + (all.length > shown.length ? `${shown.length > 1 ? ',' : ''} and ${all.length - shown.length} more` : '') : 'seimei acted on its own';
+    const what = shown.join(', ') + (all.length > shown.length ? `${shown.length > 1 ? ',' : ''} and ${all.length - shown.length} more` : '');
     f.node.replaceChildren(el('span', null, what), el('b', null, 'Trajectory'));
   }
 

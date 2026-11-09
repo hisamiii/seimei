@@ -126,6 +126,11 @@ def seed():
     add({"type": "user", "text": "kryosheet: no official pressure spec, it wants firm even contact. reuse it if flat and untorn.",
          "thread": "t1kryo", "thread_name": "kryosheet pressure", "quote": kryo["text"], "quote_id": kryo["id"], "images": [pics[1]]}, 30)
     add({"type": "assistant", "text": "got it, the sheet stays. if the apu still hits 95 after, i'll look at the fan curve."}, 28)
+    # #224: seimei on its own over the user's sessions, with nothing for the user: the trajectory only, no fold line in the chat.
+    quiet = {"lane": "t", "turn": len(ev) + 1, "why": 'session "q-7b" finished a turn'}
+    add({"type": "tool", "tool_id": "x3", "name": "mcp__seimei__session_peek", "summary": "q-7b", **quiet}, 25)
+    add({"type": "tool_result", "tool_id": "x3", "error": False, "text": "q-7b is idle", **quiet}, 24)
+    add({"type": "assistant", "text": "q-7b finished a turn; the user's own session, nothing to pass on.", **quiet}, 23)
     add({"type": "user", "text": "also which usb-c dac should i get for the pixel?"}, 20)
     add({"type": "assistant", "text": "quick take: the moondrop dawn pro or the fiio ka17 are the usual picks for sensitive iems."}, 18)
     add({"type": "offer", "re": ev[-1]["id"], "lane": "c"}, 17)

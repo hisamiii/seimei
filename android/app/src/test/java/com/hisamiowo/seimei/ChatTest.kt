@@ -191,6 +191,21 @@ class ChatTest {
         assertEquals("noted", trail.said[5L])
     }
 
+    @Test fun aRunWithNothingToNameLeavesNoLine() {
+        // seimei on its own, over the user's sessions: tools and a trajectory: reply, nothing for the user.
+        val quiet = arrayOf(
+            ev("tool", kv = arrayOf("name" to "session_peek", "tool_id" to "a", "lane" to "t", "turn" to 9, "why" to "notes waited 30 min")),
+            ev("tool_result", kv = arrayOf("tool_id" to "a", "text" to "idle", "lane" to "t", "turn" to 9)),
+            ev("assistant", kv = arrayOf("text" to "nothing for the user", "lane" to "t", "turn" to 9, "why" to "notes waited 30 min")),
+        )
+        val (chat, trail) = lanes(ev("user", kv = arrayOf("text" to "go")), *quiet)
+        assertTrue(chat.items.none { it is Item.Fold })
+        assertEquals("the trajectory keeps it", 1, trail.items.filterIsInstance<Item.Msg>().size)
+        // A report later in the same stretch still gets its line.
+        val (named, _) = lanes(*quiet, ev("worker", kv = arrayOf("event" to "done", "worker" to "w1", "name" to "dev", "text" to "ok", "lane" to "t")))
+        assertEquals("dev finished", named.items.filterIsInstance<Item.Fold>().single().text)
+    }
+
     @Test fun anchorOnlyWhenSomethingSitsBetween() {
         val (chat, _) = lanes(
             ev("user", kv = arrayOf("text" to "first question")),
