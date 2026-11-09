@@ -1267,7 +1267,12 @@ class Seimei(app: Application) : AndroidViewModel(app) {
                     }
                     pg.kind == "thread" -> api.post("api/threads/${pg.id}/send", body)
                     ask != null && ask.optBoolean("answerable") -> api.post("api/sessions/${pg.id}/answer", body.put("tool_id", ask.str("tool_id")))
-                    else -> if (api.post("api/sessions/${pg.id}/send", body).str("via") == "seimei") snack = "seimei passes it on"
+                    else -> {
+                        val r = api.post("api/sessions/${pg.id}/send", body)
+                        // The session held a relayed message for the user's OK: say where to give it.
+                        if (r.optBoolean("held")) snack = r.str("note").ifEmpty { "It waits for your OK in the session" }
+                        else if (r.str("via") == "seimei") snack = "seimei passes it on"
+                    }
                 }
                 pg.note = null
             } catch (e: IOException) {
