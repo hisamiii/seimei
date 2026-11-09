@@ -596,7 +596,7 @@ fun blocked(pg: Page): String? {
     if (pg.kind == "thread") return if (pg.row.str("shikigami").isNotEmpty()) "Now a shikigami" else null
     val ask = pg.ask
     // Without the terminal a message still goes through seimei (SendMessage), an answer does not.
-    pg.reach?.let { if (pg.via != "seimei" || ask != null) return if (ask != null) "Answer on the server" else it }
+    pg.reach?.let { if (pg.via !in setOf("seimei", "job") || ask != null) return if (ask != null) "Answer on the server" else it }
     if (ask != null && !ask.optBoolean("answerable")) return "Answer on the server"
     if (pg.row.str("status") == "waiting" && ask == null) return "${pg.row.str("waiting_text").ifEmpty { "Waiting on the server" }}. Answer it there."
     return null
@@ -1061,6 +1061,7 @@ fun Details(vm: Seimei, pg: Page) {
             }
             if (pg.kind == "worker" && r.str("task").isNotEmpty()) TaskRow(r.str("task"), r.optJSONObject("now"))
             if (pg.kind == "session") Text(if (pg.via == "seimei") "seimei passes messages on with Claude Code's SendMessage: this terminal can't be typed into."
+                else if (pg.via == "job") "Messages go to its background job as your replies, as in the agent view."
                 else pg.reach ?: "Typed into its terminal on the server",
                 fontSize = 13.sp, color = LocalExtra.current.text3)
         }

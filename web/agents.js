@@ -603,7 +603,7 @@ function blocked() {
   if (P.kind === 'thread') return P.row.shikigami ? 'Now a shikigami' : null;
   if (P.kind === 'worker') return null;
   const s = P.row;
-  if (s.reach && (s.via !== 'seimei' || P.ask)) return P.ask ? 'Answer on the server' : s.reach;
+  if (s.reach && (!['seimei', 'job'].includes(s.via) || P.ask)) return P.ask ? 'Answer on the server' : s.reach;
   if (P.ask && !P.ask.answerable) return 'Answer on the server';
   if (s.status === 'waiting' && !s.question) return `${s.waiting_text || 'Waiting on the server'}. Answer it there.`;
   return null;
@@ -919,7 +919,7 @@ function details() {
   }
   if (actions.childElementCount) body.push(actions);
   if (P.kind === 'worker' && r.task) body.push(taskRow(r.task, r.now));
-  if (P.kind === 'session') body.push(el('p', 'usage-note', r.via === 'seimei' ? 'seimei writes messages to its Claude Code inbox: this terminal can\'t be typed into' : r.reach || 'Typed into its terminal on the server'));
+  if (P.kind === 'session') body.push(el('p', 'usage-note', r.via === 'seimei' ? 'seimei writes messages to its Claude Code inbox: this terminal can\'t be typed into' : r.via === 'job' ? 'Messages go to its background job as your replies, as in the agent view' : r.reach || 'Typed into its terminal on the server'));
   sheet.body.replaceChildren(...body);
   showSheet('details');
 }

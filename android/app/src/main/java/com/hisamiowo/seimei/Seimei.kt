@@ -76,7 +76,7 @@ class Page(val kind: String, id: String) {
     var live by mutableStateOf<JSONObject?>(null)
     /** Why the app cannot type into this session, or null. */
     var reach by mutableStateOf<String?>(null)
-    /** How a message reaches it: typed into its terminal window, "seimei" (the dispatcher's SendMessage), or null. */
+    /** How a message reaches it: typed into its terminal window, "job" (its background job's reply), "seimei" (the dispatcher's SendMessage), or null. */
     var via by mutableStateOf<String?>(null)
     var note by mutableStateOf<String?>(null)
     var draft by mutableStateOf("")

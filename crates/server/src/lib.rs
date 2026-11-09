@@ -1464,11 +1464,12 @@ async fn session(
     ok(out)
 }
 
-/// How a message from the page reaches the session: typed into its terminal window, or written to its inbox by seimei.
+/// How a message from the page reaches the session: typed into its terminal window, given to its background job by the daemon, or written to its inbox by seimei.
 /// None: neither.
 fn via(sess: &Live, typed: bool) -> Option<&'static str> {
     match () {
         _ if typed => Some("terminal"),
+        _ if harness::job_reachable(&sess.rec) => Some("job"),
         _ if harness::inbox(&sess.rec, &sess.address()).is_some() => Some("seimei"),
         _ => None,
     }
@@ -1502,6 +1503,10 @@ async fn session_send(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes: 
     })
     .await
     .unwrap_or(false);
+    // A background job no window shows takes it from the daemon, as the agent view's reply: the user's own prompt.
+    if !typed && harness::reply_to_job(&sess.rec, said.trim()).await.is_ok() {
+        return ok(json!({"ok": true, "via": "job"}));
+    }
     if !typed && let Some(inbox) = harness::inbox(&sess.rec, &sess.address()) {
         return match harness::relay(&inbox, app.dispatcher.mode(), said.trim()).await {
             Ok(Delivery::Inbox) => ok(json!({"ok": true, "via": "seimei"})),

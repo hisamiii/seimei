@@ -7,8 +7,8 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 use seimei_proto::HookMatcher;
-use seimei_proto::peer;
 pub use seimei_proto::peer::Delivery;
+use seimei_proto::{daemon, peer};
 use serde_json::{Value, json};
 
 use crate::paths::home;
@@ -183,6 +183,38 @@ pub fn held_note(rec: &Value) -> String {
         Some(job) => format!("It waits for your OK in the session: claude attach {job} opens it in a terminal."),
         None => "It waits for your OK in the session's terminal.".into(),
     }
+}
+
+/// The control socket of the daemon that runs background job `job`: the folder under `/tmp/cc-daemon-<uid>/` that holds the job's pty.
+fn daemon_of(job: &str) -> Option<PathBuf> {
+    let uid = unsafe { libc::getuid() };
+    let bases = [std::env::temp_dir(), PathBuf::from("/tmp")].map(|t| t.join(format!("cc-daemon-{uid}")));
+    let dirs = bases.iter().filter_map(|b| std::fs::read_dir(b).ok()).flatten().flatten().map(|e| e.path());
+    dirs.filter(|d| ["pty", "rv"].iter().any(|k| d.join(k).join(format!("{job}.sock")).exists()))
+        .map(|d| d.join("control.sock"))
+        .find(|c| c.exists())
+}
+
+/// A daemon runs this background job, so it can take the user's messages (see reply_to_job).
+pub fn job_reachable(rec: &Value) -> bool {
+    rec["jobId"].as_str().is_some_and(|j| rec["kind"] == "bg" && !j.is_empty() && daemon_of(j).is_some())
+        && config_dir().join("daemon").join("control.key").exists()
+}
+
+/// Give a background job the user's message as their own prompt, the way Claude Code's agent view replies to one.
+/// Err: no daemon runs the job, or it would not take the message; then it goes another way.
+pub async fn reply_to_job(rec: &Value, text: &str) -> Result<(), String> {
+    let job = rec["jobId"].as_str().filter(|j| rec["kind"] == "bg" && !j.is_empty()).ok_or("not a background job")?;
+    let control = daemon_of(job).ok_or("no daemon runs the job")?;
+    let key = std::fs::read_to_string(config_dir().join("daemon").join("control.key")).map_err(|e| e.to_string())?;
+    for _ in 0..10 {
+        match daemon::reply(&control, key.trim(), job, text).await.map_err(|e| e.to_string())? {
+            Ok(()) => return Ok(()),
+            Err(r) if r.passing() => tokio::time::sleep(std::time::Duration::from_millis(300)).await,
+            Err(r) => return Err(format!("{} ({})", r.error, r.code)),
+        }
+    }
+    Err("the job is still starting".into())
 }
 
 /// The scratch folders of the daemon's background jobs.
