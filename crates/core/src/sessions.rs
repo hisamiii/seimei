@@ -13,7 +13,7 @@ use crate::events::EventLog;
 use crate::paths::home;
 use crate::terminal;
 use crate::transcripts::{
-    brief, input_of, project_of, prompt_text, rows_from, summary, text_of, time_of, tool_results,
+    brief, input_of, project_of, prompt_text, rows_from, rows_since, summary, text_of, time_of, tool_results,
 };
 use crate::util::{as_text, chars, children, data_dir, mtime, now, read_json, read_tail, save_json, stat_field};
 use crate::workers::Pool;
@@ -303,7 +303,7 @@ fn find_in(key: &str, rows: &[Live]) -> Option<Live> {
 /// Last user messages and assistant texts, plus tool calls still open (a pending AskUserQuestion first).
 pub fn peek(path: &Path, count: usize) -> Value {
     let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-    let (rows, _) = rows_from(path, size.saturating_sub(TAIL));
+    let (rows, _) = rows_since(path, size.saturating_sub(TAIL), now());
     let (mut users, mut texts) = (vec![], vec![]);
     let mut pending: Vec<(String, String, String, Value)> = vec![];
     for row in &rows {
@@ -363,7 +363,8 @@ pub fn timeline(path: &Path, start: Option<u64>, events: usize) -> Value {
     let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
     let mut tail = start.is_none_or(|st| size.saturating_sub(st) > TAIL);
     let from = if tail { size.saturating_sub(TAIL) } else { start.unwrap_or(0).min(size) };
-    let (rows, next) = rows_from(path, from);
+    // The turns the harness logged only in its API requests too: their ids keep a page from taking one twice.
+    let (rows, next) = rows_since(path, from, now());
     let mut out = vec![];
     for row in &rows {
         let (t, uid) = (time_of(row), as_text(&row["uuid"]));

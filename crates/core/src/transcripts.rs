@@ -1,6 +1,6 @@
 //! Session transcripts, read for the lists: a brief of one (project, last line, context, the call or question open right now).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 
@@ -8,7 +8,7 @@ use regex::Regex;
 use serde_json::{Value, json};
 
 use crate::paths::home;
-use crate::util::{chars, read_from};
+use crate::util::{chars, now, read_from};
 
 /// What a brief reads from the end of a transcript.
 const TAIL: u64 = 512 << 10;
@@ -45,22 +45,100 @@ fn votes(inp: &Value) -> Vec<String> {
 
 /// Whole transcript rows (user, assistant and prompts queued while the agent worked; no sidechains or compaction summaries) from byte start on (a start mid-line skips to the next line), and where they end.
 pub(crate) fn rows_from(path: &Path, start: u64) -> (Vec<Value>, u64) {
+    let (lines, end) = lines_from(path, start);
+    (lines.into_iter().map(|(_, r)| r).filter(kept).collect(), end)
+}
+
+/// Every parsed line from byte start on, with its offset, and where they end.
+fn lines_from(path: &Path, start: u64) -> (Vec<(u64, Value)>, u64) {
     let Ok(data) = read_from(path, start) else { return (vec![], start) };
     let end = data.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
-    let mut lines: Vec<&[u8]> = data[..end].split(|&b| b == b'\n').collect();
-    if start > 0 && !data.starts_with(b"{") && !lines.is_empty() {
-        lines.remove(0);
+    let mut out = vec![];
+    let mut at = start;
+    for (i, line) in data[..end].split(|&b| b == b'\n').enumerate() {
+        let here = at;
+        at += line.len() as u64 + 1;
+        // A start mid-line: the rest of that line is no row.
+        if i == 0 && start > 0 && !data.starts_with(b"{") {
+            continue;
+        }
+        if let Ok(r) = serde_json::from_slice::<Value>(line) {
+            out.push((here, r));
+        }
     }
-    let rows = lines
-        .into_iter()
-        .filter_map(|l| serde_json::from_slice::<Value>(l).ok())
-        .filter(|r| {
-            (matches!(r["type"].as_str(), Some("user" | "assistant")) || r["attachment"]["type"] == "queued_command")
-                && r["isSidechain"] != true
-                && r["isCompactSummary"] != true
-        })
+    (out, start + end as u64)
+}
+
+fn kept(r: &Value) -> bool {
+    (matches!(r["type"].as_str(), Some("user" | "assistant")) || r["attachment"]["type"] == "queued_command")
+        && r["isSidechain"] != true
+        && r["isCompactSummary"] != true
+}
+
+/// How far before a read the API requests' messages are looked up: the harness writes them just before the request.
+const LOOKBACK: u64 = 1 << 20;
+/// A request with no rows after it is taken as the only record of its messages once this old.
+/// The harness writes a request's rows within seconds after it, sometimes after the next request too.
+const UNLOGGED: f64 = 30.0;
+
+/// rows_from, plus the turns the harness logged only in its API requests.
+/// The harness also keeps each main-thread request in the transcript: an `api-request` row naming the messages it added (`tail`, the hashes of `api-request-blob` rows).
+/// After some compactions it writes no more user and assistant rows, and those requests are all that tells the session went on.
+/// Their messages come back as rows with stable ids ("blob-<hash>"), so a page that already holds one skips it; requests before start are looked at too.
+pub(crate) fn rows_since(path: &Path, start: u64, now: f64) -> (Vec<Value>, u64) {
+    let (lines, end) = lines_from(path, start.saturating_sub(LOOKBACK));
+    let mut rows: Vec<Value> = lines.iter().filter(|(at, r)| *at >= start && kept(r)).map(|(_, r)| r.clone()).collect();
+    rows.extend(unlogged(lines.iter().map(|(_, r)| r), now));
+    (rows, end)
+}
+
+/// The messages of main-thread requests after the last user or assistant row, as rows.
+fn unlogged<'a>(lines: impl Iterator<Item = &'a Value>, now: f64) -> Vec<Value> {
+    let lines: Vec<&Value> = lines.collect();
+    let last = lines.iter().rposition(|r| kept(r)).map_or(0, |i| i + 1);
+    let blobs: HashMap<&str, &Value> = lines
+        .iter()
+        .filter(|r| r["type"] == "api-request-blob")
+        .filter_map(|r| Some((r["hash"].as_str()?, &r["message"])))
         .collect();
-    (rows, start + end as u64)
+    let mut seen: HashSet<String> = HashSet::new();
+    for r in lines.iter().filter(|r| kept(r)) {
+        for b in r["message"]["content"].as_array().into_iter().flatten() {
+            seen.extend(b["id"].as_str().or(b["tool_use_id"].as_str()).map(String::from));
+        }
+    }
+    let requests: Vec<&Value> = lines[last..]
+        .iter()
+        .filter(|r| r["type"] == "api-request" && r["querySource"] == "repl_main_thread")
+        .copied()
+        .collect();
+    let mut out = vec![];
+    for req in requests {
+        // keep 0 starts a fresh context (a compaction's): its messages are the old ones, restated.
+        if req["keep"].as_i64().unwrap_or(0) == 0 || now - time_of(req) < UNLOGGED {
+            continue;
+        }
+        for hash in req["tail"].as_array().into_iter().flatten().filter_map(|h| h.as_str()) {
+            let Some(msg) = blobs.get(hash) else { continue };
+            let role = msg["role"].as_str().unwrap_or("");
+            let content = &msg["content"];
+            let ids: Vec<&str> = (content.as_array().into_iter().flatten())
+                .filter_map(|b| b["id"].as_str().or(b["tool_use_id"].as_str()))
+                .collect();
+            if !matches!(role, "user" | "assistant") || ids.iter().any(|i| seen.contains(*i)) {
+                continue;
+            }
+            // A user message of its own, not a tool's result: the harness's reminders and notes ride along as tags.
+            let text = text_of(content);
+            let tagged = text.trim_start().starts_with('<') && !text.trim_start().starts_with("<task-notification>");
+            if role == "user" && ids.is_empty() && (text.trim().is_empty() || tagged) {
+                continue;
+            }
+            out.push(json!({"type": role, "message": msg, "uuid": format!("blob-{}", chars(hash, 16)),
+                "timestamp": req["timestamp"], "unlogged": true}));
+        }
+    }
+    out
 }
 
 pub(crate) fn time_of(row: &Value) -> f64 {
@@ -118,14 +196,19 @@ pub(crate) fn question(inp: &Value) -> Value {
     json!({"questions": qs, "answerable": qs.len() == 1 && qs[0]["multiSelect"] != true})
 }
 
-static BRIEFS: LazyLock<Mutex<HashMap<PathBuf, (std::time::SystemTime, Value)>>> = LazyLock::new(Default::default);
+/// By path: the transcript's mtime, when the brief was made, and the brief.
+type Briefs = HashMap<PathBuf, (std::time::SystemTime, f64, Value)>;
+static BRIEFS: LazyLock<Mutex<Briefs>> = LazyLock::new(Default::default);
 
 /// What the lists show for a session: project, the open call or question, last line, context; cached by mtime.
 pub fn brief(path: &Path) -> std::io::Result<Value> {
     let meta = std::fs::metadata(path)?;
     let mtime = meta.modified()?;
-    if let Some((t, b)) = BRIEFS.lock().unwrap().get(path)
+    let changed = mtime.duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64());
+    // A brief made before the last requests were old enough to count (see rows_since) is made again once.
+    if let Some((t, at, b)) = BRIEFS.lock().unwrap().get(path)
         && *t == mtime
+        && (*at >= changed + UNLOGGED || now() < changed + UNLOGGED)
     {
         return Ok(b.clone());
     }
@@ -133,7 +216,7 @@ pub fn brief(path: &Path) -> std::io::Result<Value> {
         (vec![], String::new(), 0u64, Value::from(""), Value::Null);
     // Open tool calls by id, in the order they were made.
     let mut pending: Vec<(String, f64, String, Value)> = vec![];
-    for row in rows_from(path, meta.len().saturating_sub(TAIL)).0 {
+    for row in rows_since(path, meta.len().saturating_sub(TAIL), now()).0 {
         if !row["effort"].is_null() && row["effort"] != "" {
             effort = row["effort"].clone();
         }
@@ -193,7 +276,7 @@ pub fn brief(path: &Path) -> std::io::Result<Value> {
     if cache.len() >= 200 {
         cache.clear();
     }
-    cache.insert(path.to_path_buf(), (mtime, out.clone()));
+    cache.insert(path.to_path_buf(), (mtime, now(), out.clone()));
     Ok(out)
 }
 
@@ -222,6 +305,66 @@ mod tests {
         assert_eq!(project_of("/tmp/x/y"), None);
         let v = |s: &str| s.to_string();
         assert_eq!(most_common(&[v("a"), v("b"), v("b"), v("a")]).map(String::as_str), Some("a"));
+    }
+
+    /// After some compactions the harness logs a session's turns only in its API requests: they come back as rows.
+    #[test]
+    fn turns_logged_only_in_api_requests_come_back() {
+        let dir = std::env::temp_dir().join(format!("seimei-unlogged-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("t.jsonl");
+        let t0 = 1_800_000_000.0;
+        let at = |s: f64| {
+            chrono::DateTime::from_timestamp(s as i64, 0).unwrap().format("%Y-%m-%dT%H:%M:%S.000Z").to_string()
+        };
+        let call = |id: &str, text: &str| {
+            json!({"role": "assistant", "content": [{"type": "text", "text": text},
+            {"type": "tool_use", "id": id, "name": "Bash", "input": {"command": "ls"}}]})
+        };
+        let result = |id: &str| json!({"role": "user", "content": [{"type": "tool_result", "tool_use_id": id, "content": "ok"}]});
+        let blob = |h: &str, m: Value| json!({"type": "api-request-blob", "hash": h, "message": m});
+        let req = |keep: i64, tail: &[&str], s: f64| json!({"type": "api-request", "querySource": "repl_main_thread", "keep": keep, "tail": tail, "timestamp": at(s)});
+        let row =
+            |m: Value, s: f64| json!({"type": m["role"], "message": m, "uuid": format!("u{s}"), "timestamp": at(s)});
+        let lines = [
+            // As it should be: a request, then the rows of what it carried.
+            blob("h1", call("t1", "first")),
+            req(3, &["h1"], t0),
+            row(call("t1", "first"), t0 + 1.0),
+            row(result("t1"), t0 + 2.0),
+            // A compaction: the next context restates the old messages (keep 0), and no rows follow any more.
+            json!({"type": "system", "subtype": "compact_boundary", "timestamp": at(t0 + 3.0)}),
+            blob(
+                "h2",
+                json!({"role": "user", "content": [{"type": "text", "text": "This session is being continued"}]}),
+            ),
+            req(0, &["h2", "h1"], t0 + 4.0),
+            blob("h3", call("t2", "second")),
+            blob("h4", result("t2")),
+            blob("h5", json!({"role": "system", "content": [{"type": "text", "text": "# Environment update"}]})),
+            blob(
+                "h6",
+                json!({"role": "user", "content": [{"type": "text", "text": "<system-reminder>x</system-reminder>"}]}),
+            ),
+            req(5, &["h3", "h4", "h5", "h6"], t0 + 10.0),
+            blob("h7", call("t3", "third")),
+            req(9, &["h7"], t0 + 40.0),
+        ];
+        let text: String = lines.iter().map(|l| l.to_string() + "\n").collect();
+        std::fs::write(&path, &text).unwrap();
+        let ids =
+            |rows: &[Value]| rows.iter().map(|r| r["uuid"].as_str().unwrap_or("").to_string()).collect::<Vec<_>>();
+        // The request 30 s old counts, the one still fresh (its rows may yet come) not yet.
+        let (rows, end) = rows_since(&path, 0, t0 + 45.0);
+        assert_eq!(ids(&rows), ["u1800000001", "u1800000002", "blob-h3", "blob-h4"]);
+        assert_eq!(end, text.len() as u64);
+        assert_eq!((rows[2]["type"].as_str(), time_of(&rows[2])), (Some("assistant"), t0 + 10.0));
+        assert_eq!(ids(&rows_since(&path, 0, t0 + 80.0).0)[4..], ["blob-h7"]);
+        // A read from where the last one ended still looks back for them: a page holding them skips the same ids.
+        assert_eq!(ids(&rows_since(&path, end, t0 + 80.0).0), ["blob-h3", "blob-h4", "blob-h7"]);
+        // rows_from, which the dispatcher's lines read, stays with the rows themselves.
+        assert_eq!(rows_from(&path, 0).0.len(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A transcript that ends on a synthetic message keeps the last real model and its usage.
