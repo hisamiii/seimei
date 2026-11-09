@@ -56,9 +56,10 @@ pub const CLEAN_ENV: [&str; 9] = [
 ];
 
 /// USD per million tokens: input, 5-minute cache write, 1-hour cache write, cache read, output.
-/// From https://platform.claude.com/docs/en/about-claude/pricing (checked 2026-10-20). Longest prefix wins.
-pub const PRICES_CHECKED: &str = "2026-10-20";
-pub const PRICES: [(&str, [f64; 5]); 20] = [
+/// From https://platform.claude.com/docs/en/about-claude/pricing (checked 2026-11-09). Longest prefix wins.
+pub const PRICES_CHECKED: &str = "2026-11-09";
+pub const PRICES: [(&str, [f64; 5]); 21] = [
+    ("claude-fable-5-2", [8.0, 10.0, 16.0, 0.2, 40.0]),
     ("claude-fable-5-1", [10.0, 12.5, 20.0, 0.25, 50.0]),
     ("claude-mythos-5-1", [10.0, 12.5, 20.0, 0.25, 50.0]),
     ("claude-fable-5", [10.0, 12.5, 20.0, 1.0, 50.0]),
@@ -83,8 +84,12 @@ pub const PRICES: [(&str, [f64; 5]); 20] = [
 /// Haiku 5.5 prompts over 100,000 tokens (input + cache reads + cache writes) pay these instead.
 pub const LONG: (&str, u64, [f64; 5]) = ("claude-haiku-5-5", 100_000, [0.5, 0.625, 1.0, 0.05, 2.5]);
 /// Fast mode replaces input and output prices; the cache multipliers apply on top.
-pub const FAST: [(&str, f64, f64); 3] =
-    [("claude-opus-5-5", 8.0, 40.0), ("claude-opus-5", 10.0, 50.0), ("claude-opus-4-8", 10.0, 50.0)];
+pub const FAST: [(&str, f64, f64); 4] = [
+    ("claude-fable-5-2", 16.0, 80.0),
+    ("claude-opus-5-5", 8.0, 40.0),
+    ("claude-opus-5", 10.0, 50.0),
+    ("claude-opus-4-8", 10.0, 50.0),
+];
 /// Claude Code runs each Bash call inside a shell that sources its snapshot; the call's own command sits below it.
 static WRAPPER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\S*\b(ba|z|fi|da)?sh -c .*shell-snapshots/").unwrap());
 static EVAL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)eval '(.*)' < /dev/null").unwrap());

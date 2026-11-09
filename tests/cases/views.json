@@ -3,6 +3,7 @@
  "cost": [
   {"model": "claude-fable-5-1-20260101", "usage": {"input_tokens": 1200, "output_tokens": 800, "cache_read_input_tokens": 50000, "cache_creation_input_tokens": 3000}, "usd": 0.102, "key": "claude-fable-5-1"},
   {"model": "claude-mythos-5-1-20260101", "usage": {"input_tokens": 1200, "output_tokens": 800, "cache_read_input_tokens": 50000, "cache_creation_input_tokens": 3000}, "usd": 0.102, "key": "claude-mythos-5-1"},
+  {"model": "claude-fable-5-2", "usage": {"input_tokens": 1200, "output_tokens": 800, "cache_read_input_tokens": 50000, "cache_creation_input_tokens": 3000}, "usd": 0.0816, "key": "claude-fable-5-2"},
   {"model": "claude-fable-5-20260101", "usage": {"input_tokens": 1200, "output_tokens": 800, "cache_read_input_tokens": 50000, "cache_creation_input_tokens": 3000}, "usd": 0.1395, "key": "claude-fable-5"},
   {"model": "claude-mythos-5-20260101", "usage": {"input_tokens": 1200, "output_tokens": 800, "cache_read_input_tokens": 50000, "cache_creation_input_tokens": 3000}, "usd": 0.1395, "key": "claude-mythos-5"},
   {"model": "claude-opus-5-5-20260101", "usage": {"input_tokens": 1200, "output_tokens": 800, "cache_read_input_tokens": 50000, "cache_creation_input_tokens": 3000}, "usd": 0.0458, "key": "claude-opus-5-5"},

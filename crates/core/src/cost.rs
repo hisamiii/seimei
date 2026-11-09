@@ -59,9 +59,10 @@ impl Tokens {
     }
 }
 
-/// The price row for a model id: the longest matching prefix.
+/// The price row for a model id: the longest matching prefix that ends a version number (a dated fable-5 id is no fable-5-2).
 pub fn price_for(model: &str) -> Option<(&'static str, [f64; 5])> {
-    PRICES.iter().filter(|(k, _)| model.starts_with(k)).max_by_key(|(k, _)| k.len()).copied()
+    let ends = |k: &str| model.strip_prefix(k).is_some_and(|rest| !rest.starts_with(|c: char| c.is_ascii_digit()));
+    PRICES.iter().filter(|(k, _)| ends(k)).max_by_key(|(k, _)| k.len()).copied()
 }
 
 /// (USD, the price row used) for one API message; unknown models cost 0.
