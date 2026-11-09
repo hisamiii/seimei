@@ -725,7 +725,8 @@ async function submit(e) {
     return;
   }
   files.forEach((a) => a.url && URL.revokeObjectURL(a.url));
-  note(null);
+  // The session held a relayed message for the user's OK: say where to give it.
+  note(r.held ? r.note || 'It waits for your OK in the session.' : null, 'held');
   // The draft is a thread now: its log so far, and the stream's events for it from here.
   if (r.thread && P === p && !P.id) {
     P.id = r.thread.id;
