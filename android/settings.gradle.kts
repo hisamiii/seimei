@@ -13,4 +13,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "seimei"
-include(":app", ":shared")
+include(":app", ":shared", ":wear")

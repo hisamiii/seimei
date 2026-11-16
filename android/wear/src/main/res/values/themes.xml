@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Seimei" parent="android:Theme.DeviceDefault">
+        <item name="android:windowBackground">@color/surface</item>
+    </style>
+    <color name="surface">#1E1E2E</color>
+</resources>

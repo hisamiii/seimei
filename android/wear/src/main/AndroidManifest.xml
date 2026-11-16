@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-feature android:name="android.hardware.type.watch" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Dictation in the composer: asked on the first tap of the mic. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <application
+        android:name="com.hisamiowo.seimei.WearApp"
+        android:label="seimei"
+        android:icon="@drawable/ic_launcher"
+        android:roundIcon="@drawable/ic_launcher"
+        android:allowBackup="false"
+        android:networkSecurityConfig="@xml/network"
+        android:theme="@style/Seimei">
+        <meta-data android:name="com.google.android.wearable.standalone" android:value="true" />
+        <!-- With the watch's own notifications, the phone app's are not mirrored as well. -->
+        <meta-data android:name="com.google.android.wearable.notificationBridgeMode" android:value="${bridge}" />
+        <activity
+            android:name="com.hisamiowo.seimei.MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- The assistant: the side key's press and hold, when seimei holds the assistant role, opens the chat dictating. -->
+            <intent-filter>
+                <action android:name="android.intent.action.ASSIST" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VOICE_COMMAND" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+        <!-- A second entry for keys that open an app: seimei with the mic already on. -->
+        <activity-alias
+            android:name="com.hisamiowo.seimei.Voice"
+            android:label="seimei voice"
+            android:targetActivity="com.hisamiowo.seimei.MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <service android:name="com.hisamiowo.seimei.FcmService" android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+        <receiver android:name="com.hisamiowo.seimei.Decide" android:exported="false" />
+    </application>
+</manifest>
