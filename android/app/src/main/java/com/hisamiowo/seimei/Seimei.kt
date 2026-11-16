@@ -1848,5 +1848,3 @@ class Seimei(app: Application) : AndroidViewModel(app), Dictation.Host {
             .getMimeTypeFromExtension(name.substringAfterLast('.', "").lowercase()) ?: "application/octet-stream"
     }
 }
-
-fun JSONArray?.objects(): List<JSONObject> = if (this == null) emptyList() else List(length()) { getJSONObject(it) }

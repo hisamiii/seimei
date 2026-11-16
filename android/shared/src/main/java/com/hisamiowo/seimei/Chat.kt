@@ -1,5 +1,6 @@
 package com.hisamiowo.seimei
 
+import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
 import java.time.LocalDate
@@ -108,6 +109,8 @@ fun dayOf(t: Double, zone: ZoneId = ZoneId.systemDefault()): LocalDate =
     Instant.ofEpochMilli((t * 1000).toLong()).atZone(zone).toLocalDate()
 
 fun JSONObject.str(k: String) = optString(k, "").let { if (it == "null") "" else it }
+
+fun JSONArray?.objects(): List<JSONObject> = if (this == null) emptyList() else List(length()) { getJSONObject(it) }
 
 class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: String = "c", private val asks: Asks = Asks()) {
     val items = ArrayList<Item>()
