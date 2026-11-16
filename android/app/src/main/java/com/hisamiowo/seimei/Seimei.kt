@@ -111,7 +111,7 @@ class Page(val kind: String, id: String) {
     }
 }
 
-class Seimei(app: Application) : AndroidViewModel(app) {
+class Seimei(app: Application) : AndroidViewModel(app), Dictation.Host {
     val prefs = Prefs(app)
     private val store = Store(app.noBackupFilesDir)
     /** The chat as last seen, read from the phone while the app starts and unlocks. */
@@ -121,8 +121,9 @@ class Seimei(app: Application) : AndroidViewModel(app) {
     private var chatSave: Job? = null
     /** Counts page opens, so a slow answer for a page no longer wanted is dropped. */
     private var opening = 0
-    var api = Api(prefs.server)
+    override var api = Api(prefs.server)
         private set
+    override val scope get() = viewModelScope
 
     var phase by mutableStateOf(if (prefs.device != null && DeviceKey.exists()) Phase.Locked else Phase.Pair)
         private set
@@ -227,6 +228,14 @@ class Seimei(app: Application) : AndroidViewModel(app) {
             else -> null
         }
         else -> null
+    }
+
+    override fun tell(text: String, retry: (() -> Unit)?) {
+        if (retry != null) {
+            undo = retry
+            snackAction = "Retry"
+        }
+        snack = text
     }
 
     /** A short note for a tap that could not do anything; the screen shows it once. */

@@ -1,5 +1,6 @@
 package com.hisamiowo.seimei
 
+import com.hisamiowo.seimei.shared.R
 import android.app.Application
 import android.app.Notification
 import android.app.NotificationChannel
