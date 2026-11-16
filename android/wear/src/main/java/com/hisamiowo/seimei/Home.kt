@@ -168,15 +168,24 @@ fun ChatPage(vm: Model, active: Boolean, onFold: (String) -> Unit) {
     val t = LocalT.current
     val list = rememberLazyListState()
     val lift = rememberLift(false)
-    LaunchedEffect(vm.sent) { if (vm.sent > 0) list.animateScrollToItem(0) }
+    val rows = vm.items.asReversed()
+    val liveHere = vm.live.isNotEmpty() && vm.liveLane == "c"
+    val lead = (if (liveHere) 1 else 0) + vm.pending.size
+    val newest = rows.firstOrNull()
+    val follow = rememberFollow(list, if (liveHere) "live" else vm.pending.lastOrNull()?.cid ?: newest?.key, vm.sent,
+        force = newest is Item.Approval && newest.outcome == null)
+    val open = openCard(rows)
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().padding(bottom = PILL_BOTTOM), horizontalAlignment = Alignment.CenterHorizontally) {
-            Log(list, lift, Modifier.weight(1f), active = active) {
-                if (vm.live.isNotEmpty() && vm.liveLane == "c") item("live") { Md(vm.live) }
-                items(vm.pending.reversed(), key = { "p" + it.cid }) { p ->
-                    Bubble(p.text, dim = !p.failed, failed = p.failed, onClick = if (p.failed) ({ vm.retrySend(p) }) else null)
+            Box(Modifier.weight(1f)) {
+                Log(list, lift, active = active) {
+                    if (liveHere) item("live") { Md(vm.live) }
+                    items(vm.pending.reversed(), key = { "p" + it.cid }) { p ->
+                        Bubble(p.text, dim = !p.failed, failed = p.failed, onClick = if (p.failed) ({ vm.retrySend(p) }) else null)
+                    }
+                    items(rows, key = { it.key }, contentType = { it::class }) { ItemRow(it, vm, "c", onFold) }
                 }
-                items(vm.items.asReversed(), key = { it.key }, contentType = { it::class }) { ItemRow(it, vm, "c", onFold) }
+                JumpDown(list, follow, if (open >= 0) lead + open else -1)
             }
             Gap(6.dp)
             Composer(vm.draft, vm::edit, "Message seimei", "chat", vm, onSend = vm::send, autoDictate = vm.dictateNow)
@@ -198,10 +207,15 @@ fun TrajectoryPage(vm: Model, active: Boolean, goto: String?, done: () -> Unit) 
         if (i >= 0) list.scrollToItem(i)
         done()
     }
+    val liveHere = vm.live.isNotEmpty() && vm.liveLane == "t"
+    val follow = rememberFollow(list, if (liveHere) "live" else rows.firstOrNull()?.key, 0)
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-        Log(list, lift, Modifier.padding(bottom = PILL_BOTTOM + 4.dp), room = 30.dp, active = active) {
-            if (vm.live.isNotEmpty() && vm.liveLane == "t") item("live") { Md(vm.live) }
-            items(rows, key = { it.key }, contentType = { it::class }) { ItemRow(it, vm, "t") }
+        Box(Modifier.padding(bottom = PILL_BOTTOM + 4.dp)) {
+            Log(list, lift, room = 30.dp, active = active) {
+                if (liveHere) item("live") { Md(vm.live) }
+                items(rows, key = { it.key }, contentType = { it::class }) { ItemRow(it, vm, "t") }
+            }
+            JumpDown(list, follow)
         }
         Header(vm, lift) {
             Ico(Icons.list, 16.dp, LocalT.current.text)
@@ -210,6 +224,72 @@ fun TrajectoryPage(vm: Model, active: Boolean, goto: String?, done: () -> Unit) 
         ScrollIndicator(list, Modifier.align(Alignment.CenterEnd))
     }
 }
+
+// ---------- following the newest row ----------
+
+/** Whether a newest-at-the-bottom list keeps to its end as rows come in, as the phone's chat does. */
+class Follow {
+    var on by mutableStateOf(true)
+}
+
+/**
+ * Keeps [state] at its end while the reader is there: a new newest row ([newest]) brings the list down.
+ * Text streaming into the newest row grows in place at the bottom. Sending ([sent] going up) always jumps to the end; [force] (an open card) always shows.
+ * Rows added below keep the first visible row in place, so whether the reader follows is judged only while the list moves.
+ */
+@Composable
+fun rememberFollow(state: LazyListState, newest: Any?, sent: Int, force: Boolean = false): Follow {
+    val f = remember { Follow() }
+    val near = with(LocalDensity.current) { 48.dp.toPx() }
+    LaunchedEffect(state) {
+        snapshotFlow { Triple(state.isScrollInProgress, state.firstVisibleItemIndex, state.firstVisibleItemScrollOffset) }
+            .collect { (moving, i, off) -> if (moving) f.on = i == 0 && off < near }
+    }
+    LaunchedEffect(newest) {
+        if (f.on || force) {
+            state.scrollToItem(0)
+            f.on = true
+        }
+    }
+    var seen by remember { mutableStateOf(sent) }
+    LaunchedEffect(sent) {
+        if (sent > seen) {
+            f.on = true
+            state.scrollToItem(0)
+        }
+        seen = sent
+    }
+    return f
+}
+
+/** Scrolled up: a small round way back down. An open card above the view comes first, as on the phone. */
+@Composable
+fun BoxScope.JumpDown(state: LazyListState, f: Follow, open: Int = -1) {
+    if (f.on) return
+    val t = LocalT.current
+    val scope = rememberCoroutineScope()
+    // A 26dp circle in a 40dp touch area.
+    Box(
+        Modifier.align(Alignment.BottomCenter).size(40.dp).clip(CircleShape)
+            .clickable {
+                scope.launch {
+                    val last = state.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                    if (open > last) state.animateScrollToItem(open)
+                    else {
+                        state.animateScrollToItem(0)
+                        f.on = true
+                    }
+                }
+            }
+            .semantics { contentDescription = "Jump to latest" },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(Modifier.size(26.dp).clip(CircleShape).background(t.containerHighest), contentAlignment = Alignment.Center) { Ico(Icons.down, 14.dp, t.text) }
+    }
+}
+
+/** Where an unanswered card sits among [rows] (newest first), or -1. */
+fun openCard(rows: List<Item>) = rows.indexOfFirst { (it is Item.Approval && it.outcome == null) || (it is Item.Worker && it.event == "asking" && it.settled == null) }
 
 // ---------- the composer ----------
 

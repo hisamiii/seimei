@@ -236,9 +236,13 @@ fun AgentPage(vm: Model, pg: Page) {
         "worker" -> pg.row.str("state") in ACTIVE && pg.row.str("state") != "asking"
         else -> false
     }
+    // Like the chat: newest at the bottom, and a reader near the end follows it; a sent message or a new question brings it down.
+    val follow = rememberFollow(list, Triple(pg.items.lastOrNull()?.key, pg.ask?.str("tool_id"), pg.row.str("question")), pg.sent.size,
+        force = pg.ask != null)
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().padding(bottom = PILL_BOTTOM), horizontalAlignment = Alignment.CenterHorizontally) {
-            Log(list, lift, Modifier.weight(1f), room = 30.dp) {
+          Box(Modifier.weight(1f)) {
+            Log(list, lift, room = 30.dp) {
                 pg.note?.let { n -> item("note") { T(n, size = SMALL, color = t.warn) } }
                 val q = pg.row.str("question")
                 if (pg.kind == "worker" && pg.row.str("state") == "asking" && q.isNotEmpty()) item("wask") {
@@ -248,6 +252,8 @@ fun AgentPage(vm: Model, pg: Page) {
                 items(pg.sent.reversed(), key = { "p" + it.cid }) { Bubble(it.text, dim = true) }
                 items(pg.items.asReversed(), key = { it.key }, contentType = { it::class }) { ItemRow(it, vm, "p") }
             }
+            JumpDown(list, follow)
+          }
             Gap(6.dp)
             Composer(pg.draft, { pg.draft = it }, "Message ${a.name.ifEmpty { "agent" }}", pg.chatKey, vm, onSend = vm::pageSend,
                 stop = if (runs) ({ vm.workerStop(pg) }) else null)
