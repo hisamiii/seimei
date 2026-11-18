@@ -278,7 +278,8 @@ impl Direct {
 
     fn mic(&mut self, pcm: &[u8]) {
         let samples: Vec<i16> = pcm.as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes(*b)).collect();
-        if self.speaking() {
+        // While seimei speaks the microphone may be its echo, unless the user barged in and holds the turn.
+        if self.speaking() && !self.cutter.in_turn() {
             self.cutter.hold(&samples);
             return;
         }
@@ -659,7 +660,8 @@ impl Direct {
             self.said(text);
         }
         self.out.clear();
-        self.clock = Instant::now();
+        // Quiet now: the words that set the barge off, which the client sends next, are the user's turn.
+        self.clock = Instant::now().checked_sub(TAIL).unwrap_or_else(Instant::now);
         self.split = Splitter::new();
         self.heard.clear();
         if !heard.is_empty() {
