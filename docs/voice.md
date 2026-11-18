@@ -133,6 +133,7 @@ The Android app makes the same call as the page over the same socket, with the s
   - `soft`: whether the partner's audio goes through the watch's high shelf;
   - `net`: the transport the call's network runs on, like `bluetooth` for a watch through its phone, `wifi` or `cellular`;
   - the track's `underruns`;
+  - `voiceDb`: the user's voice at the microphone after the canceller, in dBFS, to compare with the server's level gate;
   - `wrote`: seconds of the partner's audio written to the track, and `outDb`, its mean power in dBFS;
   - `head`: seconds the play head moved, silence included;
   - `route`: the communication device the app set, its type and whether the platform took it;

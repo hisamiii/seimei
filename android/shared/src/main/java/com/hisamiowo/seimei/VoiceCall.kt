@@ -130,6 +130,9 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
     private var echoIn = 0.0
     // A watch's speaker: the partner's audio goes through a [Shelf] as it comes in, so the canceller's reference is what plays.
     private val shelf = if (soft) Shelf() else null
+    // The user's voice at the microphone, after the canceller: its summed power and frames, for the stats.
+    @Volatile private var voiceIn = 0.0
+    @Volatile private var voiceFrames = 0
     private var echoOut = 0.0
     private var echoFrames = 0
     // What the track holds ahead of its play head, in ms: the canceller's delay hint.
@@ -284,6 +287,10 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
                 frames++
                 canceller?.let { clean(it, buf) }
                 up.push(buf)
+                if (!muted && up.barge.talking()) {
+                    voiceIn += power(buf)
+                    voiceFrames++
+                }
                 // The bars move every 80 ms, as on the page.
                 if (frames % 4 == 0) tick(frames)
                 if (frames % (STATS_S * 50) == 0) stats()
@@ -472,6 +479,7 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
             .put("comm", if (Build.VERSION.SDK_INT >= 31) am.communicationDevice?.type ?: -1 else -1)
             .put("session", track?.audioSessionId == rec?.audioSessionId).put("gate", up.gate).put("callMode", am.mode == AudioManager.MODE_IN_COMMUNICATION)
             .put("mic", rec?.routedDevice?.type ?: -1).put("speaker", track?.routedDevice?.type ?: -1).put("phone", Build.MODEL).put("net", net()).put("soft", shelf != null)
+            .put("voiceDb", if (voiceFrames == 0) null else round1(10 * Math.log10(maxOf(voiceIn / voiceFrames, 1e-10))))
             .put("underruns", track?.underrunCount ?: -1).put("jitter", synchronized(lock) { jitter.run {
                 JSONObject().put("stalls", stalls).put("lateMs", Math.round(lateMax * 1000)).put("prebufferMs", Math.round(target * 1000))
             } })
