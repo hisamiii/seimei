@@ -28,7 +28,7 @@ const PATHS = { page: 'the page audio', element: 'an audio element', fresh: 'a n
 const GATE_TAIL = 0.3;
 // On such a barge the partner gets the microphone's last this many frames too (300 ms): the words that set it off.
 const GATE_KEEP = 15;
-// How fast the partner talks, kept on this device and sent as audio_speed. Phonic sets it when a call starts only.
+// How fast the partner talks, kept on this device and sent as audio_speed; a change mid-call goes up too. Phonic sets it when a call starts only.
 const SPEED_KEY = 'seimei.voiceSpeed';
 const SPEEDS = [0.9, 1, 1.1, 1.2, 1.3];
 // The stream must have started playing by then, or the call falls back to Web Audio.
@@ -488,7 +488,7 @@ speedBtn.addEventListener('click', () => {
   const v = SPEEDS[(SPEEDS.indexOf(speed() ?? 1) + 1) % SPEEDS.length];
   try { localStorage.setItem(SPEED_KEY, String(v)); } catch {}
   showSpeed();
-  snack(`Speed ${times(v)} from the next call`);
+  if (call) send(call, { type: 'speed', speed: v });
 });
 showSpeed();
 

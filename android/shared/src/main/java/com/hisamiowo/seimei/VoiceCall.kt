@@ -210,6 +210,9 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
 
     fun hangUp() = finish("")
 
+    /** The device's speed changed during the call: the bridge speaks the partner's next words at it. */
+    fun changeSpeed(v: Double) = text(JSONObject().put("type", "speed").put("speed", v).toString())
+
     fun toggleMute() {
         muted = !muted
         up.muted = muted

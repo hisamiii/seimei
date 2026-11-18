@@ -136,7 +136,7 @@ A call takes English and the `additional_languages` of `[voice]`, such as Russia
 The call bar's speed button sets how fast seimei talks, from 0.9 to 1.3. It is 1 by default, kept on the device and sent with the call as `?speed=`.
 
 - **HeyGen ignores speed** for voices designed or cloned in an account. So the server stretches each piece in time at the same pitch, before it goes down. It overlaps 20 ms frames, each placed where it best goes on from the last.
-- **A new speed counts from the next call.**
+- **A new speed counts from seimei's next words.** The client sends it during the call as `{"type": "speed"}`, and the next call starts with it too.
 
 ## Barge-in
 

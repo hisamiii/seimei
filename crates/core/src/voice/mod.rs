@@ -186,6 +186,8 @@ impl Config {
 pub enum Up {
     Audio(Vec<u8>),
     Barge,
+    /// The client's speed changed during the call: a direct call speaks its next words at it; Phonic keeps the one it started with.
+    Speed(f64),
     End,
 }
 
@@ -714,6 +716,7 @@ impl Call {
                             return Ok(End::Dropped);
                         }
                     }
+                    Some(Up::Speed(_)) => {}
                     Some(Up::Barge) => {
                         eprintln!("seimei: voice: barge from the page{}", if self.partner_speaking { "" } else { ", the partner was quiet" });
                         if self.partner_speaking {

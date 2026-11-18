@@ -341,6 +341,7 @@ pub async fn call(v: Arc<Voice>, mut up: mpsc::Receiver<Up>, down: mpsc::Sender<
             msg = up.recv() => match msg {
                 Some(Up::Audio(pcm)) => c.mic(&pcm),
                 Some(Up::Barge) => c.barge(),
+                Some(Up::Speed(s)) => if s.is_finite() { c.speed = s.clamp(0.5, 1.5) },
                 Some(Up::End) | None => break,
             },
             ev = live.recv() => match ev {

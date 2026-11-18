@@ -118,7 +118,7 @@ The Android app makes the same call as the page over the same socket, with the s
 - **The mic gate** is for a build without the app's canceller, on a phone without one for apps. While the partner plays, and 0.3 s after, the microphone goes up as silence. A barge then sends its last 300 ms, as on the page. With an echo canceller, there is no gate: the microphone goes up live, so the user can talk over the partner.
 - **Barge-in** is the page's detector, with the echo learned on the phone and kept between calls. A barge drops the AudioTrack's queue at once and sends `barge`.
 - **Screen off.** The call runs in a foreground service of the microphone type. Its ongoing notification shows the state and the time, with Mute and Hang up. The call bar stays on every tab while the call runs.
-- **Speed** works as on the page and is kept on the phone.
+- **Speed** works as on the page and is kept on the phone. A change during a call goes up at once.
 - **Stats** go up as on the page, with `path: "audiotrack"`. They also carry:
   - `canceller`: webrtc, platform or none;
   - `echoIn` and `echoOut`: the microphone's mean power while the partner plays, before and after the app's canceller, in dBFS;
@@ -156,6 +156,7 @@ The socket carries PCM16 mono at 16 kHz both ways as binary frames, and JSON as 
 
 The client sends the microphone without pause, silence included, since Phonic expects a steady stream. Text frames up:
 
+- `{"type": "speed", "speed": 1.2}`: the device's speed changed during the call. A direct call speaks its next words at it; Phonic keeps the speed it started with.
 - `{"type": "barge"}`: the client's own voice detection heard the user over the partner, and the client has cut its playback. The bridge then holds back the partner's audio until Phonic's own detection agrees, or for 1.5 s on a false alarm.
 - `{"type": "stats", ...}`: the page's numbers for the server log, every 10 s and at hang-up. They hold the audio context's state and rate, the way out and any fallback, the seconds played and cut, barges, flushes and the echo estimate. With the stream they also hold its wait and stalls.
 - `{"type": "end"}`: hang up.

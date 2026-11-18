@@ -1512,12 +1512,12 @@ class Seimei(app: Application) : AndroidViewModel(app), Dictation.Host {
         CallService.start(getApplication(), api, voiceSpeed)
     }
 
-    /** The call bar's speed button: the next speed, from the next call on. */
+    /** The call bar's speed button: the next speed, for the partner's next words and the calls after. */
     fun nextSpeed() {
         val v = Voice.nextSpeed(voiceSpeed)
         prefs.voiceSpeed = v
         voiceSpeed = v
-        tell("Speed ${Voice.speedText(v)} from the next call", null)
+        CallService.call?.changeSpeed(v)
     }
 
     private fun checkAsr() {
