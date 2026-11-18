@@ -104,6 +104,17 @@ Firefox on Android can play nothing through Web Audio, on tone generator sites t
 - **The mic gate.** Firefox's echo canceller only removes what plays through its own audio graph, so it misses the stream. Phonic then hears the partner, takes it for the user and cuts its own replies. So while the stream plays, and 0.3 s after, the microphone goes up as silence. When the page hears the user over the partner, it cuts the partner as usual. The microphone's last 300 ms then go up too, so Phonic hears the words that started the barge.
 - The page's policy allows `blob:` media, since the MediaSource is reached by a blob URL.
 
+## The phone app
+
+The Android app makes the same call as the page over the same socket, with the same talk button, call bar and chat lines. Its call is `VoiceCall` and `Voice.kt` in `android/shared`, for the watch app to reuse.
+
+- **Echo.** The microphone records as a voice call, with the phone's echo canceller and noise suppressor where it has them. The partner plays through an AudioTrack in the microphone's session, on the loudspeaker unless a headset takes the call.
+- **The mic gate** stays as a backup for an echo canceller that misses. While the partner plays, and 0.3 s after, the microphone goes up as silence. A barge then sends its last 300 ms, as on the page.
+- **Barge-in** is the page's detector, with the echo learned on the phone and kept between calls. A barge drops the AudioTrack's queue at once and sends `barge`.
+- **Screen off.** The call runs in a foreground service of the microphone type. Its ongoing notification shows the state and the time, with Mute and Hang up. The call bar stays on every tab while the call runs.
+- **Speed** works as on the page and is kept on the phone.
+- **Stats** go up as on the page, with `path: "audiotrack"` and whether the echo canceller and noise suppressor run.
+
 ## The client socket
 
 The socket carries PCM16 mono at 16 kHz both ways as binary frames, and JSON as text frames. It needs a login, and a cookie login needs one of the page's own origins.

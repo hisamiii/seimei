@@ -34,6 +34,7 @@ object Push {
         Triple("quiet", "Quiet pings", NotificationManager.IMPORTANCE_LOW),
         Triple("ping", "Pings", NotificationManager.IMPORTANCE_DEFAULT),
         Triple("urgent", "Urgent", NotificationManager.IMPORTANCE_HIGH),
+        Triple("call", "Voice calls", NotificationManager.IMPORTANCE_LOW),
     )
     val ABOUT = mapOf(
         "approval" to "What a session wants to run, edit, or do",
@@ -41,6 +42,7 @@ object Push {
         "ping" to "What seimei tells you",
         "urgent" to "Emergencies",
         "listen" to "While seimei keeps its own connection open",
+        "call" to "While a voice call runs, with mute and hang up",
     )
 
     /** Whether the app is on screen; the server holds pushes then, and this catches any that slip through. */
@@ -79,7 +81,7 @@ object Push {
     fun show(ctx: Context, d: Map<String, String>) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         // A kind from a newer server than this app knows still shows, on the Pings channel.
-        val kind = (d["kind"] ?: return).let { if (nm.getNotificationChannel(it) != null && it != "listen") it else "ping" }
+        val kind = (d["kind"] ?: return).let { if (nm.getNotificationChannel(it) != null && it != "listen" && it != "call") it else "ping" }
         val tag = d["tag"] ?: kind
         if (d["cancel"] == "1") return nm.cancel(tag, 0)
         // On screen the server holds pushes; "reply ready" still shows when the chat itself is not in front, a test always.

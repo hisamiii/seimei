@@ -142,6 +142,8 @@ fun ChatTab(vm: Seimei, lane: String) {
     var zoom by remember { mutableStateOf<String?>(null) }
     val traj = lane == "t"
     val rows = (if (traj) vm.trail else vm.items).asReversed()
+    // The voice partner's line as it speaks, last in the chat.
+    val saying = if (traj) "" else CallService.call?.saying.orEmpty()
     val scope = rememberCoroutineScope()
     // Rows added below keep the first visible row in place, so after a burst the first visible index says nothing about the reader.
     // Whether they follow the end is judged only while the list scrolls (their finger, or a jump to the end).
@@ -151,7 +153,7 @@ fun ChatTab(vm: Seimei, lane: String) {
             .collect { (moving, i, off) -> if (moving) follow = i == 0 && off < 160 }
     }
     val newest = rows.firstOrNull()
-    LaunchedEffect(newest?.key, vm.live.isEmpty(), vm.busy) {
+    LaunchedEffect(newest?.key, vm.live.isEmpty(), vm.busy, saying.isEmpty()) {
         if (vm.focus != null) return@LaunchedEffect
         // A card waiting for the user's OK always comes into view.
         if (follow || (newest is Item.Approval && newest.outcome == null)) {
@@ -168,7 +170,7 @@ fun ChatTab(vm: Seimei, lane: String) {
     }
     // Rows sit after the away card and the live or working row, when those show.
     val liveHere = vm.live.isNotEmpty() && vm.liveLane == lane
-    val lead = listOf(!vm.online && vm.awaySince != null, liveHere || (vm.online && vm.busy && vm.waiting == 0)).count { it } +
+    val lead = listOf(!vm.online && vm.awaySince != null, liveHere || (vm.online && vm.busy && vm.waiting == 0), saying.isNotEmpty()).count { it } +
         if (traj) 0 else vm.pending.size
     // A tapped notification names an event; it may sit in either lane.
     LaunchedEffect(vm.focus, rows.size) {
@@ -226,6 +228,7 @@ fun ChatTab(vm: Seimei, lane: String) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         if (!vm.online && vm.awaySince != null) item(key = "away") { Away(vm) }
+        if (saying.isNotEmpty()) item(key = "saying") { PartnerLine(saying, live = true) }
         if (liveHere) item(key = "live") { Md(vm.live) }
         else if (vm.online && vm.busy && vm.waiting == 0) item(key = "working") { Working() }
         if (!traj) items(vm.pending.asReversed(), key = { "p" + it.cid }) { PendingMsg(it, vm) }
@@ -376,6 +379,8 @@ fun Row(item: Item, vm: Seimei, live: JSONObject? = null, chat: Boolean = false,
     when (item) {
         is Item.Day -> NotePill(dayLabel(item.t), "", day = true)
         is Item.Msg -> if (item.role == "user") UserMsg(item, vm, onPicture) else AssistantMsg(item, vm, chat)
+        is Item.Spoken -> if (item.who == "user") SpokenMsg(item.text) else PartnerLine(item.text, item.cut)
+        is Item.Asked -> AskedLine(item)
         is Item.Fold -> FoldPill(item, vm)
         is Item.Trig -> TrigRow(item)
         is Item.Note -> NotePill(item.text + if (item.n > 1) "  ×${item.n}" else "", item.level)
@@ -1325,7 +1330,8 @@ fun Composer(vm: Seimei) {
                     contentAlignment = Alignment.Center) {
                     Box(Modifier.size(16.dp).clip(RoundedCornerShape(4.dp)).background(cs.onPrimaryContainer))
                 }
-            } else {
+            } else if (vm.voiceOn && !typing) TalkButton(vm)
+            else {
                 // Offline it stays tappable: send() then says why nothing went out.
                 FilledIconButton(vm::send, Modifier.size(52.dp), enabled = typing,
                     colors = IconButtonDefaults.filledIconButtonColors()) {

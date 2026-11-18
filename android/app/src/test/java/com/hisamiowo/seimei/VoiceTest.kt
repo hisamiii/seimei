@@ -7,6 +7,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.ZoneOffset
 import kotlin.random.Random
 
 class VoiceTest {
@@ -153,5 +154,25 @@ class VoiceTest {
         assertEquals(VoiceMsg.Error("no key"), VoiceMsg.parse("""{"type": "error", "text": "no key"}"""))
         assertNull(VoiceMsg.parse("""{"type": "asking", "request": "uptime"}"""))
         assertNull(VoiceMsg.parse("not json"))
+    }
+
+    @Test fun aCallInTheChat() {
+        val c = Chat(ZoneOffset.UTC)
+        val t = 1_800_000_000.0
+        c.add(JSONObject("""{"id": 1, "type": "voice", "who": "user", "text": "what is the uptime", "t": $t}"""))
+        c.add(JSONObject("""{"id": 2, "type": "user", "voice": true, "text": "the laptop's uptime", "t": ${t + 2}}"""))
+        c.add(JSONObject("""{"id": 3, "type": "voice", "who": "partner", "text": "Asking seimei.", "cut": true, "t": ${t + 3}}"""))
+        val ask = c.items.filterIsInstance<Item.Asked>().single()
+        assertTrue(ask.waiting)
+        c.add(JSONObject("""{"id": 4, "type": "assistant", "re": 2, "text": "Up 3 days.", "t": ${t + 9}}"""))
+        assertEquals(listOf("Day", "Note", "Spoken", "Asked", "Spoken", "Msg"), c.items.map { it::class.simpleName })
+        assertTrue((c.items[1] as Item.Note).text.startsWith("Voice call · "))
+        assertFalse((c.items[3] as Item.Asked).waiting)
+        assertEquals(Item.Spoken("e3", "partner", "Asking seimei.", true), c.items[4])
+        // The reply sits right under the ask: no chip naming what it answers.
+        assertNull((c.items[5] as Item.Msg).anchor)
+        // Turns more than 5 minutes later are another call.
+        c.add(JSONObject("""{"id": 5, "type": "voice", "who": "user", "text": "hi again", "t": ${t + 400}}"""))
+        assertEquals(2, c.items.count { it is Item.Note })
     }
 }
