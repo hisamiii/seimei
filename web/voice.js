@@ -328,11 +328,26 @@ function tone() {
 }
 
 // A beep through one way out. In a call it goes the partner's way and moves the partner there; before a call it uses its own audio, with the mic closed.
-// "file" is a plain WAV in an audio element, with no Web Audio at all.
+// "file" is a plain WAV in an audio element, with no Web Audio at all; "osc" is an oscillator in a context of its own.
 function beep(path) {
   const c = call;
   const label = `${c ? 'in call' : 'no call'}, ${path}`;
   try {
+    if (path === 'osc') {
+      // The plainest Web Audio there is: a new context with no options, at the device's own rate, and an oscillator.
+      const ctx = new AudioContext();
+      ctx.resume().catch((e) => note(`${label}: resume() refused, ${why(e)}`));
+      const osc = ctx.createOscillator(), gain = ctx.createGain();
+      osc.frequency.value = 660;
+      gain.gain.value = 0.3;
+      osc.connect(gain).connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.5);
+      const t0 = ctx.currentTime;
+      setTimeout(() => note(`${label}: context ${ctx.state} at ${ctx.sampleRate} Hz, clock moved ${(ctx.currentTime - t0).toFixed(2)} s, output latency ${((ctx.outputLatency || 0) * 1000).toFixed(0)} ms`), 400);
+      setTimeout(() => ctx.close(), 1500);
+      return;
+    }
     if (path === 'file') {
       // The page's policy plays media from its own address only: no blob URL.
       const el = new Audio(new URL('beep.wav', import.meta.url));
