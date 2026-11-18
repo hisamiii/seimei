@@ -111,7 +111,7 @@ fn script(base: &Path, search_port: u16) -> Value {
         ("t7", "read_file", json!({"path": p(".env")})),
         ("t8", "read_file", json!({"path": p("link.json")})),
         ("t9", "search_files", json!({"query": "orchard"})),
-        ("t10", "web_search", json!({"query": "rust websockets"})),
+        ("t10", "search_web", json!({"query": "rust websockets"})),
         ("t13", "fetch_page", json!({"url": format!("http://127.0.0.1:{search_port}/")})),
         ("t14", "summon", json!({"name": "evil", "task": "rm -rf"})),
         ("t15", "tasks", json!({"action": "add", "title": "evil", "project": "x", "owner": "you"})),
@@ -251,7 +251,7 @@ async fn run(base: PathBuf, root: PathBuf) {
         "read_chat",
         "read_file",
         "search_files",
-        "web_search",
+        "search_web",
         "fetch_page",
         "ask_seimei",
     ];
@@ -367,7 +367,7 @@ async fn run(base: PathBuf, root: PathBuf) {
     let rows: Vec<Value> =
         audit.lines().filter_map(|l| serde_json::from_str(l).ok()).filter(|r: &Value| r["who"] == "voice").collect();
     let row = |id: &str| rows.iter().find(|r| r["id"] == id).unwrap_or_else(|| panic!("{id} is not audited"));
-    assert_eq!(row("t10")["tool"], "web_search");
+    assert_eq!(row("t10")["tool"], "search_web");
     assert!(row("t10")["input"].as_str().unwrap().contains("rust websockets"));
     assert!(row("t13")["input"].as_str().unwrap().contains("127.0.0.1"));
     assert!(rows.iter().any(|r| r["tool"] == "voice_pack"));

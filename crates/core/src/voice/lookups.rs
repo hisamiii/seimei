@@ -482,9 +482,9 @@ pub fn specs(on: &dyn Fn(&str) -> bool, memory: bool, files: bool, web: bool) ->
         ));
     }
     if web {
-        // Slower than a lookup: the agent says something first, so the wait is not silent.
+        // Slower than a lookup: the agent says something first, so the wait is not silent. Phonic reserves the name web_search.
         let mut search = tool(
-            "web_search",
+            "search_web",
             "Search the web: returns a short answer and the top results with their links and excerpts.",
             &[("query", "string", "what to search for, in plain words")],
         );

@@ -53,7 +53,7 @@ Every lookup runs on seimei's server and answers through the socket seimei opene
 | `recent_chat(query)` | the whole thread's matching lines, numbered | sync |
 | `read_chat(line)` | six lines on each side of one, in full | sync |
 | `read_file(path)`, `search_files(query)` | files under the allowed roots | sync |
-| `web_search(query)`, `fetch_page(url)` | the web, through OpenRouter and a plain fetch | sync, speech first |
+| `search_web(query)`, `fetch_page(url)` | the web, through OpenRouter and a plain fetch | sync, speech first |
 | `ask_seimei(request, topic)` | the dispatcher | async |
 
 - **Fast lookups** are sync with `require_speech_before_tool_call: false`: a 50 ms lookup adds about 0.4 s to an answer.
@@ -64,7 +64,7 @@ Every lookup runs on seimei's server and answers through the socket seimei opene
 - **Approval cards.** When seimei waits on the user's ok for an open ask, the partner says so once per card. The card is in the chat, with Allow and Deny.
 - **Read-only.** The board, shikigami and sessions are read through `Tools::lookup`, which runs only the actions it names. A tool call for anything else, such as `tasks` or `summon`, gets "not one of your tools".
 
-`web_search` sends the query to OpenRouter's web plugin with the Exa engine and five results. It returns the model's short answer and each result's title, link and excerpt.
+`search_web` sends the query to OpenRouter's web plugin with the Exa engine and five results. It returns the model's short answer and each result's title, link and excerpt.
 
 ## Speech recognition and the voice
 

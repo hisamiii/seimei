@@ -343,11 +343,11 @@ impl Voice {
 
     /// A web tool's answer.
     pub async fn web(&self, name: &str, p: &Value) -> String {
-        let arg = if name == "web_search" { p["query"].as_str() } else { p["url"].as_str() }.unwrap_or("").trim();
+        let arg = if name == "search_web" { p["query"].as_str() } else { p["url"].as_str() }.unwrap_or("").trim();
         if arg.is_empty() {
             return "Say what to look for.".into();
         }
-        let got = if name == "web_search" { self.web.search(arg).await } else { self.web.fetch(arg).await };
+        let got = if name == "search_web" { self.web.search(arg).await } else { self.web.fetch(arg).await };
         let out = got.unwrap_or_else(|e| format!("Couldn't: {e}."));
         chars(&out, lookups::OUT_MAX)
     }
@@ -685,7 +685,10 @@ impl Call {
             "tool_call" => self.tool_call(ev, done),
             "error" => {
                 let text = chars(ev["error"]["message"].as_str().unwrap_or("Phonic reported an error"), 300);
-                eprintln!("seimei: voice: Phonic error: {text}");
+                // Which parameter it rejected, e.g. {"tools.1.tool_schema.function.name": "This tool name is reserved"}.
+                let why =
+                    ev.get("param_errors").map(|p| format!(": {}", chars(&p.to_string(), 300))).unwrap_or_default();
+                eprintln!("seimei: voice: Phonic error: {text}{why}");
                 self.say(json!({"type": "error", "text": text}));
             }
             _ => {}
@@ -741,7 +744,7 @@ impl Call {
         self.running.insert(id.clone(), (name.clone(), Instant::now()));
         let (v, done) = (self.v.clone(), done.clone());
         tokio::spawn(async move {
-            let output = if matches!(name.as_str(), "web_search" | "fetch_page") {
+            let output = if matches!(name.as_str(), "search_web" | "fetch_page") {
                 v.web(&name, &params).await
             } else {
                 let v = v.clone();
