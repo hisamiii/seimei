@@ -55,6 +55,17 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity-alias>
+        <!-- And one that starts a voice call, for the quick button's press. -->
+        <activity-alias
+            android:name="com.hisamiowo.seimei.Talk"
+            android:label="seimei call"
+            android:targetActivity="com.hisamiowo.seimei.MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
         <service android:name="com.hisamiowo.seimei.FcmService" android:exported="false">
             <intent-filter>
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />

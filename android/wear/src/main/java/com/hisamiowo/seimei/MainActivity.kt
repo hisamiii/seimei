@@ -64,11 +64,17 @@ class MainActivity : ComponentActivity() {
         take(intent)
     }
 
-    /** The call's ongoing activity: the chat, where the call's bar is. The assist gesture, a voice command, or the "seimei voice" entry: the chat with the mic already on. */
+    /**
+     * The call's ongoing activity: the chat, where the call's bar is. The "seimei call" entry, for the quick button: the chat, starting a call.
+     * The assist gesture, a voice command, or the "seimei voice" entry: the chat with the mic already on.
+     */
     private fun take(intent: Intent?) {
-        if (intent?.action == CALL && vm.phase == Phase.Ready) {
+        val talk = intent?.component?.className?.endsWith(".Talk") == true
+        if ((intent?.action == CALL || talk) && vm.phase == Phase.Ready) {
             vm.go(Screen.Home)
             vm.homePage = 0
+            // A press during a call only shows it.
+            if (talk && CallService.call == null) vm.callNow = true
             return
         }
         val voice = intent?.action == Intent.ACTION_ASSIST || intent?.action == Intent.ACTION_VOICE_COMMAND ||

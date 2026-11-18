@@ -176,6 +176,8 @@ class Model(app: Application) : AndroidViewModel(app), Dictation.Host {
         private set
     /** The assist gesture opened the app: the chat's mic starts as soon as the chat shows. */
     var dictateNow by mutableStateOf(false)
+    /** The "seimei call" entry opened the app: the chat starts a call. */
+    var callNow by mutableStateOf(false)
 
     private var events = ArrayList<JSONObject>()
     private var chat = Chat()

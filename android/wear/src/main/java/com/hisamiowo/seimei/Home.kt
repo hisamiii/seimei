@@ -190,7 +190,7 @@ fun ChatPage(vm: Model, active: Boolean, onFold: (String) -> Unit) {
             Gap(6.dp)
             val call = CallService.call
             if (call != null) CallBar(call, vm)
-            else Composer(vm.draft, vm::edit, "Message seimei", "chat", vm, onSend = vm::send, autoDictate = vm.dictateNow, talk = true)
+            else Composer(vm.draft, vm::edit, "Message seimei", "chat", vm, onSend = vm::send, autoDictate = vm.dictateNow, talk = true, autoCall = vm.callNow)
         }
         Header(vm, lift) { T("seimei", size = TITLE, weight = FontWeight.Medium, lines = 1) }
         ScrollIndicator(list, Modifier.align(Alignment.CenterEnd))
@@ -303,7 +303,7 @@ fun openCard(rows: List<Item>) = rows.indexOfFirst { (it is Item.Approval && it.
 @Composable
 fun Composer(
     text: String, onChange: (String) -> Unit, hint: String, target: String, vm: Model, onSend: () -> Unit,
-    stop: (() -> Unit)? = null, autoDictate: Boolean = false, talk: Boolean = false,
+    stop: (() -> Unit)? = null, autoDictate: Boolean = false, talk: Boolean = false, autoCall: Boolean = false,
 ) {
     val t = LocalT.current
     val d = vm.dictation
@@ -331,6 +331,15 @@ fun Composer(
         val add = d.results.joinToString(" ")
         d.results.clear()
         onChange(if (text.isEmpty() || text.last().isWhitespace()) text + add else "$text $add")
+    }
+    LaunchedEffect(autoCall) {
+        if (!autoCall) return@LaunchedEffect
+        // At a cold start the server's answer on voice may still be on the way, over a slow link.
+        val on = vm.voiceOn || withTimeoutOrNull(5000) { snapshotFlow { vm.voiceOn }.first { it } } == true
+        vm.callNow = false
+        if (!on) vm.snack = "Voice calls are off"
+        else if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) vm.startCall()
+        else askCall.launch(Manifest.permission.RECORD_AUDIO)
     }
     LaunchedEffect(autoDictate) {
         if (!autoDictate) return@LaunchedEffect
