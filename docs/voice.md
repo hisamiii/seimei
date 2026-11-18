@@ -130,6 +130,7 @@ The Android app makes the same call as the page over the same socket, with the s
   - `session`: whether the track plays in the microphone's audio session;
   - `gate`: whether the mic gate is on;
   - `callMode`, the routed `mic` and `speaker` device types, and the `phone` model;
+  - `soft`: whether the partner's audio goes through the watch's high shelf;
   - `net`: the transport the call's network runs on, like `bluetooth` for a watch through its phone, `wifi` or `cellular`;
   - the track's `underruns`;
   - `wrote`: seconds of the partner's audio written to the track, and `outDb`, its mean power in dBFS;
@@ -144,6 +145,7 @@ The Wear OS app makes the phone app's call, with the same `VoiceCall`, canceller
 
 - **In the chat.** A call has no screen of its own: its turns land in the chat. A bar takes the composer's place, with mute, the call's time and hang up. The talk button sits in send's place on an empty composer, as on the phone.
 - **In the background.** The call runs in a foreground service for the microphone and media playback. It goes on with the screen off or another app in front. Its ongoing activity shows on the watch face, with Mute and Hang up, and a tap opens the chat.
+- **Hiss.** A watch's small speaker makes "s" sounds hiss. So the watch's call runs the partner's audio through a high shelf, 4 dB down above 5 kHz, as it comes in. The speaker and the canceller's reference get the same filtered audio.
 - **The network.** The app uses the watch's default network: the phone's Bluetooth proxy when the phone is near, else the watch's own Wi-Fi or LTE. It never asks for a faster network, which would power up Wi-Fi and cost battery. 16 kHz PCM is 256 kbit/s each way.
 - **A new route.** When the default network changes, the app drops its connections at once and opens the event stream again on the new one. A dead route would otherwise hold the stream until its 40 s read timeout. A call's socket does not move: it ends with the old route.
 

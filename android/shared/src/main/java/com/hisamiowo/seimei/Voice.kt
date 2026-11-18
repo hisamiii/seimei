@@ -4,7 +4,13 @@ import org.json.JSONException
 import org.json.JSONObject
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import kotlin.math.PI
+import kotlin.math.cos
 import kotlin.math.max
+import kotlin.math.pow
+import kotlin.math.roundToInt
+import kotlin.math.sin
+import kotlin.math.sqrt
 
 // Voice calls without the audio devices (docs/voice.md): the socket's messages and frames, the local barge-in and the mic gate.
 // VoiceCall feeds them; the unit tests run them on plain arrays, as web/pcm.js runs in node.
@@ -288,5 +294,52 @@ class Uplink(echo: Double, private val out: Out) {
             held.clear()
             out.send(f)
         }
+    }
+}
+
+/**
+ * A high shelf, the cookbook biquad: [db] above about [hz] at 16 kHz, with a shelf slope of 1.
+ * A watch's small speaker makes "s" sounds hiss, so its call runs the partner's audio through one before it plays.
+ */
+class Shelf(hz: Double = HZ, db: Double = DB) {
+    private val b0: Double
+    private val b1: Double
+    private val b2: Double
+    private val a1: Double
+    private val a2: Double
+    private var x1 = 0.0
+    private var x2 = 0.0
+    private var y1 = 0.0
+    private var y2 = 0.0
+
+    init {
+        val a = 10.0.pow(db / 40)
+        val w = 2 * PI * hz / Voice.RATE
+        val c = cos(w)
+        val k = 2 * sqrt(a) * sin(w) / 2 * sqrt(2.0)
+        val a0 = (a + 1) - (a - 1) * c + k
+        b0 = a * ((a + 1) + (a - 1) * c + k) / a0
+        b1 = -2 * a * ((a - 1) + (a + 1) * c) / a0
+        b2 = a * ((a + 1) + (a - 1) * c - k) / a0
+        a1 = 2 * ((a - 1) - (a + 1) * c) / a0
+        a2 = ((a + 1) - (a - 1) * c - k) / a0
+    }
+
+    /** Filters [s] in place, going on from the last call's samples. */
+    fun run(s: ShortArray) {
+        for (i in s.indices) {
+            val x = s[i].toDouble()
+            val y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+            x2 = x1
+            x1 = x
+            y2 = y1
+            y1 = y
+            s[i] = y.roundToInt().coerceIn(-32768, 32767).toShort()
+        }
+    }
+
+    companion object {
+        const val HZ = 5000.0
+        const val DB = -4.0
     }
 }

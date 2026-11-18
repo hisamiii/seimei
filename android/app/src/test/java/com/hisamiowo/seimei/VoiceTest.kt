@@ -263,4 +263,19 @@ class VoiceTest {
         assertEquals(listOf("Day", "Msg", "Msg", "Msg"), c.items.map { it::class.simpleName })
         assertEquals(listOf(true, true, false), c.items.drop(1).map { (it as Item.Msg).voiced })
     }
+
+    /** A sine's level in dBFS after [f], past the filter's first 100 ms. */
+    private fun through(f: Shelf?, hz: Double): Double {
+        val s = ShortArray(16000) { (10000 * Math.sin(2 * Math.PI * hz * it / 16000)).toInt().toShort() }
+        f?.run(s)
+        return frameDb(s.copyOfRange(1600, s.size))
+    }
+
+    @Test
+    fun shelfCutsTheHissAndKeepsTheVoice() {
+        val voice = through(Shelf(), 300.0) - through(null, 300.0)
+        val hiss = through(Shelf(), 7000.0) - through(null, 7000.0)
+        assertTrue("voice moved $voice dB", Math.abs(voice) < 0.3)
+        assertTrue("hiss cut $hiss dB", hiss < -3.0 && hiss > -4.5)
+    }
 }

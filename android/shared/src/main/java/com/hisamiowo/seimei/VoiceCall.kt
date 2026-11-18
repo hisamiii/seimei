@@ -36,7 +36,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * The microphone runs as a voice call, with the platform's echo canceller and noise suppressor; [Uplink] cuts the partner off when the user talks over it.
  * The audio runs on threads of its own, so the call goes on with the screen off; its state is Compose state for the call bar and the notification.
  */
-class VoiceCall(private val ctx: Context, private val api: Api, val speed: Double?, echo: Double, private val host: Host) {
+class VoiceCall(private val ctx: Context, private val api: Api, val speed: Double?, echo: Double, private val host: Host, soft: Boolean = false) {
     interface Host {
         fun tell(text: String)
         /** The call is over; [why] is empty when the user or the partner ended it. */
@@ -128,6 +128,8 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
     private val canceller = Aec.make()
     // The microphone's power before and after the app's canceller while the partner plays, for the stats: the echo it removes.
     private var echoIn = 0.0
+    // A watch's speaker: the partner's audio goes through a [Shelf] as it comes in, so the canceller's reference is what plays.
+    private val shelf = if (soft) Shelf() else null
     private var echoOut = 0.0
     private var echoFrames = 0
     // What the track holds ahead of its play head, in ms: the canceller's delay hint.
@@ -469,7 +471,7 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
             .put("head", round1(headTotal.toDouble() / Voice.RATE)).put("route", route)
             .put("comm", if (Build.VERSION.SDK_INT >= 31) am.communicationDevice?.type ?: -1 else -1)
             .put("session", track?.audioSessionId == rec?.audioSessionId).put("gate", up.gate).put("callMode", am.mode == AudioManager.MODE_IN_COMMUNICATION)
-            .put("mic", rec?.routedDevice?.type ?: -1).put("speaker", track?.routedDevice?.type ?: -1).put("phone", Build.MODEL).put("net", net())
+            .put("mic", rec?.routedDevice?.type ?: -1).put("speaker", track?.routedDevice?.type ?: -1).put("phone", Build.MODEL).put("net", net()).put("soft", shelf != null)
             .put("underruns", track?.underrunCount ?: -1).put("jitter", synchronized(lock) { jitter.run {
                 JSONObject().put("stalls", stalls).put("lateMs", Math.round(lateMax * 1000)).put("prebufferMs", Math.round(target * 1000))
             } })
@@ -513,6 +515,7 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
             if (!running) return
             val s = Voice.samples(bytes.toByteArray())
             if (s.isEmpty()) return
+            shelf?.run(s)
             val secs = s.size.toDouble() / Voice.RATE
             synchronized(lock) { jitter.arrived(secs, now()) }
             heard = Voice.level(s)
