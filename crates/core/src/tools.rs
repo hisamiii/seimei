@@ -349,8 +349,15 @@ impl Tools {
                         Err(e) => return text(&format!("Not sent: {e}"), true),
                     }
                 }
+                let asked = w.state() == "asking";
                 match w.send(&arg(a, "text"), None, vec![]).await {
-                    Ok(()) => text(&format!("Sent to {}.{on}", w.name()), false),
+                    Ok(()) => {
+                        // A message to a shikigami that asks answers it: its open card in the chat settles.
+                        if asked {
+                            self.events.add(json!({"type": "worker", "event": "settled", "worker": w.id, "name": w.name(), "by": "seimei"}));
+                        }
+                        text(&format!("Sent to {}.{on}", w.name()), false)
+                    }
                     Err(e) => text(&e, true),
                 }
             }

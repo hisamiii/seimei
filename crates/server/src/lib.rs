@@ -397,6 +397,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/workers/{id}", get(worker_history))
         .route("/api/workers/{id}/metrics", get(worker_metrics))
         .route("/api/workers/{id}/send", post(worker_send))
+        .route("/api/workers/{id}/settle", post(worker_settle))
         .route("/api/workers/{id}/stop", post(worker_stop))
         .route("/api/workers/{id}/tune", post(worker_tune))
         .route("/api/workers/{id}/archive", post(worker_archive))
@@ -1364,6 +1365,13 @@ async fn worker_send(State(app): Shared, UrlPath(id): UrlPath<String>, bytes: By
         seimei_core::util::chars(&said, 500)
     );
     app.dispatcher.note(&line, None);
+    ok(json!({"ok": true}))
+}
+
+/// The user marks a shikigami's question done without an answer: its open card in the chat settles, and nothing reaches the shikigami.
+async fn worker_settle(State(app): Shared, UrlPath(id): UrlPath<String>) -> Response {
+    let w = attempt!(worker_of(&app, &id));
+    app.events.add(json!({"type": "worker", "event": "settled", "worker": w.id, "name": w.name(), "by": "user"}));
     ok(json!({"ok": true}))
 }
 

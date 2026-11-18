@@ -391,6 +391,12 @@ body:not([data-tab="chat"]):not([data-tab="threads"]) #new-thread { display: non
 .wcard.done .badge { background: var(--container-high); color: var(--text-3); }
 .wcard.failed .badge { background: var(--error-container); color: var(--error); }
 .wcard.asking { box-shadow: inset 0 0 0 1.5px var(--primary); }
+.wcard .settle { margin: -6px -8px -6px auto; flex: none; background: none; color: var(--text-3); width: 40px; height: 40px; padding: 0; border-radius: 20px; display: grid; place-items: center; }
+.wcard .settle:hover { color: var(--primary); }
+/* An answered question folds to a few quiet lines. */
+.wcard.asked .badge { background: var(--container-high); color: var(--text-3); }
+.wcard.asked .body { max-height: 4.4em; color: var(--text-3); -webkit-mask-image: linear-gradient(#000 50%, transparent); mask-image: linear-gradient(#000 50%, transparent); }
+.wcard.asked.open .body { max-height: none; -webkit-mask-image: none; mask-image: none; }
 .wcard .body { font-size: 14px; color: var(--text-2); max-height: 9.5em; overflow: hidden; overflow-wrap: anywhere; }
 .wcard .body.task { white-space: pre-wrap; max-height: 4.4em; }
 .wcard.clipped:not(.open) .body { -webkit-mask-image: linear-gradient(#000 60%, transparent); mask-image: linear-gradient(#000 60%, transparent); }

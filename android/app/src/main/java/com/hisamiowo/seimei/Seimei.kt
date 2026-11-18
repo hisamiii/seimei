@@ -1412,6 +1412,16 @@ class Seimei(app: Application) : AndroidViewModel(app), Dictation.Host {
         page?.takeIf { it.kind == a.kind && it.id == a.id }?.let { it.row = it.row.merged(JSONObject().put("archived", on)) }
     }
 
+    /** A shikigami's question that went stale: its card settles as done, and nothing reaches the shikigami. */
+    fun workerSettle(id: String) {
+        viewModelScope.launch {
+            try {
+                api.post("api/workers/$id/settle")
+            } catch (e: IOException) {
+            }
+        }
+    }
+
     fun workerStop(id: String, kind: String = "worker") {
         viewModelScope.launch {
             try {

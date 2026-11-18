@@ -285,7 +285,7 @@ function threadLine(ev) {
 // What a shikigami event shows in chat, or nothing: the user wrote their own reply on its page.
 function workerCard(ev) {
   const name = el('b', null, ev.name);
-  if (ev.event === 'replied') return null;
+  if (ev.event === 'replied' || ev.event === 'settled') return null;
   if (ev.event === 'summoned') return evline(ev, '', name, el('small', null, model(ev)));
   if (ev.event === 'failed') return evline(ev, 'failed ', name, ' failed', el('small', null, oneSentence(firstLine(ev.text))));
   if (ev.event === 'done') {
@@ -310,7 +310,14 @@ function workerCard(ev) {
   const head = el('div', 'head');
   const title = el('div', 'title');
   title.append(name);
-  head.append(badge, title);
+  // A question that went stale is marked done here, with nothing sent.
+  const done = el('button', 'btn icon settle');
+  done.type = 'button';
+  done.title = 'Mark done';
+  done.setAttribute('aria-label', done.title);
+  done.dataset.settle = ev.worker;
+  done.append(svg(ALLOW, 18));
+  head.append(badge, title, done);
   card.append(head);
   if (ev.text) {
     const body = el('div', 'body');
@@ -963,7 +970,9 @@ export class Renderer {
       if (open && ev.event !== 'summoned') {
         open.classList.replace('asking', 'asked');
         open.querySelector('.foot')?.remove();
-        open.querySelector('.title').append(el('span', 'meta', ev.event === 'replied' || ev.event === 'done' ? 'Answered' : 'Closed'));
+        open.querySelector('.settle')?.remove();
+        const word = ev.event === 'settled' && ev.by === 'user' ? 'Done' : ['replied', 'done', 'settled'].includes(ev.event) ? 'Answered' : 'Closed';
+        open.querySelector('.title').append(el('span', 'meta', word));
         this.asks.delete(ev.worker);
       }
       const node = workerCard(ev);
@@ -1057,7 +1066,7 @@ export function addEvent(ev) {
   if (live) live.parentNode.append(live);
   hello();
   if (stick) toBottom();
-  else if (/^(user|assistant|approval|worker|image)$/.test(ev.type) && inTraj(ev) === (S.lane === 't')) {
+  else if (/^(user|assistant|approval|worker|image)$/.test(ev.type) && !/^(replied|settled)$/.test(ev.event) && inTraj(ev) === (S.lane === 't')) {
     missed++;
     jumpState();
   }
@@ -1427,6 +1436,11 @@ function onTap(e) {
   if (e.target.matches('img.pic')) {
     const n = e.target.dataset.name;
     return view(e.target.src, n ? { full: `api/files/${n}`, save: `api/files/${n}?download=1` } : {});
+  }
+  const settle = e.target.closest('[data-settle]');
+  if (settle) {
+    settle.disabled = true;
+    return fetch(`api/workers/${encodeURIComponent(settle.dataset.settle)}/settle`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then((r) => { if (!r.ok) settle.disabled = false; }, () => { settle.disabled = false; });
   }
   const card = e.target.closest('.wcard, .report, .evline');
   if (card?.dataset.worker && !e.target.closest('a, .more') && !getSelection().toString()) {

@@ -902,7 +902,7 @@ fun WorkerCard(w: Item.Worker, vm: Seimei) {
                 Md(w.text, 14, MaterialTheme.colorScheme.onSurface)
             }
         }
-        else -> QuestionCard(w, open)
+        else -> QuestionCard(w, open) { vm.workerSettle(w.worker) }
     }
 }
 
@@ -927,23 +927,36 @@ fun Clipped(key: String, shape: Shape, bg: Color, content: @Composable () -> Uni
     }
 }
 
-/** A question: a decision, so the warm card, the asker's name as its title, the answer one tap away. */
+/** A question: a decision, so the warm card, the asker's name as its title, the answer one tap away.
+ * The check in its corner marks a stale one done; once settled, it folds to a few quiet lines. */
 @Composable
-fun QuestionCard(w: Item.Worker, open: () -> Unit) {
+fun QuestionCard(w: Item.Worker, open: () -> Unit, settle: () -> Unit) {
     val t = LocalTokens.current
+    val cs = MaterialTheme.colorScheme
+    val x = LocalExtra.current
+    val asked = w.settled != null
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(t.warnContainer).clickable(onClick = open).padding(16.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(if (asked) cs.surfaceContainer else t.warnContainer)
+            .clickable(onClick = open).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            ShapeTile(w.name, 40.dp, t.warn) {
-                Icon(Icons.question, null, Modifier.size(22.dp), tint = t.onWarn)
+            ShapeTile(w.name, 40.dp, if (asked) cs.surfaceContainerHighest else t.warn) {
+                Icon(Icons.question, null, Modifier.size(22.dp), tint = if (asked) x.text3 else t.onWarn)
             }
             Spacer(Modifier.width(12.dp))
-            Text(w.name, fontSize = 16.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold, color = t.onWarnContainer, modifier = Modifier.weight(1f))
-            w.settled?.let { Text(it, fontSize = 12.sp, color = t.onWarnContainer.copy(alpha = .8f)) }
+            Text(w.name, fontSize = 16.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold, color = if (asked) cs.onSurface else t.onWarnContainer,
+                modifier = Modifier.weight(1f))
+            val settled = w.settled
+            if (settled != null) Text(settled, fontSize = 12.sp, color = x.text3)
+            else IconButton(settle, Modifier.size(40.dp).offset(x = 8.dp)) {
+                Icon(Icons.check, "Mark done", Modifier.size(20.dp), tint = t.onWarnContainer.copy(alpha = .7f))
+            }
         }
-        if (w.text.isNotEmpty()) Md(w.text, 14, t.onWarnContainer)
+        if (w.text.isNotEmpty()) {
+            if (asked) Box(Modifier.heightIn(max = 60.dp).clipToBounds()) { Md(w.text, 14, x.text3) }
+            else Md(w.text, 14, t.onWarnContainer)
+        }
         if (w.settled == null) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(open, Modifier.weight(1f).heightIn(min = 48.dp), colors = ButtonDefaults.buttonColors(
                 containerColor = t.warn.copy(alpha = .16f).compositeOver(t.warnContainer), contentColor = t.onWarnContainer)) {

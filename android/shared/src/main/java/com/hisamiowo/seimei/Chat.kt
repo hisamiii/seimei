@@ -35,7 +35,7 @@ sealed interface Item {
     data class Worker(
         override val key: String, val event: String, val name: String, val worker: String,
         val text: String, val model: String, val cwd: String, val effort: String = "",
-        /** An "asks" card that something later settled: "Answered" or "Closed". */
+        /** An "asks" card that something later settled: "Answered", "Done" (the user marked it) or "Closed". */
         val settled: String? = null,
     ) : Item
     /** A card: Approve/Deny from seimei's own tools and plugins, or (with options) a permission prompt of the agent's.
@@ -364,9 +364,13 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
                 val event = ev.str("event")
                 val wid = ev.str("worker")
                 if (event != "summoned") asks.remove(wid)?.let { (owner, i) ->
-                    owner.settle(i, if (event == "replied" || event == "done") "Answered" else "Closed")
+                    owner.settle(i, when {
+                        event == "settled" && ev.str("by") == "user" -> "Done"
+                        event in setOf("replied", "done", "settled") -> "Answered"
+                        else -> "Closed"
+                    })
                 }
-                if (event == "replied") {
+                if (event == "replied" || event == "settled") {
                     Unit
                 } else if (event in WORKER_CARDS) {
                     if (event == "asking") asks[wid] = this to items.size

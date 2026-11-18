@@ -218,7 +218,7 @@ impl Inner {
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect();
         }
-        let trajectory = (kind == "worker" && !matches!(what, Some("asking" | "replied")))
+        let trajectory = (kind == "worker" && !matches!(what, Some("asking" | "replied" | "settled")))
             || kind == "system"
             || (kind == "rate_limit" && ev.get("status").and_then(Value::as_str) != Some("rejected"));
         if trajectory { Map::from_iter([("lane".into(), json!("t"))]) } else { Map::new() }

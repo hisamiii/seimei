@@ -226,6 +226,18 @@ class ChatTest {
         assertEquals("Answered", chat.items.filterIsInstance<Item.Worker>().single().settled)
     }
 
+    @Test fun aSettledAskFoldsWithNoNote() {
+        // seimei's message answers one; the user marks the other done.
+        val (chat, _) = lanes(
+            ev("worker", kv = arrayOf("event" to "asking", "worker" to "w1", "name" to "x", "text" to "which?")),
+            ev("worker", kv = arrayOf("event" to "settled", "worker" to "w1", "name" to "x", "by" to "seimei")),
+            ev("worker", kv = arrayOf("event" to "asking", "worker" to "w2", "name" to "y", "text" to "still?")),
+            ev("worker", kv = arrayOf("event" to "settled", "worker" to "w2", "name" to "y", "by" to "user")),
+        )
+        assertEquals(listOf("Answered", "Done"), chat.items.filterIsInstance<Item.Worker>().map { it.settled })
+        assertTrue(chat.items.none { it is Item.Note })
+    }
+
     @Test fun quotedReplyShowsItsAnchor() {
         val (chat, _) = lanes(ev("user", kv = arrayOf("text" to "ship it", "quote" to "app-tester is done", "quote_id" to 9)))
         assertEquals(Anchor("app-tester is done", "e9", "t"), chat.items.filterIsInstance<Item.Msg>().single().anchor)
