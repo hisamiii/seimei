@@ -25,7 +25,13 @@ export const toBottom = () => {
   jumpState();
 };
 export const following = () => pinned;
-log.addEventListener('scroll', () => { pinned = nearBottom(); jumpState(); }, { passive: true });
+// Only a move up lets go: a scroll event can come late (a background tab fires it on return), after the thread grew below.
+let lastTop = 0;
+log.addEventListener('scroll', () => {
+  pinned = nearBottom() || (pinned && log.scrollTop >= lastTop);
+  lastTop = log.scrollTop;
+  jumpState();
+}, { passive: true });
 
 // Jump to latest: while the reader is scrolled up, a button above the composer counts the rows that came in below.
 // It goes to the newest unanswered card above the view, else to the end.

@@ -1126,7 +1126,12 @@ function build(kind, id, row) {
   P = { kind, id, row, title, sub, ring: r, hand, banner, dot, quote, main, thread, empty, qbox, note: noteEl, tray: trayEl, input, attach, send, stop,
     files: [], next: null, ask: null, askKey: undefined, pinned: true, renderer: new Renderer(thread), ids: new Set(), raw: [], last: 0, pending: [] };
 
-  main.addEventListener('scroll', () => { if (P) P.pinned = nearBottom(); }, { passive: true });
+  // As in the chat: only a move up lets go, since a late scroll event can see a thread that grew below.
+  let lastTop = 0;
+  main.addEventListener('scroll', () => {
+    if (P) P.pinned = nearBottom() || (P.pinned && main.scrollTop >= lastTop);
+    lastTop = main.scrollTop;
+  }, { passive: true });
   new ResizeObserver(() => stick()).observe(thread);
   attach.addEventListener('click', () => file.click());
   file.addEventListener('change', (e) => { addFiles([...e.target.files]); e.target.value = ''; });
