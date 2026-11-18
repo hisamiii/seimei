@@ -3,6 +3,7 @@
 
 #![allow(clippy::result_large_err)] // axum responses as the error side, as handlers return them
 
+pub mod adb;
 pub mod asr;
 mod voice;
 
@@ -121,6 +122,8 @@ pub struct App {
     pub asr: Option<Arc<seimei_core::asr::Asr>>,
     /// Voice mode (docs/voice.md); None unless `[voice] on`.
     pub voice: Option<Arc<seimei_core::voice::Voice>>,
+    /// The watch's adb relay (docs/watch-adb.md): adb's connections waiting for their watch.
+    pub adb: adb::Relay,
 }
 
 /// What the server is built from.
@@ -265,6 +268,7 @@ impl App {
             audit: state.join("audit.jsonl"),
             asr,
             voice,
+            adb: Default::default(),
         })
     }
 
@@ -446,6 +450,8 @@ pub fn router(app: Arc<App>) -> Router {
             .route("/api/devices/{id}/revoke", post(revoke))
             .route("/api/devices/push", get(push_info).post(push_token))
             .route("/api/devices/push/test", post(push_test))
+            .route("/api/adb/ready", post(adb::ready))
+            .route("/api/adb/ws", get(adb::ws))
             .route("/api/push/ws", get(push_ws))
             .route("/api/push/web", get(web_push_info).post(web_push_set));
     }

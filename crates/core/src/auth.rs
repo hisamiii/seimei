@@ -838,6 +838,24 @@ impl Auth {
         }
     }
 
+    /// Marks a paired phone as running one of the app's features, like "adb" for the watch's adb relay; the mark goes with the pairing.
+    pub fn mark(&self, device: &str, feature: &str) {
+        let mut g = self.lock();
+        let Some(d) = g.data.devices.iter_mut().find(|d| d.id == device) else { return };
+        if d.other.get(feature) == Some(&Value::Bool(true)) {
+            return;
+        }
+        d.other.insert(feature.into(), Value::Bool(true));
+        self.save(&mut g);
+    }
+
+    /// The paired phones marked with this feature.
+    pub fn marked(&self, feature: &str) -> Vec<String> {
+        let g = self.lock();
+        let on = |d: &&Device| d.other.get(feature) == Some(&Value::Bool(true));
+        g.data.devices.iter().filter(on).map(|d| d.id.clone()).collect()
+    }
+
     /// Phones and browsers with a push record: a browser's id is "b:" and its session's key.
     pub fn push_devices(&self) -> Vec<Value> {
         let g = self.lock();
@@ -1011,6 +1029,25 @@ mod tests {
             serde_cbor_2::from_slice::<serde_cbor_2::Value>(&back).unwrap(),
             serde_cbor_2::from_slice::<serde_cbor_2::Value>(&cose).unwrap()
         );
+    }
+
+    #[test]
+    fn a_mark_stays_with_its_phone() {
+        let (a, dir) = auth("mark");
+        let ec = openssl::ec::EcKey::generate(&openssl::ec::EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap())
+            .unwrap();
+        let public = b64url(&PKey::from_ec_key(ec).unwrap().public_key_to_der().unwrap());
+        let (code, _) = a.pair_code();
+        let watch = a.claim(&code, "watch", &public).unwrap();
+        assert!(a.marked("adb").is_empty());
+        a.mark(&watch, "adb");
+        a.mark("nobody", "adb");
+        assert_eq!(a.marked("adb"), [watch.as_str()]);
+        // Kept on disk, and gone with the pairing.
+        assert_eq!(Auth::new(&dir, "http://localhost:8418").marked("adb"), [watch.as_str()]);
+        a.revoke(&watch);
+        assert!(a.marked("adb").is_empty());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread")]

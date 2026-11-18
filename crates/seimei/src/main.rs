@@ -315,11 +315,13 @@ struct Server {
     port: u16,
     origin: Option<String>,
     web: bool,
+    /// The watch's adb relay on 127.0.0.1 (docs/watch-adb.md); 0 turns it off.
+    adb: u16,
 }
 
 impl Default for Server {
     fn default() -> Self {
-        Server { port: 8417, origin: None, web: true }
+        Server { port: 8417, origin: None, web: true, adb: 5590 }
     }
 }
 
@@ -479,6 +481,10 @@ fn main() {
         });
         tokio::spawn(app.watcher.clone().run());
         tokio::spawn(app.watcher.clone().follow());
+        if web_on && app.auth.is_some() && cfg.server.adb != 0 {
+            // --dev moves it too, as it moves the port.
+            tokio::spawn(seimei_server::adb::listen(app.clone(), cfg.server.adb + u16::from(a.dev)));
+        }
         if let Some(asr) = app.asr.clone() {
             tokio::spawn(asr.nightly());
             tokio::spawn({

@@ -610,6 +610,15 @@ impl Push {
         n
     }
 
+    /// A push to these phones only, whatever they show: the watch's adb relay wakes its app this way. Returns how many it went to.
+    pub fn to(self: &Arc<Self>, devices: &[String], data: Value, ttl: u64) -> usize {
+        let phones: Vec<_> = self.phones(Only::All).into_iter().filter(|(d, _)| devices.contains(d)).collect();
+        let n = phones.len();
+        let Value::Object(data) = data else { return 0 };
+        tokio::spawn(self.clone().send(data, ttl, phones));
+        n
+    }
+
     /// A test notification to one phone, shown even with the app open.
     pub fn test(self: &Arc<Self>, device: &str) {
         let phones: Vec<_> = self.phones(Only::All).into_iter().filter(|(d, _)| d == device).collect();

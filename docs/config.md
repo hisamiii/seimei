@@ -11,6 +11,7 @@ The table lists each section's keys, their defaults and what they set. Notes on 
 | `[server]` | `port` | 8417 | the port on 127.0.0.1; `--dev` uses port + 1 |
 | | `origin` | `http://localhost:8417` | the HTTPS address phones and browsers use |
 | | `web` | `true` | `false` runs only the plugins, without the phone server |
+| | `adb` | 5590 | the watch's adb relay ([watch-adb.md](watch-adb.md)); 0 is off |
 | `[dispatcher]` | `model` | `[models] work` | the dispatcher's model |
 | | `effort` | the CLI's settings | its reasoning effort: low, medium, high, xhigh or max |
 | | `name` | `seimei` | its session's name in Claude Code's registry |
