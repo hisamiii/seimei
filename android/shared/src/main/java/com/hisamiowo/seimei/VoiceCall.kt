@@ -32,7 +32,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * One voice call with the partner (docs/voice.md): the microphone goes up the socket as 16 kHz PCM16 without pause, the partner's audio comes down to an AudioTrack.
- * The microphone runs as a voice call, with the platform's echo canceller and noise suppressor; [Uplink] cuts the partner off when the user talks over it.
+ * The microphone runs as a voice call, with the platform's echo canceller and noise suppressor; [Uplink] cuts the partner off when the user talks over its echo.
  * The audio runs on threads of its own, so the call goes on with the screen off; its state is Compose state for the call bar and the notification.
  */
 class VoiceCall(private val ctx: Context, private val api: Api, val speed: Double?, echo: Double, private val host: Host) {
@@ -65,8 +65,8 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
         private set
     /** What the call bar's pill and the notification say. */
     val label get() = if (muted) "Muted" else LABELS[state] ?: ""
-    /** The echo this call learned, for the next one (Barge.learned). */
-    val echo get() = up.barge.echo
+    /** The echo this call learned, for the next one (Echo.learned). */
+    val echo get() = model.gain
 
     private val main = Handler(Looper.getMainLooper())
     private val am = ctx.getSystemService(AudioManager::class.java)
@@ -97,17 +97,29 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
     @Volatile private var played = 0.0
     @Volatile private var cutS = 0.0
     @Volatile private var flushes = 0
-    // The echo canceller and noise suppressor: on, off (made but not enabled), or none (this phone gives apps none).
+    // The echo canceller and noise suppressor: on, off (made but not enabled), none (this phone gives apps none), or the error that made it fail.
     private var aec = "none"
     private var ns = "none"
+    // What the platform says it has: the effects it lists for apps, and whether it offers an echo canceller.
+    private val offered = try {
+        AudioEffect.queryEffects()?.map { "${it.name} (${it.implementor})" } ?: emptyList()
+    } catch (e: Exception) {
+        emptyList()
+    }
+    private val aecOffered = try {
+        AcousticEchoCanceler.isAvailable()
+    } catch (e: Exception) {
+        false
+    }
     // The effects the platform runs on the microphone's stream, read once it records.
     @Volatile private var fx = emptyList<String>()
 
-    private class Chunk(val gen: Int, val samples: ShortArray, val db: Double)
+    private class Chunk(val gen: Int, val samples: ShortArray)
 
-    private val up = Uplink(echo, object : Uplink.Out {
-        override fun level() = synchronized(lock) { log.level(now()) }
-        override fun busy() = synchronized(lock) { log.busy(now()) }
+    private val model = Echo(echo)
+    private val up = Uplink(model, object : Uplink.Out {
+        override fun playing() = synchronized(lock) { log.playing(now()) }
+        override fun busy() = synchronized(lock) { log.busy(now(), model.reach) }
         override fun barge() {
             cut()
             text(Voice.up("barge"))
@@ -189,12 +201,12 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
         am.mode = mode
     }
 
-    /** Makes and enables an effect on the microphone's session: "on", "off" when it would not enable, "none" when the phone has none for apps. */
+    /** Makes and enables an effect on the microphone's session: "on", "off" when it would not enable, "none" when the phone has none for apps, or why it failed. */
     private fun attach(session: Int, make: (Int) -> AudioEffect?): String {
         val e = try {
             make(session)
         } catch (e: Exception) {
-            null
+            return "error: ${e.javaClass.simpleName} ${e.message ?: ""}".trim()
         } ?: return "none"
         effects += e
         return try {
@@ -208,6 +220,8 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
     private fun record() {
         val r = rec ?: return
         var frames = 0
+        // The microphone's clock: frames counted from the earliest a read came back, as reads come in bursts.
+        var base = Double.POSITIVE_INFINITY
         try {
             r.startRecording()
             // What the platform itself runs on this input: on many phones the voice call's echo canceller lives here, not in [effects].
@@ -230,7 +244,9 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
                     break
                 }
                 frames++
-                up.push(buf)
+                val t = frames * Voice.FRAME.toDouble() / Voice.RATE
+                base = minOf(base + CREEP, now() - t)
+                up.push(buf, base + t)
                 // The bars move every 80 ms, as on the page.
                 if (frames % 4 == 0) tick(frames)
                 if (frames % (STATS_S * 50) == 0) stats()
@@ -297,7 +313,8 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
                         break
                     }
                     // The echo check and the mic gate follow what is in the track, as it will play.
-                    synchronized(lock) { log.push(n.toDouble() / Voice.RATE, head.db, now) }
+                    val at = synchronized(lock) { log.push(n.toDouble() / Voice.RATE, now) }
+                    model.played(at, head.samples, off, n)
                     off += n
                     if (off == head.samples.size) {
                         pend.removeFirst()
@@ -329,6 +346,7 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
             cutS += log.cut(now())
             jitter.cut()
         }
+        model.cut(now())
         gen++
         queue.clear()
         if (!running) return
@@ -352,8 +370,10 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
     private fun stats() {
         text(JSONObject().put("type", "stats").put("path", "audiotrack").put("got", got)
             .put("played", round1(played)).put("barges", up.barges).put("cut", round1(cutS)).put("flushes", flushes)
-            .put("gated", round1(up.gated * Voice.FRAME.toDouble() / Voice.RATE)).put("echo", round1(echo)).put("muted", muted)
-            .put("aec", aec).put("ns", ns).put("fx", JSONArray(fx)).put("callMode", am.mode == AudioManager.MODE_IN_COMMUNICATION)
+            .put("gated", round1(up.gated * Voice.FRAME.toDouble() / Voice.RATE)).put("echo", round1(echo))
+            .put("delayMs", model.delay?.let { Math.round(it * 1000) } ?: -1).put("match", Math.round(model.match * 100) / 100.0).put("muted", muted)
+            .put("aec", aec).put("aecOffered", aecOffered).put("ns", ns).put("fx", JSONArray(fx))
+            .put("effects", JSONArray(offered)).put("session", track?.audioSessionId == rec?.audioSessionId).put("callMode", am.mode == AudioManager.MODE_IN_COMMUNICATION)
             .put("mic", rec?.routedDevice?.type ?: -1).put("speaker", track?.routedDevice?.type ?: -1).put("phone", Build.MODEL)
             .put("underruns", track?.underrunCount ?: -1).put("jitter", synchronized(lock) { jitter.run {
                 JSONObject().put("stalls", stalls).put("lateMs", Math.round(lateMax * 1000)).put("prebufferMs", Math.round(target * 1000))
@@ -391,7 +411,7 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
             heard = Voice.level(s)
             got++
             played += secs
-            queue.add(Chunk(gen, s, frameDb(s)))
+            queue.add(Chunk(gen, s))
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
@@ -431,6 +451,8 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
         const val STATS_S = 10
         /** The track's own buffer: room for a burst after a late stretch. */
         const val TRACK_MS = 500
+        /** The microphone's clock may drift this many seconds per frame later, so a lost read does not skew it for good. */
+        private const val CREEP = 0.00002
         private val ATTRS = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
     }

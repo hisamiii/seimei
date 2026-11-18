@@ -38,7 +38,7 @@ class CallService : Service() {
         /** Starts a call: the microphone first, then the service, which Android lets start only while the app is in front. */
         fun start(ctx: Context, api: Api, speed: Double?): Boolean {
             if (call != null) return true
-            val c = VoiceCall(ctx.applicationContext, api, speed, Barge.learned(Prefs(ctx).voiceEcho), this)
+            val c = VoiceCall(ctx.applicationContext, api, speed, Echo.learned(Prefs(ctx).voiceEcho), this)
             if (!c.start()) {
                 told = "Couldn't open the microphone"
                 return false

@@ -85,10 +85,11 @@ class Prefs(ctx: Context) {
     var voiceSpeed: Double?
         get() = p.getString("voiceSpeed", null)?.toDoubleOrNull()?.takeIf { it in Voice.SPEEDS }
         set(v) = p.edit().putString("voiceSpeed", v?.toString()).apply()
-    /** The echo the last voice call learned on this phone, in dB (Barge). */
+    /** The echo the last voice call learned on this phone, in dB against what played (Echo). */
+    // A key of its own: the older "voiceEcho" measured against the loudest of the last 0.3 s, which reads lower.
     var voiceEcho: Double?
-        get() = p.getString("voiceEcho", null)?.toDoubleOrNull()
-        set(v) = p.edit().putString("voiceEcho", v?.toString()).apply()
+        get() = p.getString("voiceEchoGain", null)?.toDoubleOrNull()
+        set(v) = p.edit().putString("voiceEchoGain", v?.toString()).apply()
 }
 
 val b64url: Base64.Encoder = Base64.getUrlEncoder().withoutPadding()
