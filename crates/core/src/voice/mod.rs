@@ -270,8 +270,11 @@ impl Voice {
             named(line.split([' ', '(', '[']).next().unwrap_or("").trim(), &mut out);
         }
         // A board project heads its items: "name (paused) [color x]", the items indented under it.
-        for line in src.board.lines().filter(|l| !l.starts_with(' ')) {
-            named(line.split([' ', '(', '[']).next().unwrap_or("").trim(), &mut out);
+        let lines: Vec<&str> = src.board.lines().collect();
+        for (i, line) in lines.iter().enumerate() {
+            if !line.starts_with(' ') && lines.get(i + 1).is_some_and(|n| n.starts_with(' ')) {
+                named(line.split([' ', '(', '[']).next().unwrap_or("").trim(), &mut out);
+            }
         }
         if self.files_on() {
             out.extend(lookups::project_names(&self.cfg.roots, &out.clone()));
