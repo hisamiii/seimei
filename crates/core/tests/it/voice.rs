@@ -161,3 +161,89 @@ fn audio_speed_is_clamped() {
     assert_eq!(speed("audio_speed = 3"), 1.5);
     assert_eq!(speed("audio_speed = 0.1"), 0.5);
 }
+
+/// Active project folders give their names and docs for speech recognition; a stale one only when a known name matches it.
+#[test]
+fn project_names_for_keywords() {
+    let base = std::env::temp_dir().join(format!("seimei-voice-names-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    for d in ["root/orchard/docs", "root/kiln", "root/dusty", "root/.hidden"] {
+        std::fs::create_dir_all(base.join(d)).unwrap();
+    }
+    for f in [
+        "root/orchard/README.md",
+        "root/orchard/plan.md",
+        "root/orchard/docs/voice.md",
+        "root/kiln/notes.txt",
+        "root/dusty/old.md",
+    ] {
+        std::fs::write(base.join(f), "x").unwrap();
+    }
+    // dusty is old: only a known name keeps it.
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(60 * 24 * 3600);
+    std::fs::File::open(base.join("root/dusty")).unwrap().set_modified(old).unwrap();
+    let names = lookups::project_names(&[base.join("root")], &[]);
+    assert_eq!(names, ["kiln", "orchard", "plan.md", "voice.md"]);
+    let names = lookups::project_names(&[base.join("root")], &["Dusty".into()]);
+    assert!(names.contains(&"dusty".to_string()) && names.contains(&"old.md".to_string()), "{names:?}");
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// recent_chat numbers its lines across the whole thread; read_chat reads around one, in full.
+#[test]
+fn chat_search_and_read() {
+    let ev = |id: i64, ty: &str, text: &str| {
+        Arc::new(serde_json::json!({"id": id, "type": ty, "text": text, "t": 1.7e9 + id as f64}))
+    };
+    let mut events = vec![];
+    for i in 1..=30 {
+        events.push(ev(i * 2, "user", &format!("question {i}")));
+        events.push(ev(
+            i * 2 + 1,
+            "assistant",
+            &format!("answer {i}{}", if i == 5 { " about the plum orchard" } else { "" }),
+        ));
+    }
+    let found = lookups::recent_chat(&events, "plum orchard");
+    assert!(found.starts_with("#11 [") && found.contains("seimei: answer 5 about the plum orchard"), "{found}");
+    let around = lookups::read_chat(&events, 11);
+    let lines: Vec<&str> = around.lines().collect();
+    assert_eq!(lines.len(), 13, "{around}");
+    assert!(lines[0].starts_with("#5 ") && lines[6].starts_with("#11 ") && lines[12].starts_with("#17 "), "{around}");
+    assert!(lookups::read_chat(&events, 999).contains("no chat line"));
+}
+
+/// auto takes at most two additional languages: past that, calls use request.
+#[test]
+fn auto_language_mode_limit() {
+    let cfg = |src: &str| {
+        seimei_core::voice::Config::from_toml(Some(&toml::Value::Table(src.parse::<toml::Table>().unwrap())))
+    };
+    assert_eq!(cfg("").multilingual_mode, "auto");
+    assert_eq!(cfg("additional_languages = [\"ru\", \"uk\"]").multilingual_mode, "auto");
+    assert_eq!(cfg("additional_languages = [\"ru\", \"uk\", \"pt\"]").multilingual_mode, "request");
+    assert_eq!(
+        cfg("multilingual_mode = \"initial\"\nadditional_languages = [\"ru\", \"uk\", \"pt\"]").multilingual_mode,
+        "initial"
+    );
+}
+
+/// The tools' new parameters: a topic for ask_seimei, a count for the agent reads, a line for read_chat.
+#[test]
+fn tool_parameters() {
+    let specs = lookups::specs(&|_| true, true, true, false);
+    let params = |name: &str| -> Vec<String> {
+        let t = specs.iter().find(|t| t["tool_schema"]["function"]["name"] == name).unwrap();
+        let p = &t["tool_schema"]["function"]["parameters"];
+        assert_eq!(
+            p["required"].as_array().unwrap().len(),
+            p["properties"].as_object().unwrap().len(),
+            "{name}: strict wants all"
+        );
+        p["properties"].as_object().unwrap().keys().cloned().collect()
+    };
+    assert_eq!(params("ask_seimei"), ["request", "topic"]);
+    assert_eq!(params("shikigami"), ["name", "count"]);
+    assert_eq!(params("sessions"), ["name", "count"]);
+    assert_eq!(params("read_chat"), ["line"]);
+}

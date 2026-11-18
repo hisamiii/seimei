@@ -34,6 +34,9 @@ const BARGE_HOLD: Duration = Duration::from_millis(1500);
 const ASK_WAIT: Duration = Duration::from_secs(150);
 /// The call's transcript in the dispatcher's note, at most.
 const NOTE_MAX: usize = 4000;
+/// Phonic's limit on one boosted keyword, and how many the call sends at most.
+const KEYWORD_MAX: usize = 50;
+const KEYWORDS: usize = 200;
 /// A chat line passed to the partner during the call, at most.
 const DELTA_MAX: usize = 600;
 /// A sample above this is sound: Phonic streams silent chunks between its turns.
@@ -91,6 +94,16 @@ impl Config {
             }
             known
         });
+        // Phonic's auto mode takes at most two additional languages and refuses the call past that.
+        let additional_languages = list("additional_languages").unwrap_or_default();
+        let mut multilingual_mode = s("multilingual_mode", "auto");
+        if multilingual_mode == "auto" && additional_languages.len() > 2 {
+            eprintln!(
+                "seimei: [voice] multilingual_mode \"auto\" takes at most 2 additional_languages, not {}: calls use \"request\"",
+                additional_languages.len()
+            );
+            multilingual_mode = "request".into();
+        }
         let pronounce = (t.and_then(|t| t.get("pronounce")).and_then(|p| p.as_table()).into_iter().flatten())
             .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string())))
             .collect();
@@ -108,8 +121,8 @@ impl Config {
                 .unwrap_or(1.0)
                 .clamp(0.5, 1.5),
             default_language: s("default_language", "en"),
-            additional_languages: list("additional_languages").unwrap_or_default(),
-            multilingual_mode: s("multilingual_mode", "request"),
+            additional_languages,
+            multilingual_mode,
             idle: t.and_then(|t| t.get("idle")).and_then(|v| v.as_integer()).unwrap_or(300).clamp(10, 3600) as u64,
             sections,
             memory: Some(s("memory", "")).filter(|m| !m.is_empty()).map(|m| expand(&m).into()),
@@ -242,20 +255,30 @@ impl Voice {
         lookups::specs(&|s| self.on(s), memory, self.files_on(), self.web.ready())
     }
 
-    /// Words for speech recognition: seimei's own, the shikigami's and sessions' names (also split at dashes), and config's.
+    /// Words for speech recognition, the surest first: seimei's own, config's, the shikigami's and sessions' names
+    /// (also split at dashes), the board's projects, then active project folders and their docs (lookups::project_names).
     pub fn keywords(&self, src: &pack::Sources) -> Vec<String> {
         let mut out: Vec<String> = vec!["seimei".into(), "shikigami".into()];
-        for line in src.workers.lines().chain(src.sessions.lines()) {
-            let name = line.split([' ', '(', '[']).next().unwrap_or("").trim();
+        out.extend(self.cfg.keywords.iter().cloned());
+        let named = |name: &str, out: &mut Vec<String>| {
             if name.len() >= 3 && name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
                 out.push(name.into());
                 out.extend(name.split('-').filter(|p| p.len() >= 3).map(String::from));
             }
+        };
+        for line in src.workers.lines().chain(src.sessions.lines()) {
+            named(line.split([' ', '(', '[']).next().unwrap_or("").trim(), &mut out);
         }
-        out.extend(self.cfg.keywords.iter().cloned());
+        // A board project heads its items: "name (paused) [color x]", the items indented under it.
+        for line in src.board.lines().filter(|l| !l.starts_with(' ')) {
+            named(line.split([' ', '(', '[']).next().unwrap_or("").trim(), &mut out);
+        }
+        if self.files_on() {
+            out.extend(lookups::project_names(&self.cfg.roots, &out.clone()));
+        }
         let mut seen = HashSet::new();
-        out.retain(|k| seen.insert(k.to_lowercase()));
-        out.truncate(200);
+        out.retain(|k| k.chars().count() <= KEYWORD_MAX && seen.insert(k.to_lowercase()));
+        out.truncate(KEYWORDS);
         out
     }
 
@@ -300,7 +323,14 @@ impl Voice {
                 Some(dir) => lookups::read_memory(dir, &s("name")),
                 None => "There is no memory folder.".into(),
             },
-            "recent_chat" => lookups::recent_chat(&self.events.before(None, 3000), &s("query")),
+            "recent_chat" => lookups::recent_chat(&self.events.before(None, usize::MAX), &s("query")),
+            "read_chat" => {
+                let line = p["line"].as_i64().or_else(|| s("line").trim_start_matches('#').trim().parse().ok());
+                match line {
+                    Some(line) => lookups::read_chat(&self.events.before(None, usize::MAX), line),
+                    None => "Say the line's number from recent_chat.".into(),
+                }
+            }
             "read_file" => self.reach().read_file(&s("path")),
             "search_files" => self.reach().search_files(&s("query")),
             _ => format!("{name} is not one of your tools."),
@@ -386,6 +416,11 @@ struct Ask {
     at: Instant,
     /// Its tool call has its output: the answer or the "still working" line.
     closed: bool,
+    /// A few words the partner gave it, to name it when its answer comes after the talk moved on.
+    topic: String,
+    /// The user's turns so far when it was asked: more by the answer means the answer is late.
+    turns: usize,
+    answered: bool,
 }
 
 type Socket = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
@@ -400,6 +435,12 @@ struct Call {
     partner_speaking: bool,
     /// What the partner has said so far in the reply that plays.
     said: String,
+    /// The part of `said` that went to the client with its audio: after a barge, the words the user heard.
+    sent: String,
+    /// The user's turns in this call.
+    user_turns: usize,
+    /// Approval cards the partner was told about.
+    cards: HashSet<String>,
     /// The client's barge: the partner's audio is held back until its own detection agrees or BARGE_HOLD passes.
     barge: Option<Instant>,
     asks: Vec<Ask>,
@@ -429,6 +470,9 @@ impl Call {
             user_speaking: false,
             partner_speaking: false,
             said: String::new(),
+            sent: String::new(),
+            user_turns: 0,
+            cards: HashSet::new(),
             barge: None,
             asks: vec![],
             replies: VecDeque::new(),
@@ -533,8 +577,8 @@ impl Call {
                     Some(Up::End) | None => {
                         // A hang-up in the middle of a reply: what the partner said of it is a cut turn.
                         if self.partner_speaking {
-                            let said = std::mem::take(&mut self.said);
-                            self.heard("partner", &said, true);
+                            let sent = std::mem::take(&mut self.sent);
+                            self.heard("partner", &sent, true);
                         }
                         let _ = sock.close(None).await;
                         return Ok(End::Client);
@@ -592,6 +636,7 @@ impl Call {
                 if self.barge.is_none() && !pcm.is_empty() && (self.partner_speaking || audible || !text.is_empty()) {
                     let _ = self.down.try_send(Down::Audio(pcm));
                     if !text.is_empty() {
+                        self.sent.push_str(&text);
                         self.say(json!({"type": "saying", "text": text}));
                     }
                     if audible {
@@ -602,6 +647,7 @@ impl Call {
             "assistant_started_speaking" => {
                 (self.partner_speaking, self.barge) = (true, None);
                 self.said.clear();
+                self.sent.clear();
                 self.state("speaking");
             }
             "assistant_finished_speaking" => {
@@ -613,7 +659,11 @@ impl Call {
             "interrupted_response" => {
                 self.partner_speaking = false;
                 self.said.clear();
-                self.heard("partner", &s("text"), true);
+                // The cut line is what the user heard: what went to the client, or Phonic's text when that is shorter.
+                // Phonic's runs on past the client's while the page's barge holds the audio back.
+                let sent = std::mem::take(&mut self.sent);
+                let text = s("text");
+                self.heard("partner", if text.trim().len() < sent.trim().len() { &text } else { &sent }, true);
                 self.say(json!({"type": "flush"}));
             }
             "user_started_speaking" => {
@@ -644,6 +694,9 @@ impl Call {
         let text = text.trim();
         if text.is_empty() {
             return;
+        }
+        if who == "user" {
+            self.user_turns += 1;
         }
         let mut ev = json!({"type": "voice", "who": who, "text": text});
         if cut {
@@ -679,7 +732,8 @@ impl Call {
             if let Some(t) = &mut self.turn {
                 t.tools.push("ask_seimei".into());
             }
-            return self.ask(&id, params["request"].as_str().unwrap_or("").trim());
+            let topic = params["topic"].as_str().unwrap_or("").trim();
+            return self.ask(&id, params["request"].as_str().unwrap_or("").trim(), topic);
         }
         self.running.insert(id.clone(), (name.clone(), Instant::now()));
         let (v, done) = (self.v.clone(), done.clone());
@@ -720,7 +774,7 @@ impl Call {
         }
     }
 
-    fn ask(&mut self, call_id: &str, request: &str) {
+    fn ask(&mut self, call_id: &str, request: &str, topic: &str) {
         if request.is_empty() {
             let output = "Say what to ask seimei.";
             self.out.push(json!({"type": "tool_call_output", "tool_call_id": call_id, "output": output}));
@@ -728,7 +782,18 @@ impl Call {
         }
         let event = self.v.dispatcher.send_voice(request);
         self.say(json!({"type": "asking", "request": request}));
-        let ask = Ask { call_id: call_id.into(), event, request: request.into(), at: Instant::now(), closed: false };
+        let topic = if topic.is_empty() { chars(request, 60) } else { chars(topic, 60) };
+        let (at, turns) = (Instant::now(), self.user_turns);
+        let ask = Ask {
+            call_id: call_id.into(),
+            event,
+            request: request.into(),
+            at,
+            closed: false,
+            topic,
+            turns,
+            answered: false,
+        };
         self.asks.push(ask);
     }
 
@@ -741,16 +806,25 @@ impl Call {
                 // The dispatcher ran a turn: the notes it had are delivered.
                 self.transcript.clear();
                 let text = s("text");
+                let turns = self.user_turns;
                 if let Some(a) = self.asks.iter_mut().find(|a| ev["re"].as_i64() == Some(a.event)) {
-                    let request = a.request.clone();
+                    let (request, topic) = (a.request.clone(), a.topic.clone());
+                    a.answered = true;
+                    let late = turns > a.turns;
                     if !a.closed {
                         a.closed = true;
                         let output = json!({"seimei": text});
                         self.out.push(json!({"type": "tool_call_output", "tool_call_id": a.call_id, "output": output}));
                     }
-                    let msg = format!(
-                        "seimei answered the request \"{request}\": {text}\nTell the user in your own words, in a sentence or two."
-                    );
+                    let msg = if late {
+                        format!(
+                            "seimei answered an earlier request, about {topic} (\"{request}\"): {text}\nThe talk has moved on since. Start with \"About {topic}:\", then tell the answer in your own words in a sentence or two. Keep it apart from what you talk about now."
+                        )
+                    } else {
+                        format!(
+                            "seimei answered the request \"{request}\": {text}\nTell the user in your own words, in a sentence or two."
+                        )
+                    };
                     self.replies.push_back(json!({"type": "generate_reply", "system_message": msg}));
                     self.say(json!({"type": "answered", "request": request}));
                 } else if ev["lane"] != "t" {
@@ -761,6 +835,20 @@ impl Call {
             "user" if ev["voice"] != true => {
                 let msg = format!("[{at}] the user typed to seimei: {}", chars(&s("text"), DELTA_MAX));
                 self.out.push(json!({"type": "add_system_message", "system_message": msg}));
+            }
+            // seimei waits on the user's ok for something it does for an open ask: the partner says so, once per card.
+            "approval" if s("who") == "seimei" && !s("aid").is_empty() => {
+                let Some(a) = self.asks.iter().rev().find(|a| !a.answered) else { return };
+                if !self.cards.insert(s("aid")) {
+                    return;
+                }
+                let what = [s("sub"), s("target")].into_iter().find(|x| !x.is_empty()).unwrap_or_default();
+                let msg = format!(
+                    "seimei needs the user's ok on the phone before it can go on with {}: it asks to {}. Tell the user in a sentence: the card is in the chat, and they tap Allow or Deny there.",
+                    a.topic,
+                    chars(&what, 120)
+                );
+                self.replies.push_back(json!({"type": "generate_reply", "system_message": msg}));
             }
             "worker" if matches!(s("event").as_str(), "done" | "failed" | "asking") => {
                 let what = match s("event").as_str() {

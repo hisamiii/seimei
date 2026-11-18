@@ -18,7 +18,7 @@ client --PCM over wss--> /api/voice/ws --> voice bridge --wss--> Phonic
 - **The partner talks.** It answers from the context pack and from read-only lookups that run on seimei's server.
 - **The dispatcher acts.** For an action, or a question the partner can't settle, the partner calls `ask_seimei`. The request goes into the thread as the user's message, marked voice. It reaches the dispatcher as `[voice] <request>`, and the dispatcher's prompt says how to answer one: short, fact first, heard rather than read.
 - **The answer comes back.** The dispatcher's reply goes to Phonic as the tool call's output. Then, once both sides are quiet, a `generate_reply` asks the partner to say it in its own words. A reply that takes over 150 s gets a "still working" output first, and is spoken when it lands.
-- **Both sides land in the thread.** Each finished turn is a `voice` event, `who` being `user` or `partner`, with `cut` on a reply the user barged into or hung up on. The call so far rides to the dispatcher as a keyed "Voice call so far" note, so its next turn sees what was said.
+- **Both sides land in the thread.** Each finished turn is a `voice` event, `who` being `user` or `partner`, with `cut` on a reply the user barged into or hung up on. A cut reply holds only the words that reached the client, so none the bridge held back. The call so far rides to the dispatcher as a keyed "Voice call so far" note, so its next turn sees what was said.
 - **News reaches the partner.** During a call, seimei's other chat replies, the user's typed messages and shikigami reports go to Phonic as stamped `add_system_message` lines.
 
 A conversation that drops, or reaches Phonic's two-hour limit, goes on in a fresh one with a rebuilt pack. The pack's chat section holds the voice turns so far, so the new conversation knows them. When Phonic ends the call after `idle` seconds of silence, the call ends.
@@ -46,26 +46,33 @@ Every lookup runs on seimei's server and answers through the socket seimei opene
 | tool | does | mode |
 |---|---|---|
 | `board(query)` | open board items, filtered | sync |
-| `shikigami(name)` | the list, or one shikigami's latest messages | sync |
-| `sessions(name)` | the user's sessions, or one's latest messages | sync |
+| `shikigami(name, count)` | the list, or one's latest 12 messages, up to 40 | sync |
+| `sessions(name, count)` | the list, or one's latest 4 messages, up to 20 | sync |
 | `search_notes(query)` | the best matching sections of `notes.md` | sync |
 | `search_memory(query)`, `read_memory(name)` | the memory index, or one file | sync |
-| `recent_chat(query)` | older thread lines | sync |
+| `recent_chat(query)` | the whole thread's matching lines, numbered | sync |
+| `read_chat(line)` | six lines on each side of one, in full | sync |
 | `read_file(path)`, `search_files(query)` | files under the allowed roots | sync |
 | `web_search(query)`, `fetch_page(url)` | the web, through OpenRouter and a plain fetch | sync, speech first |
-| `ask_seimei(request)` | the dispatcher | async |
+| `ask_seimei(request, topic)` | the dispatcher | async |
 
 - **Fast lookups** are sync with `require_speech_before_tool_call: false`: a 50 ms lookup adds about 0.4 s to an answer.
 - **Web tools** take 1 to 3 s. They stay sync, so their answer starts the partner's reply by itself. They ask for speech first: the partner says it is looking, so the wait is not silent.
 - **ask_seimei** is plain async. Phonic's `wait_for_response` would block every lookup during the wait and speak the result twice.
 - **Names are matched loosely.** Speech recognition hears "fern anvil" as "for-an-anvil". So a name goes to the closest real one: the same letters, one holding the other, or an edit distance within a third.
+- **Late answers** name their topic. When the user has spoken since the ask, the partner opens with its own few words for it, like "About the voice doc:". So the answer doesn't mix with the talk of the moment.
+- **Approval cards.** When seimei waits on the user's ok for an open ask, the partner says so once per card. The card is in the chat, with Allow and Deny.
 - **Read-only.** The board, shikigami and sessions are read through `Tools::lookup`, which runs only the actions it names. A tool call for anything else, such as `tasks` or `summon`, gets "not one of your tools".
 
 `web_search` sends the query to OpenRouter's web plugin with the Exa engine and five results. It returns the model's short answer and each result's title, link and excerpt.
 
 ## Speech recognition and the voice
 
-`boosted_keywords` holds seimei, shikigami, the names of the shikigami and sessions, and `[voice] keywords`. Names also go split at dashes.
+`boosted_keywords` holds up to 200 words, surest first, each at most 50 characters.
+
+- seimei, shikigami and `[voice] keywords`.
+- The names of the shikigami, sessions and board projects, also split at dashes.
+- The active project folders under the roots, and their docs such as `voice.md`. A folder is active when it or its `.git` changed in the last 14 days, or a known name matches it.
 
 `[voice] pronounce` becomes Phonic's pronunciation dictionary. Turn taking is `eager`, which detects the end of speech about 0.4 s sooner than `standard`.
 

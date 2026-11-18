@@ -13,7 +13,7 @@ pub const SECTIONS: [&str; 6] = ["style", "chat", "board", "work", "notes", "mem
 const STYLE_MAX: usize = 1_000;
 const CHAT_MAX: usize = 16_000;
 const CHAT_LINES: usize = 60;
-const CHAT_ONE: usize = 400;
+pub const CHAT_ONE: usize = 400;
 const BOARD_MAX: usize = 8_000;
 const WORK_MAX: usize = 6_000;
 const NOTES_MAX: usize = 30_000;
@@ -84,8 +84,15 @@ fn lines_within(text: &str, max: usize, more: &str) -> String {
 
 /// One line per chat event worth knowing: the user's and seimei's messages, both sides of voice calls, seimei's tool calls and the shikigami's reports.
 pub fn chat_line(e: &Value) -> Option<String> {
+    let line = chat_text(e, CHAT_ONE)?;
+    let t = e["t"].as_f64().unwrap_or(0.0);
+    Some(format!("[{}] {line}", local_time(t, "%a %H:%M")))
+}
+
+/// A chat event's line without its time, each text cut at `one` characters; None for events not worth a line.
+pub fn chat_text(e: &Value, one: usize) -> Option<String> {
     let s = |k: &str| e[k].as_str().unwrap_or("").trim();
-    let flat = |t: &str| chars(&t.split_whitespace().collect::<Vec<_>>().join(" "), CHAT_ONE);
+    let flat = |t: &str| chars(&t.split_whitespace().collect::<Vec<_>>().join(" "), one);
     let trajectory = e["lane"] == "t";
     let line = match s("type") {
         "user" if e["voice"] == true => format!("user, asked by voice through you: {}", flat(s("text"))),
@@ -102,8 +109,7 @@ pub fn chat_line(e: &Value) -> Option<String> {
     if line.ends_with(": ") {
         return None;
     }
-    let t = e["t"].as_f64().unwrap_or(0.0);
-    Some(format!("[{}] {line}", local_time(t, "%a %H:%M")))
+    Some(line)
 }
 
 /// The newest lines that fit, oldest first.

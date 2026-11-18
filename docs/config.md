@@ -48,7 +48,7 @@ The table lists each section's keys, their defaults and what they set. Notes on 
 | | `audio_speed` | 1.0 | how fast the partner talks, 0.5 to 1.5; see [voice.md](voice.md) |
 | | `default_language` | `en` | the language a call starts in |
 | | `additional_languages` | `[]` | more languages the partner hears and speaks, such as `["ru", "uk"]` |
-| | `multilingual_mode` | `request` | when the partner switches language, see below |
+| | `multilingual_mode` | `auto` | when the partner switches language, see below |
 | | `idle` | 300 | seconds of silence before a call ends |
 | | `sections` | all six | the pack's sections: `style`, `chat`, `board`, `work`, `notes`, `memory` |
 | | `memory` | none | a folder with `MEMORY.md` and one `.md` file per memory |
@@ -81,7 +81,7 @@ Notes on the keys:
 - With every `[asr.sources]` switch off, only the pins in `asr/words.txt` are sent.
 - `[voice] roots` takes absolute paths or paths under `~`. The memory folder and seimei's `notes.md` are readable besides them. Without roots or memory there are no file tools.
 - `[voice] voice` takes one of Phonic's voice ids, such as `grant`.
-- `[voice] multilingual_mode` is `request` to switch when the user asks, `auto` to follow each turn, or `initial` to keep the first turn's language. `auto` takes at most two additional languages.
+- `[voice] multilingual_mode` is `auto` to follow the language of each turn, `request` to switch when the user asks, or `initial` to keep the first turn's language. `auto` takes at most two additional languages: with more, calls use `request` and the log says so.
 - `[voice] pronounce` is a table such as `{ HRX = "H R X" }`. Phonic takes plain respellings, no IPA.
 - Without a key in `search_key_file`, the partner gets no web tools.
 

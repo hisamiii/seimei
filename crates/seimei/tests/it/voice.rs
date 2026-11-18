@@ -248,6 +248,7 @@ async fn run(base: PathBuf, root: PathBuf) {
         "search_memory",
         "read_memory",
         "recent_chat",
+        "read_chat",
         "read_file",
         "search_files",
         "web_search",
@@ -265,7 +266,7 @@ async fn run(base: PathBuf, root: PathBuf) {
     // The page's own speed, over the config's 1.0.
     assert_eq!(configs[0]["audio_speed"], 1.25);
     assert_eq!(configs[0]["default_language"], "en");
-    assert_eq!(configs[0]["multilingual_mode"], "request");
+    assert_eq!(configs[0]["multilingual_mode"], "auto");
     // The second conversation's pack holds the first one's voice turns.
     assert!(configs[1]["system_prompt"].as_str().unwrap().contains("you, by voice: Hello there."));
 
@@ -327,7 +328,7 @@ async fn run(base: PathBuf, root: PathBuf) {
         [
             ("user".into(), "what is on the board about the lantern".into(), false),
             ("partner".into(), "Hello there.".into(), false),
-            ("partner".into(), "Long ans".into(), true),
+            // The client barged before any of the long answer reached it: the user heard none, so no cut line.
         ]
     );
     let request = evs.iter().find(|e| e["type"] == "user" && e["voice"] == true).unwrap();

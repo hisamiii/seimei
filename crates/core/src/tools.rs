@@ -488,6 +488,11 @@ impl Tools {
     /// Blocking: run it off the async threads.
     pub fn lookup(&self, name: &str, a: &Value) -> Value {
         let heard = arg(a, "name");
+        // The voice partner's deeper read: a count over 0 replaces the default, up to a cap.
+        let count = |default: i64, max: i64| {
+            let c = a["count"].as_i64().or_else(|| arg(a, "count").trim().parse().ok()).unwrap_or(0);
+            if c > 0 { c.min(max) } else { default }
+        };
         match name {
             "board" => {
                 let all = self.board.lock().unwrap().text(false);
@@ -501,7 +506,7 @@ impl Tools {
                 let Some(found) = crate::voice::lookups::closest(&heard, &names) else {
                     return text(&format!("No shikigami is called \"{heard}\". Running: {}", names.join(", ")), true);
                 };
-                self.blocking("peek", &json!({"worker": found, "count": 12}))
+                self.blocking("peek", &json!({"worker": found, "count": count(12, 40)}))
             }
             "sessions" if heard.trim().is_empty() => self.blocking("sessions", &json!({})),
             "sessions" => {
@@ -511,7 +516,7 @@ impl Tools {
                 let Some(found) = crate::voice::lookups::closest(&heard, &names) else {
                     return text(&format!("No session is called \"{heard}\". Running: {}", names.join(", ")), true);
                 };
-                self.session_peek(&json!({"session": found, "count": 4}))
+                self.session_peek(&json!({"session": found, "count": count(4, 20)}))
             }
             _ => text(&format!("{name} is not a lookup"), true),
         }
