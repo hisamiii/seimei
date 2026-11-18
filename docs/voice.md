@@ -18,7 +18,7 @@ client --PCM over wss--> /api/voice/ws --> voice bridge --wss--> Phonic
 - **The partner talks.** It answers from the context pack and from read-only lookups that run on seimei's server.
 - **The dispatcher acts.** For an action, or a question the partner can't settle, the partner calls `ask_seimei`. The request goes into the thread as the user's message, marked voice. It reaches the dispatcher as `[voice] <request>`, and the dispatcher's prompt says how to answer one: short, fact first, heard rather than read.
 - **The answer comes back.** The dispatcher's reply goes to Phonic as the tool call's output. Then, once both sides are quiet, a `generate_reply` asks the partner to say it in its own words. A reply that takes over 150 s gets a "still working" output first, and is spoken when it lands.
-- **Both sides land in the thread.** Each finished turn is a `voice` event, `who` being `user` or `partner`, with `cut` on a reply the user barged into. The call so far rides to the dispatcher as a keyed "Voice call so far" note, so its next turn sees what was said.
+- **Both sides land in the thread.** Each finished turn is a `voice` event, `who` being `user` or `partner`, with `cut` on a reply the user barged into or hung up on. The call so far rides to the dispatcher as a keyed "Voice call so far" note, so its next turn sees what was said.
 - **News reaches the partner.** During a call, seimei's other chat replies, the user's typed messages and shikigami reports go to Phonic as stamped `add_system_message` lines.
 
 A conversation that drops, or reaches Phonic's two-hour limit, goes on in a fresh one with a rebuilt pack. The pack's chat section holds the voice turns so far, so the new conversation knows them. When Phonic ends the call after `idle` seconds of silence, the call ends.
@@ -101,7 +101,7 @@ Text frames down:
 
 Down audio is only what is heard. Phonic streams silent chunks nonstop, so the bridge forwards a chunk only while the partner speaks, or when it holds sound or words.
 
-Each turn leaves a line in the server log. It holds the time from the user's last speech to the partner's first sound, when Phonic heard the end, and each lookup's time. A reply that speaks seimei's answer gets a line too.
+Each turn leaves a line in the server log. It holds the user's words and the time from their last speech to the partner's first sound. It also says when Phonic heard the end, and how long each lookup took. A reply that speaks seimei's answer gets a line too.
 
 ## What leaves the machine
 

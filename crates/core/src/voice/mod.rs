@@ -343,6 +343,8 @@ struct Turn {
     heard: Instant,
     /// Each lookup that ran meanwhile, with its time.
     tools: Vec<String>,
+    /// The user's words, once Phonic has them.
+    words: String,
 }
 
 /// An ask_seimei call waiting for the dispatcher: its user message's event id is what the reply answers.
@@ -492,6 +494,11 @@ impl Call {
                         }
                     }
                     Some(Up::End) | None => {
+                        // A hang-up in the middle of a reply: what the partner said of it is a cut turn.
+                        if self.partner_speaking {
+                            let said = std::mem::take(&mut self.said);
+                            self.heard("partner", &said, true);
+                        }
                         let _ = sock.close(None).await;
                         return Ok(End::Client);
                     }
@@ -581,7 +588,7 @@ impl Call {
             "user_finished_speaking" => {
                 self.user_speaking = false;
                 if let Some(spoke) = self.spoke {
-                    self.turn = Some(Turn { spoke, heard: Instant::now(), tools: vec![] });
+                    self.turn = Some(Turn { spoke, heard: Instant::now(), tools: vec![], words: String::new() });
                 }
             }
             "input_text" => self.heard("user", &s("text"), false),
@@ -607,6 +614,9 @@ impl Call {
         }
         self.v.events.add(ev);
         self.say(json!({"type": "said", "who": who, "text": text}));
+        if let Some(t) = self.turn.as_mut().filter(|_| who == "user") {
+            t.words = chars(text, 80);
+        }
         let name = if who == "user" { "user" } else { "partner" };
         self.transcript.push(format!("{name}: {text}"));
         let mut note = self.transcript.join("\n");
@@ -662,9 +672,10 @@ impl Call {
         if let Some(t) = self.turn.take() {
             let tools = if t.tools.is_empty() { "none".to_string() } else { t.tools.join(", ") };
             eprintln!(
-                "seimei: voice: turn: first sound {:.2} s after the user's speech, Phonic heard the end at {:.2} s, tools: {tools}",
+                "seimei: voice: turn: first sound {:.2} s after the user's speech, Phonic heard the end at {:.2} s, tools: {tools}, after {:?}",
                 t.spoke.elapsed().as_secs_f64(),
                 (t.heard - t.spoke).as_secs_f64(),
+                t.words,
             );
         } else if let Some(at) = self.answer.take() {
             eprintln!("seimei: voice: answer: first sound {:.2} s after the reply request", at.elapsed().as_secs_f64());
