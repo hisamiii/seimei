@@ -19,7 +19,7 @@ client --PCM over wss--> /api/voice/ws --> voice bridge --wss--> Phonic
 - **The dispatcher acts.** For an action, or a question the partner can't settle, the partner calls `ask_seimei`. The request goes into the thread as the user's message, marked voice. It reaches the dispatcher as `[voice] <request>`, and the dispatcher's prompt says how to answer one: short, fact first, heard rather than read.
 - **The answer comes back.** The dispatcher's reply goes to Phonic as the tool call's output. Then, once both sides are quiet, a `generate_reply` asks the partner to say it in its own words. A reply that takes over 150 s gets a "still working" output first, and is spoken when it lands.
 - **Both sides land in the thread.** Each finished turn is a `voice` event, `who` being `user` or `partner`, with `cut` on a reply the user barged into or hung up on. A cut reply holds only the words that reached the client, so none the bridge held back. The call so far rides to the dispatcher as a keyed "Voice call so far" note, so its next turn sees what was said.
-- **The end gets a summary.** When the call ends, `search_model` reads the whole call through OpenRouter and writes one or two sentences: what was asked and what came of it. A `voice_end` event then holds the call's length in `secs` and its `summary`. When the model fails, the event comes without a summary. A call where nobody spoke leaves no event.
+- **The end gets a summary.** When the call ends, a `voice_end` event holds the call's length in `secs`. The dispatcher then gets the whole call as a [seimei] message its reply keeps out of the chat. It writes one or two sentences with its `voice_summary` tool: what was asked and what came of it. A call where nobody spoke leaves no event.
 - **News reaches the partner.** During a call, seimei's other chat replies, the user's typed messages and shikigami reports go to Phonic as stamped `add_system_message` lines.
 
 A conversation that drops, or reaches Phonic's two-hour limit, goes on in a fresh one with a rebuilt pack. The pack's chat section holds the voice turns so far, so the new conversation knows them. When Phonic ends the call after `idle` seconds of silence, the call ends.
@@ -150,8 +150,6 @@ Each turn leaves a line in the server log. It holds the user's words and the tim
 ## What leaves the machine
 
 Every call sends the pack, lookup answers, the audio and both transcripts to Phonic, and Phonic's upstream providers process them. Web searches go to OpenRouter and its search engine, and `fetch_page` reaches the page's site.
-
-At the end of a call, the whole transcript goes to OpenRouter for the summary.
 
 All of it goes as it is: nothing is scrubbed.
 

@@ -13,7 +13,6 @@ use crate::util::chars;
 
 const RESULTS: usize = 5;
 const EXCERPT: usize = 700;
-const SUMMARY_MAX: usize = 400;
 /// A page bigger than this is read only this far.
 const PAGE_BYTES: usize = 3 << 20;
 const REDIRECTS: usize = 3;
@@ -47,22 +46,6 @@ impl Web {
         });
         let v = self.complete(&body).await.map_err(|e| format!("search failed: {e}"))?;
         Ok(results(&v))
-    }
-
-    /// A call's summary for its card in the chat: one or two plain sentences from the transcript.
-    pub async fn summary(&self, transcript: &str) -> Result<String, String> {
-        let ask = "This is a voice call between the user and their voice assistant, which hands actions to seimei, the user's coding agent. In one or two plain sentences, say what the user asked and what came of it. No preamble, no markdown.";
-        let body = json!({
-            "model": self.model,
-            "messages": [{"role": "system", "content": ask}, {"role": "user", "content": transcript}],
-            "max_tokens": 160,
-        });
-        let v = self.complete(&body).await?;
-        let text = v["choices"][0]["message"]["content"].as_str().unwrap_or("").trim();
-        if text.is_empty() {
-            return Err("an empty summary".into());
-        }
-        Ok(chars(text, SUMMARY_MAX))
     }
 
     /// One chat completion through OpenRouter.

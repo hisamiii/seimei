@@ -576,6 +576,18 @@ impl Tools {
                 };
                 text(&said, false)
             }
+            "voice_summary" => {
+                let call = a["call"].as_i64().unwrap_or(0);
+                if !self.events.get(call).is_some_and(|e| e["type"] == "voice_end") {
+                    return text("No such call.", true);
+                }
+                let summary = s("text").trim().to_string();
+                if summary.is_empty() {
+                    return text("Not written: the text is empty.", true);
+                }
+                self.events.add(json!({"type": "voice_summary", "call": call, "summary": summary}));
+                text("Written onto the call's card.", false)
+            }
             "presence" => {
                 let rows = self.push.presence();
                 if rows.is_empty() {

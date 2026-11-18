@@ -582,6 +582,12 @@ impl Dispatcher {
         let _ = self.tx.send(Cmd::Deliver { text: format!("[seimei] {text}"), images: vec![], src: Some(src) });
     }
 
+    /// Something the dispatcher should do on its own: the user need not see it, so its reply stays in the trajectory.
+    pub fn chore(&self, text: &str) {
+        let src = Source::Event(why(text), Class::Noise);
+        let _ = self.tx.send(Cmd::Deliver { text: format!("[seimei] {text}"), images: vec![], src: Some(src) });
+    }
+
     /// The permission mode it runs in ([approvals] dispatcher).
     pub fn mode(&self) -> &str {
         &self.cfg.mode

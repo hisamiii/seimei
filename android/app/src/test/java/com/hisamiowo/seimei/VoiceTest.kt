@@ -244,12 +244,14 @@ class VoiceTest {
         assertFalse((c.items[2] as Item.Asked).waiting)
         // The reply sits right under the ask: no chip naming what it answers.
         assertNull((c.items[3] as Item.Msg).anchor)
-        // The call's end closes the card with its length and summary, however late it comes.
-        c.add(JSONObject("""{"id": 5, "type": "voice_end", "secs": 372, "summary": "Asked for the uptime: 3 days.", "t": ${t + 700}}"""))
+        // The call's end closes the card with its length, however late it comes; seimei's summary fills it in after.
+        c.add(JSONObject("""{"id": 5, "type": "voice_end", "secs": 372, "t": ${t + 700}}"""))
         val ended = c.items[1] as Item.Voice
         assertTrue(ended.ended)
         assertEquals(372L, ended.secs)
-        assertEquals("Asked for the uptime: 3 days.", ended.summary)
+        assertEquals("", ended.summary)
+        c.add(JSONObject("""{"id": 8, "type": "voice_summary", "call": 5, "summary": "Asked for the uptime: 3 days.", "t": ${t + 720}}"""))
+        assertEquals("Asked for the uptime: 3 days.", (c.items[1] as Item.Voice).summary)
         // A turn after the end, or more than 5 minutes after the last one, is another call.
         c.add(JSONObject("""{"id": 6, "type": "voice", "who": "user", "text": "hi again", "t": ${t + 710}}"""))
         c.add(JSONObject("""{"id": 7, "type": "voice", "who": "user", "text": "still there?", "t": ${t + 1100}}"""))

@@ -39,8 +39,8 @@ const KEYWORD_MAX: usize = 50;
 const KEYWORDS: usize = 200;
 /// A chat line passed to the partner during the call, at most.
 const DELTA_MAX: usize = 600;
-/// The most of a call's transcript the summary reads.
-const SUMMARY_IN: usize = 60_000;
+/// The most of a call's transcript the dispatcher reads for the summary: it stays in its context.
+const SUMMARY_IN: usize = 12_000;
 /// A sample above this is sound: Phonic streams silent chunks between its turns.
 const AUDIBLE: i16 = 200;
 /// Fresh conversations after a dropped socket, in a row, before the call ends.
@@ -388,7 +388,7 @@ impl Voice {
             call.lost();
         }
         call.state("ended");
-        call.end().await;
+        call.end();
     }
 }
 
@@ -505,19 +505,20 @@ impl Call {
         self.say(json!({"type": "state", "state": s}));
     }
 
-    /// The call is over: its card in the chat gets the length and, when OpenRouter answers, a summary.
+    /// The call is over: its card in the chat gets the length, and the dispatcher reads the transcript to write the summary.
     /// A call where nobody said a word leaves no card.
-    async fn end(&self) {
+    fn end(&self) {
         if self.lines.is_empty() {
             return;
         }
         let secs = self.started.elapsed().as_secs();
-        let mut ev = json!({"type": "voice_end", "secs": secs});
-        match self.v.web.summary(&chars(&self.lines.join("\n"), SUMMARY_IN)).await {
-            Ok(s) => ev["summary"] = json!(s),
-            Err(e) => eprintln!("seimei: voice: no summary: {e}"),
-        }
-        self.v.events.add(ev);
+        let ev = self.v.events.add(json!({"type": "voice_end", "secs": secs}));
+        let call = ev["id"].as_i64().unwrap_or(0);
+        let said = chars(&self.lines.join("\n"), SUMMARY_IN);
+        self.v.dispatcher.chore(&format!(
+            "Voice call {call} ended. Write its summary with voice_summary: one or two plain sentences on what the user \
+             asked and what came of it. The user need not see this; answer nothing else.\n\n{said}"
+        ));
     }
 
     /// The conversation went away: open tool calls died with it, so answers still to come are spoken with generate_reply.

@@ -429,6 +429,29 @@
    "_meta": {
     "anthropic/alwaysLoad": true
    },
+   "description": "Write a voice call's summary onto its card in the chat, when seimei sends you the call's transcript: one or two plain sentences on what the user asked and what came of it.",
+   "inputSchema": {
+    "properties": {
+     "call": {
+      "type": "integer",
+      "description": "the call's id, from seimei's message"
+     },
+     "text": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "call",
+     "text"
+    ],
+    "type": "object"
+   },
+   "name": "voice_summary"
+  },
+  {
+   "_meta": {
+    "anthropic/alwaysLoad": true
+   },
    "description": "Push a notification to the user's phone. Nothing else pushes on its own except approval cards: use it when the user asked to hear about something (an APK is up, a run finished), when a shikigami or session needs them soon, or with reply=true when they asked you something and left the app (the tap opens the chat at your latest message; it skips a phone already showing the chat). level: silent (no sound), normal (default), urgent (sound, high priority; rare emergencies only). key: pings with the same key update one notification instead of stacking (e.g. 'build', 'render-7'). Pings without a key while the user is away show together. Check presence first when unsure.",
    "inputSchema": {
     "properties": {

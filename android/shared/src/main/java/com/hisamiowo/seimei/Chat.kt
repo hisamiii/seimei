@@ -147,6 +147,8 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
     private var seq = 0
     // Voice: where the open call's card sits in items, and the partner's open asks to seimei by event id.
     private var call = -1
+    /** The ended calls' cards by their voice_end's id: seimei's voice_summary names one. */
+    private val calls = HashMap<Long, Int>()
     private val asked = HashMap<Long, Int>()
 
     val waiting get() = approvals.keys.count { it !in outcomes }
@@ -237,12 +239,19 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
     }
 
     /** A voice call is one card where it starts, with its turns inside; what the partner asked seimei stays in the chat, as the reply that answers it does.
-     * Turns more than 5 minutes apart are another call; a voice_end closes the card with the call's length and summary. */
+     * Turns more than 5 minutes apart are another call; a voice_end closes the card with the call's length, and a voice_summary from seimei fills in its summary. */
     private fun voice(ev: JSONObject, key: String, t: Double) {
+        if (ev.str("type") == "voice_summary") {
+            calls[ev.optLong("call")]?.let { i -> (items[i] as? Item.Voice)?.let { items[i] = it.copy(summary = ev.str("summary")) } }
+            return
+        }
         val open = (items.getOrNull(call) as? Item.Voice)?.takeIf { !it.ended }
         if (ev.str("type") == "voice_end") {
             // It closes the open card, however long the call stayed silent; with no card open, its turns are on an older page.
-            if (open != null) items[call] = open.copy(secs = ev.optLong("secs"), summary = ev.str("summary"), ended = true)
+            if (open != null) {
+                items[call] = open.copy(secs = ev.optLong("secs"), ended = true)
+                calls[ev.optLong("id")] = call
+            }
             return
         }
         val c = if (open != null && t - open.t1 <= 300) open else Item.Voice("v$key", t, t).also { call = put(it) }
@@ -317,7 +326,7 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
         }
         activity = -1
         val id = ev.optLong("id")
-        if (type == "voice" || type == "voice_end" || (type == "user" && ev.optBoolean("voice"))) return voice(ev, key, t)
+        if (type == "voice" || type == "voice_end" || type == "voice_summary" || (type == "user" && ev.optBoolean("voice"))) return voice(ev, key, t)
         if (type == "user" || type == "assistant") {
             if (id > 0) said[id] = ev.str("text")
             val re = ev.optLong("re")

@@ -760,6 +760,7 @@ export class Renderer {
     this.cur = null;
     // Voice: the open call's card, and the partner's open asks to seimei by event id.
     this.vcall = null;
+    this.calls = new Map();
     this.asked = new Map();
   }
 
@@ -849,7 +850,7 @@ export class Renderer {
   }
 
   // A voice call is one card where it starts, with its turns inside; what the partner asked seimei stays in the chat, as the reply that answers it does.
-  // Turns more than 5 minutes apart are another call; a voice_end closes the card with the call's length and summary.
+  // Turns more than 5 minutes apart are another call; a voice_end closes the card with the call's length, and a voice_summary from seimei fills in its summary.
   call(t, fresh = false) {
     if (fresh || !this.vcall || this.vcall.ended || t - this.vcall.t1 > 300) {
       this.vcall = callCard(t);
@@ -860,14 +861,18 @@ export class Renderer {
   }
 
   voice(ev) {
+    if (ev.type === 'voice_summary') {
+      const c = this.calls.get(ev.call);
+      if (c) { c.sum.textContent = ev.summary; c.sum.hidden = !ev.summary; }
+      return;
+    }
     if (ev.type === 'voice_end') {
       // It closes the open card, however long the call stayed silent; with no card open, its turns are on an older page.
       const c = this.vcall;
       if (!c || c.ended) return;
       c.ended = true;
+      this.calls.set(ev.id, c);
       c.title.textContent = `Voice call · ${minutes(ev.secs)}`;
-      c.sum.textContent = ev.summary || '';
-      c.sum.hidden = !ev.summary;
       c.node.classList.remove('live');
       return;
     }
@@ -923,7 +928,7 @@ export class Renderer {
       return;
     }
     this.activity = null;
-    if (ev.type === 'voice' || ev.type === 'voice_end' || (ev.type === 'user' && ev.voice)) return this.voice(ev);
+    if (ev.type === 'voice' || ev.type === 'voice_end' || ev.type === 'voice_summary' || (ev.type === 'user' && ev.voice)) return this.voice(ev);
     if (ev.type === 'user' || ev.type === 'assistant') {
       if (ev.text) said.set(ev.id, ev.text);
       // Sent from a side thread: the thread's name above the message, one tap from it

@@ -415,6 +415,11 @@ async def dispatcher(self: Fake, text: str, images: int):
         # One stdout line of 3 MB (a big image can pass a reader's 1 MB line limit).
         self.assistant({"type": "text", "text": "x" * (3 << 20)})
         await self.say("That was big.")
+    elif m := re.search(r"\[seimei\] Voice call (\d+) ended", text):
+        # The call's summary: the transcript's first user line, written onto the card.
+        heard = next((ln[6:] for ln in text.splitlines() if ln.startswith("user: ")), "nothing")
+        await self.tool("mcp__seimei__voice_summary", {"call": int(m[1]), "text": f"The user asked {heard}."})
+        await self.say("Summed up.")
     elif text.startswith("[seimei] mark this reply"):
         await self.say("trajectory:")
     elif text.strip().split("\n\n")[-1].startswith("[seimei]"):
