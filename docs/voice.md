@@ -78,6 +78,7 @@ The page offers a call from an empty composer. When voice mode is on and there i
 - **Barge-in** is cut on the page. `web/pcm.js` hears 120 ms of the user's voice over the partner, at least -42 dBFS and 10 dB over the room. The page then drops what it has queued to play and sends `barge`. That takes about 0.1 to 0.2 s, against about 1 s for Phonic's own detection.
 - **Echo** must not count as the user. A browser's echo canceller may miss audio the page plays itself, so the partner comes back through the microphone. Over the partner, voice must also be 6 dB louder than the loudest echo heard so far, relative to what plays. That estimate starts high, falls 15 dB a second, and the phone keeps it between calls.
 - **Mute** sends silence: Phonic expects a steady stream.
+- **The debug panel** opens with a tap on the pill. It shows the browser, whether its audio runs, and the chunks received, played and cut. Its beeps play half a second through each way out: the page's audio context, an audio element, or a new context. The partner's audio then follows the last way tried.
 - The microphone runs with the browser's echo cancellation, noise suppression and gain control. It goes up as 16 kHz PCM16 in 20 ms frames, and the screen stays on during a call.
 
 A call needs https or localhost, since the browser gives the microphone to a secure page only.

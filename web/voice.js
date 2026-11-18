@@ -7,7 +7,7 @@ import { Down, Barge, BARGE, RATE, FRAME, toPcm16, fromPcm16, level } from './pc
 import { frameDb } from './phrases.js';
 
 const bar = $('callbar'), pill = $('call-pill'), who = $('call-who'), lvl = $('call-level'), time = $('call-time');
-const mute = $('call-mute'), end = $('call-end'), thread = $('thread');
+const mute = $('call-mute'), end = $('call-end'), thread = $('thread'), debug = $('call-debug'), readout = $('call-readout');
 const BARS = 26;
 // What the speaker has queued starts this far ahead, so a late chunk does not leave a gap.
 const LEAD = 0.06;
@@ -17,6 +17,10 @@ const ECHO_S = 0.3;
 const ECHO_KEY = 'seimei.voiceEcho';
 // The page's own numbers go to the server log this often, and at hang-up.
 const STATS_MS = 10000;
+// The debug panel stays open between calls once opened (a tap on the pill).
+const DEBUG_KEY = 'seimei.voiceDebug';
+// A phone may play nothing from one way out and fine from another: the panel's beeps try each, and the partner follows the last one tried.
+const PATHS = { page: 'the page audio', element: 'an audio element', fresh: 'a new audio context' };
 const LABEL = { connecting: 'Connecting…', listening: 'Listening', speaking: 'Speaking', reconnecting: 'Reconnecting…' };
 let call = null;
 
@@ -51,6 +55,8 @@ async function start() {
   const out = ctx.createGain();
   out.connect(ctx.destination);
   const c = {
+    // Where the partner's audio goes: a context and the node to connect to (see PATHS).
+    sink: { ctx, out, path: 'page' }, got: 0, peak: -Infinity, beeps: 0,
     ctx, stream, ws, src, proc, out, t0: performance.now(), down: new Down(ctx.sampleRate), barge: new Barge(BARGE, learned()),
     pending: new Float32Array(0), sources: new Set(), until: 0, muted: false, state: 'connecting',
     levels: Array(BARS).fill(0), mic: 0, heard: 0, live: null, lock: null,
@@ -64,7 +70,11 @@ async function start() {
   // A ScriptProcessor runs only while connected; it writes silence.
   proc.connect(ctx.destination);
   proc.onaudioprocess = (e) => up(c, e.inputBuffer.getChannelData(0));
-  ws.onmessage = (m) => (typeof m.data === 'string' ? message(c, JSON.parse(m.data)) : play(c, m.data));
+  ws.onmessage = (m) => {
+    if (typeof m.data === 'string') return message(c, JSON.parse(m.data));
+    c.got++;
+    play(c, m.data);
+  };
   ws.onclose = (e) => {
     if (call !== c) return;
     if (e.code === 1006 && c.state === 'connecting') {
@@ -110,12 +120,14 @@ function send(c, msg) {
 function play(c, data) {
   const f = fromPcm16(data);
   if (!f.length) return;
-  const buf = c.ctx.createBuffer(1, f.length, RATE);
+  const { ctx, out } = c.sink;
+  const buf = ctx.createBuffer(1, f.length, RATE);
   buf.copyToChannel(f, 0);
-  const node = c.ctx.createBufferSource();
+  const node = ctx.createBufferSource();
   node.buffer = buf;
-  node.connect(c.out);
-  const at = Math.max(c.ctx.currentTime + (c.until > c.ctx.currentTime ? 0 : LEAD), c.until);
+  node.connect(out);
+  c.peak = 20 * Math.log10(Math.max(1 / 32768, f.reduce((m, x) => Math.max(m, Math.abs(x)), 0)));
+  const at = Math.max(ctx.currentTime + (c.until > ctx.currentTime ? 0 : LEAD), c.until);
   node.start(at);
   c.until = at + buf.duration;
   c.heard = level(f);
@@ -128,7 +140,7 @@ function play(c, data) {
 
 // The loudest sound that played lately, in dBFS, or null when nothing did.
 function playLevel(c) {
-  const now = c.ctx.currentTime;
+  const now = c.sink.ctx.currentTime;
   while (c.played.length && c.played[0][1] < now - ECHO_S) c.played.shift();
   let db = null;
   for (const [a, , d] of c.played) if (a <= now) db = Math.max(db ?? -Infinity, d);
@@ -148,13 +160,14 @@ function learned() {
 function stats(c) {
   const t = c.stream.getAudioTracks()[0]?.getSettings() || {};
   send(c, { type: 'stats', context: c.ctx.state, rate: c.ctx.sampleRate, base_latency: c.ctx.baseLatency, output_latency: c.ctx.outputLatency,
-    ...c.stats, echo: Math.round(c.barge.echo * 10) / 10, muted: c.muted,
+    ...c.stats, echo: Math.round(c.barge.echo * 10) / 10, muted: c.muted, got: c.got, path: c.sink.path, out_context: c.sink.ctx.state,
+    out_time: Math.round(c.sink.ctx.currentTime * 10) / 10, beeps: c.beeps, agent: navigator.userAgent,
     mic: { echo_cancellation: t.echoCancellation, noise_suppression: t.noiseSuppression, auto_gain: t.autoGainControl, rate: t.sampleRate } });
 }
 
 // Everything queued to play stops now.
 function cut(c) {
-  c.stats.cut += Math.max(0, c.until - c.ctx.currentTime);
+  c.stats.cut += Math.max(0, c.until - c.sink.ctx.currentTime);
   for (const n of c.sources) {
     try { n.stop(); } catch {}
   }
@@ -195,7 +208,7 @@ function endLive(c) {
 
 function label(c) {
   const talking = !c.muted && c.barge.talking();
-  const playing = c.ctx.currentTime < c.until;
+  const playing = c.sink.ctx.currentTime < c.until;
   who.textContent = c.muted ? 'Muted' : LABEL[c.state] || '';
   pill.classList.toggle('me', talking);
   pill.classList.toggle('them', playing && !talking);
@@ -204,7 +217,8 @@ function label(c) {
 function tick() {
   const c = call;
   if (!c) return;
-  const playing = c.ctx.currentTime < c.until;
+  const playing = c.sink.ctx.currentTime < c.until;
+  if (!debug.hidden) shown(c);
   if (performance.now() - (c.statsAt || c.t0) > STATS_MS) {
     c.statsAt = performance.now();
     stats(c);
@@ -231,6 +245,8 @@ function hangUp(why) {
   c.stream.getTracks().forEach((t) => t.stop());
   cut(c);
   c.ctx.close();
+  if (c.sink.ctx !== c.ctx) c.sink.ctx.close();
+  c.audio?.pause();
   c.lock?.release().catch(() => {});
   endLive(c);
   show(false);
@@ -238,7 +254,66 @@ function hangUp(why) {
   say('Call ended');
 }
 
+// The panel: what the browser is, whether its audio runs, and what reached it.
+function shown(c) {
+  const ua = navigator.userAgent;
+  const b = ua.match(/(Firefox|SamsungBrowser|EdgA|Chrome)\/(\d+)/);
+  const s = c.sink.ctx;
+  readout.textContent = [
+    `${b ? `${b[1]} ${b[2]}` : 'browser?'}${/Android/.test(ua) ? ' on Android' : ''} · out: ${PATHS[c.sink.path]}`,
+    `audio ${s.state} at ${s.sampleRate} Hz, clock ${s.currentTime.toFixed(1)} s · mic ${c.ctx.state}`,
+    `got ${c.got} chunks, played ${c.stats.chunks} (${c.stats.played.toFixed(1)} s), last peak ${c.peak.toFixed(0)} dBFS`,
+    `barge cuts ${c.stats.barges} · flushes ${c.stats.flushes} · beeps ${c.beeps}`,
+  ].join('\n');
+}
+
+// Moves the partner's audio to another way out, made in this tap.
+function route(c, path) {
+  if (path === c.sink.path) return;
+  cut(c);
+  if (c.sink.ctx !== c.ctx) c.sink.ctx.close();
+  c.audio?.pause();
+  c.audio = null;
+  c.out.disconnect();
+  if (path === 'fresh') {
+    const ctx = new AudioContext();
+    const out = ctx.createGain();
+    out.connect(ctx.destination);
+    c.sink = { ctx, out, path };
+  } else {
+    if (path === 'element') {
+      const dest = c.ctx.createMediaStreamDestination();
+      c.out.connect(dest);
+      c.audio = new Audio();
+      c.audio.srcObject = dest.stream;
+      c.audio.play().catch((e) => snack(`The audio element won't play: ${e.name}`));
+    } else c.out.connect(c.ctx.destination);
+    c.sink = { ctx: c.ctx, out: c.out, path };
+  }
+  c.sink.ctx.resume().catch(() => {});
+}
+
+// Half a second of 660 Hz at -10 dBFS, through the same path as the partner's audio.
+function beep(path) {
+  const c = call;
+  if (!c) return;
+  route(c, path);
+  c.sink.ctx.resume().catch(() => {});
+  const n = RATE / 2, pcm = new Int16Array(n);
+  for (let i = 0; i < n; i++) pcm[i] = 0.3 * 32767 * Math.sin(2 * Math.PI * 660 * i / RATE) * Math.min(1, i / 160, (n - i) / 160);
+  c.beeps++;
+  play(c, pcm.buffer);
+  shown(c);
+}
+
 $('talk').addEventListener('click', start);
+pill.addEventListener('click', () => {
+  debug.hidden = !debug.hidden;
+  try { localStorage.setItem(DEBUG_KEY, debug.hidden ? '' : '1'); } catch {}
+  if (call && !debug.hidden) shown(call);
+});
+for (const b of debug.querySelectorAll('[data-beep]')) b.addEventListener('click', () => beep(b.dataset.beep));
+try { debug.hidden = !localStorage.getItem(DEBUG_KEY); } catch {}
 end.addEventListener('click', () => hangUp(''));
 mute.addEventListener('click', () => {
   if (!call) return;
