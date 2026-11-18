@@ -38,6 +38,21 @@ The table lists each section's keys, their defaults and what they set. Notes on 
 | | `zdr` | `false` | use only providers that keep no data |
 | | `deny` | `[]` | words and globs never sent |
 | `[asr.sources]` | `chat`, `names`, `board`, `window`, `draft`, `auto` | all `true` | one switch per source of the word list |
+| `[voice]` | `on` | `false` | voice mode, see [voice.md](voice.md) |
+| | `key_file` | `~/.config/phonic/api_key` | the Phonic API key |
+| | `url` | `wss://api.phonic.ai/v1/sts/ws` | Phonic's conversation socket |
+| | `model` | `phonic-1` | the speech-to-speech model |
+| | `voice` | Phonic's default | the voice id |
+| | `turn_taking` | `eager` | how soon the partner takes its turn |
+| | `idle` | 300 | seconds of silence before a call ends |
+| | `sections` | all six | the pack's sections: `style`, `chat`, `board`, `work`, `notes`, `memory` |
+| | `memory` | none | a folder with `MEMORY.md` and one `.md` file per memory |
+| | `roots` | `[]` | folders `read_file` and `search_files` may read |
+| | `keywords` | `[]` | more words for speech recognition |
+| | `pronounce` | `{}` | words and how to say them |
+| | `search_key_file` | `~/.config/seimei/openrouter-key` | the OpenRouter key for `web_search` |
+| | `search_model` | `openai/gpt-4.1-mini` | the model that runs the search |
+| | `search_url` | OpenRouter's chat completions | where searches go |
 
 Notes on the keys:
 
@@ -59,6 +74,9 @@ Notes on the keys:
 - Without the OpenRouter key in `key_file` the mic is not shown, see [asr.md](asr.md). `vocab_max` stays at 100 because MAI got worse with 150.
 - `zdr` sets OpenRouter's `provider.zdr`. Both default models have such a provider.
 - With every `[asr.sources]` switch off, only the pins in `asr/words.txt` are sent.
+- `[voice] roots` takes absolute paths or paths under `~`. The memory folder and seimei's `notes.md` are readable besides them. Without roots or memory there are no file tools.
+- `[voice] pronounce` is a table such as `{ HRX = "H R X" }`. Phonic takes plain respellings, no IPA.
+- Without a key in `search_key_file`, the partner gets no web tools.
 
 ## Permission modes
 

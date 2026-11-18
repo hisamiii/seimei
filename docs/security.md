@@ -57,6 +57,17 @@ This matters because `auth.json` sits in the agents' reach, as the same user, so
 
 The tripwire does not stop an agent that writes the file and then restarts seimei, because startup trusts the file. The restart is the trace.
 
+## The voice partner
+
+The voice partner, when `[voice] on`, never acts: its tools only read, and `ask_seimei` hands actions to the dispatcher as the user's message. What it reads leaves the machine for Phonic, so the bridge scrubs secrets and denied paths out of everything it sends.
+
+- File reads reach only `[voice] roots`, the memory folder and `notes.md`.
+- They never reach seimei's state folders, a denied path, a key file, a hidden file or a file named like a secret.
+- A web query or URL that holds a secret is not sent, and `fetch_page` never reaches this machine or a private network.
+- Every pack and tool call goes to the audit log, as `who: "voice"`.
+
+[voice.md](voice.md) has the details.
+
 ## The bypass caveat
 
 In bypass mode, approval cards protect against mistakes and casual prompt injection, not against a determined agent with a shell. A real boundary needs a sandbox or a separate user for the agents, which seimei does not set up.

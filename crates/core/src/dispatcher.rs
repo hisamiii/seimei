@@ -486,12 +486,17 @@ impl Dispatcher {
         cid: Option<&str>,
         reply: Option<&Value>,
     ) {
-        self.post(text, names, images, files, cid, reply, None);
+        self.post(text, names, images, files, cid, reply, None, false);
     }
 
     /// The user sends a side thread's summary: their message, tagged with the thread (id, name), answering what the thread started from.
     pub fn send_from_thread(&self, text: &str, thread: (&str, &str), reply: Option<&Value>) {
-        self.post(text, &[], vec![], &[], None, reply, Some(thread));
+        self.post(text, &[], vec![], &[], None, reply, Some(thread), false);
+    }
+
+    /// The voice partner's ask_seimei: the request in the thread as the user's, marked voice, and to the dispatcher with a [voice] tag. Returns its event id: the reply answers it.
+    pub fn send_voice(&self, text: &str) -> i64 {
+        self.post(text, &[], vec![], &[], None, None, None, true)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -504,9 +509,13 @@ impl Dispatcher {
         cid: Option<&str>,
         reply: Option<&Value>,
         thread: Option<(&str, &str)>,
-    ) {
+        voice: bool,
+    ) -> i64 {
         let (shown, said) = reply.map(quoted).unwrap_or_default();
         let mut ev = json!({"type": "user", "text": text});
+        if voice {
+            ev["voice"] = json!(true);
+        }
         if let Some(c) = cid {
             ev["cid"] = json!(c);
         }
@@ -530,7 +539,7 @@ impl Dispatcher {
             ev["files"] = json!(shown);
         }
         let ev = self.events.add(ev);
-        let mut text = text.to_string();
+        let mut text = if voice { format!("[voice] {text}") } else { text.to_string() };
         if let Some((id, name)) = thread {
             text = format!("[from the side thread \"{name}\" ({id})]\n{text}");
         }
@@ -558,6 +567,7 @@ impl Dispatcher {
         }
         let id = ev["id"].as_i64().unwrap_or(0);
         let _ = self.tx.send(Cmd::Deliver { text, images, src: Some(Source::User(id)) });
+        id
     }
 
     /// Something the dispatcher should know, delivered with its next message.

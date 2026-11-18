@@ -21,3 +21,4 @@ mod setup;
 mod share;
 mod threads;
 mod update;
+mod voice;

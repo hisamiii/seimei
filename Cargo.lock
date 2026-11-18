@@ -1933,6 +1933,7 @@ name = "seimei"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "futures-util",
  "libc",
  "mimalloc",
  "minisign",
@@ -1948,6 +1949,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tokio-tungstenite",
  "toml",
 ]
 
@@ -1957,6 +1959,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
  "chrono",
+ "futures-util",
  "http",
  "image",
  "imagesize",
@@ -1971,6 +1974,7 @@ dependencies = [
  "shlex",
  "similar",
  "tokio",
+ "tokio-tungstenite",
  "toml",
  "unicode-normalization",
  "url",
@@ -2510,7 +2514,9 @@ checksum = "8f72a05e828585856dacd553fba484c242c46e391fb0e58917c942ee9202915c"
 dependencies = [
  "futures-util",
  "log",
+ "native-tls",
  "tokio",
+ "tokio-native-tls",
  "tungstenite",
 ]
 
@@ -2662,6 +2668,7 @@ dependencies = [
  "http",
  "httparse",
  "log",
+ "native-tls",
  "rand",
  "sha1",
  "thiserror 2.0.21",

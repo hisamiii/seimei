@@ -26,8 +26,10 @@ toml = "1.1.8"
 mimalloc = { version = "0.1.52", default-features = false }
 
 [dev-dependencies]
+futures-util = "0.3.34"
 minisign = "0.10.0"
 openssl = "0.10.81"
+tokio-tungstenite = "0.29.0"
 
 [[test]]
 name = "desktop"

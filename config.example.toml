@@ -93,3 +93,18 @@ enabled = []
 # window = true                     # the laptop's focused window and its repo
 # draft = true                      # rare words of the composer's draft
 # auto = true                       # the nightly list of your own rare words
+
+[voice]
+# Voice mode (docs/voice.md): a Phonic voice partner that talks, looks things up and hands actions to the dispatcher.
+# on = false
+# key_file = "~/.config/phonic/api_key"
+# voice = ""                        # a Phonic voice id; empty for its default
+# turn_taking = "eager"
+# idle = 300                        # seconds of silence before a call ends
+# sections = ["style", "chat", "board", "work", "notes", "memory"]
+# memory = ""                       # a folder with MEMORY.md and one .md file per memory
+# roots = ["~/projects"]            # folders the partner may read and search
+# keywords = []                     # more words for speech recognition, e.g. project names
+# pronounce = {}                    # e.g. { NPU = "N P U" }
+# search_key_file = "~/.config/seimei/openrouter-key"   # without a key there are no web tools
+# search_model = "openai/gpt-4.1-mini"

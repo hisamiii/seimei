@@ -1,0 +1,112 @@
+# Voice mode
+
+Voice mode lets the user talk with seimei hands-free, in a long flowing conversation. A speech-to-speech model, Phonic's `phonic-1`, is the voice partner: it answers most turns in its own words and hands every action to the dispatcher.
+
+Voice mode is off by default; `[voice] on = true` in [config.md](config.md) turns it on.
+
+## How a call works
+
+The client streams the microphone to seimei over `GET /api/voice/ws`, and seimei holds Phonic's conversation socket on the other side. The bridge is `crates/core/src/voice`; nothing about a call goes from the phone to Phonic directly.
+
+```
+client --PCM over wss--> /api/voice/ws --> voice bridge --wss--> Phonic
+                                             |  ^
+            lookups (board, notes, files, web)  |  tool_call_output, add_system_message, generate_reply
+            ask_seimei --> dispatcher, as a [voice] message in the real thread
+```
+
+- **The partner talks.** It answers from the context pack and from read-only lookups that run on seimei's server.
+- **The dispatcher acts.** For an action, or a question the partner can't settle, the partner calls `ask_seimei`. The request goes into the thread as the user's message, marked voice. It reaches the dispatcher as `[voice] <request>`, and the dispatcher's prompt says how to answer one: short, fact first, heard rather than read.
+- **The answer comes back.** The dispatcher's reply goes to Phonic as the tool call's output. Then, once both sides are quiet, a `generate_reply` asks the partner to say it in its own words. A reply that takes over 150 s gets a "still working" output first, and is spoken when it lands.
+- **Both sides land in the thread.** Each finished turn is a `voice` event, `who` being `user` or `partner`, with `cut` on a reply the user barged into. The call so far rides to the dispatcher as a keyed "Voice call so far" note, so its next turn sees what was said.
+- **News reaches the partner.** During a call, seimei's other chat replies, the user's typed messages and shikigami reports go to Phonic as stamped `add_system_message` lines.
+
+A conversation that drops, or reaches Phonic's two-hour limit, goes on in a fresh one with a rebuilt pack. The pack's chat section holds the voice turns so far, so the new conversation knows them. When Phonic ends the call after `idle` seconds of silence, the call ends.
+
+## The context pack
+
+The pack is the partner's system prompt, built when a conversation opens. Phonic's first audio does not get slower between 10k and 150k characters of prompt, so the pack is generous, capped at 120k.
+
+| section | from | budget |
+|---|---|---|
+| voice rules | `voice/partner.md`, always | about 3k |
+| `style` | `style.md` in the state folder | 1k |
+| `chat` | the newest 60 thread lines, 400 characters each | 16k |
+| `board` | the open board items | 8k |
+| `work` | the shikigami and the user's sessions, one line each | 6k |
+| `notes` | `notes.md` from the top, then the later headings | 30k |
+| `memory` | `MEMORY.md` in the `[voice] memory` folder | 24k |
+
+`[voice] sections` lists the sections to send. A section left out also takes its lookups away. Each section is stamped with the time it was built, and the rules say a lookup beats the pack.
+
+## The partner's tools
+
+Every lookup runs on seimei's server and answers through the socket seimei opened, so nothing is exposed to the internet. Answers are scrubbed and cut to 12,000 characters, under Phonic's 16,000.
+
+| tool | does | mode |
+|---|---|---|
+| `board(query)` | open board items, filtered | sync |
+| `shikigami(name)` | the list, or one shikigami's latest messages | sync |
+| `sessions(name)` | the user's sessions, or one's latest messages | sync |
+| `search_notes(query)` | the best matching sections of `notes.md` | sync |
+| `search_memory(query)`, `read_memory(name)` | the memory index, or one file | sync |
+| `recent_chat(query)` | older thread lines | sync |
+| `read_file(path)`, `search_files(query)` | files under the allowed roots | sync |
+| `web_search(query)`, `fetch_page(url)` | the web, through OpenRouter and a plain fetch | sync, speech first |
+| `ask_seimei(request)` | the dispatcher | async |
+
+- **Fast lookups** are sync with `require_speech_before_tool_call: false`: a 50 ms lookup adds about 0.4 s to an answer.
+- **Web tools** take 1 to 3 s. They stay sync, so their answer starts the partner's reply by itself. They ask for speech first: the partner says it is looking, so the wait is not silent.
+- **ask_seimei** is plain async. Phonic's `wait_for_response` would block every lookup during the wait and speak the result twice.
+- **Names are matched loosely.** Speech recognition hears "fern anvil" as "for-an-anvil". So a name goes to the closest real one: the same letters, one holding the other, or an edit distance within a third.
+- **Read-only.** The board, shikigami and sessions are read through `Tools::lookup`, which runs only the actions it names. A tool call for anything else, such as `tasks` or `summon`, gets "not one of your tools".
+
+`web_search` sends the query to OpenRouter's web plugin with the Exa engine and five results. It returns the model's short answer and each result's title, link and excerpt.
+
+## Speech recognition and the voice
+
+`boosted_keywords` holds seimei, shikigami, the names of the shikigami and sessions, and `[voice] keywords`. Names also go split at dashes.
+
+`[voice] pronounce` becomes Phonic's pronunciation dictionary. Turn taking is `eager`, which detects the end of speech about 0.4 s sooner than `standard`.
+
+## The client socket
+
+The socket carries PCM16 mono at 16 kHz both ways as binary frames, and JSON as text frames. It needs a login, and a cookie login needs one of the page's own origins.
+
+The client sends the microphone without pause, silence included, since Phonic expects a steady stream. Text frames up:
+
+- `{"type": "barge"}`: the client's own voice detection heard the user over the partner, and the client has cut its playback. The bridge then holds back the partner's audio until Phonic's own detection agrees, or for 1.5 s on a false alarm.
+- `{"type": "end"}`: hang up.
+
+Text frames down:
+
+- `{"type": "state", "state": ...}`: `connecting`, `listening`, `speaking`, `reconnecting`, `ended`.
+- `{"type": "flush"}`: drop the audio queued to play. It follows Phonic's own barge-in, about 1 s after the user starts speaking.
+- `{"type": "said", "who": "user" | "partner", "text": ...}`: a finished turn.
+- `{"type": "asking", "request": ...}` and `{"type": "answered", "request": ...}`: an ask_seimei call and its answer.
+- `{"type": "error", "text": ...}`.
+
+Down audio is only what is heard. Phonic streams silent chunks nonstop, so the bridge forwards a chunk only while the partner speaks, or when it holds sound or words.
+
+## What leaves the machine
+
+Every call sends the pack, lookup answers, the audio and both transcripts to Phonic, and Phonic's upstream providers process them. Web searches go to OpenRouter and its search engine, and `fetch_page` reaches the page's site.
+
+Phonic keeps conversations under its default retention; zero retention is for its Enterprise plan only.
+
+The guards, all in the bridge:
+
+- **The scrubber.** It takes secrets and denied paths out of the pack and of every lookup answer. Secrets are private key blocks, keys in known formats, assigned passwords and tokens, bearer headers, logins in URLs and long random strings.
+- **Outgoing web calls.** A search query or URL the scrubber would change is not sent.
+- **File reads.** `read_file` and `search_files` reach only `[voice] roots`, the memory folder and `notes.md`. They never read seimei's state folders, so no login, upload or audit log. Nor do they read a denied path, a key file, a hidden file or folder, or a file whose name says it holds a secret. Symlinks are resolved before the check.
+- **No local pages.** `fetch_page` takes any http or https address, except ones on this machine or a private network, checked on every redirect.
+- **The audit log.** Each pack, with its section sizes, and each tool call of the partner's, with its query, URL or path, goes to `audit.jsonl` as `who: "voice"`.
+
+## Tests
+
+`tests/fakes/phonic.py` is a fake conversation socket that plays a script and logs what the bridge sends. `crates/seimei/tests/it/voice.rs` runs a whole call against it, with the fake agent CLI as the dispatcher and a fake search endpoint.
+
+- A script is a JSON list of conversations, each a list of steps.
+- `expect` waits for a matching message, `send` sends an event, and `sleep`, `close` and `drop` do what they say.
+- An `audio_chunk` to send with `"pcm": "loud"` or `"silent"` gets 20 ms of that audio.
+- `tests/cases/voice.json` holds the pack, scrubber, name-matching and guard cases.

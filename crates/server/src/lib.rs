@@ -4,6 +4,7 @@
 #![allow(clippy::result_large_err)] // axum responses as the error side, as handlers return them
 
 pub mod asr;
+mod voice;
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -118,6 +119,8 @@ pub struct App {
     audit: PathBuf,
     /// Dictation (docs/asr.md); None when `[asr]` is off.
     pub asr: Option<Arc<seimei_core::asr::Asr>>,
+    /// Voice mode (docs/voice.md); None unless `[voice] on`.
+    pub voice: Option<Arc<seimei_core::voice::Voice>>,
 }
 
 /// What the server is built from.
@@ -136,12 +139,25 @@ pub struct Setup {
     pub terminal: String,
     pub plugins: Arc<seimei_core::plugins::Plugins>,
     pub asr: Option<Arc<seimei_core::asr::Asr>>,
+    pub voice: seimei_core::voice::Config,
 }
 
 impl App {
     pub fn new(setup: Setup) -> std::io::Result<App> {
-        let Setup { events, auth, origins, web, state, push, dispatcher: disp, shikigami, terminal, plugins, asr } =
-            setup;
+        let Setup {
+            events,
+            auth,
+            origins,
+            web,
+            state,
+            push,
+            dispatcher: disp,
+            shikigami,
+            terminal,
+            plugins,
+            asr,
+            voice,
+        } = setup;
         let state = state.as_path();
         // Only these Host headers are served: a page using DNS rebinding cannot read the API from the browser.
         let mut hosts: HashSet<String> = ["localhost", "127.0.0.1", "::1"].map(String::from).into();
@@ -197,8 +213,23 @@ impl App {
             let tools = weak.upgrade();
             Box::pin(async move { tools?.handle(msg).await })
         }));
+        let reader = tools.clone();
+        let about = disp.about.clone();
         let dispatcher =
             Dispatcher::new(disp, events.clone(), state, usage.clone(), approvals.clone(), audit.clone(), tools);
+        let voice = voice.on.then(|| {
+            let p = pool.clone();
+            seimei_core::voice::Voice::new(
+                voice,
+                events.clone(),
+                dispatcher.clone(),
+                audit.clone(),
+                Box::new(move |name, a| reader.lookup(name, a)),
+                Box::new(move || p.denied()),
+                state,
+                &about,
+            )
+        });
         let _ = pool.dispatcher.set(dispatcher.clone());
         let d = dispatcher.clone();
         let _ = watches.wake.set(Box::new(move |line| d.wake(line)));
@@ -229,6 +260,7 @@ impl App {
             worker_events,
             audit: state.join("audit.jsonl"),
             asr,
+            voice,
         })
     }
 
@@ -389,7 +421,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/sessions/{pid}/archive", post(session_archive))
         .route("/api/sessions/{pid}/answer", post(session_answer))
         .route("/api/asr", get(asr::status).post(asr::transcribe))
-        .route("/api/asr/edit", post(asr::edited));
+        .route("/api/asr/edit", post(asr::edited))
+        .route("/api/voice/ws", get(voice::ws));
     if app.auth.is_some() {
         r = r
             .route("/api/auth/password", post(login_password))

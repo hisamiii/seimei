@@ -114,6 +114,12 @@ Material You has no fixed colors. The app uses Android's wallpaper scheme and se
 
 Dictation takes a 16 kHz WAV and a hint through `POST /api/asr` or the local socket `<state>/asr.sock`. `crates/core/src/asr` builds a word list from live context, calls OpenRouter and fixes misheard terms; [asr.md](asr.md) has the details.
 
+## Voice
+
+Voice mode bridges a client's audio on `GET /api/voice/ws` to Phonic's conversation socket. `crates/core/src/voice` builds the partner's context pack and runs its lookups.
+
+It relays `ask_seimei` to the dispatcher as a `[voice]` message; [voice.md](voice.md) has the details.
+
 ## Deploys
 
 An install from a release updates with `seimei update`, see [install.md](install.md). Production never runs from the working tree.
@@ -161,9 +167,10 @@ The code map lists where each part lives. Paths are relative to the repo root.
 
 State and the user live in `crates/core/src` too. `events.rs` is the log, next to `auth.rs`, `push.rs`, `files.rs`, `uploads.rs`, `usage.rs`, `cost.rs`, `metrics.rs`, `watches.rs`, `boot.rs`, `archive.rs`, `aliases.rs`, `wake.rs`, `deploys.rs` and `util.rs`.
 
-Dictation and plugins:
+Dictation, voice and plugins:
 
 - `crates/core/src/asr`: `vocab.rs` builds the word list, `fix.rs` is the fixer, and `mod.rs` makes the OpenRouter call and writes the logs. Its routes are in `crates/server/src/asr.rs`.
+- `crates/core/src/voice`: `pack.rs` builds the context pack and holds the scrubber, `lookups.rs` the partner's tools, `web.rs` the search and the page fetch, and `mod.rs` the call. Its route is in `crates/server/src/voice.rs`.
 - `crates/core/src/plugins/mod.rs`: the host, with the `Builtin` trait, `Factory`, enabling, the plugin socket and prompt sections. It also serves a session's own tools over stdio for agents that cannot take them in-process: `seimei plugin shikigami` and `seimei plugin seimei`.
 - `crates/core/src/plugins/link.rs`: a connector's socket.
 - `plugins/<name>`: a built-in plugin's crate. `src/lib.rs` exports its `PLUGIN: Factory`, next to `plugin.toml`, `prompt.md`, `tools.json`, tests and connector.

@@ -484,6 +484,39 @@ impl Tools {
         text(&said, false)
     }
 
+    /// The voice partner's lookups, by their names in voice::lookups. Only the read-only actions named here run; anything else is refused.
+    /// Blocking: run it off the async threads.
+    pub fn lookup(&self, name: &str, a: &Value) -> Value {
+        let heard = arg(a, "name");
+        match name {
+            "board" => {
+                let all = self.board.lock().unwrap().text(false);
+                text(&crate::voice::lookups::board(&all, &arg(a, "query")), false)
+            }
+            "shikigami" if heard.trim().is_empty() => self.workers(&json!({})),
+            "shikigami" => {
+                let listing = self.pool.listing();
+                let rows = listing["list"].as_array().cloned().unwrap_or_default();
+                let names: Vec<String> = rows.iter().filter_map(|w| w["name"].as_str().map(String::from)).collect();
+                let Some(found) = crate::voice::lookups::closest(&heard, &names) else {
+                    return text(&format!("No shikigami is called \"{heard}\". Running: {}", names.join(", ")), true);
+                };
+                self.blocking("peek", &json!({"worker": found, "count": 12}))
+            }
+            "sessions" if heard.trim().is_empty() => self.blocking("sessions", &json!({})),
+            "sessions" => {
+                let live = sessions::live(&self.pool.own_sessions());
+                let mut names: Vec<String> = live.iter().map(|s| s.name.clone()).collect();
+                names.extend(live.iter().filter_map(|s| self.pool.aliases.of(s)));
+                let Some(found) = crate::voice::lookups::closest(&heard, &names) else {
+                    return text(&format!("No session is called \"{heard}\". Running: {}", names.join(", ")), true);
+                };
+                self.session_peek(&json!({"session": found, "count": 4}))
+            }
+            _ => text(&format!("{name} is not a lookup"), true),
+        }
+    }
+
     /// A tool call that reads or writes files (pricing, images, the board): run off the async threads.
     fn blocking(&self, name: &str, a: &Value) -> Value {
         let s = |k: &str| arg(a, k);
