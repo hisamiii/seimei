@@ -12,6 +12,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Lets the quick button's service open the call from the background; adb grants it (docs/voice.md). -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
     <application
@@ -73,6 +75,11 @@
         </service>
         <service android:name="com.hisamiowo.seimei.CallService" android:exported="false" android:foregroundServiceType="microphone|mediaPlayback" />
         <service android:name="com.hisamiowo.seimei.AdbRelay" android:exported="false" android:foregroundServiceType="dataSync" />
+        <!-- Samsung's quick button starts this service on a press; only the system holds the permission. -->
+        <service
+            android:name="com.hisamiowo.seimei.QuickButton"
+            android:exported="true"
+            android:permission="com.samsung.android.permisson.ACCESS_SYSTEM_KEY_DISPATCHING" />
         <receiver android:name="com.hisamiowo.seimei.Decide" android:exported="false" />
     </application>
 </manifest>
