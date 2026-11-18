@@ -138,3 +138,13 @@ fn file_reach() {
     }
     let _ = std::fs::remove_dir_all(&base);
 }
+
+#[test]
+fn partner_words_join_with_a_space() {
+    use seimei_core::voice::spaced;
+    assert_eq!(spaced("on your laptop.", "I asked seimei"), " I asked seimei");
+    assert_eq!(spaced("Hello ", "there."), "there.");
+    assert_eq!(spaced("It's 3.", "5 GB"), "5 GB");
+    assert_eq!(spaced("", "Hi"), "Hi");
+    assert_eq!(spaced("Done.", " Next"), " Next");
+}

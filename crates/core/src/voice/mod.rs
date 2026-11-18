@@ -137,6 +137,13 @@ pub struct Voice {
     web: web::Web,
 }
 
+/// The partner's next words as they join what it said: Phonic sends the sentences around a tool call with no space between them.
+/// Only a capital starts a new sentence, so a number split as "3." and "5" stays whole.
+pub fn spaced(said: &str, text: &str) -> String {
+    let ends = said.ends_with(['.', '!', '?', ',', ';', ':']);
+    if ends && text.starts_with(char::is_uppercase) { format!(" {text}") } else { text.to_string() }
+}
+
 /// Whether a frame of PCM16 holds speech, by its mean square.
 fn speech(pcm: &[u8]) -> bool {
     let samples = pcm.as_chunks::<2>().0;
@@ -548,7 +555,7 @@ impl Call {
                 self.state("listening");
             }
             "audio_chunk" => {
-                let text = s("text");
+                let text = spaced(&self.said, &s("text"));
                 self.said.push_str(&text);
                 let pcm = base64::engine::general_purpose::STANDARD.decode(s("audio")).unwrap_or_default();
                 let audible = pcm.as_chunks::<2>().0.iter().any(|b| i16::from_le_bytes(*b).saturating_abs() > AUDIBLE);
