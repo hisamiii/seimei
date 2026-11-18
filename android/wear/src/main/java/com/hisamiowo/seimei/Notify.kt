@@ -111,7 +111,11 @@ class FcmService : FirebaseMessagingService() {
         Prefs(this).pushToken = token
     }
 
-    override fun onMessageReceived(msg: RemoteMessage) = Notify.show(this, msg.data)
+    override fun onMessageReceived(msg: RemoteMessage) {
+        val d = msg.data
+        if (d["kind"] == "adb") return d["id"]?.let { AdbRelay.wake(this, it) } ?: Unit
+        Notify.show(this, d)
+    }
 }
 
 /** Allow or Deny on a card's notification: the watch's key signs in (it works only while the watch is unlocked) and settles that one card. */

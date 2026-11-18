@@ -851,6 +851,7 @@ class Model(app: Application) : AndroidViewModel(app), Dictation.Host {
         viewModelScope.launch {
             try {
                 Notify.register(getApplication(), api, prefs)
+                AdbRelay.ready(api)
             } catch (e: IOException) {
             }
         }
