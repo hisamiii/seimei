@@ -1302,7 +1302,8 @@ impl Session {
             self.go_idle();
             return;
         }
-        if std::mem::take(&mut self.cut) && msg.is_error && msg.subtype == "error_during_execution" {
+        // The CLI cut the turn short for the message sent into it, and its next turn answers that message.
+        if std::mem::take(&mut self.cut) && msg.aborted() {
             return;
         }
         if self.w.is_thread() {

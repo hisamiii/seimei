@@ -32,7 +32,7 @@ impl Session {
     /// One message as the events the turn loop reads.
     fn read(&mut self, msg: Message) {
         if let Message::Result(r) = &msg {
-            let cut = std::mem::take(&mut self.cut) && r.is_error && r.subtype == "error_during_execution";
+            let cut = std::mem::take(&mut self.cut) && r.aborted();
             self.turn = cut;
             if cut {
                 self.queue.push_back(Ev::Usage(r.session_id.clone(), r.model_usage.clone()));

@@ -20,6 +20,7 @@ mod relay;
 mod seimei_tools;
 mod setup;
 mod share;
+mod steer;
 mod threads;
 mod update;
 mod voice;

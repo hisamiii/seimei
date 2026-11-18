@@ -109,6 +109,18 @@ pub struct ResultMessage {
     /// Per model, this session's totals so far (inputTokens, outputTokens, cacheReadInputTokens, ...).
     #[serde(default, rename = "modelUsage")]
     pub model_usage: Option<Value>,
+    /// Why the turn ended: "completed", "aborted_streaming", "api_error", ...
+    #[serde(default)]
+    pub terminal_reason: Option<String>,
+}
+
+impl ResultMessage {
+    /// The turn was cut off: by an interrupt, or by a priority "now" message that the next turn answers.
+    /// Claude Code ends a turn cut by "now" as a success with no text; older versions ended it as error_during_execution.
+    pub fn aborted(&self) -> bool {
+        matches!(self.terminal_reason.as_deref(), Some("aborted_streaming" | "aborted_tools"))
+            || self.is_error && self.subtype == "error_during_execution"
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]

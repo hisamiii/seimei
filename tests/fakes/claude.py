@@ -257,10 +257,10 @@ class Fake:
             return f"denied (deny, {note[1]})"
         return f"denied ({msg.split('.')[0].lower() or 'deny'})"
 
-    def result(self, text: str, error: str | None = None):
+    def result(self, text: str, error: str | None = None, reason: str = "completed"):
         self.usage["inputTokens"] += 100
         self.out({"type": "result", "subtype": error or "success", "duration_ms": 500, "duration_api_ms": 400,
-                  "is_error": bool(error), "num_turns": 1, "session_id": self.sid, "result": text,
+                  "is_error": bool(error), "num_turns": 1, "session_id": self.sid, "result": text, "terminal_reason": reason,
                   "total_cost_usd": 0.0, "usage": {"input_tokens": 100, "output_tokens": 10},
                   "modelUsage": {MODEL: dict(self.usage)}, "uuid": str(uuid.uuid4())})
 
@@ -283,12 +283,13 @@ class Fake:
                 await self.turn
             except asyncio.CancelledError:
                 if self.cut:
+                    # Like Claude Code: a turn cut by "now" ends as a success with no text.
                     self.cut = False
-                    self.result("", error="error_during_execution")
+                    self.result("", reason="aborted_streaming")
                     continue
                 self.out({"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "[Request interrupted by user]"}]},
                           "parent_tool_use_id": None, "session_id": self.sid, "uuid": str(uuid.uuid4())})
-                self.result("", error="error_during_execution")
+                self.result("", error="error_during_execution", reason="aborted_streaming")
             except Exception as e:
                 print(f"fake claude: {e!r}", file=sys.stderr)
                 self.result(str(e), error="error_during_execution")
@@ -488,6 +489,15 @@ async def shikigami(self: Fake, text: str):
     elif t == "run":
         await self.tool("Bash", {"command": "make -j16 render"}, hang=True)
         said = "Rendered."
+    elif t == "work":
+        # Text first, then a long call: a message sent now cuts the turn after it has said something.
+        await self.say("Building the renderer first.")
+        await self.tool("Bash", {"command": "make -j16 render"}, hang=True)
+        said = "Rendered."
+    elif t == "late":
+        # Its first words come late, as after a compaction or a long think.
+        await asyncio.sleep(7)
+        said = "Looked at the late message."
     elif t == "bg":
         # A background command outlives the turn: it ends 3 s after the result, and no turn starts by itself.
         tid = "bg" + uuid.uuid4().hex[:6]
