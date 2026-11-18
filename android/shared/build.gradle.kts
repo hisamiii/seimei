@@ -13,6 +13,17 @@ android {
 
     defaultConfig {
         minSdk = 30
+        // Phones, and the emulator.
+        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+    }
+
+    // The echo canceller for voice calls: webrtc's audio processing, built from source by src/main/cpp/webrtc.sh.
+    ndkVersion = "29.0.14206865"
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.31.6"
+        }
     }
 
     buildFeatures {

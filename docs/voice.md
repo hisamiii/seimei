@@ -113,21 +113,28 @@ Firefox on Android can play nothing through Web Audio, on tone generator sites t
 
 The Android app makes the same call as the page over the same socket, with the same talk button, call bar and call cards. Its call is `VoiceCall` and `Voice.kt` in `android/shared`, for the watch app to reuse.
 
-- **Echo.** The app sets the call mode before it opens the microphone, since the phone picks its voice processing when the input opens. The microphone records as a voice call, with the phone's echo canceller and noise suppressor where it has them. The partner plays through an AudioTrack in the microphone's session, on the loudspeaker unless a headset takes the call.
-- **Jitter buffer.** Phonic sends 20 ms chunks at about real time, so the network's jitter would leave the speaker dry between late chunks. A reply starts once 150 to 250 ms of it is queued. The target follows how late chunks came in this call. It rises after a stall: a dry speaker while the reply goes on. The track holds up to 500 ms, so a burst after a late stretch fits. The track pauses while it waits.
-- **The mic gate** is for a phone without an echo canceller for apps. While the partner plays, and 0.3 s after, the microphone goes up as silence. A barge then sends its last 300 ms, as on the page. With the echo canceller on, there is no gate: the microphone goes up live, so the user can talk over the partner.
+- **Echo.** The app cancels the partner's echo itself, with webrtc's audio processing: AEC3, its noise suppressor and a high-pass filter. Everything the app writes to the speaker, silence included, goes to the canceller in 10 ms frames as the echo's reference. Each microphone frame is cleaned before it goes up. Phones differ too much to rely on their own canceller: one may run it with no reference, another not at all.
+- **The platform's effects** are switched off while the app's canceller runs, since two cancellers would fight. The app still sets the call mode before it opens the microphone, and records as a voice call. The partner plays through an AudioTrack in the microphone's session, on the loudspeaker unless a headset takes the call. A build without the native library uses the phone's echo canceller and noise suppressor where it has them.
+- **The native library** is `android/shared/src/main/cpp`: a small C wrapper, its JNI side, and `webrtc.sh`. The script builds the freedesktop extraction of webrtc's audio processing, pinned to v2.1, with the NDK for arm64 and x86_64. CMake runs it once per ABI. It needs git, meson and ninja, and the network the first time.
+- **Jitter buffer.** Phonic sends 20 ms chunks at about real time, so the network's jitter would leave the speaker dry between late chunks. A reply starts once 150 to 250 ms of it is queued. The target follows how late chunks came in this call. It rises after a stall: a dry speaker while the reply goes on. The track gets the partner's audio only 60 ms ahead of its play head, so the canceller's reference plays soon after it goes in. A burst after a late stretch waits in the jitter buffer. While it waits, the track plays silence and never pauses. A streaming track starts only once it holds its start threshold, by default its whole buffer. So the app lowers the threshold to one 20 ms frame: with the default, a track held 60 ms ahead never starts and plays nothing. A paused voice-call output goes to standby, and the phone's echo canceller then loses its reference: the partner's first words come back through the microphone.
+- **The mic gate** is for a build without the app's canceller, on a phone without one for apps. While the partner plays, and 0.3 s after, the microphone goes up as silence. A barge then sends its last 300 ms, as on the page. With an echo canceller, there is no gate: the microphone goes up live, so the user can talk over the partner.
 - **Barge-in** is the page's detector, with the echo learned on the phone and kept between calls. A barge drops the AudioTrack's queue at once and sends `barge`.
 - **Screen off.** The call runs in a foreground service of the microphone type. Its ongoing notification shows the state and the time, with Mute and Hang up. The call bar stays on every tab while the call runs.
 - **Speed** works as on the page and is kept on the phone.
 - **Stats** go up as on the page, with `path: "audiotrack"`. They also carry:
-  - `aec` and `ns`: on, off, none for apps, or the error that made them fail;
+  - `canceller`: webrtc, platform or none;
+  - `echoIn` and `echoOut`: the microphone's mean power while the partner plays, before and after the app's canceller, in dBFS;
+  - `aec3`: AEC3's own echo return loss and its enhancement, its delay and the residual echo likelihood;
+  - `aec` and `ns`: the platform's, on, off, none for apps, or the error that made them fail;
   - `aecOffered`: what `AcousticEchoCanceler.isAvailable()` says;
-  - `effects`: every effect the platform lists for apps, with its maker;
+  - `effects`: every effect the platform lists for apps, last in the line;
   - `fx`: the effects the platform runs on the microphone;
   - `session`: whether the track plays in the microphone's audio session;
   - `gate`: whether the mic gate is on;
   - `callMode`, the routed `mic` and `speaker` device types, and the `phone` model;
   - the track's `underruns`;
+  - `wrote`: seconds of the partner's audio written to the track, and `outDb`, its mean power in dBFS;
+  - `head`: seconds the play head moved, silence included;
   - `jitter`: its `stalls`, the worst `lateMs` and the `prebufferMs` now.
 
 ## The client socket

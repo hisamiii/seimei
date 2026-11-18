@@ -77,8 +77,16 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
     private val queue = LinkedBlockingQueue<Chunk>()
     // Around the track's writes and its flush, so a cut drops everything at once and the count of written frames stays true.
     private val trackLock = Any()
-    // Frames written since the last flush: less the play head, what the track still holds.
+    // Frames written since the last flush: less the play head, what the track still holds. The partner's audio ends at partnerEnd, silence follows.
     private var written = 0L
+    private var partnerEnd = 0L
+    // How many frames go into the track ahead of its play head: [AHEAD_MS], or the track's start threshold when that is more.
+    private var ahead = Voice.RATE * AHEAD_MS / 1000
+    // For the stats: the partner's audio actually written to the track (frames, summed power), and the play head before the last flush.
+    private var wrote = 0L
+    private var wrotePower = 0.0
+    private var headBase = 0L
+    @Volatile private var headTotal = 0L
     @Volatile private var gen = 0
     @Volatile private var running = true
     @Volatile private var open = false
@@ -102,7 +110,7 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
     private var ns = "none"
     // What the platform says it has: the effects it lists for apps, and whether it offers an echo canceller.
     private val offered = try {
-        AudioEffect.queryEffects()?.map { "${it.name} (${it.implementor})" } ?: emptyList()
+        AudioEffect.queryEffects()?.map { it.name } ?: emptyList()
     } catch (e: Exception) {
         emptyList()
     }
@@ -113,6 +121,16 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
     }
     // The effects the platform runs on the microphone's stream, read once it records.
     @Volatile private var fx = emptyList<String>()
+    // The app's own echo canceller, or null when this build has none: then the platform's runs, where the phone has one.
+    private val canceller = Aec.make()
+    // The microphone's power before and after the app's canceller while the partner plays, for the stats: the echo it removes.
+    private var echoIn = 0.0
+    private var echoOut = 0.0
+    private var echoFrames = 0
+    // What the track holds ahead of its play head, in ms: the canceller's delay hint.
+    @Volatile private var aheadMs = 0
+    // The two audio threads; the last one to end frees the canceller.
+    private val alive = java.util.concurrent.atomic.AtomicInteger(2)
 
     private class Chunk(val gen: Int, val samples: ShortArray, val db: Double)
 
@@ -145,19 +163,21 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
         if (r.state != AudioRecord.STATE_INITIALIZED) return false.also { r.release(); unroute() }
         rec = r
         // isAvailable() is false on phones that run their canceller below the app; create() says for itself.
-        aec = attach(r.audioSessionId) { AcousticEchoCanceler.create(it) }
-        ns = attach(r.audioSessionId) { NoiseSuppressor.create(it) }
-        // With the echo canceller on, the partner's voice does not come back: the user can talk over it, and the mic goes up live.
-        up.gate = aec != "on"
+        // With the app's own canceller, the platform's are made only to switch them off: two cancellers would fight.
+        val on = canceller == null
+        aec = attach(r.audioSessionId, on) { AcousticEchoCanceler.create(it) }
+        ns = attach(r.audioSessionId, on) { NoiseSuppressor.create(it) }
+        // With an echo canceller, the partner's voice does not come back: the user can talk over it, and the mic goes up live.
+        up.gate = canceller == null && aec != "on"
         val outMin = AudioTrack.getMinBufferSize(Voice.RATE, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
         // In the microphone's session, so an echo canceller that works per session hears what plays.
-        // Room for a burst after a late stretch: what plays waits on the jitter buffer, not on this size.
+        // Room for what goes ahead of the play head ([AHEAD_MS]): a burst after a late stretch waits in the jitter buffer.
         track = try {
             AudioTrack.Builder().setAudioAttributes(ATTRS)
                 .setAudioFormat(AudioFormat.Builder().setSampleRate(Voice.RATE).setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                     .setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
                 .setTransferMode(AudioTrack.MODE_STREAM).setBufferSizeInBytes(maxOf(outMin, Voice.RATE * 2 * TRACK_MS / 1000))
-                .setSessionId(r.audioSessionId).build()
+                .setSessionId(r.audioSessionId).build().also(::threshold)
         } catch (e: Exception) {
             for (fx in effects) fx.release()
             r.release()
@@ -168,6 +188,16 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
         Thread(::record, "voice-mic").start()
         Thread(::playback, "voice-out").start()
         return true
+    }
+
+    /**
+     * A streaming track starts to play only once its buffer holds the start threshold, by default the whole buffer.
+     * This one holds only [AHEAD_MS] (plus silence), so it would never start: the partner plays from one 20 ms frame on.
+     */
+    private fun threshold(t: AudioTrack) {
+        val n = if (Build.VERSION.SDK_INT >= 31) t.setStartThresholdInFrames(Voice.FRAME)
+        else t.setBufferSizeInFrames(Voice.RATE * AHEAD_MS / 1000)
+        if (n > 0) ahead = maxOf(ahead, n)
     }
 
     fun hangUp() = finish("")
@@ -202,8 +232,8 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
         am.mode = mode
     }
 
-    /** Makes and enables an effect on the microphone's session: "on", "off" when it would not enable, "none" when the phone has none for apps, or why it failed. */
-    private fun attach(session: Int, make: (Int) -> AudioEffect?): String {
+    /** Makes an effect on the microphone's session and enables it, or disables it: "on", "off", "none" when the phone has none for apps, or why it failed. */
+    private fun attach(session: Int, enable: Boolean, make: (Int) -> AudioEffect?): String {
         val e = try {
             make(session)
         } catch (e: Exception) {
@@ -211,7 +241,7 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
         } ?: return "none"
         effects += e
         return try {
-            e.enabled = true
+            e.enabled = enable
             if (e.enabled) "on" else "off"
         } catch (x: IllegalStateException) {
             "off"
@@ -243,6 +273,7 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
                     break
                 }
                 frames++
+                canceller?.let { clean(it, buf) }
                 up.push(buf)
                 // The bars move every 80 ms, as on the page.
                 if (frames % 4 == 0) tick(frames)
@@ -252,7 +283,26 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
             try { r.stop() } catch (e: IllegalStateException) {}
             for (e in effects) e.release()
             r.release()
+            if (alive.decrementAndGet() == 0) canceller?.release()
         }
+    }
+
+    /** The app's canceller on a microphone frame; while the partner plays, its power before and after go to the stats. */
+    private fun clean(c: Aec, f: ShortArray) {
+        val before = power(f)
+        // The track's lead, the microphone's frame and the output's period.
+        c.near(f, aheadMs + 40)
+        if (synchronized(lock) { log.playing(now()) }) {
+            echoIn += before
+            echoOut += power(f)
+            echoFrames++
+        }
+    }
+
+    private fun power(f: ShortArray): Double {
+        var s = 0.0
+        for (x in f) s += x.toDouble() * x
+        return s / f.size / (32768.0 * 32768.0)
     }
 
     private fun tick(frames: Int) {
@@ -267,7 +317,7 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
 
     /**
      * The partner's audio into the track through the jitter buffer: a reply waits until its prebuffer is queued, then plays.
-     * When the track runs dry, the next audio waits again. The track is paused while it waits, so a dry track is not an underrun.
+     * When the partner's audio runs out, the next audio waits again. The track plays silence meanwhile ([fill]).
      */
     private fun playback() {
         val t = track ?: return
@@ -276,6 +326,7 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
         var off = 0
         var waiting = true
         try {
+            synchronized(trackLock) { t.play() }
             while (running) {
                 if (g != gen) {
                     // A cut: what waits here belongs to the old reply; cut() flushed the track.
@@ -292,17 +343,29 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
                 val now = now()
                 if (waiting) {
                     val queued = (pend.sumOf { it.samples.size } - off).toDouble() / Voice.RATE
-                    if (!synchronized(lock) { jitter.ready(queued, now) }) continue
-                    synchronized(trackLock) { if (g == gen) t.play() }
+                    if (!synchronized(lock) { jitter.ready(queued, now) }) {
+                        fill(t, g)
+                        continue
+                    }
                     waiting = false
                 }
-                // As much as the track takes now, without blocking, so a cut never waits on a write.
+                // Only [AHEAD_MS] ahead of the play head, without blocking: the rest waits here, so what goes to the canceller plays soon after.
                 var full = false
                 while (pend.isNotEmpty()) {
                     val head = pend.first()
                     val n = synchronized(trackLock) {
+                        val room = (ahead - (written - head(t))).toInt()
                         if (g != gen) -1
-                        else t.write(head.samples, off, head.samples.size - off, AudioTrack.WRITE_NON_BLOCKING).also { if (it > 0) written += it }
+                        else if (room <= 0) 0
+                        else t.write(head.samples, off, minOf(room, head.samples.size - off), AudioTrack.WRITE_NON_BLOCKING).also {
+                            if (it > 0) {
+                                written += it
+                                partnerEnd = written
+                                wrote += it
+                                for (i in off until off + it) wrotePower += head.samples[i].toDouble() * head.samples[i]
+                                canceller?.far(head.samples, off, it)
+                            }
+                        }
                     }
                     if (n < 0) break
                     if (n == 0) {
@@ -317,22 +380,45 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
                         off = 0
                     }
                 }
+                synchronized(trackLock) {
+                    val h = head(t)
+                    aheadMs = ((written - h) * 1000 / Voice.RATE).toInt()
+                    headTotal = headBase + h
+                }
                 if (full) {
                     Thread.sleep(5)
                 } else if (pend.isEmpty() && g == gen) {
-                    val dry = synchronized(trackLock) {
-                        (written - (t.playbackHeadPosition.toLong() and 0xffffffffL) <= 0).also { if (it) t.pause() }
-                    }
+                    val dry = synchronized(trackLock) { head(t) >= partnerEnd }
                     if (dry) {
                         synchronized(lock) { jitter.dried(now) }
                         waiting = true
                     }
+                    fill(t, g)
                 }
             }
         } catch (e: InterruptedException) {
         } finally {
             try { t.stop() } catch (e: IllegalStateException) {}
             t.release()
+            if (alive.decrementAndGet() == 0) canceller?.release()
+        }
+    }
+
+    private fun head(t: AudioTrack) = t.playbackHeadPosition.toLong() and 0xffffffffL
+
+    /**
+     * Keeps [SILENCE_MS] of silence queued while no partner audio is: the track never runs dry and never pauses.
+     * A paused voice-call output goes to standby, and the phone's echo canceller then loses what plays as its reference.
+     */
+    private fun fill(t: AudioTrack, g: Int) {
+        synchronized(trackLock) {
+            if (g != gen) return
+            while (written - head(t) < Voice.RATE * SILENCE_MS / 1000) {
+                val n = t.write(SILENCE, 0, SILENCE.size, AudioTrack.WRITE_NON_BLOCKING)
+                if (n <= 0) return
+                written += n
+                canceller?.far(SILENCE, 0, n)
+            }
         }
     }
 
@@ -348,10 +434,13 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
         try {
             synchronized(trackLock) {
                 track?.run {
+                    headBase += head(this)
                     pause()
                     flush()
+                    play()
                 }
                 written = 0
+                partnerEnd = 0
             }
         } catch (e: IllegalStateException) {
         }
@@ -366,15 +455,24 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
         text(JSONObject().put("type", "stats").put("path", "audiotrack").put("got", got)
             .put("played", round1(played)).put("barges", up.barges).put("cut", round1(cutS)).put("flushes", flushes)
             .put("gated", round1(up.gated * Voice.FRAME.toDouble() / Voice.RATE)).put("echo", round1(echo)).put("muted", muted)
+            .put("canceller", if (canceller != null) "webrtc" else if (aec == "on") "platform" else "none").put("echoIn", echoDb(echoIn))
+            .put("echoOut", echoDb(echoOut)).put("aec3", canceller?.stats()?.let { JSONArray(it.map { v -> if (v.isNaN()) null else round1(v) }) })
             .put("aec", aec).put("aecOffered", aecOffered).put("ns", ns).put("fx", JSONArray(fx))
-            .put("effects", JSONArray(offered)).put("session", track?.audioSessionId == rec?.audioSessionId).put("gate", up.gate).put("callMode", am.mode == AudioManager.MODE_IN_COMMUNICATION)
+            .put("wrote", round1(wrote.toDouble() / Voice.RATE)).put("outDb", if (wrote == 0L) null else round1(10 * Math.log10(maxOf(wrotePower / wrote / (32768.0 * 32768.0), 1e-10))))
+            .put("head", round1(headTotal.toDouble() / Voice.RATE))
+            .put("session", track?.audioSessionId == rec?.audioSessionId).put("gate", up.gate).put("callMode", am.mode == AudioManager.MODE_IN_COMMUNICATION)
             .put("mic", rec?.routedDevice?.type ?: -1).put("speaker", track?.routedDevice?.type ?: -1).put("phone", Build.MODEL)
             .put("underruns", track?.underrunCount ?: -1).put("jitter", synchronized(lock) { jitter.run {
                 JSONObject().put("stalls", stalls).put("lateMs", Math.round(lateMax * 1000)).put("prebufferMs", Math.round(target * 1000))
-            } }).toString())
+            } })
+            // Last: the server log keeps a stats line's first 600 characters, and this list is long.
+            .put("effects", JSONArray(offered)).toString())
     }
 
     private fun round1(v: Double) = Math.round(v * 10) / 10.0
+
+    /** The mean power of the microphone's frames while the partner played, in dBFS, or null before any. */
+    private fun echoDb(sum: Double) = if (echoFrames == 0) null else round1(10 * Math.log10(maxOf(sum / echoFrames, 1e-10)))
 
     private fun finish(why: String) {
         if (!over.compareAndSet(false, true)) return
@@ -443,8 +541,13 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
         private val LABELS = mapOf("connecting" to "Connecting…", "listening" to "Listening", "speaking" to "Speaking", "reconnecting" to "Reconnecting…")
         /** The app's numbers go to the server log this often, and at hang-up. */
         const val STATS_S = 10
-        /** The track's own buffer: room for a burst after a late stretch. */
-        const val TRACK_MS = 500
+        /** The track's own buffer: room for what goes ahead, and some. */
+        const val TRACK_MS = 120
+        /** How far the partner's audio goes into the track ahead of its play head; the rest waits in the jitter buffer. */
+        const val AHEAD_MS = 60
+        /** The silence kept queued while the partner is quiet: two of the output's 20 ms periods. */
+        const val SILENCE_MS = 40
+        private val SILENCE = ShortArray(Voice.FRAME)
         private val ATTRS = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
     }
