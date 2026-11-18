@@ -142,8 +142,10 @@ fun ChatTab(vm: Seimei, lane: String) {
     var zoom by remember { mutableStateOf<String?>(null) }
     val traj = lane == "t"
     val rows = (if (traj) vm.trail else vm.items).asReversed()
-    // The voice partner's line as it speaks, last in the chat.
-    val saying = if (traj) "" else CallService.call?.saying.orEmpty()
+    // The running voice call's card: the open one with a turn since the call started.
+    val call = if (traj) null else CallService.call
+    val saying = call?.saying.orEmpty()
+    val callKey = call?.let { c -> (vm.items.lastOrNull { it is Item.Voice } as? Item.Voice)?.takeIf { !it.ended && it.t1 >= c.since }?.key }
     val scope = rememberCoroutineScope()
     // Rows added below keep the first visible row in place, so after a burst the first visible index says nothing about the reader.
     // Whether they follow the end is judged only while the list scrolls (their finger, or a jump to the end).
@@ -228,15 +230,17 @@ fun ChatTab(vm: Seimei, lane: String) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         if (!vm.online && vm.awaySince != null) item(key = "away") { Away(vm) }
-        if (saying.isNotEmpty()) item(key = "saying") { PartnerLine(saying, live = true) }
+        // The partner speaks before the call's first turn is in the chat: its card is drawn already, last.
+        if (call != null && callKey == null && saying.isNotEmpty()) item(key = "saying") { CallCard(Item.Voice("saying", call.since, call.since), call) }
         if (liveHere) item(key = "live") { Md(vm.live) }
         else if (vm.online && vm.busy && vm.waiting == 0) item(key = "working") { Working() }
         if (!traj) items(vm.pending.asReversed(), key = { "p" + it.cid }) { PendingMsg(it, vm) }
         items(rows, key = { it.key }, contentType = { it::class }) { row ->
             Box(if (row.key == flashing) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp)) else Modifier) {
                 val quote = row.quote(if (traj) "t" else "c")
-                if (quote != null) SwipeReply({ vm.replyIn(quote) }) { Row(row, vm, chat = !traj) { zoom = it } }
-                else Row(row, vm, chat = !traj) { zoom = it }
+                val live = if (row.key == callKey) call else null
+                if (quote != null) SwipeReply({ vm.replyIn(quote) }) { Row(row, vm, chat = !traj, call = live) { zoom = it } }
+                else Row(row, vm, chat = !traj, call = live) { zoom = it }
             }
         }
         if (vm.hasOlder) item(key = "older") {
@@ -375,12 +379,12 @@ fun TrigRow(t: Item.Trig) {
 }
 
 @Composable
-fun Row(item: Item, vm: Seimei, live: JSONObject? = null, chat: Boolean = false, onPicture: (String) -> Unit) {
+fun Row(item: Item, vm: Seimei, live: JSONObject? = null, chat: Boolean = false, call: VoiceCall? = null, onPicture: (String) -> Unit) {
     when (item) {
         is Item.Day -> NotePill(dayLabel(item.t), "", day = true)
         is Item.Msg -> if (item.role == "user") UserMsg(item, vm, onPicture) else AssistantMsg(item, vm, chat)
-        is Item.Spoken -> if (item.who == "user") SpokenMsg(item.text) else PartnerLine(item.text, item.cut)
         is Item.Asked -> AskedLine(item)
+        is Item.Voice -> CallCard(item, call)
         is Item.Fold -> FoldPill(item, vm)
         is Item.Trig -> TrigRow(item)
         is Item.Note -> NotePill(item.text + if (item.n > 1) "  ×${item.n}" else "", item.level)

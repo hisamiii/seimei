@@ -52,6 +52,8 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
         private set
     var seconds by mutableStateOf(0)
         private set
+    /** When the call started, in unix seconds: a chat card with a turn since then is this call's. */
+    val since = System.currentTimeMillis() / 1000.0
     /** The user talks now. */
     var talking by mutableStateOf(false)
         private set

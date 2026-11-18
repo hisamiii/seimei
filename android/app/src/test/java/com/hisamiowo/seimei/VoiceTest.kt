@@ -233,14 +233,26 @@ class VoiceTest {
         val ask = c.items.filterIsInstance<Item.Asked>().single()
         assertTrue(ask.waiting)
         c.add(JSONObject("""{"id": 4, "type": "assistant", "re": 2, "text": "Up 3 days.", "t": ${t + 9}}"""))
-        assertEquals(listOf("Day", "Note", "Spoken", "Asked", "Spoken", "Msg"), c.items.map { it::class.simpleName })
-        assertTrue((c.items[1] as Item.Note).text.startsWith("Voice call · "))
-        assertFalse((c.items[3] as Item.Asked).waiting)
-        assertEquals(Item.Spoken("e3", "partner", "Asking seimei.", true), c.items[4])
+        // One card holds the turns; the ask and seimei's reply stay in the chat.
+        assertEquals(listOf("Day", "Voice", "Asked", "Msg"), c.items.map { it::class.simpleName })
+        val card = c.items[1] as Item.Voice
+        assertEquals(listOf("e1", "e3"), card.turns.map { it.key })
+        assertEquals(Item.Spoken("e3", "partner", "Asking seimei.", true), card.turns[1])
+        assertEquals("Asking seimei.", card.last)
+        assertEquals(t + 3, card.t1, 0.0)
+        assertFalse(card.ended)
+        assertFalse((c.items[2] as Item.Asked).waiting)
         // The reply sits right under the ask: no chip naming what it answers.
-        assertNull((c.items[5] as Item.Msg).anchor)
-        // Turns more than 5 minutes later are another call.
-        c.add(JSONObject("""{"id": 5, "type": "voice", "who": "user", "text": "hi again", "t": ${t + 400}}"""))
-        assertEquals(2, c.items.count { it is Item.Note })
+        assertNull((c.items[3] as Item.Msg).anchor)
+        // The call's end closes the card with its length and summary, however late it comes.
+        c.add(JSONObject("""{"id": 5, "type": "voice_end", "secs": 372, "summary": "Asked for the uptime: 3 days.", "t": ${t + 700}}"""))
+        val ended = c.items[1] as Item.Voice
+        assertTrue(ended.ended)
+        assertEquals(372L, ended.secs)
+        assertEquals("Asked for the uptime: 3 days.", ended.summary)
+        // A turn after the end, or more than 5 minutes after the last one, is another call.
+        c.add(JSONObject("""{"id": 6, "type": "voice", "who": "user", "text": "hi again", "t": ${t + 710}}"""))
+        c.add(JSONObject("""{"id": 7, "type": "voice", "who": "user", "text": "still there?", "t": ${t + 1100}}"""))
+        assertEquals(3, c.items.count { it is Item.Voice })
     }
 }

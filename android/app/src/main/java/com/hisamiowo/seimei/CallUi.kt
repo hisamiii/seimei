@@ -14,6 +14,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -26,16 +27,21 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -122,19 +128,61 @@ fun SpokenMsg(text: String) {
     } }
 }
 
-/** A line of the voice partner's: plain, with a bar on the left, so it never reads as seimei's. [live] while it still speaks, [cut] when the user cut it off. */
+/** A line of the voice partner's: plain, with a bar on the left, so it never reads as seimei's; [cut] when the user cut it off. */
 @Composable
-fun PartnerLine(text: String, cut: Boolean = false, live: Boolean = false) {
+fun PartnerLine(text: String, cut: Boolean = false) {
     val cs = MaterialTheme.colorScheme
     val x = LocalTokens.current
-    val dot = if (live) pulse() else 1f
     Row(Modifier.fillMaxWidth(.88f).height(IntrinsicSize.Min)) {
         Box(Modifier.width(2.dp).fillMaxHeight().background(cs.primary))
         Text(buildAnnotatedString {
             append(text)
             if (cut) withStyle(SpanStyle(color = x.text3)) { append(" …") }
-            if (live) withStyle(SpanStyle(color = cs.primary.copy(alpha = dot), fontSize = 10.sp)) { append("  ●") }
         }, Modifier.padding(start = 10.dp, top = 2.dp, bottom = 2.dp), color = x.text2, fontSize = 16.sp, lineHeight = 23.2.sp)
+    }
+}
+
+/** A voice call as one card: its length, the time and the summary, and a tap on the head opens the turns.
+ * While [live] runs it has an outline, the running time and the partner's current line. */
+@Composable
+fun CallCard(c: Item.Voice, live: VoiceCall?) {
+    val cs = MaterialTheme.colorScheme
+    val x = LocalTokens.current
+    var open by rememberSaveable(c.key) { mutableStateOf(false) }
+    val shape = RoundedCornerShape(20.dp)
+    Column(Modifier.fillMaxWidth().clip(shape).background(cs.surfaceContainer)
+        .then(if (live != null) Modifier.border(1.5.dp, cs.primary, shape) else Modifier),
+        verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.fillMaxWidth().clickable(onClickLabel = if (open) "Close" else "Open") { open = !open }
+            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = if (c.summary.isEmpty() && live == null && !open) 12.dp else 0.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Box(Modifier.size(30.dp).clip(RoundedCornerShape(10.dp)).background(cs.primaryContainer), contentAlignment = Alignment.Center) {
+                Icon(Icons.wave, null, Modifier.size(18.dp), tint = cs.onPrimaryContainer)
+            }
+            val length = if (live != null) null else callMinutes(if (c.ended) c.secs.toDouble() else c.t1 - c.t0)
+            Text(if (length == null) "Voice call" else "Voice call · $length", Modifier.weight(1f), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            val running = live?.let { " · %d:%02d".format(it.seconds / 60, it.seconds % 60) }.orEmpty()
+            Text(clock(c.t0) + running, fontSize = 12.5.sp, color = x.text3)
+            Icon(Icons.expand, null, Modifier.size(20.dp).rotate(if (open) 180f else 0f), tint = x.text3)
+        }
+        Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (c.summary.isNotEmpty()) Text(c.summary, fontSize = 14.sp, lineHeight = 20.sp, color = x.text2)
+            val line = live?.saying?.ifEmpty { null } ?: c.last
+            if (live != null && line.isNotEmpty()) Row(Modifier.height(IntrinsicSize.Min)) {
+                Box(Modifier.width(2.dp).fillMaxHeight().background(cs.primary))
+                val dot = if (live.saying.isNotEmpty()) pulse() else 0f
+                Text(buildAnnotatedString {
+                    append(line)
+                    if (live.saying.isNotEmpty()) withStyle(SpanStyle(color = cs.primary.copy(alpha = dot), fontSize = 10.sp)) { append("  ●") }
+                }, Modifier.padding(start = 10.dp), color = x.text2, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (open) {
+                HorizontalDivider(Modifier.padding(vertical = 6.dp), color = cs.surfaceContainerHigh)
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    for (t in c.turns) if (t.who == "user") SpokenMsg(t.text) else PartnerLine(t.text, t.cut)
+                }
+            }
+        }
     }
 }
 

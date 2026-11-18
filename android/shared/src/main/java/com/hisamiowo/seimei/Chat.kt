@@ -19,7 +19,11 @@ sealed interface Item {
                    val files: List<FileRef> = emptyList(), val anchor: Anchor? = null, val reply: Long = 0,
                    val thread: String = "", val threadName: String = "", val sender: String = "", val offer: Boolean = false) : Item
     /** A voice call's turn of the user's (their bubble with a wave mark) or of the partner's (a line with a bar), cut when the user barged in or hung up. */
-    data class Spoken(override val key: String, val who: String, val text: String, val cut: Boolean = false) : Item
+    data class Spoken(val key: String, val who: String, val text: String, val cut: Boolean = false)
+    /** A voice call as one card: t0 and t1 are its first and last turn, secs its length once it [ended] (-1 before), with the summary when there is one.
+     * The turns open on a tap; last is the partner's latest line, shown while the call runs. */
+    data class Voice(override val key: String, val t0: Double, val t1: Double, val turns: List<Spoken> = emptyList(),
+                    val last: String = "", val secs: Long = -1, val summary: String = "", val ended: Boolean = false) : Item
     /** The voice partner asked seimei; [waiting] until seimei's reply lands under it. */
     data class Asked(override val key: String, val text: String, val waiting: Boolean = true) : Item
     /** A run of trajectory events, as one line in the chat; goto is the key of the first one. */
@@ -141,8 +145,8 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
     /** Where each message sits in items, by event id: an offer marks the reply it is about. */
     private val msgAt = HashMap<Long, Int>()
     private var seq = 0
-    // Voice: the last voice turn's time, and the partner's open asks to seimei by event id.
-    private var lastVoice = 0.0
+    // Voice: where the open call's card sits in items, and the partner's open asks to seimei by event id.
+    private var call = -1
     private val asked = HashMap<Long, Int>()
 
     val waiting get() = approvals.keys.count { it !in outcomes }
@@ -232,18 +236,28 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
         items[fold] = (items[fold] as Item.Fold).copy(text = text)
     }
 
-    /** A voice call's turns; a call opens with a note, and turns more than 5 minutes apart are another call. */
+    /** A voice call is one card where it starts, with its turns inside; what the partner asked seimei stays in the chat, as the reply that answers it does.
+     * Turns more than 5 minutes apart are another call; a voice_end closes the card with the call's length and summary. */
     private fun voice(ev: JSONObject, key: String, t: Double) {
-        if (lastVoice == 0.0 || t - lastVoice > 300) put(Item.Note("v$key", "Voice call · ${clock(t)}", ""))
-        lastVoice = t
+        val open = (items.getOrNull(call) as? Item.Voice)?.takeIf { !it.ended }
+        if (ev.str("type") == "voice_end") {
+            // It closes the open card, however long the call stayed silent; with no card open, its turns are on an older page.
+            if (open != null) items[call] = open.copy(secs = ev.optLong("secs"), summary = ev.str("summary"), ended = true)
+            return
+        }
+        val c = if (open != null && t - open.t1 <= 300) open else Item.Voice("v$key", t, t).also { call = put(it) }
         between = false
         if (ev.str("type") == "user") {
+            items[call] = c.copy(t1 = t)
             // The partner asked seimei: the reply that follows answers it, with no chip.
             val id = ev.optLong("id")
             lastUser = id
             if (id > 0) said[id] = ev.str("text")
             asked[id] = put(Item.Asked(key, ev.str("text")))
-        } else put(Item.Spoken(key, ev.str("who"), ev.str("text"), ev.optBoolean("cut")))
+            return
+        }
+        val turn = Item.Spoken(key, ev.str("who"), ev.str("text"), ev.optBoolean("cut"))
+        items[call] = c.copy(t1 = t, turns = c.turns + turn, last = if (turn.who == "partner") turn.text else c.last)
     }
 
     fun add(ev: JSONObject) {
@@ -303,7 +317,7 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
         }
         activity = -1
         val id = ev.optLong("id")
-        if (type == "voice" || (type == "user" && ev.optBoolean("voice"))) return voice(ev, key, t)
+        if (type == "voice" || type == "voice_end" || (type == "user" && ev.optBoolean("voice"))) return voice(ev, key, t)
         if (type == "user" || type == "assistant") {
             if (id > 0) said[id] = ev.str("text")
             val re = ev.optLong("re")
@@ -409,6 +423,9 @@ fun noteText(ev: JSONObject): String {
 }
 
 // The locale's short time, as the web page shows it ("6:13 PM" in English)
+/** A voice call's length on its card: "6 min", at least 1. */
+fun callMinutes(secs: Double) = "${maxOf(1L, Math.round(secs / 60))} min"
+
 fun clock(t: Double): String =
     java.time.format.DateTimeFormatter.ofLocalizedTime(java.time.format.FormatStyle.SHORT)
         .format(Instant.ofEpochMilli((t * 1000).toLong()).atZone(ZoneId.systemDefault())).replace('\u202f', ' ')
