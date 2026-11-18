@@ -59,11 +59,11 @@ The tripwire does not stop an agent that writes the file and then restarts seime
 
 ## The voice partner
 
-The voice partner, when `[voice] on`, never acts: its tools only read, and `ask_seimei` hands actions to the dispatcher as the user's message. What it reads leaves the machine for Phonic, so the bridge scrubs secrets and denied paths out of everything it sends.
+The voice partner, when `[voice] on`, never acts: its tools only read, and `ask_seimei` hands actions to the dispatcher as the user's message. What it reads leaves the machine for Phonic as it is, so its file reads are fenced in.
 
 - File reads reach only `[voice] roots`, the memory folder and `notes.md`.
 - They never reach seimei's state folders, a denied path, a key file, a hidden file or a file named like a secret.
-- A web query or URL that holds a secret is not sent, and `fetch_page` never reaches this machine or a private network.
+- `fetch_page` never reaches this machine or a private network.
 - Every pack and tool call goes to the audit log, as `who: "voice"`.
 
 [voice.md](voice.md) has the details.

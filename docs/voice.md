@@ -41,7 +41,7 @@ The pack is the partner's system prompt, built when a conversation opens. Phonic
 
 ## The partner's tools
 
-Every lookup runs on seimei's server and answers through the socket seimei opened, so nothing is exposed to the internet. Answers are scrubbed and cut to 12,000 characters, under Phonic's 16,000.
+Every lookup runs on seimei's server and answers through the socket seimei opened, so nothing is exposed to the internet. Answers are cut to 12,000 characters, under Phonic's 16,000.
 
 | tool | does | mode |
 |---|---|---|
@@ -92,12 +92,12 @@ Down audio is only what is heard. Phonic streams silent chunks nonstop, so the b
 
 Every call sends the pack, lookup answers, the audio and both transcripts to Phonic, and Phonic's upstream providers process them. Web searches go to OpenRouter and its search engine, and `fetch_page` reaches the page's site.
 
+All of it goes as it is: nothing is scrubbed.
+
 Phonic keeps conversations under its default retention; zero retention is for its Enterprise plan only.
 
 The guards, all in the bridge:
 
-- **The scrubber.** It takes secrets and denied paths out of the pack and of every lookup answer. Secrets are private key blocks, keys in known formats, assigned passwords and tokens, bearer headers, logins in URLs and long random strings.
-- **Outgoing web calls.** A search query or URL the scrubber would change is not sent.
 - **File reads.** `read_file` and `search_files` reach only `[voice] roots`, the memory folder and `notes.md`. They never read seimei's state folders, so no login, upload or audit log. Nor do they read a denied path, a key file, a hidden file or folder, or a file whose name says it holds a secret. Symlinks are resolved before the check.
 - **No local pages.** `fetch_page` takes any http or https address, except ones on this machine or a private network, checked on every redirect.
 - **The audit log.** Each pack, with its section sizes, and each tool call of the partner's, with its query, URL or path, goes to `audit.jsonl` as `who: "voice"`.
@@ -109,4 +109,4 @@ The guards, all in the bridge:
 - A script is a JSON list of conversations, each a list of steps.
 - `expect` waits for a matching message, `send` sends an event, and `sleep`, `close` and `drop` do what they say.
 - An `audio_chunk` to send with `"pcm": "loud"` or `"silent"` gets 20 ms of that audio.
-- `tests/cases/voice.json` holds the pack, scrubber, name-matching and guard cases.
+- `tests/cases/voice.json` holds the pack, name-matching and guard cases.

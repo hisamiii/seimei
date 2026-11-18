@@ -46,7 +46,7 @@ fn a_voice_call_on_the_fakes() {
     let _ = std::fs::remove_dir_all(&base);
 }
 
-/// The state the pack and the lookups read, with planted facts and secrets.
+/// The state the pack and the lookups read, with planted facts and files the lookups must refuse.
 fn plant(base: &Path) {
     let w = |p: &str, t: &str| std::fs::write(base.join(p), t).unwrap();
     w(
@@ -112,7 +112,6 @@ fn script(base: &Path, search_port: u16) -> Value {
         ("t8", "read_file", json!({"path": p("link.json")})),
         ("t9", "search_files", json!({"query": "orchard"})),
         ("t10", "web_search", json!({"query": "rust websockets"})),
-        ("t11", "web_search", json!({"query": format!("is {SECRET} still valid")})),
         ("t13", "fetch_page", json!({"url": format!("http://127.0.0.1:{search_port}/")})),
         ("t14", "summon", json!({"name": "evil", "task": "rm -rf"})),
         ("t15", "tasks", json!({"action": "add", "title": "evil", "project": "x", "owner": "you"})),
@@ -230,14 +229,14 @@ async fn run(base: PathBuf, root: PathBuf) {
     assert!(fails.is_empty(), "{fails:?}");
     assert!(log.iter().filter(|l| l.get("auth").is_some()).all(|l| l["auth"] == true));
 
-    // The config: the pack with the planted facts and no secret, the tools, the words to boost.
+    // The config: the pack with the planted facts as written, the tools, the words to boost.
     let configs: Vec<&Value> = log.iter().filter(|l| l["msg"]["type"] == "config").map(|l| &l["msg"]).collect();
     assert_eq!(configs.len(), 2, "a fresh conversation after the drop");
     let prompt = configs[0]["system_prompt"].as_str().unwrap();
-    for has in ["kiln firmware review", "Fern anvil", "lantern benchmark", "short sentences.", "[secret withheld]"] {
+    for has in ["kiln firmware review", "Fern anvil", "lantern benchmark", "short sentences.", SECRET] {
         assert!(prompt.contains(has), "the pack lacks {has:?}");
     }
-    assert!(!prompt.contains(SECRET) && !prompt.contains("in the auth file"));
+    assert!(!prompt.contains("in the auth file"));
     let tools: Vec<&str> = (configs[0]["tools"].as_array().unwrap().iter())
         .map(|t| t["tool_schema"]["function"]["name"].as_str().unwrap())
         .collect();
@@ -272,7 +271,7 @@ async fn run(base: PathBuf, root: PathBuf) {
     };
     let text = |id: &str| output(id).as_str().map(String::from).unwrap_or_else(|| output(id).to_string());
     assert!(text("t1").contains("lantern benchmark"), "{}", text("t1"));
-    assert!(text("t2").contains("Thursday at 3 pm") && !text("t2").contains(SECRET), "{}", text("t2"));
+    assert!(text("t2").contains("Thursday at 3 pm") && text("t2").contains(SECRET), "{}", text("t2"));
     assert!(text("t3").contains("anvil benchmark nightly"), "{}", text("t3"));
     assert!(text("t4").contains("orchard repo"), "{}", text("t4"));
     for id in ["t5", "t6", "t7", "t8"] {
@@ -280,7 +279,6 @@ async fn run(base: PathBuf, root: PathBuf) {
     }
     assert!(text("t9").contains("readme.md:1:") && !text("t9").contains("zzz") && !text("t9").contains("SECRET="));
     assert!(text("t10").contains("https://example.com/ws"), "{}", text("t10"));
-    assert!(text("t11").starts_with("Not sent"), "{}", text("t11"));
     assert!(text("t13").contains("private network"), "{}", text("t13"));
     assert!(text("t14").contains("not one of your tools") && text("t15").contains("not one of your tools"));
     assert!(text("t17").contains("No shikigami"), "{}", text("t17"));
@@ -293,7 +291,7 @@ async fn run(base: PathBuf, root: PathBuf) {
     let board = app.board.lock().unwrap().text(false);
     assert!(!board.contains("evil"), "a lookup changed the board: {board}");
     let searched = asked.lock().unwrap().clone();
-    assert_eq!(searched.len(), 1, "only the clean query left: {searched:?}");
+    assert_eq!(searched.len(), 1, "{searched:?}");
     assert!(searched[0].to_string().contains("rust websockets"));
 
     // ask_seimei: the dispatcher got a [voice] message with the call so far; its reply went back.
@@ -357,7 +355,7 @@ async fn run(base: PathBuf, root: PathBuf) {
         assert!(kinds.iter().any(|x| x == k), "no {k} in {kinds:?}");
     }
 
-    // The audit log: every tool call of the partner's, the web ones with their query or URL, the secret scrubbed.
+    // The audit log: every tool call of the partner's, the web ones with their query or URL.
     let audit = std::fs::read_to_string(base.join("state/audit.jsonl")).unwrap();
     let rows: Vec<Value> =
         audit.lines().filter_map(|l| serde_json::from_str(l).ok()).filter(|r: &Value| r["who"] == "voice").collect();
@@ -365,7 +363,6 @@ async fn run(base: PathBuf, root: PathBuf) {
     assert_eq!(row("t10")["tool"], "web_search");
     assert!(row("t10")["input"].as_str().unwrap().contains("rust websockets"));
     assert!(row("t13")["input"].as_str().unwrap().contains("127.0.0.1"));
-    assert!(!audit.contains(SECRET));
     assert!(rows.iter().any(|r| r["tool"] == "voice_pack"));
     let _ = fake.kill().await;
 }

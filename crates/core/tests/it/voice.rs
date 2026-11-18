@@ -1,4 +1,4 @@
-//! tests/cases/voice.json: the voice partner's context pack, the scrubber, name matching, page text and the fetch and file guards.
+//! tests/cases/voice.json: the voice partner's context pack, name matching, page text and the fetch and file guards.
 
 use std::net::IpAddr;
 use std::path::Path;
@@ -25,20 +25,6 @@ fn report(fails: &[String], total: usize) {
 }
 
 #[test]
-fn scrub_cases() {
-    let doc = cases();
-    let list = doc["scrub"].as_array().unwrap();
-    let mut fails = vec![];
-    for c in list {
-        let got = pack::scrub(c["in"].as_str().unwrap(), &strs(&c["deny"]));
-        if got != c["out"].as_str().unwrap() {
-            fails.push(format!("{}: {got:?}", c["what"]));
-        }
-    }
-    report(&fails, list.len());
-}
-
-#[test]
 fn pack_cases() {
     let doc = cases();
     let list = doc["pack"].as_array().unwrap();
@@ -58,7 +44,7 @@ fn pack_cases() {
             notes: t("notes"),
             memory: t("memory"),
         };
-        let p = pack::build(&src, &strs(&c["sections"]), &[]);
+        let p = pack::build(&src, &strs(&c["sections"]));
         for h in strs(&c["has"]) {
             if !p.text.contains(&h) {
                 fails.push(format!("{}: lacks {h:?}", c["what"]));

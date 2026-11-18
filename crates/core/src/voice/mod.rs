@@ -25,7 +25,6 @@ use crate::paths::expand;
 use crate::util::{chars, local_time, now};
 
 use lookups::Reach;
-use pack::scrub;
 
 /// Phonic's limit for one conversation; a call that reaches it goes on in a new one.
 const MAX_CONVERSATION: u64 = 7200;
@@ -252,7 +251,7 @@ impl Voice {
         c
     }
 
-    /// A lookup's answer, scrubbed. Blocking: it reads files and state.
+    /// A lookup's answer. Blocking: it reads files and state.
     pub fn lookup(&self, name: &str, p: &Value) -> String {
         let s = |k: &str| p[k].as_str().unwrap_or("").to_string();
         let out = match name {
@@ -268,26 +267,22 @@ impl Voice {
             "search_files" => self.reach().search_files(&s("query")),
             _ => format!("{name} is not one of your tools."),
         };
-        chars(&scrub(&out, &self.deny()), lookups::OUT_MAX)
+        chars(&out, lookups::OUT_MAX)
     }
 
-    /// A web tool's answer. What leaves the server goes through the scrubber first: a query or URL it would change is not sent.
+    /// A web tool's answer.
     pub async fn web(&self, name: &str, p: &Value) -> String {
         let arg = if name == "web_search" { p["query"].as_str() } else { p["url"].as_str() }.unwrap_or("").trim();
         if arg.is_empty() {
             return "Say what to look for.".into();
         }
-        if scrub(arg, &self.deny()) != arg {
-            return "Not sent: it looks like it holds a secret or a private path.".into();
-        }
         let got = if name == "web_search" { self.web.search(arg).await } else { self.web.fetch(arg).await };
         let out = got.unwrap_or_else(|e| format!("Couldn't: {e}."));
-        chars(&scrub(&out, &self.deny()), lookups::OUT_MAX)
+        chars(&out, lookups::OUT_MAX)
     }
 
     fn audit(&self, conversation: &str, id: &str, tool: &str, input: &Value) {
-        let input = json!(scrub(&input.to_string(), &self.deny()));
-        let c = AuditCall { who: "voice", worker: None, session: conversation, agent: None, id, tool, input: &input };
+        let c = AuditCall { who: "voice", worker: None, session: conversation, agent: None, id, tool, input };
         self.audit.call(c);
     }
 
@@ -418,7 +413,7 @@ impl Call {
         let v = self.v.clone();
         let (prompt, config) = tokio::task::spawn_blocking(move || {
             let src = v.sources();
-            let p = pack::build(&src, &v.cfg.sections, &v.deny());
+            let p = pack::build(&src, &v.cfg.sections);
             let config = v.config(&p.text, v.keywords(&src));
             (p, config)
         })
@@ -614,13 +609,12 @@ impl Call {
     /// A thread event during the call: the dispatcher's answer to an ask, or news the partner should know.
     fn chat(&mut self, ev: &Value) {
         let s = |k: &str| ev[k].as_str().unwrap_or("").trim().to_string();
-        let deny = self.v.deny();
         let at = local_time(ev["t"].as_f64().unwrap_or_else(now), "%H:%M");
         match ev["type"].as_str().unwrap_or("") {
             "assistant" => {
                 // The dispatcher ran a turn: the notes it had are delivered.
                 self.transcript.clear();
-                let text = scrub(&s("text"), &deny);
+                let text = s("text");
                 if let Some(a) = self.asks.iter_mut().find(|a| ev["re"].as_i64() == Some(a.event)) {
                     let request = a.request.clone();
                     if !a.closed {
@@ -639,7 +633,7 @@ impl Call {
                 }
             }
             "user" if ev["voice"] != true => {
-                let msg = format!("[{at}] the user typed to seimei: {}", chars(&scrub(&s("text"), &deny), DELTA_MAX));
+                let msg = format!("[{at}] the user typed to seimei: {}", chars(&s("text"), DELTA_MAX));
                 self.out.push(json!({"type": "add_system_message", "system_message": msg}));
             }
             "worker" if matches!(s("event").as_str(), "done" | "failed" | "asking") => {
@@ -648,7 +642,7 @@ impl Call {
                     "failed" => "failed",
                     _ => "asks",
                 };
-                let text = chars(&scrub(&s("text"), &deny), DELTA_MAX);
+                let text = chars(&s("text"), DELTA_MAX);
                 let msg = format!("[{at}] shikigami {} {what}: {text}", s("name"));
                 self.out.push(json!({"type": "add_system_message", "system_message": msg}));
             }

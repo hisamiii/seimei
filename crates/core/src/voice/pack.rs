@@ -1,9 +1,6 @@
 //! The context pack: what the voice partner knows when a call opens, built from seimei's own state.
-//! Every section is cut to its budget and the whole pack goes through `scrub` before it leaves the server.
+//! Every section is cut to its budget.
 
-use std::sync::LazyLock;
-
-use regex::Regex;
 use serde_json::Value;
 
 use crate::events::Event;
@@ -25,8 +22,6 @@ const MEMORY_MAX: usize = 24_000;
 pub const MAX: usize = 120_000;
 
 const RULES: &str = include_str!("partner.md");
-pub const WITHHELD: &str = "[secret withheld]";
-pub const WITHHELD_PATH: &str = "[withheld path]";
 
 /// What the pack is built from, read by the caller: plain data, so a test can hand in any state.
 #[derive(Default)]
@@ -50,7 +45,7 @@ pub struct Pack {
 }
 
 /// The pack: the voice rules, then each allowed section that has something, newest state last.
-pub fn build(src: &Sources, sections: &[String], deny: &[String]) -> Pack {
+pub fn build(src: &Sources, sections: &[String]) -> Pack {
     let at = local_time(src.built, "%H:%M");
     let on = |s: &str| sections.iter().any(|x| x == s);
     let mut parts: Vec<(&'static str, String)> =
@@ -70,7 +65,7 @@ pub fn build(src: &Sources, sections: &[String], deny: &[String]) -> Pack {
     add("memory", "Memory index: read_memory(name) reads one".into(), lines_within(&src.memory, MEMORY_MAX, more));
     let sizes = parts.iter().map(|(n, t)| (*n, t.chars().count())).collect();
     let text = parts.into_iter().map(|(_, t)| t).collect::<Vec<_>>().join("\n\n");
-    Pack { text: chars(&scrub(&text, deny), MAX), sizes }
+    Pack { text: chars(&text, MAX), sizes }
 }
 
 /// Whole lines from the top, within `max` characters; `more` marks a cut.
@@ -133,77 +128,4 @@ fn notes(text: &str) -> String {
         return shown;
     }
     format!("{shown}[... more sections, search_notes finds them: {}]", left.join("; "))
-}
-
-static PEM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"-----BEGIN [A-Z ]*PRIVATE KEY( BLOCK)?-----").unwrap());
-static PEM_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"-----END [A-Z ]*PRIVATE KEY( BLOCK)?-----").unwrap());
-static KNOWN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(concat!(
-        r"\b(sk-[A-Za-z0-9_-]{16,}|sk_(live|test)_[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{20,}",
-        r"|github_pat_[A-Za-z0-9_]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}",
-        r"|glpat-[A-Za-z0-9_-]{20,}|hf_[A-Za-z0-9]{30,}|npm_[A-Za-z0-9]{30,}",
-        r"|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})",
-    ))
-    .unwrap()
-});
-static ASSIGNED: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(concat!(
-        r#"(?i)\b(password|passwd|passphrase|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key"#,
-        r#"|client[_-]?secret|auth[_-]?token|session[_-]?token|credentials?)\b("?\s*[:=]\s*|\s+is\s+)["'`]?[^\s"'`,;]{6,}"#,
-    ))
-    .unwrap()
-});
-static BEARER: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{12,}").unwrap());
-static URL_LOGIN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\b([a-z][a-z0-9+.-]*://)[^\s/:@]+:[^\s/@]+@").unwrap());
-static LONG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[A-Za-z0-9_+=-]{32,}").unwrap());
-static WORD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\S+").unwrap());
-
-/// A long run of mixed case and digits: a key in no known format.
-fn random(token: &str) -> bool {
-    let has = |f: fn(&char) -> bool| token.chars().any(|c| f(&c));
-    let digits = token.chars().filter(char::is_ascii_digit).count();
-    has(char::is_ascii_uppercase) && has(char::is_ascii_lowercase) && digits >= 2
-}
-
-/// The text with secrets and denied paths taken out: private key blocks go whole, keys, tokens and passwords become WITHHELD, and a word naming a denied path becomes WITHHELD_PATH.
-/// `deny` holds absolute paths; their `~` forms are caught too.
-pub fn scrub(text: &str, deny: &[String]) -> String {
-    let home = crate::paths::home().display().to_string();
-    let mut forms: Vec<String> = vec![];
-    for d in deny.iter().map(|d| d.trim_end_matches('/')).filter(|d| !d.is_empty()) {
-        forms.push(d.to_string());
-        if let Some(rest) = d.strip_prefix(&home).filter(|r| r.starts_with('/')) {
-            forms.push(format!("~{rest}"));
-            forms.push(format!("$HOME{rest}"));
-        }
-    }
-    let (mut out, mut in_key) = (vec![], false);
-    for line in text.lines() {
-        if PEM.is_match(line) {
-            in_key = !PEM_END.is_match(line);
-            out.push(WITHHELD.to_string());
-            continue;
-        }
-        if in_key {
-            in_key = !PEM_END.is_match(line);
-            continue;
-        }
-        let line = URL_LOGIN.replace_all(line, format!("${{1}}{WITHHELD}@"));
-        let line = KNOWN.replace_all(&line, WITHHELD);
-        let line = BEARER.replace_all(&line, format!("${{1}} {WITHHELD}"));
-        let line = ASSIGNED.replace_all(&line, format!("${{1}}${{2}}{WITHHELD}"));
-        let line = LONG.replace_all(
-            &line,
-            |c: &regex::Captures| {
-                if random(&c[0]) { WITHHELD.to_string() } else { c[0].to_string() }
-            },
-        );
-        let line = WORD.replace_all(&line, |c: &regex::Captures| {
-            if forms.iter().any(|f| c[0].contains(f.as_str())) { WITHHELD_PATH.to_string() } else { c[0].to_string() }
-        });
-        out.push(line.into_owned());
-    }
-    out.join("\n")
 }
