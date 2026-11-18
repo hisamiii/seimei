@@ -24,6 +24,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
 import okio.ByteString.Companion.toByteString
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
@@ -69,8 +70,13 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
     private val am = ctx.getSystemService(AudioManager::class.java)
     private val lock = Any()
     private val log = Playlog()
+    private val jitter = Jitter()
     // Each chunk carries the cut it belongs to: a chunk from before a cut never plays.
-    private val queue = LinkedBlockingQueue<Pair<Int, ShortArray>>()
+    private val queue = LinkedBlockingQueue<Chunk>()
+    // Around the track's writes and its flush, so a cut drops everything at once and the count of written frames stays true.
+    private val trackLock = Any()
+    // Frames written since the last flush: less the play head, what the track still holds.
+    private var written = 0L
     @Volatile private var gen = 0
     @Volatile private var running = true
     @Volatile private var open = false
@@ -89,6 +95,13 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
     @Volatile private var played = 0.0
     @Volatile private var cutS = 0.0
     @Volatile private var flushes = 0
+    // The echo canceller and noise suppressor: on, off (made but not enabled), or none (this phone gives apps none).
+    private var aec = "none"
+    private var ns = "none"
+    // The effects the platform runs on the microphone's stream, read once it records.
+    @Volatile private var fx = emptyList<String>()
+
+    private class Chunk(val gen: Int, val samples: ShortArray, val db: Double)
 
     private val up = Uplink(echo, object : Uplink.Out {
         override fun level() = synchronized(lock) { log.level(now()) }
@@ -107,31 +120,35 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
     /** Opens the microphone, the speaker and the socket; false when the microphone would not open. */
     @SuppressLint("MissingPermission") // the voice button asks for it first
     fun start(): Boolean {
+        // The call mode first: the platform picks the microphone's voice processing (its echo canceller) when the input opens.
+        route()
         val min = AudioRecord.getMinBufferSize(Voice.RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         val r = try {
             AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, Voice.RATE, AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT, maxOf(min, Voice.FRAME * 2 * 16))
         } catch (e: Exception) {
-            return false
+            return false.also { unroute() }
         }
-        if (r.state != AudioRecord.STATE_INITIALIZED) return false.also { r.release() }
+        if (r.state != AudioRecord.STATE_INITIALIZED) return false.also { r.release(); unroute() }
         rec = r
-        if (AcousticEchoCanceler.isAvailable()) AcousticEchoCanceler.create(r.audioSessionId)?.let { it.enabled = true; effects += it }
-        if (NoiseSuppressor.isAvailable()) NoiseSuppressor.create(r.audioSessionId)?.let { it.enabled = true; effects += it }
+        // isAvailable() is false on phones that run their canceller below the app; create() says for itself.
+        aec = attach(r.audioSessionId) { AcousticEchoCanceler.create(it) }
+        ns = attach(r.audioSessionId) { NoiseSuppressor.create(it) }
         val outMin = AudioTrack.getMinBufferSize(Voice.RATE, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
         // In the microphone's session, so an echo canceller that works per session hears what plays.
+        // Room for a burst after a late stretch: what plays waits on the jitter buffer, not on this size.
         track = try {
             AudioTrack.Builder().setAudioAttributes(ATTRS)
                 .setAudioFormat(AudioFormat.Builder().setSampleRate(Voice.RATE).setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                     .setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
-                .setTransferMode(AudioTrack.MODE_STREAM).setBufferSizeInBytes(maxOf(outMin, Voice.RATE * 2 / 10))
+                .setTransferMode(AudioTrack.MODE_STREAM).setBufferSizeInBytes(maxOf(outMin, Voice.RATE * 2 * TRACK_MS / 1000))
                 .setSessionId(r.audioSessionId).build()
         } catch (e: Exception) {
             for (fx in effects) fx.release()
             r.release()
+            unroute()
             return false
         }
-        route()
         ws = api.socket(Voice.path(speed), listener)
         Thread(::record, "voice-mic").start()
         Thread(::playback, "voice-out").start()
@@ -170,11 +187,33 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
         am.mode = mode
     }
 
+    /** Makes and enables an effect on the microphone's session: "on", "off" when it would not enable, "none" when the phone has none for apps. */
+    private fun attach(session: Int, make: (Int) -> AudioEffect?): String {
+        val e = try {
+            make(session)
+        } catch (e: Exception) {
+            null
+        } ?: return "none"
+        effects += e
+        return try {
+            e.enabled = true
+            if (e.enabled) "on" else "off"
+        } catch (x: IllegalStateException) {
+            "off"
+        }
+    }
+
     private fun record() {
         val r = rec ?: return
         var frames = 0
         try {
             r.startRecording()
+            // What the platform itself runs on this input: on many phones the voice call's echo canceller lives here, not in [effects].
+            fx = try {
+                r.activeRecordingConfiguration?.let { c -> (c.effects + c.clientEffects).map { it.name }.distinct() } ?: emptyList()
+            } catch (e: Exception) {
+                emptyList()
+            }
             while (running) {
                 val buf = ShortArray(Voice.FRAME)
                 var n = 0
@@ -211,37 +250,93 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
         if (p != playing) playing = p
     }
 
+    /**
+     * The partner's audio into the track through the jitter buffer: a reply waits until its prebuffer is queued, then plays.
+     * When the track runs dry, the next audio waits again. The track is paused while it waits, so a dry track is not an underrun.
+     */
     private fun playback() {
         val t = track ?: return
+        val pend = ArrayDeque<Chunk>()
+        var g = gen
+        var off = 0
+        var waiting = true
         try {
-            t.play()
             while (running) {
-                val (g, chunk) = queue.poll(100, TimeUnit.MILLISECONDS) ?: continue
-                // In slices, so a cut stops a long chunk within 20 ms.
-                var i = 0
-                while (i < chunk.size && running && g == gen) {
-                    val n = t.write(chunk, i, minOf(Voice.FRAME, chunk.size - i))
-                    if (n <= 0) break
-                    i += n
+                if (g != gen) {
+                    // A cut: what waits here belongs to the old reply; cut() flushed the track.
+                    g = gen
+                    pend.clear()
+                    off = 0
+                    waiting = true
+                }
+                var c = if (pend.isEmpty() || waiting) queue.poll(5, TimeUnit.MILLISECONDS) else queue.poll()
+                while (c != null) {
+                    if (c.gen == g) pend.addLast(c)
+                    c = queue.poll()
+                }
+                val now = now()
+                if (waiting) {
+                    val queued = (pend.sumOf { it.samples.size } - off).toDouble() / Voice.RATE
+                    if (!synchronized(lock) { jitter.ready(queued, now) }) continue
+                    synchronized(trackLock) { if (g == gen) t.play() }
+                    waiting = false
+                }
+                // As much as the track takes now, without blocking, so a cut never waits on a write.
+                var full = false
+                while (pend.isNotEmpty()) {
+                    val head = pend.first()
+                    val n = synchronized(trackLock) {
+                        if (g != gen) -1
+                        else t.write(head.samples, off, head.samples.size - off, AudioTrack.WRITE_NON_BLOCKING).also { if (it > 0) written += it }
+                    }
+                    if (n < 0) break
+                    if (n == 0) {
+                        full = true
+                        break
+                    }
+                    // The echo check and the mic gate follow what is in the track, as it will play.
+                    synchronized(lock) { log.push(n.toDouble() / Voice.RATE, head.db, now) }
+                    off += n
+                    if (off == head.samples.size) {
+                        pend.removeFirst()
+                        off = 0
+                    }
+                }
+                if (full) {
+                    Thread.sleep(5)
+                } else if (pend.isEmpty() && g == gen) {
+                    val dry = synchronized(trackLock) {
+                        (written - (t.playbackHeadPosition.toLong() and 0xffffffffL) <= 0).also { if (it) t.pause() }
+                    }
+                    if (dry) {
+                        synchronized(lock) { jitter.dried(now) }
+                        waiting = true
+                    }
                 }
             }
+        } catch (e: InterruptedException) {
         } finally {
             try { t.stop() } catch (e: IllegalStateException) {}
             t.release()
         }
     }
 
-    /** Everything queued to play stops now. */
+    /** Everything queued to play stops now: the barge's cut does not wait on the playback thread. */
     private fun cut() {
-        synchronized(lock) { cutS += log.cut(now()) }
+        synchronized(lock) {
+            cutS += log.cut(now())
+            jitter.cut()
+        }
         gen++
         queue.clear()
         if (!running) return
         try {
-            track?.run {
-                pause()
-                flush()
-                play()
+            synchronized(trackLock) {
+                track?.run {
+                    pause()
+                    flush()
+                }
+                written = 0
             }
         } catch (e: IllegalStateException) {
         }
@@ -256,7 +351,11 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
         text(JSONObject().put("type", "stats").put("path", "audiotrack").put("got", got)
             .put("played", round1(played)).put("barges", up.barges).put("cut", round1(cutS)).put("flushes", flushes)
             .put("gated", round1(up.gated * Voice.FRAME.toDouble() / Voice.RATE)).put("echo", round1(echo)).put("muted", muted)
-            .put("aec", effects.any { it is AcousticEchoCanceler }).put("ns", effects.any { it is NoiseSuppressor }).toString())
+            .put("aec", aec).put("ns", ns).put("fx", JSONArray(fx)).put("callMode", am.mode == AudioManager.MODE_IN_COMMUNICATION)
+            .put("mic", rec?.routedDevice?.type ?: -1).put("speaker", track?.routedDevice?.type ?: -1).put("phone", Build.MODEL)
+            .put("underruns", track?.underrunCount ?: -1).put("jitter", synchronized(lock) { jitter.run {
+                JSONObject().put("stalls", stalls).put("lateMs", Math.round(lateMax * 1000)).put("prebufferMs", Math.round(target * 1000))
+            } }).toString())
     }
 
     private fun round1(v: Double) = Math.round(v * 10) / 10.0
@@ -286,11 +385,11 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
             val s = Voice.samples(bytes.toByteArray())
             if (s.isEmpty()) return
             val secs = s.size.toDouble() / Voice.RATE
-            synchronized(lock) { log.push(secs, frameDb(s), now()) }
+            synchronized(lock) { jitter.arrived(secs, now()) }
             heard = Voice.level(s)
             got++
             played += secs
-            queue.add(gen to s)
+            queue.add(Chunk(gen, s, frameDb(s)))
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
@@ -328,6 +427,8 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
         private val LABELS = mapOf("connecting" to "Connecting…", "listening" to "Listening", "speaking" to "Speaking", "reconnecting" to "Reconnecting…")
         /** The app's numbers go to the server log this often, and at hang-up. */
         const val STATS_S = 10
+        /** The track's own buffer: room for a burst after a late stretch. */
+        const val TRACK_MS = 500
         private val ATTRS = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
     }

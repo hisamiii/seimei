@@ -80,6 +80,74 @@ class VoiceTest {
         assertFalse(p.busy(200.25))
     }
 
+    /** [n] chunks of 20 ms into [j] at real time from [t0], the ones in [late] that many seconds late. */
+    private fun feed(j: Jitter, t0: Double, n: Int, late: Map<Int, Double> = emptyMap()): Double {
+        for (i in 0 until n) j.arrived(0.02, t0 + i * 0.02 + (late[i] ?: 0.0))
+        return t0 + (n - 1) * 0.02
+    }
+
+    @Test fun aSteadyReplyWaitsForTheShortestPrebuffer() {
+        val j = Jitter()
+        val t = feed(j, 10.0, 50)
+        assertEquals(0.0, j.lateMax, 1e-9)
+        assertEquals(Jitter.MIN_S, j.target, 1e-9)
+        assertFalse(j.ready(0.10, t))
+        assertTrue(j.ready(0.16, t))
+    }
+
+    @Test fun lateChunksRaiseThePrebuffer() {
+        val j = Jitter()
+        // One chunk 120 ms behind the pace: the target covers it, with the margin.
+        feed(j, 10.0, 50, mapOf(30 to 0.12))
+        assertEquals(0.12, j.lateMax, 1e-6)
+        assertEquals(0.17, j.target, 0.01)
+        // Never past the cap, however late.
+        feed(j, 20.0, 50, mapOf(10 to 0.5))
+        assertEquals(Jitter.MAX_S, j.target, 1e-9)
+        // And it falls back as the call runs steady.
+        feed(j, 30.0, 1000)
+        assertEquals(Jitter.MIN_S, j.target, 1e-9)
+    }
+
+    @Test fun aChunkFasterThanThePaceIsNoLag() {
+        val j = Jitter()
+        // Phonic runs a little ahead of real time: 20 ms of audio every 19 ms.
+        for (i in 0 until 100) j.arrived(0.02, 10.0 + i * 0.019)
+        assertEquals(0.0, j.lateMax, 1e-9)
+    }
+
+    @Test fun aDrySpeakerMidReplyIsAStall() {
+        val j = Jitter()
+        val t = feed(j, 10.0, 20)
+        j.dried(t + 0.03)
+        feed(j, t + 0.2, 20)
+        assertEquals(1, j.stalls)
+        assertTrue(j.target.toString(), j.target >= Jitter.MIN_S + Jitter.STEP_S - 1e-9)
+        // The end of a reply, then the next one a second later: no stall.
+        j.dried(20.0)
+        feed(j, 21.0, 20)
+        assertEquals(1, j.stalls)
+    }
+
+    @Test fun aShortReplyPlaysWithoutItsFullPrebuffer() {
+        val j = Jitter()
+        val t = feed(j, 10.0, 3)
+        assertFalse(j.ready(0.06, t + 0.05))
+        assertTrue(j.ready(0.06, t + Jitter.END_S + 1e-6))
+        assertFalse(j.ready(0.0, t + 1.0))
+    }
+
+    @Test fun aCutStartsANewReply() {
+        val j = Jitter()
+        val t = feed(j, 10.0, 20)
+        j.dried(t)
+        j.cut()
+        // A new reply right after the cut: no stall, and no lag carried over from the old one's pace.
+        feed(j, t + 0.1, 20)
+        assertEquals(0, j.stalls)
+        assertEquals(0.0, j.lateMax, 1e-9)
+    }
+
     private class Fake : Uplink.Out {
         var playDb: Double? = null
         var busy = false

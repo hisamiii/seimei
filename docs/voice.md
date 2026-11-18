@@ -108,12 +108,18 @@ Firefox on Android can play nothing through Web Audio, on tone generator sites t
 
 The Android app makes the same call as the page over the same socket, with the same talk button, call bar and chat lines. Its call is `VoiceCall` and `Voice.kt` in `android/shared`, for the watch app to reuse.
 
-- **Echo.** The microphone records as a voice call, with the phone's echo canceller and noise suppressor where it has them. The partner plays through an AudioTrack in the microphone's session, on the loudspeaker unless a headset takes the call.
+- **Echo.** The app sets the call mode before it opens the microphone, since the phone picks its voice processing when the input opens. The microphone records as a voice call, with the phone's echo canceller and noise suppressor where it has them. The partner plays through an AudioTrack in the microphone's session, on the loudspeaker unless a headset takes the call.
+- **Jitter buffer.** Phonic sends 20 ms chunks at about real time, so the network's jitter would leave the speaker dry between late chunks. A reply starts once 150 to 250 ms of it is queued. The target follows how late chunks came in this call. It rises after a stall: a dry speaker while the reply goes on. The track holds up to 500 ms, so a burst after a late stretch fits. The track pauses while it waits.
 - **The mic gate** stays as a backup for an echo canceller that misses. While the partner plays, and 0.3 s after, the microphone goes up as silence. A barge then sends its last 300 ms, as on the page.
 - **Barge-in** is the page's detector, with the echo learned on the phone and kept between calls. A barge drops the AudioTrack's queue at once and sends `barge`.
 - **Screen off.** The call runs in a foreground service of the microphone type. Its ongoing notification shows the state and the time, with Mute and Hang up. The call bar stays on every tab while the call runs.
 - **Speed** works as on the page and is kept on the phone.
-- **Stats** go up as on the page, with `path: "audiotrack"` and whether the echo canceller and noise suppressor run.
+- **Stats** go up as on the page, with `path: "audiotrack"`. They also carry:
+  - `aec` and `ns`: on, off, or none for apps;
+  - `fx`: the effects the platform runs on the microphone;
+  - `callMode`, the routed `mic` and `speaker` device types, and the `phone` model;
+  - the track's `underruns`;
+  - `jitter`: its `stalls`, the worst `lateMs` and the `prebufferMs` now.
 
 ## The client socket
 

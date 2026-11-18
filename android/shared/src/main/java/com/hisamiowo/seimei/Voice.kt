@@ -163,6 +163,84 @@ class Playlog {
 }
 
 /**
+ * The speaker's jitter buffer: a reply starts to play once [target] seconds of it are queued, so a late chunk finds sound still queued, not a dry speaker.
+ * Phonic sends 20 ms chunks at about real time, so the network's jitter is all the slack there is.
+ * The target follows how late chunks come in this call, from [MIN_S] to [MAX_S]; a stall, the speaker dry while the reply goes on, raises it.
+ * Clock in seconds; VoiceCall holds its lock around every call.
+ */
+class Jitter {
+    /** The prebuffer, in seconds. */
+    val target get() = (late + MARGIN_S).coerceIn(MIN_S, MAX_S)
+    /** How late chunks come: the worst lag behind the burst's best pace, held and let fall slowly. */
+    var late = 0.0
+        private set
+    /** The worst lag seen in this call, for the stats. */
+    var lateMax = 0.0
+        private set
+    /** Times the speaker ran dry and more of the same reply came within [STALL_S]. */
+    var stalls = 0
+        private set
+    private var last = Double.NEGATIVE_INFINITY
+    private var got = 0.0
+    private var best = 0.0
+    private var dry = Double.NaN
+
+    /** [seconds] of the partner's audio came in at [now]. */
+    fun arrived(seconds: Double, now: Double) {
+        if (!dry.isNaN()) {
+            if (now - dry < STALL_S) {
+                stalls++
+                late = max(late, target + STEP_S - MARGIN_S)
+            }
+            dry = Double.NaN
+        }
+        late = max(0.0, late - FALL * max(0.0, now - last))
+        if (now - last > BURST_GAP_S) {
+            // A new burst: its pace starts from this chunk.
+            got = 0.0
+            best = now
+        }
+        // Each chunk is due at the best start seen plus the audio before it; later than that is lag.
+        best = minOf(best, now - got)
+        val lag = now - got - best
+        late = max(late, lag)
+        lateMax = max(lateMax, lag)
+        got += seconds
+        last = now
+    }
+
+    /** The speaker waits: it may start once the prebuffer is queued, or once nothing more comes, for a reply shorter than that. */
+    fun ready(queued: Double, now: Double) = queued >= target || (queued > 0 && now - last >= END_S)
+
+    /** The speaker ran dry at [now]: what comes within [STALL_S] is a stall, later a new reply. */
+    fun dried(now: Double) {
+        dry = now
+    }
+
+    /** A cut: the next audio is a new reply. */
+    fun cut() {
+        dry = Double.NaN
+        last = Double.NEGATIVE_INFINITY
+    }
+
+    companion object {
+        const val MIN_S = 0.15
+        const val MAX_S = 0.25
+        /** Above the worst lag, for the speaker's own scheduling. */
+        const val MARGIN_S = 0.05
+        /** A stall raises the target this much over what it was. */
+        const val STEP_S = 0.05
+        /** The held lag falls this many seconds per second. */
+        const val FALL = 0.02
+        /** A gap this long between chunks starts a new burst. */
+        const val BURST_GAP_S = 0.6
+        const val STALL_S = 0.6
+        /** With this long since the last chunk, a short reply plays without its full prebuffer. */
+        const val END_S = 0.15
+    }
+}
+
+/**
  * The microphone's way up, one 20 ms frame at a time: silence while muted, the local barge-in, then the gate.
  * The gate backs up the echo canceller: while the partner plays, silence goes up and the frames wait, in case they start a barge.
  */
