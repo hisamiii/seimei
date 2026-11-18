@@ -101,6 +101,7 @@ enabled = []
 # voice = ""                        # a Phonic voice id; empty for its default
 # turn_taking = "eager"
 # intelligence_level = "standard"  # "high": a more capable model, "standard": lower latency
+# audio_speed = 1.0                 # how fast the partner talks, 0.5 to 1.5
 # default_language = "en"
 # additional_languages = []         # e.g. ["ru", "uk"]
 # multilingual_mode = "request"     # switch when asked; "auto" each turn, "initial" from the first turn

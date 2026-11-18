@@ -55,6 +55,8 @@ pub struct Config {
     pub turn_taking: String,
     /// standard or high: Phonic's faster model or its more capable one.
     pub intelligence_level: String,
+    /// How fast the partner talks: 0.5 to 1.5, 1 is normal.
+    pub audio_speed: f64,
     pub default_language: String,
     pub additional_languages: Vec<String>,
     /// How the partner switches language: request, auto or initial.
@@ -100,6 +102,11 @@ impl Config {
             voice: s("voice", ""),
             turn_taking: s("turn_taking", "eager"),
             intelligence_level: s("intelligence_level", "standard"),
+            audio_speed: t
+                .and_then(|t| t.get("audio_speed"))
+                .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+                .unwrap_or(1.0)
+                .clamp(0.5, 1.5),
             default_language: s("default_language", "en"),
             additional_languages: list("additional_languages").unwrap_or_default(),
             multilingual_mode: s("multilingual_mode", "request"),
@@ -262,6 +269,7 @@ impl Voice {
             "output_format": "pcm_16000",
             "turn_taking": self.cfg.turn_taking,
             "intelligence_level": self.cfg.intelligence_level,
+            "audio_speed": self.cfg.audio_speed,
             "default_language": self.cfg.default_language,
             "additional_languages": self.cfg.additional_languages,
             "multilingual_mode": self.cfg.multilingual_mode,

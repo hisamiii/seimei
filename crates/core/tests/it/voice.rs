@@ -148,3 +148,16 @@ fn partner_words_join_with_a_space() {
     assert_eq!(spaced("", "Hi"), "Hi");
     assert_eq!(spaced("Done.", " Next"), " Next");
 }
+
+#[test]
+fn audio_speed_is_clamped() {
+    let speed = |src: &str| {
+        seimei_core::voice::Config::from_toml(Some(&toml::Value::Table(src.parse::<toml::Table>().unwrap())))
+            .audio_speed
+    };
+    assert_eq!(speed(""), 1.0);
+    assert_eq!(speed("audio_speed = 1"), 1.0);
+    assert_eq!(speed("audio_speed = 1.2"), 1.2);
+    assert_eq!(speed("audio_speed = 3"), 1.5);
+    assert_eq!(speed("audio_speed = 0.1"), 0.5);
+}
