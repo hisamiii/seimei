@@ -252,7 +252,8 @@ async fn run(base: PathBuf) {
     assert!(heard.contains("goes on from their last message"), "{heard}");
     assert_eq!(msgs().iter().filter(|m| m["type"] == "flush").count(), 1, "{:?}", msgs());
 
-    // The user asks for quiet: the mic mutes once the reply played, with a tone; a message they type unmutes it.
+    // The user asks for quiet: the call pauses both ways right after the words before mute_call, with a tone.
+    // The words after it only go to the chat, and the 2 s timer unmutes with a tone.
     assert!(until(20, || msgs().last().is_some_and(|m| m["state"] == "listening")).await, "{:?}", msgs());
     tokio::time::sleep(Duration::from_millis(400)).await;
     let before = msgs().len();
@@ -260,17 +261,25 @@ async fn run(base: PathBuf) {
         tx.send(Message::Binary(f.into())).await.unwrap();
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    let muted = |on: bool| msgs()[before..].iter().position(|m| m["type"] == "mute" && m["muted"] == on);
-    assert!(until(20, || muted(true).is_some()).await, "no mute: {:?}", &msgs()[before..]);
-    let reply = msgs()[before..].iter().position(|m| m["type"] == "said" && m["who"] == "partner").expect("the reply was spoken");
-    assert!(reply < muted(true).unwrap(), "muted before the reply: {:?}", &msgs()[before..]);
+    let muted = |on: bool, from: usize| msgs()[from..].iter().position(|m| m["type"] == "mute" && m["muted"] == on).map(|i| i + from);
+    assert!(until(20, || muted(true, before).is_some()).await, "no mute: {:?}", &msgs()[before..]);
+    let mute = muted(true, before).unwrap();
+    let spoken: Vec<String> = msgs()[before..].iter().filter(|m| m["type"] == "saying").map(|m| m["text"].to_string()).collect();
+    assert!(spoken.iter().any(|t| t.contains("muting you")), "the words before the mute: {spoken:?}");
     // The tone: two notes of 90 ms after the mute.
-    let bytes = msgs()[before + muted(true).unwrap()]["_bytes"].as_u64().unwrap() as usize;
+    let bytes = msgs()[mute]["_bytes"].as_u64().unwrap() as usize;
     assert!(until(5, || got.lock().unwrap().1 >= bytes + 2 * 16_000 * 18 / 100).await, "no tone");
+    assert!(until(6, || muted(false, mute).is_some()).await, "the timer did not unmute: {:?}", &msgs()[mute..]);
+    let spoken: Vec<String> = msgs()[before..].iter().filter(|m| m["type"] == "saying").map(|m| m["text"].to_string()).collect();
+    assert!(!spoken.iter().any(|t| t.contains("Back in two")), "words after the mute were spoken: {spoken:?}");
+    // The user's own button mutes, and a message they type unmutes.
+    let unmuted = muted(false, mute).unwrap();
+    tx.send(Message::text(json!({"type": "mute", "muted": true}).to_string())).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
     app.dispatcher.send("back now", &[], vec![], &[], None, None);
-    assert!(until(10, || muted(false).is_some()).await, "the typed message did not unmute: {:?}", &msgs()[before..]);
+    assert!(until(10, || muted(false, unmuted + 1).is_some()).await, "the typed message did not unmute: {:?}", &msgs()[unmuted..]);
 
-    // The user says bye: the dispatcher calls end_call before its goodbye, and the call ends once the goodbye played.
+    // The user says bye: the dispatcher says its goodbye, then calls end_call; the call ends once the goodbye played, and the words after it are not spoken.
     assert!(until(20, || msgs().last().is_some_and(|m| m["state"] == "listening")).await, "{:?}", msgs());
     tokio::time::sleep(Duration::from_millis(400)).await;
     let before = msgs().len();
@@ -280,8 +289,8 @@ async fn run(base: PathBuf) {
     }
     assert!(until(20, || msgs().iter().any(|m| m["state"] == "ended")).await, "no hang up: {:?}", &msgs()[before..]);
     let bye: Vec<Value> = msgs()[before..].to_vec();
-    let goodbye = bye.iter().position(|m| m["type"] == "said" && m["who"] == "partner").expect("the goodbye was spoken");
-    assert!(bye[goodbye]["text"].as_str().unwrap().contains("Bye"), "{bye:?}");
+    let goodbye = bye.iter().position(|m| m["type"] == "saying" && m["text"].as_str().unwrap().contains("Bye")).expect("the goodbye was spoken");
+    assert!(!bye.iter().any(|m| m["type"] == "saying" && m["text"].as_str().unwrap().contains("Hung up")), "words after end_call were spoken: {bye:?}");
     let ended = bye.iter().position(|m| m["state"] == "ended").unwrap();
     assert!(goodbye < ended, "the call ended before the goodbye: {bye:?}");
     assert!(tokio::time::timeout(Duration::from_secs(10), reader).await.is_ok(), "the socket stayed open");

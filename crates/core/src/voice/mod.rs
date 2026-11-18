@@ -13,7 +13,7 @@ pub mod web;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use base64::Engine;
@@ -205,59 +205,24 @@ pub type Reader = Box<dyn Fn(&str, &Value) -> Value + Send + Sync>;
 /// The paths no agent may read, from config; set after startup.
 pub type Denied = Box<dyn Fn() -> Vec<String> + Send + Sync>;
 
-/// The dispatcher's call tools reaching the direct calls that are on: end_call hangs up and mute_call mutes the user's mic once its words are spoken; unmute_call unmutes at once.
+/// Whether a direct call is on, for the dispatcher's call tools: end_call, mute_call and unmute_call.
+/// The tools themselves reach the call as a flashed `call` event, in order with the reply text before them.
 #[derive(Default)]
 pub struct Line {
     calls: AtomicUsize,
-    hang: AtomicBool,
-    /// 0 for nothing asked, MUTE or UNMUTE.
-    mute: AtomicU8,
 }
 
-const MUTE: u8 = 1;
-const UNMUTE: u8 = 2;
-
 impl Line {
-    /// Asks the calls that are on to hang up; false when none is.
-    pub fn hang_up(&self) -> bool {
-        let on = self.calls.load(Ordering::Relaxed) > 0;
-        if on {
-            self.hang.store(true, Ordering::Relaxed);
-        }
-        on
-    }
-
-    /// Asks the calls that are on to mute or unmute the user's mic; false when none is.
-    pub fn mute(&self, on: bool) -> bool {
-        let on_call = self.calls.load(Ordering::Relaxed) > 0;
-        if on_call {
-            self.mute.store(if on { MUTE } else { UNMUTE }, Ordering::Relaxed);
-        }
-        on_call
+    pub fn on(&self) -> bool {
+        self.calls.load(Ordering::Relaxed) > 0
     }
 
     fn open(&self) {
         self.calls.fetch_add(1, Ordering::Relaxed);
-        self.hang.store(false, Ordering::Relaxed);
-        self.mute.store(0, Ordering::Relaxed);
     }
 
     fn close(&self) {
         self.calls.fetch_sub(1, Ordering::Relaxed);
-    }
-
-    /// Whether the dispatcher asked to hang up since the last look.
-    fn asked(&self) -> bool {
-        self.hang.swap(false, Ordering::Relaxed)
-    }
-
-    /// Whether the dispatcher asked to mute (true) or unmute (false) since the last look.
-    fn muting(&self) -> Option<bool> {
-        match self.mute.swap(0, Ordering::Relaxed) {
-            MUTE => Some(true),
-            UNMUTE => Some(false),
-            _ => None,
-        }
     }
 }
 

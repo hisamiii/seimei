@@ -452,7 +452,7 @@
    "_meta": {
     "anthropic/alwaysLoad": true
    },
-   "description": "Hang up the user's voice call, as their red button does: when they say bye or ask you to hang up. The words of this turn are spoken first, so say your goodbye in the same reply. If the user speaks again before the call ends, it stays on. Only for a direct voice call ([voice call] messages).",
+   "description": "Hang up the user's voice call, as their red button does: when they say bye or ask you to hang up. Your words before this call are spoken first and the call ends right after; words after it are not spoken, so say your goodbye before calling it. Only for a direct voice call ([voice call] messages).",
    "inputSchema": {
     "properties": {},
     "type": "object"
@@ -463,9 +463,14 @@
    "_meta": {
     "anthropic/alwaysLoad": true
    },
-   "description": "Mute the user's mic in their voice call, as their mute button does: when they ask you to (\"mute for a sec\", \"hold on, I'm talking to someone\"). The words of this turn are spoken first, then a short falling tone. Their button or a message they type in the chat unmutes it; for a timed mute (\"mute for two minutes\"), set a watch for the time and call unmute_call when it fires. Only for a direct voice call ([voice call] messages).",
+   "description": "Pause the user's voice call both ways, as their mute button does: when they ask you to (\"mute for a sec\", \"hold on, I'm talking to someone\"). Your words before this call are spoken, then a short falling tone, and from then their mic is off and your voice is silent: your replies only land in the chat as text. Words after this call are not spoken, so say your few words first. Their button, a message they type in the chat, or unmute_call ends the pause. For a timed mute (\"mute for 30 seconds\"), pass seconds: the call unmutes itself then, with a rising tone. Only for a direct voice call ([voice call] messages).",
    "inputSchema": {
-    "properties": {},
+    "properties": {
+     "seconds": {
+      "type": "number",
+      "description": "unmute by itself after this long (1 to 3600); leave out for a mute until the user or you end it"
+     }
+    },
     "type": "object"
    },
    "name": "mute_call"
@@ -474,7 +479,7 @@
    "_meta": {
     "anthropic/alwaysLoad": true
    },
-   "description": "Unmute the user's mic in their voice call, at once: a short rising tone tells them it is live again. For a timed mute you set with mute_call. Only for a direct voice call.",
+   "description": "End a voice call's mute at once: the user's mic and your voice are back, and a short rising tone tells them. For a mute longer than seconds suit, with a watch that wakes you. Only for a direct voice call.",
    "inputSchema": {
     "properties": {},
     "type": "object"

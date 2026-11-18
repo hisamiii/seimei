@@ -155,24 +155,17 @@ The user may go on after the turn went out: after a long pause, or over seimei's
 - **One message completes the other.** The new words go out with a note: they go on from the last message, and the user heard so much of the reply.
 - **The dispatcher answers once.** It folds the message into its running turn at the next step. Its reply from then on answers the new message, so that is what is spoken.
 
-## Hanging up
+## Hanging up and muting
 
-The dispatcher can end the call itself, as the user's red button does: when the user says bye or asks it to hang up.
+The dispatcher can end the call or pause it, as the user's red and mute buttons do. Its three tools are `end_call`, `mute_call` and `unmute_call`.
 
-- **The tool.** `end_call` asks the direct calls that are on to hang up. It fails when no direct call is on. The `[voice call]` line of `dispatcher.md` says to say a short goodbye and call it.
-- **The goodbye plays first.** The call waits for the dispatcher's turn to end and for every piece to go out. Then it waits until the client has played them all, plus 600 ms. Then the server sends the `ended` state, which both clients take as a hang up. So a client needs no update for it.
-- **The user may go on.** While the user talks, or their words are still being heard, the call stays. If their words go out to the dispatcher, the hang up is off.
-- **A long turn does not hold it.** After 20 s the call ends once its audio has played, even if the dispatcher's turn goes on.
-
-## Muting
-
-The dispatcher can mute the user's mic, as their mute button does: for "mute for a sec" or "hold on, I'm talking to someone".
-
-- **Mute waits for the words.** `mute_call` mutes once the dispatcher's words are spoken, on the same terms as a hang up. Then the server sends `{"type": "mute", "muted": true}` and a short falling tone.
-- **The clients show it.** The page, the app and the watch set their mute button from the message, so the call bar reads "Muted".
-- **Unmuting.** The user's mute button unmutes, as always, and tells the server. A message the user types in the chat also unmutes, and goes to the dispatcher as a normal message.
-- **A timed mute.** `unmute_call` unmutes at once. For "mute for two minutes" the dispatcher sets a time watch and calls it when the watch fires.
-- **The user hears it.** An unmute by seimei or by a typed message plays a short rising tone, and the mute button turns off.
+- **In order with the words.** A tool flashes a `call` event into the event stream, right after the reply text before it. The call marks the speech pieces so far.
+- **It acts right after those words.** Once the client has played the marked pieces, plus 400 ms for its buffer and the network, the call hangs up or mutes. The words after the tool are held back and never spoken. A turn that goes on does not delay it.
+- **A mute pauses both ways.** The client's mic mutes, and seimei's voice stops: what plays and what is queued is cut. New replies only land in the chat as text. A short falling tone marks it. The user's own mute button pauses the same way, with no tone.
+- **The clients show it.** The server sends `{"type": "mute", "muted": true}`, and the page, the app and the watch set their mute button from it. The server also ignores the mic while muted, so a client that does not mute itself changes nothing.
+- **Unmuting.** The user's button unmutes and tells the server. A message the user types in the chat unmutes too, and goes to the dispatcher as a normal message. `unmute_call` unmutes at once. Each unmute but the button's plays a short rising tone.
+- **A timed mute.** `mute_call` takes `seconds`, from 1 to 3600. The call unmutes itself then, with the rising tone. A time watch counts whole minutes, so it suits only longer mutes.
+- **The server log** says how long each took, for example "the mute went out 813 ms after seimei asked".
 
 ## Config
 

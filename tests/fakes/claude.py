@@ -416,13 +416,15 @@ async def dispatcher(self: Fake, text: str, images: int):
         self.assistant({"type": "text", "text": "x" * (3 << 20)})
         await self.say("That was big.")
     elif text.startswith("[voice call]") and "mute" in text.split("\n")[0].lower():
-        # The user asks for quiet: the words first, then the mic mutes.
-        await self.tool("mcp__seimei__mute_call", {})
+        # The user asks for quiet: a few words, the mute for 2 s, and words after it that go only to the chat.
         await self.say("Sure, muting you.")
+        await self.tool("mcp__seimei__mute_call", {"seconds": 2})
+        await self.say("Back in two.")
     elif text.startswith("[voice call]") and "bye" in text.split("\n")[0].lower():
-        # The user says bye in a direct call: hang up first, then the goodbye, which the call speaks before it ends.
-        await self.tool("mcp__seimei__end_call", {})
+        # The user says bye in a direct call: the goodbye, then the hang up; words after it are not spoken.
         await self.say("Okay, talk later. Bye!")
+        await self.tool("mcp__seimei__end_call", {})
+        await self.say("Hung up.")
     elif m := re.search(r"\[seimei\] Voice call (\d+) ended", text):
         # The call's summary: the transcript's first user line, written onto the card.
         heard = next((ln[6:] for ln in text.splitlines() if ln.startswith("user: ")), "nothing")

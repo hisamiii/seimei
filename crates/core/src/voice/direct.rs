@@ -27,12 +27,8 @@ const RENDERING: usize = 2;
 const USER_TURNS: usize = 5;
 /// A lookup's answer in the message, at most.
 const LOOKUP_MAX: usize = 2000;
-/// After the dispatcher asks to hang up: past the client's playback, its jitter buffer and the network still hold this much.
-const HANG_TAIL: Duration = Duration::from_millis(600);
-/// Everything must stay done this long before the call ends: the reply's last event may still be on its way.
-const HANG_SETTLE: Duration = Duration::from_millis(500);
-/// A dispatcher turn that goes on this long after it asked to hang up does not hold the call.
-const HANG_WAIT: Duration = Duration::from_secs(20);
+/// After the words before a call tool played on the client: its jitter buffer and the network still hold this much.
+const HANG_TAIL: Duration = Duration::from_millis(400);
 /// 20 ms of PCM16 at RATE.
 const CHUNK: usize = (RATE as usize / 50) * 2;
 
@@ -119,13 +115,12 @@ struct Direct {
     heard: String,
     cut: Option<String>,
     said_state: &'static str,
-    /// The dispatcher asked to hang up, and since when all it said has played.
-    hanging: Option<Instant>,
-    hang_ready: Option<Instant>,
-    /// The user's mic is muted on the client; the dispatcher asked to mute it, and since when all it said has played.
+    /// A hang up or mute the dispatcher asked for, waiting for its words before the ask to play.
+    pending: Option<Pending>,
+    /// A mute is a pause both ways: the user's mic is muted on the client, and seimei says nothing until it ends.
     muted: bool,
-    muting: Option<Instant>,
-    mute_ready: Option<Instant>,
+    /// A timed mute's end.
+    unmute_at: Option<Instant>,
     /// The whole call, for the summary.
     lines: Vec<String>,
     started: Instant,
@@ -218,6 +213,22 @@ fn language_name(code: &str) -> &str {
 }
 
 /// PCM16 mono at RATE as a WAV file.
+/// What a call tool asks for, once the words before it played.
+enum Act {
+    HangUp,
+    /// Optionally for so long.
+    Mute(Option<Duration>),
+}
+
+struct Pending {
+    act: Act,
+    /// The pieces before the ask: seq below this.
+    mark: u64,
+    /// When the client will have played them, once known.
+    done: Option<Instant>,
+    asked: Instant,
+}
+
 /// Two short notes as PCM16 at RATE: rising when the mic opens, falling when it mutes.
 fn tone(muting: bool) -> Vec<u8> {
     let notes: [f64; 2] = if muting { [880.0, 587.0] } else { [587.0, 880.0] };
@@ -346,11 +357,9 @@ pub async fn call(v: Arc<Voice>, mut up: mpsc::Receiver<Up>, down: mpsc::Sender<
         heard: String::new(),
         cut: None,
         said_state: "",
-        hanging: None,
-        hang_ready: None,
+        pending: None,
         muted: false,
-        muting: None,
-        mute_ready: None,
+        unmute_at: None,
         lines: vec![],
         started: Instant::now(),
     };
@@ -376,8 +385,7 @@ pub async fn call(v: Arc<Voice>, mut up: mpsc::Receiver<Up>, down: mpsc::Sender<
             d = done_rx.recv() => if let Some(d) = d { c.finished(d) },
             _ = tick.tick() => {
                 c.send_audio();
-                c.mute_now();
-                if c.hang_up() {
+                if c.act() {
                     break;
                 }
             }
@@ -416,7 +424,11 @@ impl Direct {
     }
 
     fn mic(&mut self, pcm: &[u8]) {
-        let samples: Vec<i16> = pcm.as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes(*b)).collect();
+        let mut samples: Vec<i16> = pcm.as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes(*b)).collect();
+        // Muted: nothing the mic hears counts, even from a client that does not mute itself.
+        if self.muted {
+            samples.fill(0);
+        }
         // While seimei speaks the microphone may be its echo, unless the user barged in and holds the turn.
         if self.speaking() && !self.cutter.in_turn() {
             self.cutter.hold(&samples);
@@ -562,6 +574,10 @@ impl Direct {
 
     /// Drops what seimei had still to say, and tells the client to drop what it queued.
     fn silence(&mut self) {
+        // The words a hang up or mute waits for are cut: it acts now.
+        if let Some(p) = &mut self.pending {
+            p.done.get_or_insert_with(Instant::now);
+        }
         self.epoch += 1;
         self.queue.clear();
         self.rendered.clear();
@@ -702,9 +718,6 @@ impl Direct {
                 extra.push(format!("{key}:\n{}", chars(out, LOOKUP_MAX)));
             }
         }
-        if self.hanging.take().is_some() {
-            eprintln!("seimei: voice: the user spoke on, the call stays");
-        }
         let id = self.v.dispatcher.send_spoken(&words, &extra.join("\n"));
         self.mine.insert(id);
         self.answering = Some(id);
@@ -801,6 +814,10 @@ impl Direct {
 
     /// A piece of a reply to speak, in order.
     fn speak(&mut self, text: String) {
+        // Muted: the reply is only text in the chat.
+        if self.muted {
+            return;
+        }
         self.queue.push_back(text);
         self.render();
     }
@@ -825,7 +842,9 @@ impl Direct {
                 let _ = done.send(Done::Audio { epoch, seq, text, pcm, by, ms });
             });
         }
-        while let Some((text, pcm, by)) = self.rendered.remove(&self.out_seq) {
+        while !self.pending.as_ref().is_some_and(|p| self.out_seq >= p.mark)
+            && let Some((text, pcm, by)) = self.rendered.remove(&self.out_seq)
+        {
             let seq = self.out_seq;
             self.out_seq += 1;
             if !pcm.is_empty() {
@@ -837,6 +856,14 @@ impl Direct {
             }
             if let Some(all) = self.ends.remove(&seq) {
                 self.said(all);
+            }
+            // The last piece before a hang up or mute: it acts once this has played.
+            let at = self.played_at();
+            if let Some(p) = &mut self.pending
+                && p.done.is_none()
+                && seq + 1 >= p.mark
+            {
+                p.done = Some(at);
             }
         }
         self.send_audio();
@@ -886,75 +913,89 @@ impl Direct {
         self.state(state);
     }
 
-    /// The dispatcher's end_call: the call ends once its turn is over and the client played every word, unless the user talks.
-    fn hang_up(&mut self) -> bool {
-        let now = Instant::now();
-        if self.v.line.asked() && self.hanging.is_none() {
-            eprintln!("seimei: voice: seimei hangs up once its words are spoken");
-            self.hanging = Some(now);
-        }
-        let Some(asked) = self.hanging else { return false };
-        if !self.said_all(asked) {
-            self.hang_ready = None;
-            return false;
-        }
-        now - *self.hang_ready.get_or_insert(now) >= HANG_SETTLE
-    }
-
-    /// Since `asked`, the dispatcher's turn is over (or went on past HANG_WAIT), the client played all it said, and the user is not talking.
-    fn said_all(&self, asked: Instant) -> bool {
-        let now = Instant::now();
-        let spoken = self.queue.is_empty()
-            && self.rendering == 0
-            && self.rendered.is_empty()
-            && self.out.is_empty()
-            && self.clock + HANG_TAIL <= now;
-        let over = !self.v.dispatcher.busy() || now - asked > HANG_WAIT;
-        // The user talks, or their words are still being heard: they may want more.
-        let user = self.cutter.in_turn() || !self.clauses.is_empty();
-        spoken && over && !user
-    }
-
-    /// The dispatcher's mute_call mutes the user's mic once its words are spoken; unmute_call unmutes it at once.
-    fn mute_now(&mut self) {
-        let now = Instant::now();
-        match self.v.line.muting() {
-            Some(true) if !self.muted && self.muting.is_none() => {
-                eprintln!("seimei: voice: seimei mutes the user's mic once its words are spoken");
-                self.muting = Some(now);
-            }
-            Some(false) => self.set_muted(false, "seimei"),
-            _ => {}
-        }
-        let Some(asked) = self.muting else { return };
-        if !self.said_all(asked) {
-            self.mute_ready = None;
+    /// A call tool of the dispatcher's (a flashed `call` event): it comes right after the reply text before it.
+    /// A hang up or a mute waits for that text to play; the words after it are not spoken.
+    fn call_tool(&mut self, ev: &Value) {
+        let what = ev["do"].as_str().unwrap_or("");
+        if what == "unmute" {
+            self.pending = None;
+            self.set_muted(false, "seimei");
             return;
         }
-        if now - *self.mute_ready.get_or_insert(now) >= HANG_SETTLE {
-            self.set_muted(true, "seimei");
+        let act = match what {
+            "hang up" => Act::HangUp,
+            "mute" if !self.muted => Act::Mute(ev["seconds"].as_f64().map(Duration::from_secs_f64)),
+            _ => return,
+        };
+        // The text before the tool is whole: a sentence still in the splitter is spoken too.
+        if let Some(rest) = self.split.end() {
+            self.speak(rest);
+        }
+        let mark = self.next_seq + self.queue.len() as u64;
+        let done = (self.out_seq >= mark).then(|| self.played_at());
+        eprintln!("seimei: voice: seimei asks to {what} after {} more piece(s)", mark.saturating_sub(self.out_seq));
+        self.pending = Some(Pending { act, mark, done, asked: Instant::now() });
+    }
+
+    /// When the client will have played all the audio that went or goes out so far.
+    fn played_at(&self) -> Instant {
+        self.clock.max(Instant::now()) + Duration::from_secs_f64(self.out.len() as f64 / (2.0 * f64::from(RATE)))
+    }
+
+    /// Each tick: a pending hang up or mute whose words played, and a timed mute's end. True to hang up.
+    fn act(&mut self) -> bool {
+        let now = Instant::now();
+        if self.muted && self.unmute_at.is_some_and(|t| t <= now) {
+            self.set_muted(false, "the timer");
+        }
+        let Some(p) = &self.pending else { return false };
+        if !p.done.is_some_and(|t| t + HANG_TAIL <= now) {
+            return false;
+        }
+        let Some(Pending { act, asked, .. }) = self.pending.take() else { return false };
+        let ms = asked.elapsed().as_millis();
+        match act {
+            Act::HangUp => {
+                eprintln!("seimei: voice: seimei hangs up, {ms} ms after it asked");
+                true
+            }
+            Act::Mute(secs) => {
+                self.set_muted(true, "seimei");
+                self.unmute_at = secs.map(|s| now + s);
+                eprintln!("seimei: voice: the mute went out {ms} ms after seimei asked");
+                false
+            }
         }
     }
 
-    /// seimei mutes or unmutes the user's mic: the client sets its mute button so, and a short tone says it, falling for mute and rising for unmute.
+    /// seimei mutes or unmutes: the client sets its mute button so, and a short tone says it, falling for mute and rising for unmute.
+    /// A mute also stops seimei's voice: what plays and what is queued is cut.
     fn set_muted(&mut self, on: bool, by: &str) {
-        self.muting = None;
-        self.mute_ready = None;
+        self.unmute_at = None;
         if self.muted == on {
             return;
         }
+        if on {
+            self.silence();
+        }
         self.muted = on;
-        eprintln!("seimei: voice: {by} {} the user's mic", if on { "muted" } else { "unmuted" });
+        eprintln!("seimei: voice: {by} {} the call", if on { "muted" } else { "unmuted" });
         self.say(json!({"type": "mute", "muted": on}));
         self.out.extend(tone(on));
+        self.send_audio();
     }
 
-    /// The user pressed their mute button: no tone, they know.
+    /// The user pressed their mute button: the same pause, with no tone, since they know.
     fn pressed_mute(&mut self, on: bool) {
+        eprintln!("seimei: voice: the user {} the call", if on { "muted" } else { "unmuted" });
+        if on && self.pending.as_ref().is_some_and(|p| matches!(p.act, Act::Mute(_))) {
+            self.pending = None;
+        }
+        self.unmute_at = None;
+        if on && !self.muted {
+            self.silence();
+        }
         self.muted = on;
-        self.muting = None;
-        self.mute_ready = None;
-        eprintln!("seimei: voice: the user {} their mic", if on { "muted" } else { "unmuted" });
     }
 
     /// The client heard the user over seimei and cut its playback: what is still to say is dropped.
@@ -987,9 +1028,10 @@ impl Direct {
         let re = ev["re"].as_i64().is_some_and(|r| self.mine.contains(&r));
         match ev["type"].as_str().unwrap_or("") {
             // The user typed in the chat while muted: they are back, so the mic is live again. The message itself is a normal one.
-            "user" if ev["voice"] != true && ev.get("thread").is_none() && (self.muted || self.muting.is_some()) => {
+            "user" if ev["voice"] != true && ev.get("thread").is_none() && self.muted => {
                 self.set_muted(false, "a typed message");
             }
+            "call" => self.call_tool(ev),
             "delta" if re && ev["lane"] == "c" => {
                 if let Some((_, t)) = self.timings.iter_mut().find(|(id, _)| Some(*id) == ev["re"].as_i64()) {
                     t.delta.get_or_insert_with(Instant::now);

@@ -597,26 +597,27 @@ impl Tools {
                 self.events.add(json!({"type": "voice_summary", "call": call, "summary": summary}));
                 text("Written onto the call's card.", false)
             }
-            "end_call" => {
-                if self.line.hang_up() {
-                    text("The call hangs up once this turn's words are spoken. Say goodbye in this reply if you have not.", false)
-                } else {
-                    text("No direct voice call is on.", true)
+            "end_call" | "mute_call" | "unmute_call" => {
+                if !self.line.on() {
+                    return text("No direct voice call is on.", true);
                 }
-            }
-            "mute_call" => {
-                if self.line.mute(true) {
-                    text("The user's mic mutes once this turn's words are spoken, with a short falling tone. It is live again when they press their mute button, type in the chat, or you call unmute_call.", false)
-                } else {
-                    text("No direct voice call is on.", true)
-                }
-            }
-            "unmute_call" => {
-                if self.line.mute(false) {
-                    text("The user's mic is live again: they hear a short rising tone and their mute button turns off.", false)
-                } else {
-                    text("No direct voice call is on.", true)
-                }
+                // In the event stream right after the reply text so far: the call acts once that text has played.
+                let what = match name {
+                    "end_call" => "hang up",
+                    "mute_call" => "mute",
+                    _ => "unmute",
+                };
+                let seconds = a["seconds"].as_f64().filter(|s| s.is_finite() && *s >= 1.0).map(|s| s.min(3600.0));
+                self.events.flash(json!({"type": "call", "do": what, "seconds": seconds}));
+                text(
+                    match name {
+                        "end_call" => "The call hangs up once your words before this call are spoken; words after it are not.",
+                        "mute_call" if seconds.is_some() => "The user's mic and your voice pause once your words before this call are spoken, with a short falling tone, and come back after the seconds with a rising tone. Their button or a typed message unmutes sooner. Your replies meanwhile go to the chat as text.",
+                        "mute_call" => "The user's mic and your voice pause once your words before this call are spoken, with a short falling tone. Their button, a typed message or unmute_call brings both back. Your replies meanwhile go to the chat as text.",
+                        _ => "The user's mic and your voice are back: they hear a short rising tone.",
+                    },
+                    false,
+                )
             }
             "presence" => {
                 let rows = self.push.presence();

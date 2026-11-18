@@ -170,7 +170,7 @@ Text frames down:
 - `{"type": "saying", "text": ...}`: the partner's words that go with the audio just sent, for a live line.
 - `{"type": "said", "who": "user" | "partner", "text": ...}`: a finished turn.
 - `{"type": "asking", "request": ...}` and `{"type": "answered", "request": ...}`: an ask_seimei call and its answer.
-- `{"type": "mute", "muted": ...}`: seimei muted or unmuted the user's mic in a direct call. The client sets its mute button so, as if the user pressed it.
+- `{"type": "mute", "muted": ...}`: seimei paused or resumed a direct call. The client sets its mute button so, as if the user pressed it; the server stops and resumes its own voice.
 - `{"type": "error", "text": ...}`.
 
 Down audio is only what is heard. Phonic streams silent chunks nonstop, so the bridge forwards a chunk only while the partner speaks, or when it holds sound or words.
