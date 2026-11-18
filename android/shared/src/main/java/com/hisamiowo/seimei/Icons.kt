@@ -82,6 +82,15 @@ object Icons {
     val copy = icon("M10 8h8.5A1.5 1.5 0 0 1 20 9.5v9a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 8 18.5V10a2 2 0 0 1 2-2zM16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8", stroke = 1.8f)
     val trash = icon("M5 7h14M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3", stroke = 1.8f)
     val phone = icon("M8 3h8a1.5 1.5 0 0 1 1.5 1.5v15A1.5 1.5 0 0 1 16 21H8a1.5 1.5 0 0 1-1.5-1.5v-15A1.5 1.5 0 0 1 8 3zM11 18h2", stroke = 1.8f)
+    /** Voice calls (web/index.html): the talk button and the spoken turns' mark, mute and hang up. */
+    val wave = icon("M4 10v4M8 6v12M12 9v6M16 4v16M20 10v4", stroke = 2.2f)
+    val micOff = icon("M15 9.5V6.5a3 3 0 0 0-5.6-1.5M9 9v2.5a3 3 0 0 0 4.6 2.5M5.5 11.5a6.5 6.5 0 0 0 10.4 5.2M18.4 13a6.5 6.5 0 0 0 .1-1.5M12 18v2.5M4 4l16 16", stroke = 1.8f)
+    val hangUp = ImageVector.Builder(defaultWidth = 30.dp, defaultHeight = 23.3.dp, viewportWidth = 18f, viewportHeight = 14f).apply {
+        addGroup(translationX = -3f, translationY = -5f)
+        addPath(PathParser().parsePathString("M12 9.5c-2.6 0-5 .6-7.2 1.7-.6.3-.9.9-.9 1.6v2.3c0 .7.6 1.2 1.3 1.1l3.1-.6c.6-.1 1-.6 1-1.2v-1.7c1.7-.5 " +
+            "3.7-.5 5.4 0v1.7c0 .6.4 1.1 1 1.2l3.1.6c.7.1 1.3-.4 1.3-1.1v-2.3c0-.7-.3-1.3-.9-1.6A16 16 0 0 0 12 9.5z").toNodes(), fill = SolidColor(Color.Black))
+        clearGroup()
+    }.build()
     /** Watch rules by group (watches.rs): a timer, a command's exit, a reboot, a ping. */
     val watch = mapOf(
         "time" to icon("M10 2.5h4M12 14.5V10M12 6.5a7.5 7.5 0 1 1 0 15 7.5 7.5 0 0 1 0-15z", stroke = 1.8f),
