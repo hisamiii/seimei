@@ -96,6 +96,10 @@ struct Direct {
     queue: VecDeque<String>,
     rendering: usize,
     rendered: BTreeMap<u64, (String, Vec<u8>)>,
+    /// A reply's last piece by its seq: once that piece goes out, the page hears the reply ended.
+    ends: BTreeMap<u64, String>,
+    /// The page's live line has words: the next piece joins it after a space.
+    live: bool,
     out: VecDeque<u8>,
     /// When the client is done playing what was sent.
     clock: Instant,
@@ -200,6 +204,8 @@ pub async fn call(v: Arc<Voice>, mut up: mpsc::Receiver<Up>, down: mpsc::Sender<
         queue: VecDeque::new(),
         rendering: 0,
         rendered: BTreeMap::new(),
+        ends: BTreeMap::new(),
+        live: false,
         out: VecDeque::new(),
         clock: Instant::now(),
         heard: String::new(),
@@ -545,7 +551,7 @@ impl Direct {
 
     /// Audio to play now, ahead of the reply's pieces: the opener.
     fn play(&mut self, text: &str, pcm: Vec<u8>) {
-        self.say(json!({"type": "saying", "text": text}));
+        self.saying(text);
         self.heard.push_str(text);
         self.heard.push(' ');
         self.out.extend(pcm);
@@ -577,17 +583,42 @@ impl Direct {
             });
         }
         while let Some((text, pcm)) = self.rendered.remove(&self.out_seq) {
+            let seq = self.out_seq;
             self.out_seq += 1;
-            if pcm.is_empty() {
-                continue;
+            if !pcm.is_empty() {
+                self.first_sound();
+                self.saying(&text);
+                self.heard.push_str(&text);
+                self.heard.push(' ');
+                self.out.extend(pcm);
             }
-            self.first_sound();
-            self.say(json!({"type": "saying", "text": text}));
-            self.heard.push_str(&text);
-            self.heard.push(' ');
-            self.out.extend(pcm);
+            if let Some(all) = self.ends.remove(&seq) {
+                self.said(all);
+            }
         }
         self.send_audio();
+    }
+
+    /// A piece on the page's live line as it starts to play.
+    fn saying(&mut self, text: &str) {
+        let text = if self.live { format!(" {text}") } else { text.to_string() };
+        self.live = true;
+        self.say(json!({"type": "saying", "text": text}));
+    }
+
+    /// A reply ended: the page's live line becomes a finished turn.
+    fn said(&mut self, text: String) {
+        self.live = false;
+        self.say(json!({"type": "said", "who": "partner", "text": text}));
+    }
+
+    /// The reply's text ended: the page hears so once its last piece plays, or now when all of it went out.
+    fn reply_ended(&mut self, text: String) {
+        if self.queue.is_empty() && self.out_seq == self.next_seq {
+            self.said(text);
+        } else {
+            self.ends.insert(self.next_seq + self.queue.len() as u64 - 1, text);
+        }
     }
 
     /// Audio goes out at about the pace it plays, at most AHEAD in front; never while the user talks.
@@ -624,6 +655,9 @@ impl Direct {
         self.rendered.clear();
         self.rendering = 0;
         self.out_seq = self.next_seq;
+        for (_, text) in std::mem::take(&mut self.ends) {
+            self.said(text);
+        }
         self.out.clear();
         self.clock = Instant::now();
         self.split = Splitter::new();
@@ -680,7 +714,7 @@ impl Direct {
                 }
                 if !text.is_empty() && (re || ev.get("from").is_some_and(|f| !f.is_null())) {
                     self.lines.push(format!("seimei: {text}"));
-                    self.say(json!({"type": "said", "who": "partner", "text": text}));
+                    self.reply_ended(text);
                 }
             }
             _ => {}

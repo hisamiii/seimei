@@ -769,6 +769,8 @@ export class Renderer {
     this.vcall = null;
     this.calls = new Map();
     this.asked = new Map();
+    // The user's words in a direct call, by event id -> the call's card, where seimei's replies to them go too.
+    this.spoken = new Map();
   }
 
   put(node) {
@@ -886,7 +888,13 @@ export class Renderer {
     const c = this.call(ev.t);
     this.between = false;
     if (!c.node.classList.contains('live')) c.title.textContent = `Voice call · ${minutes(c.t1 - c.t0)}`;
-    if (ev.type === 'user') {
+    if (ev.type === 'user' && ev.spoken) {
+      // The user talked with seimei itself: the words and their replies stay in the card.
+      this.lastUser = ev.id;
+      said.set(ev.id, ev.text);
+      this.spoken.set(ev.id, c);
+      c.turns.append(el('div', 'msg user voiced', ev.text));
+    } else if (ev.type === 'user') {
       // The partner asked seimei: the reply that follows answers it, with no chip.
       this.lastUser = ev.id;
       said.set(ev.id, ev.text);
@@ -936,6 +944,14 @@ export class Renderer {
     }
     this.activity = null;
     if (ev.type === 'voice' || ev.type === 'voice_end' || ev.type === 'voice_summary' || (ev.type === 'user' && ev.voice)) return this.voice(ev);
+    // seimei's spoken reply in a direct call: a line in the call's card.
+    const card = ev.type === 'assistant' && ev.text && this.spoken.get(ev.re);
+    if (card) {
+      said.set(ev.id, ev.text);
+      card.turns.append(el('div', 'vline', ev.text));
+      card.last.textContent = ev.text;
+      return;
+    }
     if (ev.type === 'user' || ev.type === 'assistant') {
       if (ev.text) said.set(ev.id, ev.text);
       // Sent from a side thread: the thread's name above the message, one tap from it
