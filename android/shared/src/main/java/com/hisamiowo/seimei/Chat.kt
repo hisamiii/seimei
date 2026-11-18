@@ -150,6 +150,8 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
     /** The ended calls' cards by their voice_end's id: seimei's voice_summary names one. */
     private val calls = HashMap<Long, Int>()
     private val asked = HashMap<Long, Int>()
+    /** The user's words in a direct call, by event id -> where the call's card sits: seimei's replies to them go in the card too. */
+    private val spoken = HashMap<Long, Int>()
 
     val waiting get() = approvals.keys.count { it !in outcomes }
 
@@ -256,6 +258,15 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
         }
         val c = if (open != null && t - open.t1 <= 300) open else Item.Voice("v$key", t, t).also { call = put(it) }
         between = false
+        if (ev.str("type") == "user" && ev.optBoolean("spoken")) {
+            // The user talked with seimei itself: the words and their replies stay in the card.
+            val id = ev.optLong("id")
+            lastUser = id
+            if (id > 0) said[id] = ev.str("text")
+            spoken[id] = call
+            items[call] = c.copy(t1 = t, turns = c.turns + Item.Spoken(key, "user", ev.str("text")))
+            return
+        }
         if (ev.str("type") == "user") {
             items[call] = c.copy(t1 = t)
             // The partner asked seimei: the reply that follows answers it, with no chip.
@@ -327,6 +338,14 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
         activity = -1
         val id = ev.optLong("id")
         if (type == "voice" || type == "voice_end" || type == "voice_summary" || (type == "user" && ev.optBoolean("voice"))) return voice(ev, key, t)
+        // seimei's spoken reply in a direct call: a line in the call's card.
+        val inCall = spoken[ev.optLong("re")]?.takeIf { type == "assistant" && ev.str("text").isNotEmpty() }
+        val callCard = inCall?.let { items.getOrNull(it) as? Item.Voice }
+        if (inCall != null && callCard != null) {
+            if (id > 0) said[id] = ev.str("text")
+            items[inCall] = callCard.copy(turns = callCard.turns + Item.Spoken(key, "partner", ev.str("text")), last = ev.str("text"))
+            return
+        }
         if (type == "user" || type == "assistant") {
             if (id > 0) said[id] = ev.str("text")
             val re = ev.optLong("re")

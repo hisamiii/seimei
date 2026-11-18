@@ -271,4 +271,17 @@ class VoiceTest {
         c.add(JSONObject("""{"id": 7, "type": "voice", "who": "user", "text": "still there?", "t": ${t + 1100}}"""))
         assertEquals(3, c.items.count { it is Item.Voice })
     }
+
+    @Test fun aDirectCallInTheChat() {
+        val c = Chat(ZoneOffset.UTC)
+        val t = 1_800_000_000.0
+        c.add(JSONObject("""{"id": 1, "type": "user", "voice": true, "spoken": true, "text": "is the build green", "t": $t}"""))
+        c.add(JSONObject("""{"id": 2, "type": "assistant", "re": 1, "text": "Yeah, all green.", "t": ${t + 3}}"""))
+        c.add(JSONObject("""{"id": 3, "type": "assistant", "text": "Something else.", "t": ${t + 4}}"""))
+        // The words and the spoken reply are turns in the card; a reply to something else stays in the chat.
+        assertEquals(listOf("Day", "Voice", "Msg"), c.items.map { it::class.simpleName })
+        val card = c.items[1] as Item.Voice
+        assertEquals(listOf(Item.Spoken("e1", "user", "is the build green"), Item.Spoken("e2", "partner", "Yeah, all green.")), card.turns)
+        assertEquals("Yeah, all green.", card.last)
+    }
 }
