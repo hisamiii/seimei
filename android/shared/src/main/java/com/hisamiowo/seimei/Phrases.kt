@@ -15,9 +15,32 @@ fun frameDb(f: ShortArray): Double {
     return 20 * log10(max(sqrt(s / f.size), 1.0) / 32768)
 }
 
+/** An energy VAD: the level, smoothed over 100 ms, against the room's noise floor (the 5th percentile of the last 10 s). Feed it 20 ms frames. */
+class Vad(private val c: Phrases.Cut) {
+    private var n = 0
+    private val powers = ArrayDeque<Double>()
+    private val history = ArrayDeque<Double>()
+
+    fun voice(f: ShortArray, inPhrase: Boolean): Boolean {
+        n++
+        val db = frameDb(f)
+        if (n * c.frameMs <= c.warmupMs) return false
+        powers.addLast(10.0.pow(db / 10))
+        if (powers.size > 5) powers.removeFirst()
+        val level = 10 * log10(powers.sum() / powers.size)
+        // Digital silence (a muted mic) says nothing about the room.
+        if (db > -85) {
+            history.addLast(level)
+            if (history.size > 10000 / c.frameMs) history.removeFirst()
+        }
+        val noise = if (history.size < 10) -60.0 else history.sorted()[floor(history.size / 20.0).toInt()]
+        val margin = c.marginDb - if (inPhrase) c.holdDb else 0.0
+        return level > max(noise + margin, c.minDb)
+    }
+}
+
 /**
  * Cuts dictation into phrases at pauses (docs/asr.md), as web/phrases.js and the laptop's dictate tool do, so each phrase is transcribed while the next is spoken.
- * An energy VAD: the level, smoothed over 100 ms, against the room's noise floor (the 5th percentile of the last 10 s).
  * push() takes 20 ms frames; send(seq, frames) gets each phrase, and cancel(seq) drops an early send when speech goes on.
  * cancel returns false when that phrase's text is in the draft already: what follows is then a phrase of its own.
  */
@@ -41,27 +64,7 @@ class Phrases(private val send: (Int, List<ShortArray>) -> Unit, private val can
 
     private fun frames(ms: Int) = (ms.toDouble() / c.frameMs).roundToInt()
 
-    // The VAD
-    private var n = 0
-    private val powers = ArrayDeque<Double>()
-    private val history = ArrayDeque<Double>()
-
-    private fun voice(f: ShortArray, inPhrase: Boolean): Boolean {
-        n++
-        val db = frameDb(f)
-        if (n * c.frameMs <= c.warmupMs) return false
-        powers.addLast(10.0.pow(db / 10))
-        if (powers.size > 5) powers.removeFirst()
-        val level = 10 * log10(powers.sum() / powers.size)
-        // Digital silence (a muted mic) says nothing about the room.
-        if (db > -85) {
-            history.addLast(level)
-            if (history.size > 10000 / c.frameMs) history.removeFirst()
-        }
-        val noise = if (history.size < 10) -60.0 else history.sorted()[floor(history.size / 20.0).toInt()]
-        val margin = c.marginDb - if (inPhrase) c.holdDb else 0.0
-        return level > max(noise + margin, c.minDb)
-    }
+    private val vad = Vad(c)
 
     private val pre = ArrayDeque<ShortArray>()
     private var phrase: MutableList<ShortArray>? = null
@@ -76,7 +79,7 @@ class Phrases(private val send: (Int, List<ShortArray>) -> Unit, private val can
     val speaking get() = phrase != null
 
     fun push(f: ShortArray) {
-        val v = voice(f, phrase != null)
+        val v = vad.voice(f, phrase != null)
         val p = phrase
         if (p == null) {
             pre.addLast(f)
