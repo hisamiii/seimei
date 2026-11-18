@@ -58,11 +58,11 @@ class CallService : Service() {
 
         override fun ended(call: VoiceCall, why: String) {
             if (this.call !== call) return
-            val ctx = app ?: return
-            Prefs(ctx).voiceEcho = call.echo
             // The service sees it and stops: stopped from here before its startForeground, it would crash the app.
+            // Cleared first, so the bar never outlives its call.
             this.call = null
             if (why.isNotEmpty()) told = why
+            app?.let { Prefs(it).voiceEcho = call.echo }
         }
     }
 
