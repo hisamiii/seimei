@@ -76,6 +76,7 @@ The page offers a call from an empty composer. When voice mode is on and there i
 - **During a call** the composer becomes the call bar: mute, a pill with the state, the level and the time, and hang up. The call goes on while the user moves to other pages.
 - **In the chat** the user's spoken turns are their bubbles with a wave mark. The partner's turns are plain lines with a bar on the left, so they never look like seimei's replies. The partner's current line grows as it speaks. A request to seimei shows as an "Asked seimei" line, which pulses until seimei's reply lands under it.
 - **Barge-in** is cut on the page. `web/pcm.js` hears 120 ms of the user's voice over the partner, at least -42 dBFS and 10 dB over the room. The page then drops what it has queued to play and sends `barge`. That takes about 0.1 to 0.2 s, against about 1 s for Phonic's own detection.
+- **Echo** must not count as the user. A browser's echo canceller may miss audio the page plays itself, so the partner comes back through the microphone. Over the partner, voice must also be 6 dB louder than the loudest echo heard so far, relative to what plays. That estimate starts high, falls 15 dB a second, and the phone keeps it between calls.
 - **Mute** sends silence: Phonic expects a steady stream.
 - The microphone runs with the browser's echo cancellation, noise suppression and gain control. It goes up as 16 kHz PCM16 in 20 ms frames, and the screen stays on during a call.
 
@@ -88,6 +89,7 @@ The socket carries PCM16 mono at 16 kHz both ways as binary frames, and JSON as 
 The client sends the microphone without pause, silence included, since Phonic expects a steady stream. Text frames up:
 
 - `{"type": "barge"}`: the client's own voice detection heard the user over the partner, and the client has cut its playback. The bridge then holds back the partner's audio until Phonic's own detection agrees, or for 1.5 s on a false alarm.
+- `{"type": "stats", ...}`: the page's numbers for the server log, every 10 s and at hang-up: the audio context's state and rate, the seconds played and cut, barges, flushes and the echo estimate.
 - `{"type": "end"}`: hang up.
 
 Text frames down:
@@ -101,7 +103,7 @@ Text frames down:
 
 Down audio is only what is heard. Phonic streams silent chunks nonstop, so the bridge forwards a chunk only while the partner speaks, or when it holds sound or words.
 
-Each turn leaves a line in the server log. It holds the user's words and the time from their last speech to the partner's first sound. It also says when Phonic heard the end, and how long each lookup took. A reply that speaks seimei's answer gets a line too.
+Each turn leaves a line in the server log. It holds the user's words and the time from their last speech to the partner's first sound. It also says when Phonic heard the end, and how long each lookup took. The line also names the `intelligence_level`. A reply that speaks seimei's answer gets a line too, and so do the page's barges and stats.
 
 ## What leaves the machine
 

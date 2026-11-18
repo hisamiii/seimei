@@ -1,6 +1,6 @@
 // Voice call audio without the DOM (docs/voice.md): the microphone down to 16 kHz PCM16, the partner's PCM16 back to samples, and the local barge-in.
 // voice.js feeds it; node can run it on plain arrays.
-import { Vad, CUT } from './phrases.js';
+import { Vad, CUT, frameDb } from './phrases.js';
 
 export const RATE = 16000;
 // 20 ms at 16 kHz: one frame up the socket.
@@ -55,26 +55,42 @@ export function level(f) {
 }
 
 // The user talks over the partner: 120 ms of voice, above the room's noise by more than dictation needs and at least -42 dBFS.
-// The floor keeps the partner's echo out: what the echo canceller leaves of it sits well under speech held close to the phone.
-export const BARGE = { ...CUT, marginDb: 10, minDb: -42, onsetMs: 120 };
+export const BARGE = { ...CUT, marginDb: 10, minDb: -42, onsetMs: 120, echoDb: 6, echoStart: 10, echoFallDb: 15 };
 
-/** Feed it 16 kHz frames: talking() says whether the user talks now, push() returns true once per stretch of voice while the partner plays. */
+/**
+ * Feed it 16 kHz frames with the level of what plays now (dBFS, or null when nothing plays).
+ * push() returns true once per stretch of the user's voice over the partner; talking() says whether the user talks now.
+ * The partner's own sound comes back through the microphone when the echo canceller misses it, as it can for page audio.
+ * So over the partner, voice must also beat the echo: the microphone's level against what plays, learned as the call goes.
+ */
 export class Barge {
-  constructor(c = BARGE) {
+  constructor(c = BARGE, echo = c.echoStart) {
     this.c = c;
     this.vad = new Vad(c);
     this.onset = 0;
     this.quiet = 0;
     this.fired = false;
+    // The loudest microphone level over what played, in dB, held and let fall slowly.
+    this.echo = echo;
   }
 
-  push(f, playing) {
-    const v = this.vad.voice(f, this.onset >= this.c.onsetMs / this.c.frameMs);
+  push(f, playDb) {
+    const c = this.c;
+    let v = this.vad.voice(f, this.onset >= c.onsetMs / c.frameMs);
+    if (playDb != null) {
+      const over = frameDb(f) - playDb;
+      if (over > this.echo + c.echoDb) {
+        // Louder than the partner's echo can be: the user.
+      } else {
+        this.echo = Math.max(over, this.echo - c.echoFallDb * c.frameMs / 1000);
+        v = false;
+      }
+    }
     this.onset = v ? this.onset + 1 : 0;
     this.quiet = v ? 0 : this.quiet + 1;
     // A pause re-arms it: the next stretch of voice can barge again.
-    if (this.quiet * this.c.frameMs >= this.c.silenceMs) this.fired = false;
-    if (!playing || this.fired || this.onset * this.c.frameMs < this.c.onsetMs) return false;
+    if (this.quiet * c.frameMs >= c.silenceMs) this.fired = false;
+    if (playDb == null || this.fired || this.onset * c.frameMs < c.onsetMs) return false;
     this.fired = true;
     return true;
   }

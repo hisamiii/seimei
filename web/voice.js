@@ -3,13 +3,20 @@
 // The page cuts the partner off itself when the user talks over it, well before the partner's own detection does.
 import { $, S, el, snack, say, toLogin } from './util.js';
 import { render, toBottom, nearBottom } from './chat.js';
-import { Down, Barge, RATE, FRAME, toPcm16, fromPcm16, level } from './pcm.js';
+import { Down, Barge, BARGE, RATE, FRAME, toPcm16, fromPcm16, level } from './pcm.js';
+import { frameDb } from './phrases.js';
 
 const bar = $('callbar'), pill = $('call-pill'), who = $('call-who'), lvl = $('call-level'), time = $('call-time');
 const mute = $('call-mute'), end = $('call-end'), thread = $('thread');
 const BARS = 26;
 // What the speaker has queued starts this far ahead, so a late chunk does not leave a gap.
 const LEAD = 0.06;
+// What played this long ago can still come back through the microphone: the output's latency plus the room.
+const ECHO_S = 0.3;
+// The echo learned on this phone, kept between calls (pcm.js Barge).
+const ECHO_KEY = 'seimei.voiceEcho';
+// The page's own numbers go to the server log this often, and at hang-up.
+const STATS_MS = 10000;
 const LABEL = { connecting: 'Connecting…', listening: 'Listening', speaking: 'Speaking', reconnecting: 'Reconnecting…' };
 let call = null;
 
@@ -24,8 +31,9 @@ function show(on) {
 
 async function start() {
   if (call) return;
-  // The context is made in the tap: a phone lets it play only then.
+  // The context is made and resumed in the tap: a phone lets it play only then.
   const ctx = new AudioContext();
+  ctx.resume().catch(() => {});
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
@@ -43,10 +51,14 @@ async function start() {
   const out = ctx.createGain();
   out.connect(ctx.destination);
   const c = {
-    ctx, stream, ws, src, proc, out, t0: performance.now(), down: new Down(ctx.sampleRate), barge: new Barge(),
+    ctx, stream, ws, src, proc, out, t0: performance.now(), down: new Down(ctx.sampleRate), barge: new Barge(BARGE, learned()),
     pending: new Float32Array(0), sources: new Set(), until: 0, muted: false, state: 'connecting',
     levels: Array(BARS).fill(0), mic: 0, heard: 0, live: null, lock: null,
+    // What was scheduled to play, as [start, end, dBFS], for the echo check.
+    played: [], stats: { played: 0, chunks: 0, barges: 0, cut: 0, flushes: 0 },
   };
+  // A phone may suspend the context, at a call or a route change: the next tap brings it back.
+  ctx.onstatechange = () => { if (call === c && ctx.state !== 'running') document.addEventListener('pointerdown', () => ctx.resume().catch(() => {}), { once: true }); };
   call = c;
   src.connect(proc);
   // A ScriptProcessor runs only while connected; it writes silence.
@@ -78,9 +90,9 @@ function up(c, x) {
   let i = 0;
   for (; i + FRAME <= buf.length; i += FRAME) {
     const f = buf.subarray(i, i + FRAME);
-    const playing = c.ctx.currentTime < c.until;
     if (c.muted) f.fill(0);
-    else if (c.barge.push(f, playing)) {
+    else if (c.barge.push(f, playLevel(c))) {
+      c.stats.barges++;
       cut(c);
       send(c, { type: 'barge' });
     }
@@ -107,12 +119,42 @@ function play(c, data) {
   node.start(at);
   c.until = at + buf.duration;
   c.heard = level(f);
+  c.played.push([at, c.until, frameDb(f)]);
+  c.stats.played += buf.duration;
+  c.stats.chunks++;
   c.sources.add(node);
   node.onended = () => c.sources.delete(node);
 }
 
+// The loudest sound that played lately, in dBFS, or null when nothing did.
+function playLevel(c) {
+  const now = c.ctx.currentTime;
+  while (c.played.length && c.played[0][1] < now - ECHO_S) c.played.shift();
+  let db = null;
+  for (const [a, , d] of c.played) if (a <= now) db = Math.max(db ?? -Infinity, d);
+  return db;
+}
+
+function learned() {
+  try {
+    const v = localStorage.getItem(ECHO_KEY);
+    // A little above what this phone showed last time, never above the cautious start.
+    if (v !== null && Number.isFinite(Number(v))) return Math.min(BARGE.echoStart, Number(v) + 3);
+  } catch {}
+  return BARGE.echoStart;
+}
+
+// The page's side of the call, for the server log: whether the audio could play and what cut it.
+function stats(c) {
+  const t = c.stream.getAudioTracks()[0]?.getSettings() || {};
+  send(c, { type: 'stats', context: c.ctx.state, rate: c.ctx.sampleRate, base_latency: c.ctx.baseLatency, output_latency: c.ctx.outputLatency,
+    ...c.stats, echo: Math.round(c.barge.echo * 10) / 10, muted: c.muted,
+    mic: { echo_cancellation: t.echoCancellation, noise_suppression: t.noiseSuppression, auto_gain: t.autoGainControl, rate: t.sampleRate } });
+}
+
 // Everything queued to play stops now.
 function cut(c) {
+  c.stats.cut += Math.max(0, c.until - c.ctx.currentTime);
   for (const n of c.sources) {
     try { n.stop(); } catch {}
   }
@@ -125,7 +167,10 @@ function message(c, m) {
     c.state = m.state;
     label(c);
     if (m.state === 'ended') hangUp('');
-  } else if (m.type === 'flush') cut(c);
+  } else if (m.type === 'flush') {
+    c.stats.flushes++;
+    cut(c);
+  }
   else if (m.type === 'saying') saying(c, m.text);
   else if (m.type === 'said' && m.who === 'partner') endLive(c);
   else if (m.type === 'error') snack(m.text);
@@ -160,6 +205,10 @@ function tick() {
   const c = call;
   if (!c) return;
   const playing = c.ctx.currentTime < c.until;
+  if (performance.now() - (c.statsAt || c.t0) > STATS_MS) {
+    c.statsAt = performance.now();
+    stats(c);
+  }
   c.levels = [...c.levels.slice(1), c.muted ? 0 : playing && !c.barge.talking() ? c.heard : c.mic];
   c.levels.forEach((l, i) => { lvl.children[i].style.height = `${4 + 24 * l}px`; });
   const sec = Math.floor((performance.now() - c.t0) / 1000);
@@ -172,6 +221,8 @@ function hangUp(why) {
   const c = call;
   if (!c) return;
   call = null;
+  stats(c);
+  try { localStorage.setItem(ECHO_KEY, String(c.barge.echo)); } catch {}
   send(c, { type: 'end' });
   c.ws.close();
   c.proc.onaudioprocess = null;

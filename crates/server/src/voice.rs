@@ -1,5 +1,5 @@
 //! GET /api/voice/ws (docs/voice.md): a voice call. Binary frames carry PCM16 mono at 16 kHz both ways; text frames carry JSON.
-//! Up: {"type": "barge"} when the client's own voice detection hears the user over the partner (it has cut its playback already), {"type": "end"}.
+//! Up: {"type": "barge"} when the client's own voice detection hears the user over the partner (it has cut its playback already), {"type": "stats"} for the server log, {"type": "end"}.
 //! Down: {"type": "state"}, "flush" (drop what is queued to play), "saying" (the partner's words as they play), "said", "asking", "answered", "error".
 
 use std::sync::Arc;
@@ -53,6 +53,8 @@ pub async fn ws(
                         match v["type"].as_str() {
                             Some("barge") => _ = up_tx.try_send(Up::Barge),
                             Some("end") => _ = up_tx.send(Up::End).await,
+                            // The page's own numbers: whether its audio could play, and what cut it.
+                            Some("stats") => eprintln!("seimei: voice: page: {}", seimei_core::util::chars(&t, 600)),
                             _ => {}
                         }
                     }
