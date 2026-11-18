@@ -39,6 +39,10 @@ The table lists each section's keys, their defaults and what they set. Notes on 
 | | `deny` | `[]` | words and globs never sent |
 | `[asr.sources]` | `chat`, `names`, `board`, `window`, `draft`, `auto` | all `true` | one switch per source of the word list |
 | `[voice]` | `on` | `false` | voice mode, see [voice.md](voice.md) |
+| | `engine` | `phonic` | `direct`: the dispatcher answers, see [voice-direct.md](voice-direct.md) |
+| | `tts_model` | `heygen/heygen-voice-1-turbo` | direct mode's speech model on OpenRouter |
+| | `tts_voice` | `bram` | its voice |
+| | `think_model` | `mistralai/mistral-small-3.2-24b-instruct` | direct mode's pre-think model |
 | | `key_file` | `~/.config/phonic/api_key` | the Phonic API key |
 | | `url` | `wss://api.phonic.ai/v1/sts/ws` | Phonic's conversation socket |
 | | `model` | `phonic-1` | the speech-to-speech model |

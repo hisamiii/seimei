@@ -10,6 +10,7 @@ Start with [install.md](install.md), then [reach.md](reach.md) to bring seimei t
 - [plugins.md](plugins.md): the built-in plugins, the agent display and browser, external MCP servers, and how to write a plugin.
 - [asr.md](asr.md): dictation, its word list and fixer, privacy, and the mic in the clients.
 - [voice.md](voice.md): voice mode, the partner's context and tools, the client socket, and what leaves the machine.
+- [voice-direct.md](voice-direct.md): direct voice mode, where the dispatcher is the voice: turn taking, pre-think, speech and its latency.
 - [dispatcher-harness.md](dispatcher-harness.md): a proposal to run the dispatcher on any harness.
 - [troubleshooting.md](troubleshooting.md): logs, a page that does not load, logins, failed turns, notifications, a leak.
 

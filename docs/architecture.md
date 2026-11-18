@@ -170,7 +170,7 @@ State and the user live in `crates/core/src` too. `events.rs` is the log, next t
 Dictation, voice and plugins:
 
 - `crates/core/src/asr`: `vocab.rs` builds the word list, `fix.rs` is the fixer, and `mod.rs` makes the OpenRouter call and writes the logs. Its routes are in `crates/server/src/asr.rs`.
-- `crates/core/src/voice`: `pack.rs` builds the context pack, `lookups.rs` the partner's tools, `web.rs` the search and the page fetch, and `mod.rs` the call. Its route is in `crates/server/src/voice.rs`.
+- `crates/core/src/voice`: `pack.rs` builds the context pack, `lookups.rs` the partner's tools, `web.rs` the search and the page fetch, and `mod.rs` the call. Direct mode's call is `direct.rs`, with `vad.rs` for turn taking, `think.rs` for pre-think and `speech.rs` for the voice. Its route is in `crates/server/src/voice.rs`.
 - `crates/core/src/plugins/mod.rs`: the host, with the `Builtin` trait, `Factory`, enabling, the plugin socket and prompt sections. It also serves a session's own tools over stdio for agents that cannot take them in-process: `seimei plugin shikigami` and `seimei plugin seimei`.
 - `crates/core/src/plugins/link.rs`: a connector's socket.
 - `plugins/<name>`: a built-in plugin's crate. `src/lib.rs` exports its `PLUGIN: Factory`, next to `plugin.toml`, `prompt.md`, `tools.json`, tests and connector.

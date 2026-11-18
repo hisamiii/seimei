@@ -228,6 +228,7 @@ impl App {
                 Box::new(move || p.denied()),
                 state,
                 &about,
+                asr.clone(),
             )
         });
         let _ = pool.dispatcher.set(dispatcher.clone());

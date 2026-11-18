@@ -486,17 +486,22 @@ impl Dispatcher {
         cid: Option<&str>,
         reply: Option<&Value>,
     ) {
-        self.post(text, names, images, files, cid, reply, None, false);
+        self.post(text, names, images, files, cid, reply, None, None);
     }
 
     /// The user sends a side thread's summary: their message, tagged with the thread (id, name), answering what the thread started from.
     pub fn send_from_thread(&self, text: &str, thread: (&str, &str), reply: Option<&Value>) {
-        self.post(text, &[], vec![], &[], None, reply, Some(thread), false);
+        self.post(text, &[], vec![], &[], None, reply, Some(thread), None);
     }
 
     /// The voice partner's ask_seimei: the request in the thread as the user's, marked voice, and to the dispatcher with a [voice] tag. Returns its event id: the reply answers it.
     pub fn send_voice(&self, text: &str) -> i64 {
-        self.post(text, &[], vec![], &[], None, None, None, true)
+        self.post(text, &[], vec![], &[], None, None, None, Some(("", false)))
+    }
+
+    /// What the user said in a direct voice call: in the thread marked spoken, and to the dispatcher with a [voice call] tag and `extra` after it. Returns its event id: the reply answers it.
+    pub fn send_spoken(&self, text: &str, extra: &str) -> i64 {
+        self.post(text, &[], vec![], &[], None, None, None, Some((extra, true)))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -509,12 +514,16 @@ impl Dispatcher {
         cid: Option<&str>,
         reply: Option<&Value>,
         thread: Option<(&str, &str)>,
-        voice: bool,
+        // A voice message: what goes to the dispatcher after the text, and whether the user said it in a direct call.
+        voice: Option<(&str, bool)>,
     ) -> i64 {
         let (shown, said) = reply.map(quoted).unwrap_or_default();
         let mut ev = json!({"type": "user", "text": text});
-        if voice {
+        if let Some((_, spoken)) = voice {
             ev["voice"] = json!(true);
+            if spoken {
+                ev["spoken"] = json!(true);
+            }
         }
         if let Some(c) = cid {
             ev["cid"] = json!(c);
@@ -539,7 +548,12 @@ impl Dispatcher {
             ev["files"] = json!(shown);
         }
         let ev = self.events.add(ev);
-        let mut text = if voice { format!("[voice] {text}") } else { text.to_string() };
+        let mut text = match voice {
+            Some(("", false)) => format!("[voice] {text}"),
+            Some(("", true)) => format!("[voice call] {text}"),
+            Some((extra, _)) => format!("[voice call] {text}\n\n{extra}"),
+            None => text.to_string(),
+        };
         if let Some((id, name)) = thread {
             text = format!("[from the side thread \"{name}\" ({id})]\n{text}");
         }
@@ -1373,7 +1387,9 @@ impl Turns {
         if !text.is_empty() {
             let turn = self.events.turn();
             let lane = self.block_lane.map(|l| json!(l)).or(turn.get("lane").cloned()).unwrap_or(json!("c"));
-            self.events.flash(json!({"type": "delta", "text": text, "lane": lane}));
+            // The message it answers, for a voice call to speak its own replies.
+            let re = turn.get("re").cloned().unwrap_or(Value::Null);
+            self.events.flash(json!({"type": "delta", "text": text, "lane": lane, "re": re}));
         }
     }
 

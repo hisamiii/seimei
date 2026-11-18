@@ -2,8 +2,12 @@
 //! The bridge holds both sockets: the client's audio on one side, Phonic's conversation socket on the other.
 //! The partner answers from the context pack and read-only lookups; ask_seimei is its only way to the dispatcher, as a [voice] message in the real thread.
 
+pub mod direct;
 pub mod lookups;
 pub mod pack;
+pub mod speech;
+pub mod think;
+pub mod vad;
 pub mod web;
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -79,6 +83,11 @@ pub struct Config {
     pub search_url: String,
     pub search_key_file: PathBuf,
     pub search_model: String,
+    /// phonic: the Phonic partner; direct: the dispatcher itself answers (docs/voice-direct.md).
+    pub engine: String,
+    pub tts_model: String,
+    pub tts_voice: String,
+    pub think_model: String,
 }
 
 impl Config {
@@ -134,6 +143,10 @@ impl Config {
             search_url: s("search_url", "https://openrouter.ai/api/v1/chat/completions"),
             search_key_file: expand(&s("search_key_file", "~/.config/seimei/openrouter-key")).into(),
             search_model: s("search_model", "openai/gpt-4.1-mini"),
+            engine: s("engine", "phonic"),
+            tts_model: s("tts_model", "heygen/heygen-voice-1-turbo"),
+            tts_voice: s("tts_voice", "bram"),
+            think_model: s("think_model", "mistralai/mistral-small-3.2-24b-instruct"),
         }
     }
 }
@@ -167,6 +180,9 @@ pub struct Voice {
     state: PathBuf,
     about: String,
     web: web::Web,
+    /// Dictation, which a direct call's speech recognition and its OpenRouter key come from.
+    pub asr: Option<Arc<crate::asr::Asr>>,
+    speech: Option<(speech::Tts, think::Think)>,
 }
 
 /// The partner's next words as they join what it said: Phonic sends the sentences around a tool call with no space between them.
@@ -199,9 +215,40 @@ impl Voice {
         denied: Denied,
         state: &Path,
         about: &str,
+        asr: Option<Arc<crate::asr::Asr>>,
     ) -> Arc<Voice> {
         let web = web::Web::new(&cfg.search_url, cfg.search_key_file.clone(), &cfg.search_model);
-        Arc::new(Voice { cfg, events, dispatcher, audit, read, denied, state: state.into(), about: about.into(), web })
+        let speech = asr.as_ref().map(|a| {
+            let (key, zdr) = (a.cfg.key_file.clone(), a.cfg.zdr);
+            let http = speech::client();
+            (speech::Tts::new(&cfg.tts_model, &cfg.tts_voice, key.clone(), zdr, http.clone()), think::Think::new(&cfg.think_model, key, zdr, http))
+        });
+        let (state, about) = (state.into(), about.into());
+        Arc::new(Voice { cfg, events, dispatcher, audit, read, denied, state, about, web, asr, speech })
+    }
+
+    /// A direct call's voice. Only called once `direct::call` checked that dictation is on.
+    pub fn tts(&self) -> &speech::Tts {
+        &self.speech.as_ref().expect("dictation is on").0
+    }
+
+    pub fn think(&self) -> &think::Think {
+        &self.speech.as_ref().expect("dictation is on").1
+    }
+
+    /// The call is over: its card in the chat gets the length, and the dispatcher reads the transcript to write the summary.
+    /// A call where nobody said a word leaves no card.
+    pub fn ended(&self, lines: &[String], secs: u64) {
+        if lines.is_empty() {
+            return;
+        }
+        let ev = self.events.add(json!({"type": "voice_end", "secs": secs}));
+        let call = ev["id"].as_i64().unwrap_or(0);
+        let said = chars(&lines.join("\n"), SUMMARY_IN);
+        self.dispatcher.chore(&format!(
+            "Voice call {call} ended. Write its summary with voice_summary: one or two plain sentences on what the user \
+             asked and what came of it. The user need not see this; answer nothing else.\n\n{said}"
+        ));
     }
 
     fn on(&self, section: &str) -> bool {
@@ -354,7 +401,7 @@ impl Voice {
         chars(&out, lookups::OUT_MAX)
     }
 
-    fn audit(&self, conversation: &str, id: &str, tool: &str, input: &Value) {
+    pub fn audit(&self, conversation: &str, id: &str, tool: &str, input: &Value) {
         let c = AuditCall { who: "voice", worker: None, session: conversation, agent: None, id, tool, input };
         self.audit.call(c);
     }
@@ -363,6 +410,9 @@ impl Voice {
     /// It goes on in a new conversation, with a fresh pack, when Phonic's socket drops or the conversation reaches its time limit.
     /// `speed` is the client's own audio_speed, over the config's; Phonic takes it only when a conversation starts.
     pub async fn call(self: Arc<Self>, mut up: mpsc::Receiver<Up>, down: mpsc::Sender<Down>, speed: Option<f64>) {
+        if self.cfg.engine == "direct" {
+            return direct::call(self, up, down).await;
+        }
         let mut live = self.events.subscribe();
         let mut call = Call::new(self.clone(), down);
         call.speed = speed.filter(|s| s.is_finite()).map(|s| s.clamp(0.5, 1.5));
@@ -508,17 +558,7 @@ impl Call {
     /// The call is over: its card in the chat gets the length, and the dispatcher reads the transcript to write the summary.
     /// A call where nobody said a word leaves no card.
     fn end(&self) {
-        if self.lines.is_empty() {
-            return;
-        }
-        let secs = self.started.elapsed().as_secs();
-        let ev = self.v.events.add(json!({"type": "voice_end", "secs": secs}));
-        let call = ev["id"].as_i64().unwrap_or(0);
-        let said = chars(&self.lines.join("\n"), SUMMARY_IN);
-        self.v.dispatcher.chore(&format!(
-            "Voice call {call} ended. Write its summary with voice_summary: one or two plain sentences on what the user \
-             asked and what came of it. The user need not see this; answer nothing else.\n\n{said}"
-        ));
+        self.v.ended(&self.lines, self.started.elapsed().as_secs());
     }
 
     /// The conversation went away: open tool calls died with it, so answers still to come are spoken with generate_reply.

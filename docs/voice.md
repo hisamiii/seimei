@@ -4,6 +4,8 @@ Voice mode lets the user talk with seimei hands-free, in a long flowing conversa
 
 Voice mode is off by default; `[voice] on = true` in [config.md](config.md) turns it on.
 
+With `[voice] engine = "direct"` the dispatcher itself is the voice, with no partner in between: see [voice-direct.md](voice-direct.md).
+
 ## How a call works
 
 The client streams the microphone to seimei over `GET /api/voice/ws`, and seimei holds Phonic's conversation socket on the other side. The bridge is `crates/core/src/voice`; nothing about a call goes from the phone to Phonic directly.
