@@ -422,6 +422,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/sessions/{pid}/answer", post(session_answer))
         .route("/api/asr", get(asr::status).post(asr::transcribe))
         .route("/api/asr/edit", post(asr::edited))
+        .route("/api/voice", get(voice::status))
         .route("/api/voice/ws", get(voice::ws));
     if app.auth.is_some() {
         r = r

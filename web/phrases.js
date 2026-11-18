@@ -27,7 +27,7 @@ export function frameDb(f) {
   return 20 * Math.log10(Math.max(rms, 1 / 32768));
 }
 
-class Vad {
+export class Vad {
   constructor(c) {
     this.c = c;
     this.n = 0;

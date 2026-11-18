@@ -11,7 +11,7 @@ const log = $('log');
 const thread = $('thread');
 const traj = $('traj');
 const older = $('older'), olderT = $('older-t'), working = $('working');
-const input = $('input'), sendBtn = $('send'), stopBtn = $('stop');
+const input = $('input'), sendBtn = $('send'), stopBtn = $('stop'), talkBtn = $('talk');
 
 let live = null;
 let liveText = '';
@@ -721,6 +721,9 @@ export class Renderer {
     // Trajectory: the dispatcher turn being drawn.
     this.turn = null;
     this.cur = null;
+    // Voice: the last voice turn's time, and the partner's open asks to seimei by event id.
+    this.lastVoice = null;
+    this.asked = new Map();
   }
 
   put(node) {
@@ -808,6 +811,21 @@ export class Renderer {
     at.after(b);
   }
 
+  // A voice call's turns: the user's as their bubbles, the partner's as plain lines, and what it asked seimei until seimei answers.
+  // A call opens with a note; turns more than 5 minutes apart are another call.
+  voice(ev) {
+    if (!this.lastVoice || ev.t - this.lastVoice > 300) this.put(el('div', 'note', `Voice call · ${clock(ev.t)}`));
+    this.lastVoice = ev.t;
+    this.between = false;
+    if (ev.type === 'user') {
+      // The partner asked seimei: the reply that follows answers it, with no chip.
+      this.lastUser = ev.id;
+      said.set(ev.id, ev.text);
+      this.asked.set(ev.id, this.put(el('div', 'ask wait', `Asked seimei: ${ev.text}`)));
+    } else if (ev.who === 'user') this.put(el('div', 'msg user voiced', ev.text));
+    else this.put(el('div', `vline${ev.cut ? ' cut' : ''}`, ev.text));
+  }
+
   add(ev) {
     if (ev.type === 'approval_done') {
       if (this.card?.aid === ev.aid) this.card.done = ev.t || Date.now() / 1000;
@@ -845,6 +863,7 @@ export class Renderer {
       return;
     }
     this.activity = null;
+    if (ev.type === 'voice' || (ev.type === 'user' && ev.voice)) return this.voice(ev);
     if (ev.type === 'user' || ev.type === 'assistant') {
       if (ev.text) said.set(ev.id, ev.text);
       // Sent from a side thread: the thread's name above the message, one tap from it
@@ -862,6 +881,7 @@ export class Renderer {
         this.between = false;
       }
       if (ev.type === 'assistant') replyable(node, ev, ev.text || '');
+      if (ev.type === 'assistant' && ev.re) this.asked.get(ev.re)?.classList.remove('wait');
       if (this.lane === 't' && ev.type === 'assistant') {
         const b = el('button', 'reply-btn sl', 'Reply in chat');
         b.type = 'button';
@@ -927,7 +947,9 @@ export function render() {
   working.hidden = !(S.online && S.session.busy && !live) || s === 'waiting';
   const typing = input.value.trim() !== '' || attachments.length > 0;
   stopBtn.hidden = !(S.session.busy && !typing);
-  sendBtn.hidden = !stopBtn.hidden;
+  // An empty composer offers a voice call in place of a send that could not send.
+  talkBtn.hidden = !(S.voice && !typing && stopBtn.hidden);
+  sendBtn.hidden = !stopBtn.hidden || !talkBtn.hidden;
   sendBtn.disabled = !typing;
   hooks.chrome();
 }
@@ -966,8 +988,11 @@ export function addEvent(ev) {
     pending.delete(ev.cid);
   }
   if (ev.type === 'assistant') clearLive();
+  if (ev.type === 'voice' && ev.who === 'partner') thread.querySelector('.vline.live')?.remove();
   route(ev);
   if (live) live.parentNode.append(live);
+  const talking = thread.querySelector('.vline.live');
+  if (talking) thread.append(talking);
   hello();
   if (stick) toBottom();
   else if (/^(user|assistant|approval|worker|image)$/.test(ev.type) && inTraj(ev) === (S.lane === 't')) {

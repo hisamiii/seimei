@@ -13,10 +13,15 @@ use seimei_core::voice::{Down, Up};
 use serde_json::Value;
 use tokio::sync::mpsc;
 
-use crate::{App, text};
+use crate::{App, ok, text};
 
 /// Microphone frames that wait for the bridge; past this they are dropped, as a live call would.
 const QUEUE: usize = 256;
+
+/// Whether to show the voice button.
+pub async fn status(State(app): State<Arc<App>>) -> Response {
+    ok(serde_json::json!({"enabled": app.voice.is_some()}))
+}
 
 pub async fn ws(
     State(app): State<Arc<App>>,

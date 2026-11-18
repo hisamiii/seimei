@@ -8,6 +8,7 @@ import { nav, renderDrawer, drawerOpen, drawerGone } from './drawer.js';
 import { setUsage, renderUsage } from './usage.js';
 import { setTasks, loadTasks, tasksArchOpen, closeTasksArch } from './tasks.js';
 import { account } from './account.js';
+import './voice.js';
 import { sheet, closeSheet } from './sheet.js';
 import { init as initTheme, phone as phoneTheme } from './theme.js';
 

@@ -180,7 +180,7 @@ The binary, the server and the clients:
 
 - `crates/server/src/lib.rs`: every HTTP route. `threads.rs` has the handlers for side threads, watch rules and the files gallery.
 - `crates/seimei/src`: `main.rs` for startup and the account commands, `lib.rs` for the list of built-in plugins, `setup.rs` and `update.rs`.
-- `web/`: `app.js` for start, stream and routing, `drawer.js` for the navigation drawer. Then `chat.js`, `agents.js`, `threads.js`, `pages.js`, `tasks.js`, `account.js` and `usage.js`, with `mic.js` for dictation and `sw.js` for notifications. A side thread's page is the agent page of `agents.js`; `pages.js` holds watches and files, `account.js` the settings.
+- `web/`: `app.js` for start, stream and routing, `drawer.js` for the navigation drawer. Then `chat.js`, `agents.js`, `threads.js`, `pages.js`, `tasks.js`, `account.js` and `usage.js`, with `mic.js` for dictation, `voice.js` and `pcm.js` for voice calls, and `sw.js` for notifications. A side thread's page is the agent page of `agents.js`; `pages.js` holds watches and files, `account.js` the settings.
 - `android/`: the app, with the same screens in Compose. `Dictate.kt` is the mic.
 
 ## Tests

@@ -69,6 +69,18 @@ Every lookup runs on seimei's server and answers through the socket seimei opene
 
 `[voice] pronounce` becomes Phonic's pronunciation dictionary. Turn taking is `eager`, which detects the end of speech about 0.4 s sooner than `standard`.
 
+## The page
+
+The page offers a call from an empty composer. When voice mode is on and there is nothing to send, the send button becomes the voice button.
+
+- **During a call** the composer becomes the call bar: mute, a pill with the state, the level and the time, and hang up. The call goes on while the user moves to other pages.
+- **In the chat** the user's spoken turns are their bubbles with a wave mark. The partner's turns are plain lines with a bar on the left, so they never look like seimei's replies. The partner's current line grows as it speaks. A request to seimei shows as an "Asked seimei" line, which pulses until seimei's reply lands under it.
+- **Barge-in** is cut on the page. `web/pcm.js` hears 120 ms of the user's voice over the partner, at least -42 dBFS and 10 dB over the room. The page then drops what it has queued to play and sends `barge`. That takes about 0.1 to 0.2 s, against about 1 s for Phonic's own detection.
+- **Mute** sends silence: Phonic expects a steady stream.
+- The microphone runs with the browser's echo cancellation, noise suppression and gain control. It goes up as 16 kHz PCM16 in 20 ms frames, and the screen stays on during a call.
+
+A call needs https or localhost, since the browser gives the microphone to a secure page only.
+
 ## The client socket
 
 The socket carries PCM16 mono at 16 kHz both ways as binary frames, and JSON as text frames. It needs a login, and a cookie login needs one of the page's own origins.
