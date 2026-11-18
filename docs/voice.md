@@ -93,6 +93,7 @@ Firefox on Android can play nothing through Web Audio, on tone generator sites t
 - **The self-test.** When the stream's `play()` is refused, or its clock stands still for 2 s, the call falls back to Web Audio. The panel and the stats say why.
 - **Silence ahead.** The stream keeps 0.25 s of silence queued past the playhead. With half of that, Firefox's element starves and its clock slows to about 70 percent. A reply's first chunk replaces that silence from 40 ms past the playhead.
 - **The cost** is small. In headless Firefox a reply's first sample played 50 to 77 ms after it arrived, with no stalls. Web Audio schedules 60 ms ahead. The panel and the stats show the median wait and the stalls.
+- **The mic gate.** Firefox's echo canceller only removes what plays through its own audio graph, so it misses the stream. Phonic then hears the partner, takes it for the user and cuts its own replies. So while the stream plays, and 0.3 s after, the microphone goes up as silence. When the page hears the user over the partner, it cuts the partner as usual. The microphone's last 300 ms then go up too, so Phonic hears the words that started the barge.
 - The page's policy allows `blob:` media, since the MediaSource is reached by a blob URL.
 
 ## The client socket

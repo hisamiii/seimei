@@ -22,6 +22,11 @@ const STATS_MS = 10000;
 const DEBUG_KEY = 'seimei.voiceDebug';
 // A phone may play nothing from one way out and fine from another: the panel's beeps try each, and the partner follows the last one tried.
 const PATHS = { page: 'the page audio', element: 'an audio element', fresh: 'a new audio context', stream: 'an audio stream' };
+// The stream plays outside the browser's audio graph, so its echo canceller never sees it and the partner hears itself.
+// There the microphone goes up as silence while the partner plays, and this long after, unless the page hears the user over it.
+const GATE_TAIL = 0.3;
+// On such a barge the partner gets the microphone's last this many frames too (300 ms): the words that set it off.
+const GATE_KEEP = 15;
 // The stream must have started playing by then, or the call falls back to Web Audio.
 const STREAM_CHECK_MS = 2000;
 // What the last beeps did, newest last: the panel shows them, with the browser's error when it would not play.
@@ -80,7 +85,7 @@ async function start() {
     pending: new Float32Array(0), sources: new Set(), until: 0, muted: false, state: 'connecting',
     levels: Array(BARS).fill(0), mic: 0, heard: 0, live: null, lock: null,
     // What was scheduled to play, as [start, end, dBFS], for the echo check.
-    played: [], stats: { played: 0, chunks: 0, barges: 0, cut: 0, flushes: 0 },
+    played: [], stats: { played: 0, chunks: 0, barges: 0, cut: 0, flushes: 0, gated: 0 }, held: [],
   };
   // A phone may suspend the context, at a call or a route change: the next tap brings it back.
   ctx.onstatechange = () => { if (call === c && ctx.state !== 'running') document.addEventListener('pointerdown', () => ctx.resume().catch(() => {}), { once: true }); };
@@ -119,6 +124,10 @@ async function start() {
   tick();
 }
 
+const upFrame = (c, pcm) => {
+  if (c.ws.readyState === WebSocket.OPEN) c.ws.send(pcm.buffer);
+};
+
 // The microphone: 16 kHz frames up the socket, each one also through the barge-in detection.
 function up(c, x) {
   if (call !== c) return;
@@ -134,9 +143,19 @@ function up(c, x) {
       c.stats.barges++;
       cut(c);
       send(c, { type: 'barge' });
+      for (const h of c.held) upFrame(c, h);
+      c.held = [];
     }
     c.mic = c.muted ? 0 : level(f);
-    if (c.ws.readyState === WebSocket.OPEN) c.ws.send(toPcm16(f).buffer);
+    if (c.sink.stream && !c.muted && clock(c) < c.until + GATE_TAIL) {
+      // Gated: the frame waits in case it starts a barge, and silence goes up in its place.
+      c.held = [...c.held, toPcm16(f)].slice(-GATE_KEEP);
+      c.stats.gated += FRAME / RATE;
+      upFrame(c, new Int16Array(FRAME));
+    } else {
+      c.held = [];
+      upFrame(c, toPcm16(f));
+    }
   }
   c.pending = buf.slice(i);
 }
@@ -310,7 +329,7 @@ function shown(c = call) {
     } else lines.push(`audio ${s.state} at ${s.sampleRate} Hz, clock ${s.currentTime.toFixed(1)} s · mic ${c.ctx.state}${c.fallback ? ` · stream fell back: ${c.fallback}` : ''}`);
     lines.push(
       `got ${c.got} chunks, played ${c.stats.chunks} (${c.stats.played.toFixed(1)} s), last peak ${c.peak.toFixed(0)} dBFS`,
-      `barge cuts ${c.stats.barges} · flushes ${c.stats.flushes}`);
+      `barge cuts ${c.stats.barges} · flushes ${c.stats.flushes}${c.sink.stream ? ` · mic gated ${c.stats.gated.toFixed(1)} s` : ''}`);
   }
   readout.textContent = [...lines, ...tried.slice(-5)].join('\n');
 }
