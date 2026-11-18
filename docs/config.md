@@ -44,6 +44,10 @@ The table lists each section's keys, their defaults and what they set. Notes on 
 | | `model` | `phonic-1` | the speech-to-speech model |
 | | `voice` | Phonic's default | the voice id |
 | | `turn_taking` | `eager` | how soon the partner takes its turn |
+| | `intelligence_level` | `standard` | `high`: more capable, `standard`: faster |
+| | `default_language` | `en` | the language a call starts in |
+| | `additional_languages` | `[]` | more languages the partner hears and speaks, such as `["ru", "uk"]` |
+| | `multilingual_mode` | `request` | when the partner switches language, see below |
 | | `idle` | 300 | seconds of silence before a call ends |
 | | `sections` | all six | the pack's sections: `style`, `chat`, `board`, `work`, `notes`, `memory` |
 | | `memory` | none | a folder with `MEMORY.md` and one `.md` file per memory |
@@ -75,6 +79,8 @@ Notes on the keys:
 - `zdr` sets OpenRouter's `provider.zdr`. Both default models have such a provider.
 - With every `[asr.sources]` switch off, only the pins in `asr/words.txt` are sent.
 - `[voice] roots` takes absolute paths or paths under `~`. The memory folder and seimei's `notes.md` are readable besides them. Without roots or memory there are no file tools.
+- `[voice] voice` takes one of Phonic's voice ids, such as `grant`.
+- `[voice] multilingual_mode` is `request` to switch when the user asks, `auto` to follow each turn, or `initial` to keep the first turn's language. `auto` takes at most two additional languages.
 - `[voice] pronounce` is a table such as `{ HRX = "H R X" }`. Phonic takes plain respellings, no IPA.
 - Without a key in `search_key_file`, the partner gets no web tools.
 

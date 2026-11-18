@@ -89,7 +89,7 @@ The socket carries PCM16 mono at 16 kHz both ways as binary frames, and JSON as 
 The client sends the microphone without pause, silence included, since Phonic expects a steady stream. Text frames up:
 
 - `{"type": "barge"}`: the client's own voice detection heard the user over the partner, and the client has cut its playback. The bridge then holds back the partner's audio until Phonic's own detection agrees, or for 1.5 s on a false alarm.
-- `{"type": "stats", ...}`: the page's numbers for the server log, every 10 s and at hang-up: the audio context's state and rate, the seconds played and cut, barges, flushes and the echo estimate.
+- `{"type": "stats", ...}`: the page's numbers for the server log, every 10 s and at hang-up. They hold the audio context's state and rate, the seconds played and cut, barges, flushes and the echo estimate.
 - `{"type": "end"}`: hang up.
 
 Text frames down:

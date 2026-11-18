@@ -261,6 +261,9 @@ async fn run(base: PathBuf, root: PathBuf) {
     let words = configs[0]["boosted_keywords"].as_array().unwrap();
     assert!(words.contains(&json!("seimei")) && words.contains(&json!("Loom")));
     assert_eq!(configs[0]["turn_taking"], "eager");
+    assert_eq!(configs[0]["intelligence_level"], "standard");
+    assert_eq!(configs[0]["default_language"], "en");
+    assert_eq!(configs[0]["multilingual_mode"], "request");
     // The second conversation's pack holds the first one's voice turns.
     assert!(configs[1]["system_prompt"].as_str().unwrap().contains("you, by voice: Hello there."));
 

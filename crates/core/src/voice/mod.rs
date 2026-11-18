@@ -53,6 +53,12 @@ pub struct Config {
     /// Empty leaves Phonic's default voice.
     pub voice: String,
     pub turn_taking: String,
+    /// standard or high: Phonic's faster model or its more capable one.
+    pub intelligence_level: String,
+    pub default_language: String,
+    pub additional_languages: Vec<String>,
+    /// How the partner switches language: request, auto or initial.
+    pub multilingual_mode: String,
     /// Seconds of silence before Phonic ends the call.
     pub idle: u64,
     pub sections: Vec<String>,
@@ -93,6 +99,10 @@ impl Config {
             model: s("model", "phonic-1"),
             voice: s("voice", ""),
             turn_taking: s("turn_taking", "eager"),
+            intelligence_level: s("intelligence_level", "standard"),
+            default_language: s("default_language", "en"),
+            additional_languages: list("additional_languages").unwrap_or_default(),
+            multilingual_mode: s("multilingual_mode", "request"),
             idle: t.and_then(|t| t.get("idle")).and_then(|v| v.as_integer()).unwrap_or(300).clamp(10, 3600) as u64,
             sections,
             memory: Some(s("memory", "")).filter(|m| !m.is_empty()).map(|m| expand(&m).into()),
@@ -251,6 +261,10 @@ impl Voice {
             "input_format": "pcm_16000",
             "output_format": "pcm_16000",
             "turn_taking": self.cfg.turn_taking,
+            "intelligence_level": self.cfg.intelligence_level,
+            "default_language": self.cfg.default_language,
+            "additional_languages": self.cfg.additional_languages,
+            "multilingual_mode": self.cfg.multilingual_mode,
             "max_conversation_duration_sec": MAX_CONVERSATION,
             "no_input_end_conversation_sec": self.cfg.idle,
             "boosted_keywords": keywords,
@@ -496,6 +510,7 @@ impl Call {
                         }
                     }
                     Some(Up::Barge) => {
+                        eprintln!("seimei: voice: barge from the page{}", if self.partner_speaking { "" } else { ", the partner was quiet" });
                         if self.partner_speaking {
                             self.barge = Some(Instant::now());
                         }
@@ -679,9 +694,10 @@ impl Call {
         if let Some(t) = self.turn.take() {
             let tools = if t.tools.is_empty() { "none".to_string() } else { t.tools.join(", ") };
             eprintln!(
-                "seimei: voice: turn: first sound {:.2} s after the user's speech, Phonic heard the end at {:.2} s, tools: {tools}, after {:?}",
+                "seimei: voice: turn: first sound {:.2} s after the user's speech, Phonic heard the end at {:.2} s, tools: {tools}, level {}, after {:?}",
                 t.spoke.elapsed().as_secs_f64(),
                 (t.heard - t.spoke).as_secs_f64(),
+                self.v.cfg.intelligence_level,
                 t.words,
             );
         } else if let Some(at) = self.answer.take() {
