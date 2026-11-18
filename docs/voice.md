@@ -19,6 +19,7 @@ client --PCM over wss--> /api/voice/ws --> voice bridge --wss--> Phonic
 - **The dispatcher acts.** For an action, or a question the partner can't settle, the partner calls `ask_seimei`. The request goes into the thread as the user's message, marked voice. It reaches the dispatcher as `[voice] <request>`, and the dispatcher's prompt says how to answer one: short, fact first, heard rather than read.
 - **The answer comes back.** The dispatcher's reply goes to Phonic as the tool call's output. Then, once both sides are quiet, a `generate_reply` asks the partner to say it in its own words. A reply that takes over 150 s gets a "still working" output first, and is spoken when it lands.
 - **Both sides land in the thread.** Each finished turn is a `voice` event, `who` being `user` or `partner`, with `cut` on a reply the user barged into or hung up on. A cut reply holds only the words that reached the client, so none the bridge held back. The call so far rides to the dispatcher as a keyed "Voice call so far" note, so its next turn sees what was said.
+- **The end gets a summary.** When the call ends, `search_model` reads the whole call through OpenRouter and writes one or two sentences: what was asked and what came of it. A `voice_end` event then holds the call's length in `secs` and its `summary`. When the model fails, the event comes without a summary. A call where nobody spoke leaves no event.
 - **News reaches the partner.** During a call, seimei's other chat replies, the user's typed messages and shikigami reports go to Phonic as stamped `add_system_message` lines.
 
 A conversation that drops, or reaches Phonic's two-hour limit, goes on in a fresh one with a rebuilt pack. The pack's chat section holds the voice turns so far, so the new conversation knows them. When Phonic ends the call after `idle` seconds of silence, the call ends.
@@ -81,7 +82,9 @@ Every lookup runs on seimei's server and answers through the socket seimei opene
 The page offers a call from an empty composer. When voice mode is on and there is nothing to send, the send button becomes the voice button.
 
 - **During a call** the composer becomes the call bar: mute, a pill with the state, the level and the time, and hang up. The call goes on while the user moves to other pages.
-- **In the chat** the user's spoken turns are their bubbles with a wave mark. The partner's turns are plain lines with a bar on the left, so they never look like seimei's replies. The partner's current line grows as it speaks. A request to seimei shows as an "Asked seimei" line, which pulses until seimei's reply lands under it.
+- **In the chat** a call is one card where it starts, with its length, the time and the summary. A tap opens the turns. The user's are bubbles with a wave mark, the partner's plain lines with a bar on the left, so they never look like seimei's replies. Turns more than 5 minutes apart are another call.
+- **During a call** its card has an outline, the running time and the partner's current line as it speaks.
+- **Requests to seimei** stay in the chat, under the card. Each shows as an "Asked seimei" line, which pulses until seimei's reply lands under it.
 - **Barge-in** is cut on the page. `web/pcm.js` hears 120 ms of the user's voice over the partner, at least -42 dBFS and 10 dB over the room. The page then drops what it has queued to play and sends `barge`. That takes about 0.1 to 0.2 s, against about 1 s for Phonic's own detection.
 - **Echo** must not count as the user. A browser's echo canceller may miss audio the page plays itself, so the partner comes back through the microphone. Over the partner, voice must also be 6 dB louder than the loudest echo heard so far, relative to what plays. That estimate starts high, falls 15 dB a second, and the phone keeps it between calls.
 - **Mute** sends silence: Phonic expects a steady stream.
@@ -106,7 +109,7 @@ Firefox on Android can play nothing through Web Audio, on tone generator sites t
 
 ## The phone app
 
-The Android app makes the same call as the page over the same socket, with the same talk button, call bar and chat lines. Its call is `VoiceCall` and `Voice.kt` in `android/shared`, for the watch app to reuse.
+The Android app makes the same call as the page over the same socket, with the same talk button, call bar and call cards. Its call is `VoiceCall` and `Voice.kt` in `android/shared`, for the watch app to reuse.
 
 - **Echo.** The app sets the call mode before it opens the microphone, since the phone picks its voice processing when the input opens. The microphone records as a voice call, with the phone's echo canceller and noise suppressor where it has them. The partner plays through an AudioTrack in the microphone's session, on the loudspeaker unless a headset takes the call.
 - **Jitter buffer.** Phonic sends 20 ms chunks at about real time, so the network's jitter would leave the speaker dry between late chunks. A reply starts once 150 to 250 ms of it is queued. The target follows how late chunks came in this call. It rises after a stall: a dry speaker while the reply goes on. The track holds up to 500 ms, so a burst after a late stretch fits. The track pauses while it waits.
@@ -147,6 +150,8 @@ Each turn leaves a line in the server log. It holds the user's words and the tim
 ## What leaves the machine
 
 Every call sends the pack, lookup answers, the audio and both transcripts to Phonic, and Phonic's upstream providers process them. Web searches go to OpenRouter and its search engine, and `fetch_page` reaches the page's site.
+
+At the end of a call, the whole transcript goes to OpenRouter for the summary.
 
 All of it goes as it is: nothing is scrubbed.
 

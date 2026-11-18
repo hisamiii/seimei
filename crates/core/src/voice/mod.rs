@@ -39,6 +39,8 @@ const KEYWORD_MAX: usize = 50;
 const KEYWORDS: usize = 200;
 /// A chat line passed to the partner during the call, at most.
 const DELTA_MAX: usize = 600;
+/// The most of a call's transcript the summary reads.
+const SUMMARY_IN: usize = 60_000;
 /// A sample above this is sound: Phonic streams silent chunks between its turns.
 const AUDIBLE: i16 = 200;
 /// Fresh conversations after a dropped socket, in a row, before the call ends.
@@ -386,6 +388,7 @@ impl Voice {
             call.lost();
         }
         call.state("ended");
+        call.end().await;
     }
 }
 
@@ -453,6 +456,9 @@ struct Call {
     out: Vec<Value>,
     /// The call's turns since the dispatcher's last reply, for its keyed note.
     transcript: Vec<String>,
+    /// The whole call: both sides' turns, the asks to seimei and its answers, for the summary.
+    lines: Vec<String>,
+    started: Instant,
     /// The last microphone frame with speech in it.
     spoke: Option<Instant>,
     turn: Option<Turn>,
@@ -481,6 +487,8 @@ impl Call {
             replies: VecDeque::new(),
             out: vec![],
             transcript: vec![],
+            lines: vec![],
+            started: Instant::now(),
             spoke: None,
             turn: None,
             running: HashMap::new(),
@@ -495,6 +503,21 @@ impl Call {
 
     fn state(&self, s: &str) {
         self.say(json!({"type": "state", "state": s}));
+    }
+
+    /// The call is over: its card in the chat gets the length and, when OpenRouter answers, a summary.
+    /// A call where nobody said a word leaves no card.
+    async fn end(&self) {
+        if self.lines.is_empty() {
+            return;
+        }
+        let secs = self.started.elapsed().as_secs();
+        let mut ev = json!({"type": "voice_end", "secs": secs});
+        match self.v.web.summary(&chars(&self.lines.join("\n"), SUMMARY_IN)).await {
+            Ok(s) => ev["summary"] = json!(s),
+            Err(e) => eprintln!("seimei: voice: no summary: {e}"),
+        }
+        self.v.events.add(ev);
     }
 
     /// The conversation went away: open tool calls died with it, so answers still to come are spoken with generate_reply.
@@ -715,6 +738,7 @@ impl Call {
         }
         let name = if who == "user" { "user" } else { "partner" };
         self.transcript.push(format!("{name}: {text}"));
+        self.lines.push(format!("{name}: {text}"));
         let mut note = self.transcript.join("\n");
         if note.chars().count() > NOTE_MAX {
             let skip = note.chars().count() - NOTE_MAX;
@@ -787,6 +811,7 @@ impl Call {
             return;
         }
         let event = self.v.dispatcher.send_voice(request);
+        self.lines.push(format!("partner asked seimei: {request}"));
         self.say(json!({"type": "asking", "request": request}));
         let topic = if topic.is_empty() { chars(request, 60) } else { chars(topic, 60) };
         let (at, turns) = (Instant::now(), self.user_turns);
@@ -816,6 +841,7 @@ impl Call {
                 if let Some(a) = self.asks.iter_mut().find(|a| ev["re"].as_i64() == Some(a.event)) {
                     let (request, topic) = (a.request.clone(), a.topic.clone());
                     a.answered = true;
+                    self.lines.push(format!("seimei answered: {text}"));
                     let late = turns > a.turns;
                     if !a.closed {
                         a.closed = true;

@@ -296,7 +296,8 @@ async fn run(base: PathBuf, root: PathBuf) {
     }
     let board = app.board.lock().unwrap().text(false);
     assert!(!board.contains("evil"), "a lookup changed the board: {board}");
-    let searched = asked.lock().unwrap().clone();
+    // The web search, and the summary at the end of the call: both through the same endpoint.
+    let searched: Vec<Value> = asked.lock().unwrap().iter().filter(|b| b.get("plugins").is_some()).cloned().collect();
     assert_eq!(searched.len(), 1, "{searched:?}");
     assert!(searched[0].to_string().contains("rust websockets"));
 
@@ -318,8 +319,20 @@ async fn run(base: PathBuf, root: PathBuf) {
         heard.iter().find(|h| h.contains("[voice] rename the garden repo to orchard")).expect("a [voice] message");
     assert!(voiced.contains("Voice call so far") && voiced.contains("user: what is on the board about the lantern"));
 
-    // The thread: both sides' turns, the cut one marked, and the request as the user's, marked voice.
+    // The call's card: its length, and the summary the model wrote from the whole transcript.
+    let ended = || app.events.after(0).iter().any(|e| e["type"] == "voice_end");
+    assert!(until(10, ended).await, "no voice_end event");
     let evs: Vec<Value> = app.events.after(0).iter().map(|e| (**e).clone()).collect();
+    let end = evs.iter().find(|e| e["type"] == "voice_end").unwrap();
+    assert_eq!(end["summary"], "Use tokio-tungstenite.");
+    assert!(end["secs"].as_u64().is_some(), "{end}");
+    let summed = asked.lock().unwrap().iter().find(|b| b.get("plugins").is_none()).cloned().expect("a summary request");
+    let transcript = summed["messages"][1]["content"].as_str().unwrap();
+    assert!(transcript.contains("user: what is on the board about the lantern"), "{transcript}");
+    assert!(transcript.contains("partner asked seimei: rename the garden repo to orchard"), "{transcript}");
+    assert!(transcript.contains("seimei answered: Echo:"), "{transcript}");
+
+    // The thread: both sides' turns, the cut one marked, and the request as the user's, marked voice.
     let voice: Vec<(String, String, bool)> = (evs.iter().filter(|e| e["type"] == "voice"))
         .map(|e| (e["who"].as_str().unwrap().into(), e["text"].as_str().unwrap().into(), e["cut"] == true))
         .collect();

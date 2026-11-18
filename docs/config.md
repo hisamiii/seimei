@@ -55,8 +55,8 @@ The table lists each section's keys, their defaults and what they set. Notes on 
 | | `roots` | `[]` | folders `read_file` and `search_files` may read |
 | | `keywords` | `[]` | more words for speech recognition |
 | | `pronounce` | `{}` | words and how to say them |
-| | `search_key_file` | `~/.config/seimei/openrouter-key` | the OpenRouter key for `search_web` |
-| | `search_model` | `openai/gpt-4.1-mini` | the model that runs the search |
+| | `search_key_file` | `~/.config/seimei/openrouter-key` | the OpenRouter key for `search_web` and call summaries |
+| | `search_model` | `openai/gpt-4.1-mini` | the model that runs the search and writes call summaries |
 | | `search_url` | OpenRouter's chat completions | where searches go |
 
 Notes on the keys:

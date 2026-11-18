@@ -654,6 +654,30 @@ const inTraj = (ev) => ev.lane === 't';
 // Texts of the user's and seimei's messages by event id, for reply anchors and quotes.
 const said = new Map();
 const REPLY = 'M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11';
+const WAVE = 'M4 10v4M8 6v12M12 9v6M16 4v16M20 10v4';
+const CHEVRON = 'M6 9l6 6 6-6';
+
+// A voice call as one card: its length and summary, and a tap opens the transcript.
+function callCard(t) {
+  const node = el('div', 'vcall');
+  const head = el('button', 'head sl');
+  head.type = 'button';
+  const badge = el('span', 'badge');
+  badge.append(svg(WAVE, 18));
+  const title = el('b', null, 'Voice call');
+  const at = clock(t);
+  const time = el('time', null, at);
+  head.append(badge, title, time, svg(CHEVRON, 20));
+  const sum = el('div', 'sum');
+  const last = el('div', 'last');
+  const turns = el('div', 'turns');
+  sum.hidden = true;
+  head.addEventListener('click', () => node.classList.toggle('open'));
+  node.append(head, sum, last, turns);
+  return { node, title, time, at, sum, last, turns, t0: t, t1: t, ended: false };
+}
+
+const minutes = (secs) => `${Math.max(1, Math.round(secs / 60))} min`;
 const ENDED = { done: 'finished', failed: 'failed', stopped: 'was stopped', interrupted: 'was interrupted' };
 
 // A server note's times in this device's clock: clock pairs each time with its text in the note.
@@ -704,6 +728,13 @@ function anchor(text, id, lane) {
   return b;
 }
 
+// The card of the call that runs now, started at `since` (unix seconds): the open card when its last turn came since, or with make a new one.
+export function callNow(since, make = false) {
+  const v = main.vcall;
+  if (v && !v.ended && v.t1 >= since) return v;
+  return make ? main.call(Date.now() / 1000, true) : null;
+}
+
 // One instance appends live; a fresh one renders older pages for prepending.
 // The chat and the trajectory share the open question cards (asks), so a report in one settles a card in the other.
 // What the trajectory does within this long after a card settles is the card's own doing: its outcome line says it, no fold line.
@@ -727,8 +758,8 @@ export class Renderer {
     // Trajectory: the dispatcher turn being drawn.
     this.turn = null;
     this.cur = null;
-    // Voice: the last voice turn's time, and the partner's open asks to seimei by event id.
-    this.lastVoice = null;
+    // Voice: the open call's card, and the partner's open asks to seimei by event id.
+    this.vcall = null;
     this.asked = new Map();
   }
 
@@ -817,19 +848,42 @@ export class Renderer {
     at.after(b);
   }
 
-  // A voice call's turns: the user's as their bubbles, the partner's as plain lines, and what it asked seimei until seimei answers.
-  // A call opens with a note; turns more than 5 minutes apart are another call.
+  // A voice call is one card where it starts, with its turns inside; what the partner asked seimei stays in the chat, as the reply that answers it does.
+  // Turns more than 5 minutes apart are another call; a voice_end closes the card with the call's length and summary.
+  call(t, fresh = false) {
+    if (fresh || !this.vcall || this.vcall.ended || t - this.vcall.t1 > 300) {
+      this.vcall = callCard(t);
+      this.put(this.vcall.node);
+    }
+    this.vcall.t1 = t;
+    return this.vcall;
+  }
+
   voice(ev) {
-    if (!this.lastVoice || ev.t - this.lastVoice > 300) this.put(el('div', 'note', `Voice call · ${clock(ev.t)}`));
-    this.lastVoice = ev.t;
+    if (ev.type === 'voice_end') {
+      // It closes the open card, however long the call stayed silent; with no card open, its turns are on an older page.
+      const c = this.vcall;
+      if (!c || c.ended) return;
+      c.ended = true;
+      c.title.textContent = `Voice call · ${minutes(ev.secs)}`;
+      c.sum.textContent = ev.summary || '';
+      c.sum.hidden = !ev.summary;
+      c.node.classList.remove('live');
+      return;
+    }
+    const c = this.call(ev.t);
     this.between = false;
+    if (!c.node.classList.contains('live')) c.title.textContent = `Voice call · ${minutes(c.t1 - c.t0)}`;
     if (ev.type === 'user') {
       // The partner asked seimei: the reply that follows answers it, with no chip.
       this.lastUser = ev.id;
       said.set(ev.id, ev.text);
       this.asked.set(ev.id, this.put(el('div', 'ask wait', `Asked seimei: ${ev.text}`)));
-    } else if (ev.who === 'user') this.put(el('div', 'msg user voiced', ev.text));
-    else this.put(el('div', `vline${ev.cut ? ' cut' : ''}`, ev.text));
+    } else if (ev.who === 'user') c.turns.append(el('div', 'msg user voiced', ev.text));
+    else {
+      c.turns.append(el('div', `vline${ev.cut ? ' cut' : ''}`, ev.text));
+      c.last.textContent = ev.text;
+    }
   }
 
   add(ev) {
@@ -869,7 +923,7 @@ export class Renderer {
       return;
     }
     this.activity = null;
-    if (ev.type === 'voice' || (ev.type === 'user' && ev.voice)) return this.voice(ev);
+    if (ev.type === 'voice' || ev.type === 'voice_end' || (ev.type === 'user' && ev.voice)) return this.voice(ev);
     if (ev.type === 'user' || ev.type === 'assistant') {
       if (ev.text) said.set(ev.id, ev.text);
       // Sent from a side thread: the thread's name above the message, one tap from it
@@ -994,11 +1048,8 @@ export function addEvent(ev) {
     pending.delete(ev.cid);
   }
   if (ev.type === 'assistant') clearLive();
-  if (ev.type === 'voice' && ev.who === 'partner') thread.querySelector('.vline.live')?.remove();
   route(ev);
   if (live) live.parentNode.append(live);
-  const talking = thread.querySelector('.vline.live');
-  if (talking) thread.append(talking);
   hello();
   if (stick) toBottom();
   else if (/^(user|assistant|approval|worker|image)$/.test(ev.type) && inTraj(ev) === (S.lane === 't')) {

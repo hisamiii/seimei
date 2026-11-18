@@ -2,14 +2,14 @@
 // The microphone goes up as 16 kHz PCM16 without pause, silence included; the partner's audio comes down and plays at once.
 // The page cuts the partner off itself when the user talks over it, well before the partner's own detection does.
 import { $, S, el, snack, say, toLogin } from './util.js';
-import { render, toBottom, nearBottom } from './chat.js';
+import { render, toBottom, nearBottom, callNow } from './chat.js';
 import { Down, Barge, BARGE, RATE, FRAME, toPcm16, fromPcm16, level } from './pcm.js';
 import { frameDb } from './phrases.js';
 import { Stream, streamable } from './stream.js';
 
 const bar = $('callbar'), pill = $('call-pill'), who = $('call-who'), lvl = $('call-level'), time = $('call-time');
 const speedBtn = $('call-speed');
-const mute = $('call-mute'), end = $('call-end'), thread = $('thread'), debug = $('call-debug'), readout = $('call-readout');
+const mute = $('call-mute'), end = $('call-end'), debug = $('call-debug'), readout = $('call-readout');
 const BARS = 26;
 // What the speaker has queued starts this far ahead, so a late chunk does not leave a gap.
 const LEAD = 0.06;
@@ -88,9 +88,9 @@ async function start() {
   const c = {
     // Where the partner's audio goes: a context and the node to connect to (see PATHS).
     sink: player ? { stream: player, path: 'stream' } : { ctx, out, path: 'page' }, got: 0, peak: -Infinity, beeps: 0, fallback: '',
-    ctx, stream, ws, src, proc, out, t0: performance.now(), down: new Down(ctx.sampleRate), barge: new Barge(BARGE, learned()),
+    ctx, stream, ws, src, proc, out, t0: performance.now(), since: Date.now() / 1000, saying: '', down: new Down(ctx.sampleRate), barge: new Barge(BARGE, learned()),
     pending: new Float32Array(0), sources: new Set(), until: 0, muted: false, state: 'connecting',
-    levels: Array(BARS).fill(0), mic: 0, heard: 0, live: null, lock: null,
+    levels: Array(BARS).fill(0), mic: 0, heard: 0, lock: null,
     // What was scheduled to play, as [start, end, dBFS], for the echo check.
     played: [], stats: { played: 0, chunks: 0, barges: 0, cut: 0, flushes: 0, gated: 0 }, held: [],
   };
@@ -256,21 +256,19 @@ function message(c, m) {
   else if (m.type === 'error') snack(m.text);
 }
 
-// The partner's words as they play, in a line that its finished turn replaces.
+// The partner's words as they play, as the call card's line; its finished turn takes their place.
 function saying(c, text) {
   const stick = nearBottom();
-  if (!c.live?.isConnected) {
-    c.live = el('div', 'vline live');
-    c.live.append(el('span'), el('i', 'caret'));
-    thread.append(c.live);
-  }
-  c.live.firstChild.textContent += text;
+  const card = callNow(c.since, true);
+  card.node.classList.add('live');
+  c.saying += text;
+  card.last.replaceChildren(c.saying, el('i', 'caret'));
   if (stick) toBottom();
 }
 
 function endLive(c) {
-  c.live?.remove();
-  c.live = null;
+  c.saying = '';
+  callNow(c.since)?.last.querySelector('.caret')?.remove();
 }
 
 function label(c) {
@@ -294,6 +292,12 @@ function tick() {
   c.levels.forEach((l, i) => { lvl.children[i].style.height = `${4 + 24 * l}px`; });
   const sec = Math.floor((performance.now() - c.t0) / 1000);
   time.textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+  const card = callNow(c.since);
+  if (card) {
+    card.node.classList.add('live');
+    card.title.textContent = 'Voice call';
+    card.time.textContent = `${card.at} · ${time.textContent}`;
+  }
   label(c);
   setTimeout(tick, 80);
 }
@@ -317,6 +321,11 @@ function hangUp(why) {
   c.audio?.pause();
   c.lock?.release().catch(() => {});
   endLive(c);
+  const card = callNow(c.since);
+  if (card) {
+    card.node.classList.remove('live');
+    card.time.textContent = card.at;
+  }
   show(false);
   if (!debug.hidden) shown();
   if (why) snack(why);
