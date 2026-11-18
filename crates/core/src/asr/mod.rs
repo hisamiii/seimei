@@ -105,6 +105,8 @@ pub struct Context {
     pub window: Option<Window>,
     /// What is already in the composer.
     pub draft: String,
+    /// The spoken language's hint, over `[asr] language`: a voice call sets it from the user's last turn.
+    pub language: Option<String>,
 }
 
 pub struct Asr {
@@ -195,10 +197,15 @@ impl Asr {
         (list, desc.replace(',', " "))
     }
 
-    async fn post(&self, model: &str, audio: &str, words: Option<(&[String], &str)>) -> Result<Value, String> {
+    async fn post(
+        &self,
+        model: &str,
+        audio: &str,
+        words: Option<(&[String], &str)>,
+        language: &str,
+    ) -> Result<Value, String> {
         let key = std::fs::read_to_string(&self.cfg.key_file).map_err(|e| format!("key: {e}"))?;
-        let mut body =
-            json!({"model": model, "language": self.cfg.language, "input_audio": {"data": audio, "format": "wav"}});
+        let mut body = json!({"model": model, "language": language, "input_audio": {"data": audio, "format": "wav"}});
         let mut provider = serde_json::Map::new();
         if let Some((w, desc)) = words {
             if model.starts_with("microsoft/") {
@@ -250,7 +257,7 @@ impl Asr {
             let tries: Vec<Option<(&[String], &str)>> =
                 if terms.is_empty() { vec![None] } else { vec![Some((&terms, &desc)), None] };
             for w in tries {
-                match self.post(model, &audio, w).await {
+                match self.post(model, &audio, w, ctx.language.as_deref().unwrap_or(&self.cfg.language)).await {
                     Ok(v) => {
                         got = Some((model.clone(), v, w.is_some()));
                         break 'models;

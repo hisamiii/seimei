@@ -48,6 +48,10 @@ The table lists each section's keys, their defaults and what they set. Notes on 
 | | `heygen_key_file` | `~/.config/heygen/api_key` | the HeyGen API key |
 | | `heygen_url` | `https://api.heygen.com` | HeyGen's API |
 | | `tts_fallback` | `true` | `tts_voice` on OpenRouter speaks when HeyGen fails |
+| | `end_finished_ms` | 400 | the silence that ends a turn whose words sound finished |
+| | `end_trailing_ms` | 2500 | the silence that ends a turn whose words trail off |
+| | `near_db` | 15 | how far under the user's level speech is someone else's |
+| | `floor_db` | -60 | the least level of the user's voice, in dBFS |
 | | `think_model` | `mistralai/mistral-small-3.2-24b-instruct` | direct mode's pre-think model |
 | | `key_file` | `~/.config/phonic/api_key` | the Phonic API key |
 | | `url` | `wss://api.phonic.ai/v1/sts/ws` | Phonic's conversation socket |

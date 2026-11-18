@@ -23,6 +23,8 @@ const TAIL: Duration = Duration::from_millis(300);
 const AHEAD: Duration = Duration::from_millis(500);
 /// Pieces of a reply rendered at once.
 const RENDERING: usize = 2;
+/// The user's level is the quietest of this many of their last turns.
+const USER_TURNS: usize = 5;
 /// A lookup's answer in the message, at most.
 const LOOKUP_MAX: usize = 2000;
 /// 20 ms of PCM16 at RATE.
@@ -52,6 +54,19 @@ struct Timing {
 struct Direct {
     v: Arc<Voice>,
     asr: Arc<Asr>,
+    /// Speech recognition's language hint: the language of the user's last turn.
+    language: String,
+    /// The user paused, and has not spoken since: the turn ends once the pause is as long as its words call for.
+    paused: bool,
+    /// The last message sent whose reply has not come yet.
+    answering: Option<i64>,
+    /// The user spoke again before that reply came: what they heard of it. Their next message completes the last one.
+    folded: Option<String>,
+    speed: f64,
+    /// The level of the user's own speech in this call, in dBFS: the quietest of their last turns that went out, so a watch at rest still counts.
+    user_db: Option<f64>,
+    user_levels: VecDeque<f64>,
+    turn_db: f64,
     down: mpsc::Sender<Down>,
     done: mpsc::UnboundedSender<Done>,
     cutter: Cutter,
@@ -101,6 +116,92 @@ struct Direct {
     /// The whole call, for the summary.
     lines: Vec<String>,
     started: Instant,
+}
+
+/// Words that end a turn after a short pause: a full stop, and no word that leads on.
+/// A comma, an ellipsis, no stop at all, or a last word such as "and", "like" or "um" trails off: the user may go on.
+pub fn finished(words: &str) -> bool {
+    // Only joining words and fillers: speech recognition may put a stop after any fragment, and "what it's for." is finished.
+    const LEADS_ON: &[&str] = &[
+        "and",
+        "but",
+        "so",
+        "or",
+        "like",
+        "um",
+        "uh",
+        "uhm",
+        "erm",
+        "hmm",
+        "mm",
+        "because",
+        "cause",
+        "и",
+        "а",
+        "но",
+        "или",
+        "чтобы",
+        "если",
+        "потому",
+        "типа",
+        "ну",
+        "э",
+        "эм",
+        "ээ",
+        "мм",
+    ];
+    let w = words.trim();
+    if w.ends_with("...") || w.ends_with('…') || !w.ends_with(['.', '!', '?']) {
+        return false;
+    }
+    let last = w.rsplit(char::is_whitespace).next().unwrap_or("");
+    let last: String = last.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_lowercase();
+    !LEADS_ON.contains(&last.as_str())
+}
+
+/// Words that are only fillers, such as "Mm. Um.": no turn, and no barge's words.
+pub fn fillers_only(words: &str) -> bool {
+    const FILLERS: &[&str] = &[
+        "mm", "mmm", "mhm", "hm", "hmm", "um", "umm", "uh", "uhm", "erm", "ah", "eh", "oh", "мм", "ммм", "хм", "э",
+        "эм", "ээ",
+    ];
+    let mut any = false;
+    for w in words.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()) {
+        if !FILLERS.contains(&w.to_lowercase().as_str()) {
+            return false;
+        }
+        any = true;
+    }
+    any
+}
+
+/// The language the words are in, as a code: a Cyrillic one from `additional` (ru when none) when most letters are Cyrillic, else English.
+pub fn language_of<'a>(words: &str, additional: &'a [String]) -> Option<&'a str> {
+    let letters: Vec<char> = words.chars().filter(|c| c.is_alphabetic()).collect();
+    if letters.is_empty() {
+        return None;
+    }
+    let cyrillic = letters.iter().filter(|c| ('\u{400}'..='\u{4ff}').contains(*c)).count();
+    if cyrillic * 2 > letters.len() {
+        let pick = additional.iter().find(|l| matches!(l.as_str(), "ru" | "uk" | "be" | "bg" | "sr" | "mk" | "kk"));
+        Some(pick.map_or("ru", String::as_str))
+    } else {
+        Some("en")
+    }
+}
+
+fn language_name(code: &str) -> &str {
+    match code {
+        "en" => "English",
+        "ru" => "Russian",
+        "uk" => "Ukrainian",
+        "be" => "Belarusian",
+        "bg" => "Bulgarian",
+        "sr" => "Serbian",
+        "mk" => "Macedonian",
+        "kk" => "Kazakh",
+        other => other,
+    }
 }
 
 /// PCM16 mono at RATE as a WAV file.
@@ -160,7 +261,8 @@ fn contexts(v: &Voice) -> (Context, String) {
     (asr, think)
 }
 
-pub async fn call(v: Arc<Voice>, mut up: mpsc::Receiver<Up>, down: mpsc::Sender<Down>) {
+/// `speed` is the client's own, 1 for normal: seimei's speech is stretched to it, at the same pitch.
+pub async fn call(v: Arc<Voice>, mut up: mpsc::Receiver<Up>, down: mpsc::Sender<Down>, speed: f64) {
     let Some(asr) = v.asr.clone().filter(|a| a.enabled()) else {
         let _ = down.try_send(Down::Json(json!({"type": "error", "text": "voice needs dictation's OpenRouter key"})));
         let _ = down.try_send(Down::Json(json!({"type": "state", "state": "ended"})));
@@ -170,10 +272,18 @@ pub async fn call(v: Arc<Voice>, mut up: mpsc::Receiver<Up>, down: mpsc::Sender<
     let (done, mut done_rx) = mpsc::unbounded_channel();
     let mut c = Direct {
         v: v.clone(),
+        language: asr.cfg.language.clone(),
         asr,
         down,
         done,
         cutter: Cutter::default(),
+        paused: false,
+        answering: None,
+        folded: None,
+        speed,
+        user_db: None,
+        user_levels: VecDeque::new(),
+        turn_db: f64::NEG_INFINITY,
         asr_ctx: Context::default(),
         think_ctx: String::new(),
         turn: 0,
@@ -209,6 +319,7 @@ pub async fn call(v: Arc<Voice>, mut up: mpsc::Receiver<Up>, down: mpsc::Sender<
         lines: vec![],
         started: Instant::now(),
     };
+    c.cutter.set_gate(Some(c.v.cfg.floor_db));
     c.refresh();
     c.v.tts().warm();
     c.state("listening");
@@ -280,11 +391,45 @@ impl Direct {
                 } else {
                     self.ended = false;
                 }
+                self.paused = false;
             }
-            Cut::Clause(pcm) => {
+            Cut::Pause => {
+                self.paused = true;
+                let quiet = Duration::from_millis(u64::from(self.cutter.quiet_ms()));
+                let end = Instant::now().checked_sub(quiet).unwrap_or_else(Instant::now);
+                let text = self.all_heard().then(Instant::now);
+                self.timing = Some(Timing {
+                    end,
+                    words: String::new(),
+                    text,
+                    sent: None,
+                    delta: None,
+                    stt: vec![],
+                    think: vec![],
+                });
+                self.check_end();
+            }
+            Cut::Resume => {
+                self.paused = false;
+                self.timing = None;
+            }
+            Cut::Clause(pcm, db) => {
                 let idx = self.clauses.len();
                 self.clauses.push(None);
-                let (asr, ctx, done, turn) = (self.asr.clone(), self.asr_ctx.clone(), self.done.clone(), self.turn);
+                // Far quieter than the user: someone else in the room, or a TV.
+                if let Some(user) = self.user_db
+                    && db < user - self.v.cfg.near_db
+                {
+                    eprintln!("seimei: voice: a clause at {db:.0} dB, the user at {user:.0} dB: not theirs, dropped");
+                    self.clauses[idx] = Some(String::new());
+                    self.check_end();
+                    self.maybe_send();
+                    return;
+                }
+                self.turn_db = self.turn_db.max(db);
+                let mut ctx = self.asr_ctx.clone();
+                ctx.language = Some(self.language.clone());
+                let (asr, done, turn) = (self.asr.clone(), self.done.clone(), self.turn);
                 tokio::spawn(async move {
                     let t0 = Instant::now();
                     let text = match asr.transcribe(&wav(&pcm), &ctx).await {
@@ -304,7 +449,9 @@ impl Direct {
                 }
                 self.windowing = true;
                 let idx = self.clauses.len();
-                let (asr, ctx, done, turn) = (self.asr.clone(), self.asr_ctx.clone(), self.done.clone(), self.turn);
+                let mut ctx = self.asr_ctx.clone();
+                ctx.language = Some(self.language.clone());
+                let (asr, done, turn) = (self.asr.clone(), self.done.clone(), self.turn);
                 tokio::spawn(async move {
                     let text = match asr.transcribe(&wav(&pcm), &ctx).await {
                         Ok(v) => v["text"].as_str().unwrap_or("").trim().to_string(),
@@ -315,23 +462,77 @@ impl Direct {
             }
             Cut::End => {
                 self.ended = true;
-                let words = self.words();
-                self.timing = Some(Timing {
-                    end: Instant::now(),
-                    words,
-                    text: None,
-                    sent: None,
-                    delta: None,
-                    stt: vec![],
-                    think: vec![],
-                });
-                if self.all_heard()
-                    && let Some(t) = &mut self.timing
+                self.paused = false;
+                if self.timing.is_none() {
+                    let end = Instant::now();
+                    self.timing = Some(Timing {
+                        end,
+                        words: String::new(),
+                        text: None,
+                        sent: None,
+                        delta: None,
+                        stt: vec![],
+                        think: vec![],
+                    });
+                }
+                let heard = self.all_heard();
+                if let Some(t) = &mut self.timing
+                    && heard
                 {
-                    t.text = Some(t.end);
+                    t.text.get_or_insert_with(Instant::now);
                 }
                 self.maybe_send();
             }
+        }
+    }
+
+    /// The user paused and every clause has its text: words that sound finished end the turn after a short pause, words that trail off after a long one.
+    fn check_end(&mut self) {
+        if !self.paused || self.ended || !self.all_heard() {
+            return;
+        }
+        let cfg = &self.v.cfg;
+        let ms = if finished(&self.words()) { cfg.end_finished_ms } else { cfg.end_trailing_ms };
+        if self.cutter.quiet_ms() >= ms {
+            self.cutter.close();
+            self.paused = false;
+            self.ended = true;
+            self.maybe_send();
+        } else {
+            self.cutter.set_end(ms);
+        }
+    }
+
+    /// The user spoke while seimei still answered their last message: that message was not done.
+    /// Its reply stops, the rest of it is not spoken, and the next message completes it, so the dispatcher answers both as one.
+    fn fold(&mut self) {
+        let Some(id) = self.answering.take() else { return };
+        let heard = self.heard.trim().to_string();
+        self.mine.remove(&id);
+        self.timings.retain(|(t, _)| *t != id);
+        self.silence();
+        eprintln!("seimei: voice: the user went on before the reply to {id} came: it folds into their next message");
+        self.folded = Some(heard);
+    }
+
+    /// Drops what seimei had still to say, and tells the client to drop what it queued.
+    fn silence(&mut self) {
+        self.epoch += 1;
+        self.queue.clear();
+        self.rendered.clear();
+        self.rendering = 0;
+        self.out_seq = self.next_seq;
+        for (_, text) in std::mem::take(&mut self.ends) {
+            self.said(text);
+        }
+        let had = !self.out.is_empty() || self.speaking();
+        self.out.clear();
+        self.clock = Instant::now().checked_sub(TAIL).unwrap_or_else(Instant::now);
+        self.split = Splitter::new();
+        self.streamed = false;
+        self.heard.clear();
+        if had {
+            self.say(json!({"type": "flush"}));
         }
     }
 
@@ -349,6 +550,7 @@ impl Direct {
         self.timing = None;
         self.stt_ms.clear();
         self.think_ms.clear();
+        self.turn_db = f64::NEG_INFINITY;
         self.refresh();
     }
 
@@ -401,11 +603,51 @@ impl Direct {
         }
         let words = self.words();
         let t = self.timing.take();
-        if words.is_empty() {
+        if words.is_empty() || fillers_only(&words) {
+            if !words.is_empty() {
+                eprintln!("seimei: voice: only fillers, no turn: {words:?}");
+            }
+            // Nothing came of it: a cut reply stays cut, but no message goes on from the last one.
+            if let Some(heard) = self.folded.take().filter(|h| !h.is_empty()) {
+                self.cut = Some(heard);
+            }
             self.new_turn();
             return;
         }
+        // The user's level, for telling their voice from others'.
+        if self.turn_db.is_finite() {
+            self.user_levels.push_back(self.turn_db);
+            if self.user_levels.len() > USER_TURNS {
+                self.user_levels.pop_front();
+            }
+            let user = self.user_levels.iter().copied().fold(f64::INFINITY, f64::min);
+            self.user_db = Some(user);
+            let gate = self.v.cfg.floor_db.max(user - self.v.cfg.near_db);
+            self.cutter.set_gate(Some(gate));
+            eprintln!(
+                "seimei: voice: turn at {:.0} dB, the user at {user:.0} dB, voice opens at {gate:.0} dB",
+                self.turn_db
+            );
+        }
         let mut extra = vec![];
+        let language = language_of(&words, &self.v.cfg.additional_languages);
+        if let Some(lang) = language
+            && lang != self.v.cfg.default_language
+        {
+            extra.push(format!("[voice call: the user spoke {}; answer in it]", language_name(lang)));
+        }
+        self.language = language.unwrap_or(&self.language).to_string();
+        if let Some(heard) = self.folded.take() {
+            let heard = if heard.is_empty() {
+                "They heard none of your reply to it.".to_string()
+            } else {
+                format!("They heard your reply to it up to \"{}\" and no further.", chars(&heard, 300))
+            };
+            extra.push(format!(
+                "[voice call: the user goes on from their last message, which they had not finished: answer both as one request. {heard}]"
+            ));
+            self.cut = None;
+        }
         if let Some(cut) = self.cut.take() {
             extra.push(format!("[voice call: the user cut your last reply off after \"{}\"]", chars(&cut, 300)));
         }
@@ -417,6 +659,7 @@ impl Direct {
         }
         let id = self.v.dispatcher.send_spoken(&words, &extra.join("\n"));
         self.mine.insert(id);
+        self.answering = Some(id);
         self.lines.push(format!("user: {words}"));
         self.say(json!({"type": "said", "who": "user", "text": words}));
         if let Some(mut t) = t {
@@ -439,6 +682,10 @@ impl Direct {
                 if turn != self.turn || idx >= self.clauses.len() {
                     return;
                 }
+                // The user's first real words while seimei still answers them: their last message was not done.
+                if self.answering.is_some() && !text.is_empty() && !fillers_only(&text) {
+                    self.fold();
+                }
                 self.clauses[idx] = Some(text);
                 self.stt_ms.push(ms);
                 if let Some(t) = &mut self.timing
@@ -447,6 +694,7 @@ impl Direct {
                     t.text = Some(Instant::now());
                 }
                 self.maybe_think();
+                self.check_end();
                 self.maybe_send();
             }
             Done::Window { turn, idx, text } => {
@@ -514,7 +762,8 @@ impl Direct {
         while self.rendering < RENDERING
             && let Some(text) = self.queue.pop_front()
         {
-            let (v, done, epoch, seq) = (self.v.clone(), self.done.clone(), self.epoch, self.next_seq);
+            let (v, done, epoch, seq, speed) =
+                (self.v.clone(), self.done.clone(), self.epoch, self.next_seq, self.speed);
             self.next_seq += 1;
             self.rendering += 1;
             tokio::spawn(async move {
@@ -523,6 +772,7 @@ impl Direct {
                     eprintln!("seimei: voice: tts: {e}");
                     (vec![], By::OpenRouter)
                 });
+                let pcm = super::speech::stretch(&pcm, speed);
                 let ms = t0.elapsed().as_millis() as u64;
                 let _ = done.send(Done::Audio { epoch, seq, text, pcm, by, ms });
             });
@@ -595,24 +845,19 @@ impl Direct {
         if !self.speaking() {
             return;
         }
-        self.epoch += 1;
-        self.queue.clear();
-        self.rendered.clear();
-        self.rendering = 0;
-        self.out_seq = self.next_seq;
-        for (_, text) in std::mem::take(&mut self.ends) {
-            self.said(text);
-        }
-        self.out.clear();
         // Quiet now: the words that set the barge off, which the client sends next, are the user's turn.
-        self.clock = Instant::now().checked_sub(TAIL).unwrap_or_else(Instant::now);
-        self.split = Splitter::new();
-        self.heard.clear();
+        self.silence();
         if !heard.is_empty() {
             self.lines.push(format!("(the user cut seimei off after: {heard})"));
+        }
+        // A reply still coming stops here: the rest of it is not spoken, and the words that cut it complete the last message.
+        self.heard = heard.clone();
+        if self.answering.is_some() {
+            self.fold();
+        } else if !heard.is_empty() {
             self.cut = Some(heard);
         }
-        self.say(json!({"type": "flush"}));
+        self.heard.clear();
         for cut in self.cutter.barge() {
             self.cut(cut);
         }
@@ -634,6 +879,9 @@ impl Direct {
             "assistant" if ev["lane"].as_str().unwrap_or("c") == "c" => {
                 let text = ev["text"].as_str().unwrap_or("").trim().to_string();
                 if re {
+                    if self.answering == ev["re"].as_i64() {
+                        self.answering = None;
+                    }
                     if self.streamed {
                         if let Some(rest) = self.split.end() {
                             self.speak(rest);
@@ -684,5 +932,49 @@ impl Direct {
             think.join(", "),
             t.words,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finished_or_trailing() {
+        for w in ["Is the build done?", "Okay, thanks.", "Да, давай.", "That's what it's for.", "Check the board!"]
+        {
+            assert!(finished(w), "{w}");
+        }
+        for w in [
+            "I'm not fully sure if it would handle things like",
+            "how do you handle stuff like pauses,",
+            "so the build is, um.",
+            "and then...",
+            "Wait, and.",
+            "ну типа",
+            "Я думаю, что…",
+        ] {
+            assert!(!finished(w), "{w}");
+        }
+    }
+
+    #[test]
+    fn fillers_alone() {
+        assert!(fillers_only("Mm. Mm."));
+        assert!(fillers_only("Um, uh."));
+        assert!(fillers_only("Эм."));
+        assert!(!fillers_only("Mm. Mm. Yeah."));
+        assert!(!fillers_only("In the"));
+        assert!(!fillers_only(""));
+    }
+
+    #[test]
+    fn language_by_script() {
+        let ru = vec!["ru".to_string()];
+        assert_eq!(language_of("Что там с билдом?", &ru), Some("ru"));
+        assert_eq!(language_of("Okay, сделай это.", &ru), Some("ru"));
+        assert_eq!(language_of("Is the yah run done?", &ru), Some("en"));
+        assert_eq!(language_of("Да", &[]), Some("ru"));
+        assert_eq!(language_of("3.5", &ru), None);
     }
 }

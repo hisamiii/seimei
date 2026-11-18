@@ -19,7 +19,7 @@ client <--PCM-- HeyGen Voice Turbo, one sentence a request <-- sentence splitter
 
 | stage | what | measured |
 |---|---|---|
-| end of turn | 300 ms of silence | 0.3 s |
+| end of turn | 400 ms of silence, 2.5 s when words trail off | 0.4 s |
 | final text | MAI-Transcribe-2 on the last clause | 0.42 to 0.82 s |
 | dispatcher | the first text of its reply | 2 to 4 s, live |
 | first sound | HeyGen Voice Turbo on the first sentence | 1.3 to 1.7 s more |
@@ -35,7 +35,13 @@ The dictation path stays: MAI-Transcribe-2 through `/api/asr`'s code, with the s
 
 - **VAD on the server.** The client streams the microphone nonstop over the voice socket, so one cutter serves every client. It is `web/phrases.js` ported to Rust in `voice/vad.rs`.
 - **A pause is a stable point.** A clause ends at about 240 ms of silence, and its audio goes to MAI at once. A cut in silence splits no word, so the partials join end to end.
-- **The end of the turn** comes at about 300 ms of silence. The last clause went out at 240 ms, so its text lands about 0.5 s after the user stops.
+- **The end of the turn** waits for the words. At 300 ms of silence the cutter marks a pause. Once the last clause's text is in, about 0.5 s after the user stops, the call decides how long the pause must be:
+  - **finished words** end the turn after `end_finished_ms`, 400 ms. They end in `.`, `?` or `!`, and their last word does not lead on;
+  - **words that trail off** wait up to `end_trailing_ms`, 2.5 s. They end on a comma, an ellipsis or no stop. Or their last word is one such as "and", "but", "so", "like" or "um", or one of their Russian peers;
+  - **speech in the pause** goes on in the same turn. A filler such as "um" is speech, so it starts the wait again, and its words trail off.
+- **Far voices** open no turn. The call learns the user's level from the turns it sends. A turn's level is the 80th percentile of its voice frames, and the user's is the quietest of their last 5 turns. So a watch at rest, 10 to 15 dB quieter than the phone, still counts once it spoke.
+- **The gate.** Voice must reach the user's level less `near_db`, 15 dB, and never less than `floor_db`, -60 dBFS. A clause quieter than that is dropped unheard, and the log says so.
+- **Fillers alone** make no turn: "Mm. Um." goes nowhere.
 - **A clause without a pause** goes to MAI as a window at 1.2 s, then every 2 s. A window's text feeds pre-think only, so its lookups start before the user stops.
 - **While seimei speaks**, the server keeps only the last 500 ms of the microphone, since it may be seimei's echo. A `barge` from the client turns that pre-roll into the start of a turn.
 
@@ -117,6 +123,21 @@ A voice designed or cloned in the user's HeyGen account speaks on HeyGen's own A
 - **The log.** Each fallback logs `voice: heygen:` with HeyGen's answer, and each turn's `direct turn:` line says who spoke the first sound.
 - **The models.** `heygen-voice-1-turbo` needs credit in the account's wallet. `heygen-voice-1-turbo-free` costs nothing until 2026-11-30, with 30 requests a minute and capacity shared by all its users.
 
+## Languages
+
+A call takes English and the `additional_languages` of `[voice]`, such as Russian.
+
+- **Speech recognition.** MAI takes one language hint, and transcribes the other language under it too. The call's hint is `[asr] language` at first, then the language of the user's last turn. Detection without a hint did worse on short Russian: "okay, do it" came back half in Latin letters. The word list does not hurt Russian.
+- **The message.** A turn mostly in Cyrillic is Russian, or the Cyrillic language of `additional_languages`. The `[voice call]` message then says which language the user spoke, so the dispatcher answers in it.
+- **The voice.** HeyGen detects the language of each piece, and voice a speaks Russian. The splitter cuts Cyrillic sentences as it cuts English.
+
+## Speed
+
+The call bar's speed button sets how fast seimei talks, from 0.9 to 1.3. It is 1 by default, kept on the device and sent with the call as `?speed=`.
+
+- **HeyGen ignores speed** for voices designed or cloned in an account. So the server stretches each piece in time at the same pitch, before it goes down. It overlaps 20 ms frames, each placed where it best goes on from the last.
+- **A new speed counts from the next call.**
+
 ## Barge-in
 
 The client keeps its own barge detector, the one in `web/pcm.js` and the app. The echo canceller in the app works under it.
@@ -124,6 +145,15 @@ The client keeps its own barge detector, the one in `web/pcm.js` and the app. Th
 - **The client cuts at once.** It drops its queued audio and sends `barge`.
 - **The server stops speaking.** It drops the pieces still to render and opens the microphone, with its last 500 ms as the start of the turn.
 - **The dispatcher hears it.** The next message says what the user heard before the cut. The running turn goes on, since it may be doing work.
+
+### Speech that goes on from the last message
+
+The user may go on after the turn went out: after a long pause, or over seimei's first words. Then the user and seimei get one answer, not two.
+
+- **When it counts.** The reply to the last message has not come yet, and the user says real words: not fillers, not a far voice. A barge during that reply counts at once.
+- **The reply stops.** What is still to say is dropped, the client flushes its audio, and the rest of that reply is not spoken.
+- **One message completes the other.** The new words go out with a note: they go on from the last message, and the user heard so much of the reply.
+- **The dispatcher answers once.** It folds the message into its running turn at the next step. Its reply from then on answers the new message, so that is what is spoken.
 
 ## Config
 
@@ -139,6 +169,10 @@ These keys under `[voice]` set direct mode.
 | `heygen_model` | `"heygen-voice-1-turbo"` | HeyGen's speech model |
 | `heygen_key_file` | `"~/.config/heygen/api_key"` | the HeyGen API key |
 | `tts_fallback` | `true` | `tts_voice` on OpenRouter speaks when HeyGen fails |
+| `end_finished_ms` | `400` | the silence that ends a turn whose words sound finished |
+| `end_trailing_ms` | `2500` | the silence that ends a turn whose words trail off |
+| `near_db` | `15` | how far under the user's level speech is someone else's |
+| `floor_db` | `-60` | the least level of the user's voice, in dBFS |
 
 The key and `zdr` come from `[asr]`, so direct mode needs dictation set up.
 
@@ -146,12 +180,11 @@ The key and `zdr` come from `[asr]`, so direct mode needs dictation set up.
 
 Most risks are about speed and about services outside seimei.
 
-- **A 300 ms end cuts thinking pauses.** The rest of the speech then becomes the next message. If that happens often, the end can wait longer after a clause with no full stop.
+- **Speech recognition sets the stops.** MAI may end a fragment with a full stop, and the turn then ends at 400 ms. Speech after it goes on from that message, so the answer is still one.
 - **The dispatcher may be busy.** A voice message during another turn folds into it, and the answer waits for that turn's next step.
 - **The dispatcher's speed is the floor.** Its 2 to 4 s to the first word set the answer's time.
 - **OpenRouter's routing.** Pre-think needs Mistral and speech needs HeyGen on OpenRouter, or HeyGen's own API. If either goes, voice goes with it.
 - **Echo.** The server holds the microphone while seimei speaks, so it relies on the client's barge to hear the user over it.
-- **Russian.** MAI runs with `[asr] language`. A call in Russian needs that language per call, or detection.
 
 ## What leaves the machine
 

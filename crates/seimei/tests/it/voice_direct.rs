@@ -12,7 +12,9 @@ use tokio_tungstenite::tungstenite::Message;
 
 use crate::dispatcher::{after, app_full, until};
 
-const WORDS: &str = "is the lantern benchmark done";
+const WORDS: &str = "Is the lantern benchmark done?";
+/// What a short clause is heard as: words that trail off, so the turn waits for more.
+const HALF: &str = "and the kiln, like";
 
 #[test]
 fn a_direct_voice_call_on_the_fakes() {
@@ -47,7 +49,7 @@ async fn fake_openrouter(asked: Asked) -> u16 {
             async move {
                 let n = {
                     let mut asked = asked.lock().unwrap();
-                    asked.push((path.to_string(), body.0));
+                    asked.push((path.to_string(), body.0.clone()));
                     asked.iter().filter(|(p, _)| p == path).count()
                 };
                 match path {
@@ -66,7 +68,12 @@ async fn fake_openrouter(asked: Asked) -> u16 {
                         let guess = json!({"lookups": [{"tool": "board", "query": "lantern"}]});
                         axum::Json(json!({"choices": [{"message": {"content": guess.to_string()}}]})).into_response()
                     }
-                    _ => axum::Json(json!({"text": WORDS})).into_response(),
+                    _ => {
+                        // A clause of under 1.8 s, pre-roll and pause included, is the half sentence.
+                        let wav = body.0["input_audio"]["data"].as_str().map_or(0, str::len) * 3 / 4;
+                        let text = if wav < 44 + 32_000 * 18 / 10 { HALF } else { WORDS };
+                        axum::Json(json!({"text": text})).into_response()
+                    }
                 }
             }
         })
@@ -183,8 +190,10 @@ async fn run(base: PathBuf) {
         "{heygen:?}"
     );
 
-    // A second turn, cut off by a barge while seimei speaks: the client hears a flush.
-    for f in frames(1000, true).into_iter().chain(frames(600, false)) {
+    // A second turn, once seimei is quiet, cut off by a barge while seimei speaks: the client hears a flush.
+    assert!(until(20, || msgs().last().is_some_and(|m| m["state"] == "listening")).await, "{:?}", msgs());
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    for f in frames(1600, true).into_iter().chain(frames(600, false)) {
         tx.send(Message::Binary(f.into())).await.unwrap();
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
@@ -204,13 +213,36 @@ async fn run(base: PathBuf) {
     let by = |path: &str| asked.lock().unwrap().iter().filter(|(p, _)| p == path).count();
     assert!(by("heygen") == 2 && by("speech") >= 2, "heygen {}, openrouter {}", by("heygen"), by("speech"));
 
+    // The words that cut the reply: a half sentence, a pause of 1.5 s, and the rest.
+    // One turn, since the half trails off, and one message that completes the last one: the rest of the cut reply is not spoken.
+    let flushed = msgs().iter().rposition(|m| m["type"] == "flush").unwrap();
+    let before = said("user");
+    let mut talk = frames(700, true);
+    talk.extend(frames(1500, false));
+    talk.extend(frames(1600, true));
+    talk.extend(frames(600, false));
+    for f in talk {
+        tx.send(Message::Binary(f.into())).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(until(20, || said("user") > before).await, "no third turn: {:?}", msgs());
+    let since: Vec<Value> = msgs()[flushed..].to_vec();
+    let third: Vec<&Value> = since.iter().filter(|m| m["type"] == "said" && m["who"] == "user").collect();
+    assert_eq!(third.len(), 1, "the pause split the turn: {since:?}");
+    assert_eq!(third[0]["text"], format!("{HALF} {WORDS}"));
+    let first_said = since.iter().position(|m| m["type"] == "said" && m["who"] == "user").unwrap();
+    assert!(!since[..first_said].iter().any(|m| m["type"] == "saying"), "the cut reply went on: {since:?}");
+    let heard = std::fs::read_to_string(base.join("heard.jsonl")).unwrap_or_default();
+    assert!(heard.contains("goes on from their last message"), "{heard}");
+    assert_eq!(msgs().iter().filter(|m| m["type"] == "flush").count(), 1, "{:?}", msgs());
+
     tx.send(Message::text(json!({"type": "end"}).to_string())).await.unwrap();
     let _ = tokio::time::timeout(Duration::from_secs(10), reader).await;
 
     // The thread: the user's spoken words, seimei's reply to them, and the call's end.
     let evs = after(&app, from);
     let words: Vec<&Value> = evs.iter().filter(|e| e["type"] == "user" && e["spoken"] == true).collect();
-    assert_eq!(words.len(), 2, "{evs:?}");
+    assert_eq!(words.len(), 3, "{evs:?}");
     assert_eq!(words[0]["text"], WORDS);
     assert_eq!(words[0]["voice"], true);
     let first = words[0]["id"].as_i64().unwrap();

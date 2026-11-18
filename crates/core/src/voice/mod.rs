@@ -94,6 +94,12 @@ pub struct Config {
     pub heygen_url: String,
     /// tts_voice on OpenRouter speaks when HeyGen fails.
     pub tts_fallback: bool,
+    /// The silence that ends a direct call's turn, in ms: after words that sound finished, and after words that trail off.
+    pub end_finished_ms: u32,
+    pub end_trailing_ms: u32,
+    /// Speech this many dB under the user's own level, the quietest of their last turns in the call, is someone else's; none below floor_db (dBFS) counts.
+    pub near_db: f64,
+    pub floor_db: f64,
     pub think_model: String,
 }
 
@@ -122,6 +128,14 @@ impl Config {
             );
             multilingual_mode = "request".into();
         }
+        let num = |k: &str, d: f64| {
+            t.and_then(|t| t.get(k))
+                .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+                .unwrap_or(d)
+        };
+        let ms = |k: &str, d: i64| {
+            t.and_then(|t| t.get(k)).and_then(|v| v.as_integer()).unwrap_or(d).clamp(300, 10_000) as u32
+        };
         let pronounce = (t.and_then(|t| t.get("pronounce")).and_then(|p| p.as_table()).into_iter().flatten())
             .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string())))
             .collect();
@@ -158,6 +172,10 @@ impl Config {
             heygen_key_file: expand(&s("heygen_key_file", "~/.config/heygen/api_key")).into(),
             heygen_url: s("heygen_url", "https://api.heygen.com").trim_end_matches('/').to_string(),
             tts_fallback: t.and_then(|t| t.get("tts_fallback")).and_then(|v| v.as_bool()).unwrap_or(true),
+            end_finished_ms: ms("end_finished_ms", 400),
+            end_trailing_ms: ms("end_trailing_ms", 2500),
+            near_db: num("near_db", 15.0).clamp(3.0, 40.0),
+            floor_db: num("floor_db", -60.0).clamp(-90.0, -10.0),
             think_model: s("think_model", "mistralai/mistral-small-3.2-24b-instruct"),
         }
     }
@@ -433,7 +451,8 @@ impl Voice {
     /// `speed` is the client's own audio_speed, over the config's; Phonic takes it only when a conversation starts.
     pub async fn call(self: Arc<Self>, mut up: mpsc::Receiver<Up>, down: mpsc::Sender<Down>, speed: Option<f64>) {
         if self.cfg.engine == "direct" {
-            return direct::call(self, up, down).await;
+            let speed = speed.filter(|s| s.is_finite()).unwrap_or(self.cfg.audio_speed).clamp(0.5, 1.5);
+            return direct::call(self, up, down, speed).await;
         }
         let mut live = self.events.subscribe();
         let mut call = Call::new(self.clone(), down);

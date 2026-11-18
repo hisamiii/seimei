@@ -228,6 +228,45 @@ pub fn resample(x: &[i16], from: u32, to: u32) -> Vec<i16> {
         .collect()
 }
 
+/// PCM16 mono at RATE played `speed` times as fast at the same pitch (WSOLA: overlap-add of 20 ms frames, each placed where it best continues the last).
+pub fn stretch(pcm: &[u8], speed: f64) -> Vec<u8> {
+    const N: usize = 320;
+    const HOP: usize = N / 2;
+    const SEEK: usize = 80;
+    let x: Vec<f64> = pcm.as_chunks::<2>().0.iter().map(|b| f64::from(i16::from_le_bytes(*b))).collect();
+    if !speed.is_finite() || (speed - 1.0).abs() < 0.01 || x.len() < 4 * N {
+        return pcm.to_vec();
+    }
+    // A periodic Hann window: frames at HOP overlap to a constant 1.
+    let win: Vec<f64> = (0..N).map(|i| 0.5 - 0.5 * (2.0 * std::f64::consts::PI * i as f64 / N as f64).cos()).collect();
+    let frames = ((x.len() - N) as f64 / (HOP as f64 * speed)) as usize;
+    let mut out = vec![0.0; frames * HOP + N];
+    let mut prev = 0usize;
+    for k in 0..=frames {
+        let nominal = (k as f64 * HOP as f64 * speed) as usize;
+        let at = if k == 0 {
+            0
+        } else {
+            // The frame that best matches how the last one would go on, within SEEK of where it should start.
+            let want = prev + HOP;
+            let lo = nominal.saturating_sub(SEEK);
+            let hi = (nominal + SEEK).min(x.len() - N);
+            let score = |p: usize| -> f64 {
+                (0..HOP).step_by(2).map(|i| x.get(want + i).copied().unwrap_or(0.0) * x[p + i]).sum()
+            };
+            (lo..=hi.max(lo)).max_by(|a, b| score(*a).total_cmp(&score(*b))).unwrap_or(nominal)
+        };
+        if at + N > x.len() {
+            break;
+        }
+        for i in 0..N {
+            out[k * HOP + i] += x[at + i] * win[i];
+        }
+        prev = at;
+    }
+    out.iter().flat_map(|s| (s.round().clamp(-32768.0, 32767.0) as i16).to_le_bytes()).collect()
+}
+
 /// Cuts a streaming reply into pieces to speak: whole sentences, and the first piece from a clause of FIRST_WORDS.
 /// Markdown is dropped: the reply is heard.
 #[derive(Default)]
@@ -362,6 +401,34 @@ mod tests {
         let y = resample(&x, 44100, 16000);
         assert_eq!(y.len(), 16000);
         assert_eq!(rate("audio/pcm;rate=44100;channels=1"), 44100);
+    }
+
+    #[test]
+    fn stretches_by_speed_and_keeps_pitch() {
+        // One second of a 200 Hz tone.
+        let pcm: Vec<u8> = (0..16_000)
+            .flat_map(|i| {
+                (((f64::from(i) * 2.0 * std::f64::consts::PI * 200.0 / 16_000.0).sin() * 8000.0) as i16).to_le_bytes()
+            })
+            .collect();
+        assert_eq!(stretch(&pcm, 1.0), pcm);
+        let fast = stretch(&pcm, 1.25);
+        let secs = fast.len() as f64 / 32_000.0;
+        assert!((0.78..0.84).contains(&secs), "{secs} s");
+        // The pitch stays: zero crossings per second, about 400 for 200 Hz.
+        let s: Vec<i16> = fast.as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes(*b)).collect();
+        let mid = &s[800..s.len() - 800];
+        let crossings = mid.windows(2).filter(|w| (w[0] < 0) != (w[1] < 0)).count() as f64;
+        let hz = crossings / 2.0 / (mid.len() as f64 / 16_000.0);
+        assert!((190.0..210.0).contains(&hz), "{hz} Hz");
+    }
+
+    #[test]
+    fn splits_russian() {
+        let mut s = Splitter::new();
+        let mut got = s.push("Да, тест эха прошёл, сборка уже на телефоне. Версия 3.5 вышла! Звони");
+        got.extend(s.end());
+        assert_eq!(got, ["Да, тест эха прошёл, сборка уже на телефоне.", "Версия 3.5 вышла!", "Звони"]);
     }
 
     #[test]
