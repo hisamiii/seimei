@@ -113,9 +113,8 @@ The Android app makes the same call as the page over the same socket, with the s
 
 - **Echo.** The app sets the call mode before it opens the microphone, since the phone picks its voice processing when the input opens. The microphone records as a voice call, with the phone's echo canceller and noise suppressor where it has them. The partner plays through an AudioTrack in the microphone's session, on the loudspeaker unless a headset takes the call.
 - **Jitter buffer.** Phonic sends 20 ms chunks at about real time, so the network's jitter would leave the speaker dry between late chunks. A reply starts once 150 to 250 ms of it is queued. The target follows how late chunks came in this call. It rises after a stall: a dry speaker while the reply goes on. The track holds up to 500 ms, so a burst after a late stretch fits. The track pauses while it waits.
-- **The mic gate** stays as a backup for an echo canceller that misses or is missing. While the partner plays, and while its echo may still come, the microphone goes up as silence. That is 0.3 s after the sound, or the echo's delay plus 0.2 s once it is known. A barge then sends the voice that set it off and the 100 ms before it.
-- **The echo model** predicts the partner's echo at the microphone from what the app played. Both go into 10 ms bins on one clock. The echo's delay is the lag where the microphone's levels best follow what played over the last 3 seconds, up to half a second late. A new delay must win three searches in a row. The echo's level against what played is learned as the call goes and kept between calls. It falls toward a quieter microphone, but rises only slowly, and only while the microphone follows what played.
-- **Barge-in** is the page's detector, with two more tests over the partner. The voice must be 8 dB above the echo predicted for it, frame by frame. And its last 300 ms must not follow what played: an echo that matches is the echo, however loud, and raises the learned level. A barge drops the AudioTrack's queue at once and sends `barge`. Voice in the echo's tail, after the partner is done, opens the gate without a barge.
+- **The mic gate** is for a phone without an echo canceller for apps. While the partner plays, and 0.3 s after, the microphone goes up as silence. A barge then sends its last 300 ms, as on the page. With the echo canceller on, there is no gate: the microphone goes up live, so the user can talk over the partner.
+- **Barge-in** is the page's detector, with the echo learned on the phone and kept between calls. A barge drops the AudioTrack's queue at once and sends `barge`.
 - **Screen off.** The call runs in a foreground service of the microphone type. Its ongoing notification shows the state and the time, with Mute and Hang up. The call bar stays on every tab while the call runs.
 - **Speed** works as on the page and is kept on the phone.
 - **Stats** go up as on the page, with `path: "audiotrack"`. They also carry:
@@ -124,7 +123,7 @@ The Android app makes the same call as the page over the same socket, with the s
   - `effects`: every effect the platform lists for apps, with its maker;
   - `fx`: the effects the platform runs on the microphone;
   - `session`: whether the track plays in the microphone's audio session;
-  - `delayMs` and `match`: the echo's delay, -1 while unknown, and how well the microphone followed what played there;
+  - `gate`: whether the mic gate is on;
   - `callMode`, the routed `mic` and `speaker` device types, and the `phone` model;
   - the track's `underruns`;
   - `jitter`: its `stalls`, the worst `lateMs` and the `prebufferMs` now.

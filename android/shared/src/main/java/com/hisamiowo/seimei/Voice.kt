@@ -19,10 +19,8 @@ object Voice {
     const val ECHO_S = 0.3
     /** The mic goes up as silence while the partner plays and this long after, unless the user barges in. */
     const val GATE_TAIL = 0.3
-    /** The gate holds the microphone's last this many frames (300 ms), in case they start a barge. */
+    /** On a barge the partner gets the microphone's last this many frames too (300 ms): the words that set it off. */
     const val GATE_KEEP = 15
-    /** On a barge the partner gets the voice that set it off and this many frames (100 ms) before it. */
-    const val GATE_PRE = 5
 
     fun nextSpeed(v: Double?) = SPEEDS[(SPEEDS.indexOf(v ?: 1.0) + 1) % SPEEDS.size]
 
@@ -82,35 +80,35 @@ sealed interface VoiceMsg {
 
 /**
  * The user talks over the partner: 120 ms of voice, above the room's noise by 10 dB and at least -42 dBFS (web/pcm.js Barge).
- * Feed it 16 kHz frames with how far each is above the partner's echo ([Echo.heard], null when nothing plays); push() is true once per stretch of the user's voice over the partner.
- * Over the partner, voice must beat the echo predicted for it by [MARGIN_DB], and must not follow what played: that is the echo, however loud.
+ * Feed it 16 kHz frames with the level of what plays now (dBFS, or null when nothing plays); push() is true once per stretch of the user's voice over the partner.
+ * The partner's own sound comes back through the microphone when the echo canceller misses it.
+ * So over the partner, voice must also beat the echo: the microphone's level against what plays, learned as the call goes.
  */
-class Barge(private val echo: Echo) {
+class Barge(echo: Double = ECHO_START) {
     private val c = CUT
     private val vad = Vad(c)
-    /** Frames of voice in a row now. */
-    var onset = 0
-        private set
+    private var onset = 0
     private var quiet = 0
-    private var top = 0.0
-    /** This stretch of voice barged in already; a pause re-arms it. */
-    var fired = false
+    private var fired = false
+    /** The loudest microphone level over what played, in dB, held and let fall slowly. */
+    var echo = echo
         private set
 
-    fun push(f: ShortArray, over: Double?): Boolean {
+    fun push(f: ShortArray, playDb: Double?): Boolean {
         var v = vad.voice(f, onset >= ONSET_MS / c.frameMs)
-        if (over != null && over <= MARGIN_DB) v = false
-        top = if (v) max(if (onset == 0) 0.0 else top, over ?: 0.0) else 0.0
+        if (playDb != null) {
+            val over = frameDb(f) - playDb
+            // Louder than the partner's echo can be: the user. Anything else may be the echo.
+            if (over <= echo + ECHO_DB) {
+                echo = max(over, echo - ECHO_FALL_DB * c.frameMs / 1000)
+                v = false
+            }
+        }
         onset = if (v) onset + 1 else 0
         quiet = if (v) 0 else quiet + 1
+        // A pause re-arms it: the next stretch of voice can barge again.
         if (quiet * c.frameMs >= c.silenceMs) fired = false
-        if (over == null || fired || onset * c.frameMs < ONSET_MS) return false
-        if (echo.echoing(onset * c.frameMs / 1000.0)) {
-            // Louder than the echo was, yet it follows what played: the echo grew, so the estimate does too.
-            echo.raise(top)
-            onset = 0
-            return false
-        }
+        if (playDb == null || fired || onset * c.frameMs < ONSET_MS) return false
         fired = true
         return true
     }
@@ -121,269 +119,44 @@ class Barge(private val echo: Echo) {
     companion object {
         val CUT = Phrases.Cut(marginDb = 10.0, minDb = -42.0)
         const val ONSET_MS = 120
-        /** Over the partner, voice must be this much louder than the echo predicted for it. */
-        const val MARGIN_DB = 8.0
-    }
-}
-
-/**
- * The partner's echo at the microphone, predicted from what played: what played, [delay] later and [gain] dB off, with a short tail for the room.
- * The delay is where the microphone's envelope best follows what played; until that is clear, the echo may come at any delay up to [MAX_S].
- * Both sides go in as 10 ms bins on one clock in seconds. It locks itself: the speaker and the microphone feed it from threads of their own.
- */
-class Echo(gain: Double = START_DB) {
-    private val ref = Bins()
-    private val mic = Bins()
-    /** The echo's level against what played, in dB: the loudest heard, held, and let fall while the partner plays. */
-    @Volatile var gain = gain
-        private set
-    /** The echo's lag behind what played, in 10 ms bins, or -1 until the microphone clearly follows it. */
-    @Volatile var lag = -1
-        private set
-    /** How well the microphone followed what played at that lag: the correlation of their envelopes, -1 to 1. */
-    @Volatile var match = 0.0
-        private set
-    private var peak = -100.0
-    private var last = 0L
-    private var frames = 0
-    private var cand = -1
-    private var candN = 0
-
-    /** The echo's delay in seconds, or null while unknown. */
-    val delay get() = if (lag < 0) null else lag * BIN_S
-
-    /** How long after a sound ends its echo can still come. */
-    val reach get() = if (lag < 0) Voice.GATE_TAIL else max(Voice.GATE_TAIL, (lag + JITTER) * BIN_S + TAIL_S)
-
-    /** [n] samples from [off] went to the speaker, the first to play at [at]. */
-    @Synchronized fun played(at: Double, s: ShortArray, off: Int = 0, n: Int = s.size) {
-        for (i in 0 until n) ref.add(bin(at + i.toDouble() / Voice.RATE), s[off + i])
-    }
-
-    /** What would play from [now] on will not: a cut. */
-    @Synchronized fun cut(now: Double) = ref.clearFrom(bin(now))
-
-    /** A microphone frame that ended at [t]: how many dB it is over the echo predicted for it, or null when no echo can be in it. */
-    @Synchronized fun heard(t: Double, f: ShortArray): Double? {
-        val start = t - f.size.toDouble() / Voice.RATE
-        for (i in f.indices) mic.add(bin(start + i.toDouble() / Voice.RATE), f[i])
-        val b0 = bin(start)
-        val b1 = bin(start + (f.size - 1).toDouble() / Voice.RATE)
-        last = b1
-        if (++frames % LOCATE_EVERY == 0) locate(b0 - 1)
-        var shape = 0.0
-        var m = 0.0
-        for (b in b0..b1) {
-            shape += predict(b)
-            m += mic.power(b)
-        }
-        val n = (b1 - b0 + 1).toDouble()
-        val sdb = db(shape / n)
-        val dur = f.size.toDouble() / Voice.RATE
-        peak = max(sdb, peak - PEAK_FALL_DB * dur)
-        if (sdb < FLOOR_DB) return null
-        val g = db(m / n) - sdb
-        // Learn from the partner's louder sounds only: under its quiet ones the room's noise would pass for echo.
-        // Rise only slowly, within the margin, while the microphone follows what played: the user's voice must never teach it.
-        if (sdb >= peak - LEARN_DB) {
-            if (g < gain) gain = max(g, gain - FALL_DB * dur)
-            else if (g <= gain + Barge.MARGIN_DB && lag >= 0 && following() >= RISE_R) gain = minOf(g, gain + RISE_DB * dur)
-        }
-        return g - gain
-    }
-
-    /**
-     * The microphone's last [MATCH_S], or the last [voiced] seconds, followed what played: what it hears is the echo, however loud.
-     * The voiced stretch alone catches an echo that just grew: the step in its level would break the longer match.
-     */
-    @Synchronized fun echoing(voiced: Double) = following(MATCH_S) >= ECHO_R || following(voiced) >= ECHO_SHORT_R
-
-    // How well the microphone's last [span] seconds follow what played, at the lag or at any lag while it is unknown.
-    private fun following(span: Double = MATCH_S): Double {
-        val w = (span / BIN_S).toInt()
-        val lo = if (lag < 0) 0 else max(0, lag - JITTER)
-        val hi = if (lag < 0) MAX_LAG else lag + JITTER
-        var best = -1.0
-        for (k in lo..hi) best = max(best, corr(last, w, k))
-        return best
-    }
-
-    /** An echo [db] louder than the gain: the gain rises toward it, by at most [RAISE_DB] at a time. */
-    @Synchronized fun raise(db: Double) {
-        gain += db.coerceIn(0.0, RAISE_DB)
-    }
-
-    // The echo predicted for bin [b], before the gain: the loudest of what played around the lag, the room's tail after it.
-    private fun predict(b: Long): Double {
-        val lo = if (lag < 0) 0 else max(0, lag - JITTER)
-        val hi = if (lag < 0) MAX_LAG else lag + JITTER
-        var p = 0.0
-        for (k in lo..hi + TAIL) {
-            val w = if (k <= hi) 1.0 else TAIL_W[k - hi - 1]
-            p = max(p, ref.power(b - k) * w)
-        }
-        return p
-    }
-
-    // The lag where the microphone's last [LOCATE_S] best follows what played; kept until another clearly beats it [LOCATE_N] times in a row.
-    // A single match may be chance: the user's voice over what played can follow it for a moment.
-    private fun locate(end: Long) {
-        val w = (LOCATE_S / BIN_S).toInt()
-        // Only while the partner played through the whole span: at a reply's end or after a cut, the longer lags would win for holding more of it.
-        if (minOf(ref.active(end - w + 1, end), ref.active(end - w + 1 - MAX_LAG, end - MAX_LAG)) < w * LOCATE_ACTIVE) {
-            candN = 0
-            cand = -1
-            return
-        }
-        var best = -1.0
-        var at = -1
-        for (k in 0..MAX_LAG) {
-            val r = corr(end, w, k)
-            if (r > best) {
-                best = r
-                at = k
-            }
-        }
-        val now = if (lag < 0) -1.0 else corr(end, w, lag)
-        val clear = best >= LOCK_R && (lag < 0 || best > now + SWITCH_R)
-        if (clear && cand >= 0 && Math.abs(at - cand) <= JITTER) candN++ else candN = if (clear) 1 else 0
-        cand = if (clear) at else -1
-        if (candN >= LOCATE_N) {
-            lag = at
-            candN = 0
-        }
-        match = if (lag == at || lag < 0) best else now
-    }
-
-    // The correlation of the microphone's levels over the [w] bins up to [end] with what played [k] bins before; 0 when too little played.
-    // Only bins where something played count: the silence between replies would match at any lag.
-    private fun corr(end: Long, w: Int, k: Int): Double {
-        var sx = 0.0
-        var sy = 0.0
-        var sxx = 0.0
-        var syy = 0.0
-        var sxy = 0.0
-        var active = 0
-        for (i in 0 until w) {
-            val b = end - i
-            val x = ref.db(b - k)
-            if (x <= FLOOR_DB) continue
-            val y = mic.db(b)
-            active++
-            sx += x
-            sy += y
-            sxx += x * x
-            syy += y * y
-            sxy += x * y
-        }
-        if (active < max(w * MIN_ACTIVE, MIN_BINS)) return 0.0
-        val vx = sxx - sx * sx / active
-        val vy = syy - sy * sy / active
-        if (vx <= 0 || vy <= 0) return 0.0
-        return (sxy - sx * sy / active) / Math.sqrt(vx * vy)
-    }
-
-    private fun bin(t: Double) = Math.floor(t / BIN_S).toLong()
-
-    /** 10 ms bins of a signal's power, in a ring of the last [SIZE]. */
-    private class Bins {
-        private val idx = LongArray(SIZE) { Long.MIN_VALUE }
-        private val sum = DoubleArray(SIZE)
-        private val count = IntArray(SIZE)
-
-        fun add(b: Long, x: Short) {
-            val i = Math.floorMod(b, SIZE.toLong()).toInt()
-            if (idx[i] != b) {
-                idx[i] = b
-                sum[i] = 0.0
-                count[i] = 0
-            }
-            sum[i] += x.toDouble() * x
-            count[i]++
-        }
-
-        /** The mean power, 1 for full scale. */
-        fun power(b: Long): Double {
-            val i = Math.floorMod(b, SIZE.toLong()).toInt()
-            return if (idx[i] == b && count[i] > 0) sum[i] / count[i] / (32768.0 * 32768.0) else 0.0
-        }
-
-        fun db(b: Long) = db(power(b))
-
-        /** The bins from [from] to [to] where something played. */
-        fun active(from: Long, to: Long): Int {
-            var n = 0
-            for (b in from..to) if (db(b) > FLOOR_DB) n++
-            return n
-        }
-
-        fun clearFrom(b: Long) {
-            for (i in 0 until SIZE) if (idx[i] >= b) idx[i] = Long.MIN_VALUE
-        }
-    }
-
-    companion object {
-        const val BIN_S = 0.01
-        private const val SIZE = 1024
-        /** The longest delay looked for: the output's latency, the input's and the air. */
-        const val MAX_S = 0.5
-        private val MAX_LAG = (MAX_S / BIN_S).toInt()
-        /** Bins either side of the lag, for the clocks' jitter. */
-        private const val JITTER = 3
-        /** The room's tail after the echo, falling 1.5 dB per bin. */
-        private const val TAIL = 20
-        private val TAIL_W = DoubleArray(TAIL) { Math.pow(10.0, -1.5 * (it + 1) / 10) }
-        private const val TAIL_S = TAIL * BIN_S
-        /** Below this, nothing plays that could come back. */
-        const val FLOOR_DB = -70.0
-        /** The cautious start, used until a call has taught the phone its echo: louder than what played. */
-        const val START_DB = 10.0
-        /** The gain falls this fast while the partner plays louder than the echo seemed. */
-        const val FALL_DB = 10.0
-        private const val LEARN_DB = 20.0
-        private const val PEAK_FALL_DB = 10.0
-        private const val LOCATE_EVERY = 10
-        private const val LOCATE_S = 3.0
-        private const val LOCATE_N = 3
-        private const val LOCATE_ACTIVE = 0.5
-        /** A lag is taken once the microphone follows what played this well, and dropped for one that does better by [SWITCH_R]. */
-        private const val LOCK_R = 0.6
-        private const val SWITCH_R = 0.1
-        /** Voice over the partner whose last 300 ms follow what played this well is the echo. */
-        const val MATCH_S = 0.3
-        const val ECHO_R = 0.7
-        /** The voiced stretch is short, so it must match better: chance alone often reaches 0.7 there. */
-        private const val ECHO_SHORT_R = 0.9
-        private const val RISE_R = 0.5
-        private const val RISE_DB = 20.0
-        private const val RAISE_DB = 6.0
-        private const val MIN_ACTIVE = 0.3
-        private const val MIN_BINS = 8.0
-
-        fun db(p: Double) = 10 * Math.log10(max(p, 1e-10))
+        /** Over the partner, voice must be this much louder than the loudest echo heard so far. */
+        const val ECHO_DB = 6.0
+        /** The cautious start, used until a call has taught the phone its echo; it falls this fast while the partner plays. */
+        const val ECHO_START = 10.0
+        const val ECHO_FALL_DB = 15.0
 
         /** A little above what this phone showed last time, never above the cautious start. */
-        fun learned(last: Double?) = if (last == null || last.isNaN()) START_DB else minOf(START_DB, last + 3)
+        fun learned(last: Double?) = if (last == null || last.isNaN()) ECHO_START else minOf(ECHO_START, last + 3)
     }
 }
 
-/** What was queued to play, on a clock in seconds: when it ends, for the mic gate. */
+/** What was queued to play, as start, end and dBFS on a clock in seconds: the echo check and the mic gate read it. */
 class Playlog {
+    private val played = ArrayDeque<DoubleArray>()
     /** When what is queued ends; 0 after a cut. */
     var until = 0.0
         private set
 
-    /** Queues [seconds] of sound right after what is queued, or now when nothing is; returns its start. */
-    fun push(seconds: Double, now: Double): Double {
+    /** Queues [seconds] of sound at [db] right after what is queued, or now when nothing is; returns its start. */
+    fun push(seconds: Double, db: Double, now: Double): Double {
         val at = max(now, until)
         until = at + seconds
+        played.addLast(doubleArrayOf(at, until, db))
         return at
+    }
+
+    /** The loudest sound that played within [Voice.ECHO_S], or null when nothing did. */
+    fun level(now: Double): Double? {
+        while (played.isNotEmpty() && played.first()[1] < now - Voice.ECHO_S) played.removeFirst()
+        var db: Double? = null
+        for (p in played) if (p[0] <= now) db = max(db ?: Double.NEGATIVE_INFINITY, p[2])
+        return db
     }
 
     fun playing(now: Double) = now < until
 
-    /** Playing, or done less than [reach] ago (at least [Voice.GATE_TAIL]): its echo may still come, so the mic gate holds. */
-    fun busy(now: Double, reach: Double = Voice.GATE_TAIL) = now < until + max(Voice.GATE_TAIL, reach)
+    /** Playing, or just done: the mic gate holds. */
+    fun busy(now: Double) = now < until + Voice.GATE_TAIL
 
     /** Everything queued stops now; returns the seconds that will not play. */
     fun cut(now: Double): Double = max(0.0, until - now).also { until = 0.0 }
@@ -469,12 +242,12 @@ class Jitter {
 
 /**
  * The microphone's way up, one 20 ms frame at a time: silence while muted, the local barge-in, then the gate.
- * The gate backs up the echo canceller: while the partner's echo may come, silence goes up and the frames wait, in case they start a barge.
+ * The gate backs up the echo canceller: while the partner plays, silence goes up and the frames wait, in case they start a barge.
  */
-class Uplink(val echo: Echo, private val out: Out) {
+class Uplink(echo: Double, private val out: Out) {
     interface Out {
-        fun playing(): Boolean
-        /** The partner plays, or its echo may still come. */
+        /** The level of what plays now, as [Playlog.level]. */
+        fun level(): Double?
         fun busy(): Boolean
         /** The user barged in: stop playing now, and tell the bridge. */
         fun barge()
@@ -484,6 +257,9 @@ class Uplink(val echo: Echo, private val out: Out) {
     val barge = Barge(echo)
     @Volatile
     var muted = false
+    /** Hold the microphone while the partner plays; off when the echo canceller runs. */
+    @Volatile
+    var gate = true
     private val held = ArrayDeque<ShortArray>()
     var barges = 0
         private set
@@ -493,24 +269,17 @@ class Uplink(val echo: Echo, private val out: Out) {
     var mic = 0f
         private set
 
-    /** A frame that ended at [t], on the clock [Echo] gets what played on. */
-    fun push(frame: ShortArray, t: Double) {
+    fun push(frame: ShortArray) {
         val quiet = muted
         val f = if (quiet) ShortArray(frame.size) else frame
-        val over = if (quiet) null else echo.heard(t, f)
-        if (!quiet && barge.push(f, over)) {
-            // Over the echo's tail, the voice only opens the gate: nothing plays to cut.
-            if (out.playing()) {
-                barges++
-                out.barge()
-            }
-            // The voice that set it off and a little before, not the echo ahead of it.
-            val keep = minOf(held.size, barge.onset - 1 + Voice.GATE_PRE)
-            for (h in held.takeLast(keep)) out.send(h)
+        if (!quiet && barge.push(f, out.level())) {
+            barges++
+            out.barge()
+            for (h in held) out.send(h)
             held.clear()
         }
         mic = if (quiet) 0f else Voice.level(f)
-        if (!quiet && out.busy() && (out.playing() || !barge.fired)) {
+        if (!quiet && gate && out.busy()) {
             held.addLast(f)
             if (held.size > Voice.GATE_KEEP) held.removeFirst()
             gated++
