@@ -87,6 +87,8 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
     private var wrotePower = 0.0
     private var headBase = 0L
     @Volatile private var headTotal = 0L
+    // Where the call's sound goes: the communication device's type and whether the platform took it.
+    @Volatile private var route = ""
     @Volatile private var gen = 0
     @Volatile private var running = true
     @Volatile private var open = false
@@ -219,10 +221,14 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
         am.mode = AudioManager.MODE_IN_COMMUNICATION
         focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT).setAudioAttributes(ATTRS).build().also(am::requestAudioFocus)
         if (Build.VERSION.SDK_INT >= 31) {
-            val cur = am.communicationDevice
-            if (cur == null || cur.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE)
-                am.availableCommunicationDevices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }?.let(am::setCommunicationDevice)
-        } else if (!am.isWiredHeadsetOn && !am.isBluetoothScoOn) am.isSpeakerphoneOn = true
+            // A headset when one is connected, else the loudspeaker; never the earpiece the call mode picks on its own.
+            val all = am.availableCommunicationDevices
+            val d = all.firstOrNull { it.type in HEADSETS } ?: all.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+            route = if (d == null) "none" else "${d.type}:${am.setCommunicationDevice(d)}"
+        } else if (!am.isWiredHeadsetOn && !am.isBluetoothScoOn) {
+            am.isSpeakerphoneOn = true
+            route = "speakerphone"
+        }
     }
 
     @Suppress("DEPRECATION")
@@ -459,7 +465,8 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
             .put("echoOut", echoDb(echoOut)).put("aec3", canceller?.stats()?.let { JSONArray(it.map { v -> if (v.isNaN()) null else round1(v) }) })
             .put("aec", aec).put("aecOffered", aecOffered).put("ns", ns).put("fx", JSONArray(fx))
             .put("wrote", round1(wrote.toDouble() / Voice.RATE)).put("outDb", if (wrote == 0L) null else round1(10 * Math.log10(maxOf(wrotePower / wrote / (32768.0 * 32768.0), 1e-10))))
-            .put("head", round1(headTotal.toDouble() / Voice.RATE))
+            .put("head", round1(headTotal.toDouble() / Voice.RATE)).put("route", route)
+            .put("comm", if (Build.VERSION.SDK_INT >= 31) am.communicationDevice?.type ?: -1 else -1)
             .put("session", track?.audioSessionId == rec?.audioSessionId).put("gate", up.gate).put("callMode", am.mode == AudioManager.MODE_IN_COMMUNICATION)
             .put("mic", rec?.routedDevice?.type ?: -1).put("speaker", track?.routedDevice?.type ?: -1).put("phone", Build.MODEL)
             .put("underruns", track?.underrunCount ?: -1).put("jitter", synchronized(lock) { jitter.run {
@@ -548,6 +555,8 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
         /** The silence kept queued while the partner is quiet: two of the output's 20 ms periods. */
         const val SILENCE_MS = 40
         private val SILENCE = ShortArray(Voice.FRAME)
+        private val HEADSETS = setOf(AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES, AudioDeviceInfo.TYPE_USB_HEADSET,
+            AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_HEARING_AID)
         private val ATTRS = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
     }
