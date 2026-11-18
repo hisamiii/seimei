@@ -1,6 +1,6 @@
 //! GET /api/voice/ws (docs/voice.md): a voice call. Binary frames carry PCM16 mono at 16 kHz both ways; text frames carry JSON.
 //! Up: {"type": "barge"} when the client's own voice detection hears the user over the partner (it has cut its playback already), {"type": "end"}.
-//! Down: {"type": "state"}, "flush" (drop what is queued to play), "said", "asking", "answered", "error".
+//! Down: {"type": "state"}, "flush" (drop what is queued to play), "saying" (the partner's words as they play), "said", "asking", "answered", "error".
 
 use std::sync::Arc;
 

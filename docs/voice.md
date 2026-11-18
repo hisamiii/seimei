@@ -82,11 +82,14 @@ Text frames down:
 
 - `{"type": "state", "state": ...}`: `connecting`, `listening`, `speaking`, `reconnecting`, `ended`.
 - `{"type": "flush"}`: drop the audio queued to play. It follows Phonic's own barge-in, about 1 s after the user starts speaking.
+- `{"type": "saying", "text": ...}`: the partner's words that go with the audio just sent, for a live line.
 - `{"type": "said", "who": "user" | "partner", "text": ...}`: a finished turn.
 - `{"type": "asking", "request": ...}` and `{"type": "answered", "request": ...}`: an ask_seimei call and its answer.
 - `{"type": "error", "text": ...}`.
 
 Down audio is only what is heard. Phonic streams silent chunks nonstop, so the bridge forwards a chunk only while the partner speaks, or when it holds sound or words.
+
+Each turn leaves a line in the server log. It holds the time from the user's last speech to the partner's first sound, when Phonic heard the end, and each lookup's time. A reply that speaks seimei's answer gets a line too.
 
 ## What leaves the machine
 

@@ -6,7 +6,7 @@ pub mod lookups;
 pub mod pack;
 pub mod web;
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -40,6 +40,8 @@ const DELTA_MAX: usize = 600;
 const AUDIBLE: i16 = 200;
 /// Fresh conversations after a dropped socket, in a row, before the call ends.
 const RETRIES: u32 = 3;
+/// A microphone frame with a mean square above this (an RMS of about -36 dBFS) holds speech, for the turn timings.
+const SPEECH: f64 = 500.0 * 500.0;
 
 /// [voice] in config.toml (docs/config.md).
 #[derive(Clone, Debug)]
@@ -133,6 +135,13 @@ pub struct Voice {
     state: PathBuf,
     about: String,
     web: web::Web,
+}
+
+/// Whether a frame of PCM16 holds speech, by its mean square.
+fn speech(pcm: &[u8]) -> bool {
+    let samples = pcm.as_chunks::<2>().0;
+    let sum: f64 = samples.iter().map(|b| f64::from(i16::from_le_bytes(*b)).powi(2)).sum();
+    !samples.is_empty() && sum / samples.len() as f64 > SPEECH
 }
 
 /// The text of a tool result as `tools::text` builds it.
@@ -326,6 +335,16 @@ enum End {
     Dropped,
 }
 
+/// The user's finished turn, until the partner's first sound: the server log gets its timings.
+struct Turn {
+    /// The last microphone frame with speech in it.
+    spoke: Instant,
+    /// When Phonic decided the user had finished.
+    heard: Instant,
+    /// Each lookup that ran meanwhile, with its time.
+    tools: Vec<String>,
+}
+
 /// An ask_seimei call waiting for the dispatcher: its user message's event id is what the reply answers.
 struct Ask {
     call_id: String,
@@ -357,6 +376,13 @@ struct Call {
     out: Vec<Value>,
     /// The call's turns since the dispatcher's last reply, for its keyed note.
     transcript: Vec<String>,
+    /// The last microphone frame with speech in it.
+    spoke: Option<Instant>,
+    turn: Option<Turn>,
+    /// Lookups that run, by tool call id: the tool's name and its start.
+    running: HashMap<String, (String, Instant)>,
+    /// A generate_reply that went out to speak seimei's answer, until its first sound.
+    answer: Option<Instant>,
 }
 
 impl Call {
@@ -374,6 +400,10 @@ impl Call {
             replies: VecDeque::new(),
             out: vec![],
             transcript: vec![],
+            spoke: None,
+            turn: None,
+            running: HashMap::new(),
+            answer: None,
         }
     }
 
@@ -394,6 +424,9 @@ impl Call {
         self.partner_speaking = false;
         self.barge = None;
         self.said.clear();
+        self.turn = None;
+        self.running.clear();
+        self.answer = None;
     }
 
     async fn connect(&self) -> Result<Socket, String> {
@@ -445,6 +478,9 @@ impl Call {
                 },
                 msg = up.recv() => match msg {
                     Some(Up::Audio(pcm)) => {
+                        if speech(&pcm) {
+                            self.spoke = Some(Instant::now());
+                        }
                         let chunk = json!({"type": "audio_chunk", "audio": base64::engine::general_purpose::STANDARD.encode(&pcm)});
                         if sock.send(Message::text(chunk.to_string())).await.is_err() {
                             return Ok(End::Dropped);
@@ -468,11 +504,13 @@ impl Call {
                     }
                 },
                 out = done_rx.recv() => if let Some(out) = out {
+                    self.ran(&out);
                     self.out.push(out);
                 },
                 _ = tick.tick() => self.timers(),
             }
-            if !self.user_speaking && !self.partner_speaking {
+            if !self.user_speaking && !self.partner_speaking && !self.replies.is_empty() {
+                self.answer = Some(Instant::now());
                 self.out.extend(self.replies.drain(..));
             }
             for m in std::mem::take(&mut self.out) {
@@ -509,6 +547,12 @@ impl Call {
                 let audible = pcm.as_chunks::<2>().0.iter().any(|b| i16::from_le_bytes(*b).saturating_abs() > AUDIBLE);
                 if self.barge.is_none() && !pcm.is_empty() && (self.partner_speaking || audible || !text.is_empty()) {
                     let _ = self.down.try_send(Down::Audio(pcm));
+                    if !text.is_empty() {
+                        self.say(json!({"type": "saying", "text": text}));
+                    }
+                    if audible {
+                        self.first_sound();
+                    }
                 }
             }
             "assistant_started_speaking" => {
@@ -534,7 +578,12 @@ impl Call {
                     self.say(json!({"type": "flush"}));
                 }
             }
-            "user_finished_speaking" => self.user_speaking = false,
+            "user_finished_speaking" => {
+                self.user_speaking = false;
+                if let Some(spoke) = self.spoke {
+                    self.turn = Some(Turn { spoke, heard: Instant::now(), tools: vec![] });
+                }
+            }
             "input_text" => self.heard("user", &s("text"), false),
             "tool_call" => self.tool_call(ev, done),
             "error" => {
@@ -580,8 +629,12 @@ impl Call {
             return;
         }
         if name == "ask_seimei" {
+            if let Some(t) = &mut self.turn {
+                t.tools.push("ask_seimei".into());
+            }
             return self.ask(&id, params["request"].as_str().unwrap_or("").trim());
         }
+        self.running.insert(id.clone(), (name.clone(), Instant::now()));
         let (v, done) = (self.v.clone(), done.clone());
         tokio::spawn(async move {
             let output = if matches!(name.as_str(), "web_search" | "fetch_page") {
@@ -592,6 +645,30 @@ impl Call {
             };
             let _ = done.send(json!({"type": "tool_call_output", "tool_call_id": id, "output": output}));
         });
+    }
+
+    /// A lookup's output is ready: its time goes with the turn.
+    fn ran(&mut self, out: &Value) {
+        let id = out["tool_call_id"].as_str().unwrap_or("");
+        if let Some((name, at)) = self.running.remove(id)
+            && let Some(t) = &mut self.turn
+        {
+            t.tools.push(format!("{name} {:.2} s", at.elapsed().as_secs_f64()));
+        }
+    }
+
+    /// The partner's first sound after the user's turn or after a reply to seimei's answer: one line in the server log.
+    fn first_sound(&mut self) {
+        if let Some(t) = self.turn.take() {
+            let tools = if t.tools.is_empty() { "none".to_string() } else { t.tools.join(", ") };
+            eprintln!(
+                "seimei: voice: turn: first sound {:.2} s after the user's speech, Phonic heard the end at {:.2} s, tools: {tools}",
+                t.spoke.elapsed().as_secs_f64(),
+                (t.heard - t.spoke).as_secs_f64(),
+            );
+        } else if let Some(at) = self.answer.take() {
+            eprintln!("seimei: voice: answer: first sound {:.2} s after the reply request", at.elapsed().as_secs_f64());
+        }
     }
 
     fn ask(&mut self, call_id: &str, request: &str) {

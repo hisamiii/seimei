@@ -347,6 +347,7 @@ async fn run(base: PathBuf, root: PathBuf) {
         "state:speaking",
         "flush",
         "said",
+        "saying",
         "asking",
         "answered",
         "state:reconnecting",
