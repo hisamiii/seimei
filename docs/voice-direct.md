@@ -1,6 +1,6 @@
 # Direct voice mode
 
-In direct voice mode the user talks with the dispatcher itself, and its reply streams back as speech sentence by sentence. A small fast model guesses an opener and the lookups while the user talks.
+In direct voice mode the user talks with the dispatcher itself, and its reply streams back as speech sentence by sentence. The first sound the user hears is that reply: no filler plays before it.
 
 It replaces the Phonic partner of [voice.md](voice.md). `[voice] engine = "direct"` turns it on; Phonic stays the default until direct mode works on every client.
 
@@ -9,7 +9,7 @@ It replaces the Phonic partner of [voice.md](voice.md). `[voice] engine = "direc
 Times count from the moment the user stops talking. They were measured through OpenRouter in November 2026.
 
 ```
-mic --PCM 16 kHz over /api/voice/ws--> server VAD --clause--> MAI-Transcribe-2 --text--> pre-think (opener, lookups)
+mic --PCM 16 kHz over /api/voice/ws--> server VAD --clause--> MAI-Transcribe-2 --text--> pre-think (lookups)
                                             |                                                   |
                                             +--end of turn--> [voice call] message --> dispatcher --> deltas
                                                                                                       |
@@ -19,13 +19,13 @@ client <--PCM-- HeyGen Voice Turbo, one sentence a request <-- sentence splitter
 | stage | what | measured |
 |---|---|---|
 | end of turn | 300 ms of silence | 0.3 s |
-| reaction | the opener, or a short "Okay." | 0.05 s after the end |
-| final text | MAI-Transcribe-2 on the last clause | 0.42 to 0.79 s |
+| final text | MAI-Transcribe-2 on the last clause | 0.42 to 0.82 s |
 | dispatcher | the first text of its reply | 2 to 4 s, live |
-| first sound | HeyGen Voice Turbo on the first sentence | 0.6 to 0.9 s more |
+| first sound | HeyGen Voice Turbo on the first sentence | 1.3 to 1.7 s more |
 
-- **The reaction lands on target.** An opener or an acknowledgement plays as the turn ends, so the user hears seimei within half a second.
-- **The answer takes about 3 to 5 s.** The dispatcher's own first words set it. The QA server's fake dispatcher answers at once, and there the first reply sound came 0.55 to 1.77 s after the end of speech.
+- **The first sound is the answer.** It comes at about 4 to 6 s with the live dispatcher, which sets most of it.
+- **On the QA server** the fake dispatcher answers at once. There the first reply sound came 1.76 to 2.32 s after the end of speech, in 4 turns.
+- **Speech is the next biggest stage.** The first piece is a sentence, or a clause of 6 words, rendered whole before it plays.
 - **The server logs each turn** as `voice: direct turn:` with these stages, the recognition times and the pre-think times.
 
 ## Speech to text: pseudo-streaming MAI
@@ -35,42 +35,43 @@ The dictation path stays: MAI-Transcribe-2 through `/api/asr`'s code, with the s
 - **VAD on the server.** The client streams the microphone nonstop over the voice socket, so one cutter serves every client. It is `web/phrases.js` ported to Rust in `voice/vad.rs`.
 - **A pause is a stable point.** A clause ends at about 240 ms of silence, and its audio goes to MAI at once. A cut in silence splits no word, so the partials join end to end.
 - **The end of the turn** comes at about 300 ms of silence. The last clause went out at 240 ms, so its text lands about 0.5 s after the user stops.
-- **A clause without a pause** goes to MAI as a window at 1.2 s, then every 2 s. A window's text feeds pre-think only.
+- **A clause without a pause** goes to MAI as a window at 1.2 s, then every 2 s. A window's text feeds pre-think only, so its lookups start before the user stops.
 - **While seimei speaks**, the server keeps only the last 500 ms of the microphone, since it may be seimei's echo. A `barge` from the client turns that pre-roll into the start of a turn.
 
 A minute of speech makes 15 to 30 clause requests, plus the windows. MAI costs $0.11 per hour of audio, so about $0.17 per hour of speech with pre-roll and windows.
 
-## Pre-think and the opener
+## Pre-think
 
-On each new clause or window, a fast model reads the words so far, at most once every 2 s. It returns JSON with an opener and the lookups to run.
+On each new clause or window, a fast model reads the words so far, at most once every 2 s. It returns the lookups to run as JSON.
 
 ```json
-{"opener": "hm, let me look at the board", "lookups": [{"tool": "board", "query": "voice"}]}
+{"lookups": [{"tool": "board", "query": "voice"}]}
 ```
 
-- **The opener** acknowledges or stalls in at most 10 words. It never states a fact, a number or a promise. It names a topic only when that topic matches something seimei knows, since the words may be misheard.
-- **Its audio** is rendered as soon as the guess comes, and plays when the turn ends. A window, pre-think and the voice take about 2.5 s, so only turns of about 3.5 s or more get one.
-- **Shorter turns** get "Mm-hm.", "Okay." or "Yeah.", rendered once when the call starts.
 - **The lookups** are the read-only ones of `voice/lookups.rs`. Their answers ride with the message, so the dispatcher seldom needs a tool call of its own.
+- **The message never waits for them.** Lookups that finish after the turn ends are dropped.
 - **The prompt** holds the open board, the shikigami, the sessions and the last 20 chat lines: about 2.4k tokens.
 
-The model is `mistralai/mistral-small-3.2-24b-instruct` on OpenRouter, with the dictation's key. It answers in 0.75 to 1.15 s over a warm connection. The prompt's size changes that by about 0.1 s.
+The model is `mistralai/mistral-small-3.2-24b-instruct` on OpenRouter, with the dictation's key. One provider serves it, and its time varies by the hour.
 
-| model | how | first token |
+| when | median | range |
 |---|---|---|
-| mistral-small-3.2 | OpenRouter | 0.59 s, p90 0.91 s |
-| ministral-8b | OpenRouter | 0.58 s |
-| haiku | a warm, stripped Claude Code process | 1.36 s, p90 1.69 s |
+| morning, warm connection | 0.93 s | 0.75 to 1.15 s |
+| evening, warm connection | 3.45 s | 2.58 to 3.87 s |
 
-- **Haiku is too slow for this.** It took 0.77 s longer to the first token, even with no tools, MCP servers or settings loaded.
+- **Why not haiku.** Through a warm, stripped Claude Code process it took 1.36 s to the first token, against 0.59 s for Mistral then.
 - **OpenRouter can refuse US models by region** with a 403 for the provider's terms: Anthropic, OpenAI and Google alike.
 - **The cost** is about $0.001 a turn.
+
+### No opener
+
+An earlier build spoke a guessed opener or a canned acknowledgement as the turn ended. It was dropped: the first sound is the real reply.
 
 ## How a turn reaches the dispatcher and comes back
 
 The dispatcher runs as one long agent session, and `Turns::delta` already flashes its reply as `delta` events while it is written.
 
-- **The message.** At the end of the turn the call sends `[voice call] <the words>` through `Dispatcher::send_spoken`. Notes follow the words: the opener already said, where the user cut seimei off, and the lookups' answers.
+- **The message.** At the end of the turn the call sends `[voice call] <the words>` through `Dispatcher::send_spoken`. Notes follow the words: where the user cut seimei off, and the lookups' answers.
 - **The thread.** The user's words are a `user` event with `voice` and `spoken` set. The reply is the usual `assistant` event answering it.
 - **The reply back.** Delta events carry `re`, the id of the message they answer. The call speaks the chat-lane deltas whose `re` is one of its own messages.
 - **Sentence by sentence.** The splitter in `voice/speech.rs` cuts after a full stop, or after a clause of 6 words for the first piece. Two pieces render at a time, and they play in order.
@@ -119,7 +120,7 @@ Four keys under `[voice]` set direct mode.
 | `engine` | `"phonic"` | `"direct"` for this mode |
 | `tts_model` | `"heygen/heygen-voice-1-turbo"` | the speech model on OpenRouter |
 | `tts_voice` | `"bram"` | its voice |
-| `think_model` | `"mistralai/mistral-small-3.2-24b-instruct"` | the pre-think model |
+| `think_model` | `"mistralai/mistral-small-3.2-24b-instruct"` | the pre-think model, for the lookups |
 
 The key and `zdr` come from `[asr]`, so direct mode needs dictation set up.
 

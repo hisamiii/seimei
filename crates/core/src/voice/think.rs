@@ -1,5 +1,5 @@
 //! Pre-think (docs/voice-direct.md): while the user talks, a fast model guesses the request from the words so far.
-//! It writes the opener, the first few words seimei says, and names the read-only lookups whose answers ride with the message.
+//! It names the read-only lookups whose answers ride with the message, so the dispatcher seldom needs a tool call of its own.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -8,8 +8,6 @@ use serde_json::{Value, json};
 
 /// Lookups one guess may ask for.
 const LOOKUPS: usize = 3;
-/// An opener this long at most, in words.
-const OPENER_WORDS: usize = 12;
 
 /// The lookups pre-think may run, with the one argument each takes.
 pub const TOOLS: [(&str, &str, &str); 8] = [
@@ -24,15 +22,9 @@ pub const TOOLS: [(&str, &str, &str); 8] = [
 ];
 
 const PROMPT: &str = "You listen in on a voice call between the user and seimei, a coding agent's dispatcher, while the user is still talking. \
-From the words so far, do two things.\n\
-1. opener: the first few words seimei says when the user stops, spoken while seimei prepares the real answer. \
-Acknowledge, restate the topic, or stall naturally, casual like a friend: \"yeah, the echo test, one sec\", \"hm, let me look at the board\". \
-Never state a fact, a number, a result or a promise, and never say it did something. At most 10 words. Same language as the user. \
-The words so far are heard by machine and may be cut off or misheard: name a topic only when it matches something in what seimei knows, \
-and never repeat an odd word back.\n\
-2. lookups: up to 3 read-only lookups whose answers seimei will need, from this list (tool: argument, what it reads):\n{tools}\n\
-Only lookups the words clearly need; none for small talk.\n\
-Answer with JSON only: {\"opener\": \"...\", \"lookups\": [{\"tool\": \"board\", \"query\": \"...\"}]}\n\n\
+From the words so far, pick up to 3 read-only lookups whose answers seimei will need to answer, from this list (tool: argument, what it reads):\n{tools}\n\
+Only lookups the words clearly need; none for small talk. The words are heard by machine and may be cut off or misheard.\n\
+Answer with JSON only: {\"lookups\": [{\"tool\": \"board\", \"query\": \"...\"}]}\n\n\
 What seimei knows now:\n{context}";
 
 pub struct Think {
@@ -43,10 +35,9 @@ pub struct Think {
     http: reqwest::Client,
 }
 
-/// A guess: the opener and the lookups to run, each a tool name and its arguments.
+/// A guess: the lookups to run, each a tool name and its arguments.
 #[derive(Debug, Default)]
 pub struct Guess {
-    pub opener: String,
     pub lookups: Vec<(String, Value)>,
 }
 
@@ -93,8 +84,6 @@ impl Think {
 pub fn parse(out: &str) -> Guess {
     let out = out.trim().trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```");
     let Ok(v) = serde_json::from_str::<Value>(out.trim()) else { return Guess::default() };
-    let opener: Vec<&str> = v["opener"].as_str().unwrap_or("").split_whitespace().collect();
-    let opener = if opener.len() <= OPENER_WORDS { opener.join(" ") } else { String::new() };
     let mut lookups = vec![];
     for l in v["lookups"].as_array().into_iter().flatten().take(LOOKUPS) {
         let tool = l["tool"].as_str().unwrap_or("");
@@ -102,7 +91,7 @@ pub fn parse(out: &str) -> Guess {
         let value = l[*arg].as_str().or_else(|| l["query"].as_str()).unwrap_or("").trim();
         lookups.push((name.to_string(), json!({ *arg: value })));
     }
-    Guess { opener, lookups }
+    Guess { lookups }
 }
 
 #[cfg(test)]
@@ -110,16 +99,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn keeps_known_tools_and_short_openers() {
+    fn keeps_known_tools_only() {
         let g = parse(
-            r#"{"opener": "yeah, the echo test, one sec", "lookups": [{"tool": "shikigami", "name": "voice-echo"},
+            r#"{"lookups": [{"tool": "shikigami", "name": "voice-echo"},
             {"tool": "Bash", "query": "rm -rf /"}, {"tool": "board", "query": "voice"}]}"#,
         );
-        assert_eq!(g.opener, "yeah, the echo test, one sec");
         assert_eq!(g.lookups.len(), 2);
         assert_eq!(g.lookups[0], ("shikigami".to_string(), json!({"name": "voice-echo"})));
-        let long = parse(r#"{"opener": "one two three four five six seven eight nine ten eleven twelve thirteen"}"#);
-        assert!(long.opener.is_empty());
         assert!(parse("not json").lookups.is_empty());
     }
 }

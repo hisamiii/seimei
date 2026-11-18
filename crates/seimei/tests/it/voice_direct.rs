@@ -1,6 +1,6 @@
 //! A direct voice call through /api/voice/ws (docs/voice-direct.md), with the fake agent CLI as the dispatcher.
 //! A fake OpenRouter does speech recognition, pre-think and speech.
-//! It covers pre-think's opener and lookups, the message to the dispatcher, its reply spoken back, a barge, and the thread's events.
+//! It covers pre-think's lookups, the message to the dispatcher, its reply spoken back as the first sound, a barge, and the thread's events.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -13,7 +13,6 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::dispatcher::{after, app_full, until};
 
 const WORDS: &str = "is the lantern benchmark done";
-const OPENER: &str = "hm, one sec";
 
 #[test]
 fn a_direct_voice_call_on_the_fakes() {
@@ -39,7 +38,7 @@ fn a_direct_voice_call_on_the_fakes() {
 /// What the fake OpenRouter was asked, by path.
 type Asked = Arc<Mutex<Vec<(String, Value)>>>;
 
-/// OpenRouter's three endpoints: recognition hears WORDS, pre-think guesses OPENER and a board lookup, speech is 200 ms of tone per piece.
+/// OpenRouter's three endpoints: recognition hears WORDS, pre-think asks for a board lookup, speech is 200 ms of tone per piece.
 async fn fake_openrouter(asked: Asked) -> u16 {
     let route = |path: &'static str, asked: Asked| {
         axum::routing::post(move |body: axum::Json<Value>| {
@@ -54,7 +53,7 @@ async fn fake_openrouter(asked: Asked) -> u16 {
                         ([("content-type", "audio/pcm;rate=16000;channels=1")], pcm).into_response()
                     }
                     "think" => {
-                        let guess = json!({"opener": OPENER, "lookups": [{"tool": "board", "query": "lantern"}]});
+                        let guess = json!({"lookups": [{"tool": "board", "query": "lantern"}]});
                         axum::Json(json!({"choices": [{"message": {"content": guess.to_string()}}]})).into_response()
                     }
                     _ => axum::Json(json!({"text": WORDS})).into_response(),
@@ -139,20 +138,19 @@ async fn run(base: PathBuf) {
     let said = |who: &str| msgs().into_iter().filter(|m| m["type"] == "said" && m["who"] == who).count();
     assert!(until(20, || said("partner") >= 1).await, "no reply ended: {:?}", msgs());
 
-    // The opener played first, then the dispatcher's reply, all as audio.
+    // The first sound is the dispatcher's reply: no filler before it.
     let saying: Vec<String> =
         msgs().iter().filter(|m| m["type"] == "saying").map(|m| m["text"].as_str().unwrap().to_string()).collect();
-    assert_eq!(saying[0], OPENER, "{saying:?}");
-    assert!(saying[1..].iter().any(|s| s.contains("Echo")), "{saying:?}");
+    assert!(saying[0].starts_with("Echo"), "{saying:?}");
     // Audio goes down at the pace it plays.
     let want = 6400 * saying.len();
     assert!(until(10, || got.lock().unwrap().1 >= want).await, "each piece's 200 ms of audio went down");
     assert!(msgs().iter().any(|m| m["type"] == "said" && m["who"] == "user" && m["text"] == WORDS));
 
-    // The dispatcher got the words, the opener already said and the board lookup's answer.
+    // The dispatcher got the words and the board lookup's answer.
     let heard = std::fs::read_to_string(base.join("heard.jsonl")).unwrap_or_default();
     assert!(heard.contains(&format!("[voice call] {WORDS}")), "{heard}");
-    assert!(heard.contains(OPENER) && heard.contains("lantern benchmark"), "{heard}");
+    assert!(heard.contains("lantern benchmark") && !heard.contains("already said"), "{heard}");
     let asked_paths: Vec<String> = asked.lock().unwrap().iter().map(|(p, _)| p.clone()).collect();
     assert!(asked_paths.iter().any(|p| p == "think"), "{asked_paths:?}");
     let speech: Vec<String> = (asked.lock().unwrap().iter())

@@ -1,6 +1,6 @@
 //! A direct voice call (docs/voice-direct.md): the user talks with the dispatcher itself.
-//! The server cuts the microphone at pauses, transcribes each clause, and pre-think guesses an opener and lookups while the user talks.
-//! At the end of the turn the opener plays, the words go to the dispatcher as a [voice] message, and its reply streams back as speech.
+//! The server cuts the microphone at pauses, transcribes each clause, and pre-think runs the lookups the words so far call for.
+//! At the end of the turn the words go to the dispatcher as a [voice call] message, and its reply streams back as speech: its first sound is the real reply.
 
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -27,8 +27,6 @@ const RENDERING: usize = 2;
 const LOOKUP_MAX: usize = 2000;
 /// 20 ms of PCM16 at RATE.
 const CHUNK: usize = (RATE as usize / 50) * 2;
-/// Said when the user stops and no opener is ready, rendered once per call.
-const ACKS: [&str; 3] = ["Mm-hm.", "Okay.", "Yeah."];
 
 /// What the call's tasks hand back.
 enum Done {
@@ -36,8 +34,6 @@ enum Done {
     Window { turn: u64, idx: usize, text: String },
     Guess { turn: u64, guess: super::think::Guess, ms: u64 },
     Lookup { turn: u64, key: String, out: String },
-    Opener { turn: u64, text: String, pcm: Vec<u8> },
-    Ack { pcm: Vec<u8> },
     Audio { epoch: u64, seq: u64, text: String, pcm: Vec<u8>, ms: u64 },
     Contexts { asr: Context, think: String },
 }
@@ -47,7 +43,6 @@ struct Timing {
     end: Instant,
     words: String,
     text: Option<Instant>,
-    opener: Option<Instant>,
     sent: Option<Instant>,
     delta: Option<Instant>,
     stt: Vec<u64>,
@@ -75,10 +70,6 @@ struct Direct {
     windowing: bool,
     asked: HashSet<String>,
     lookups: Vec<(String, String)>,
-    opener: Option<(String, Vec<u8>)>,
-    /// The opener that played at the end of the turn, for the message to say.
-    said_opener: Option<String>,
-    acks: Vec<Vec<u8>>,
     /// This turn's speech recognition and pre-think times.
     stt_ms: Vec<u64>,
     think_ms: Vec<u64>,
@@ -195,9 +186,6 @@ pub async fn call(v: Arc<Voice>, mut up: mpsc::Receiver<Up>, down: mpsc::Sender<
         windowing: false,
         asked: HashSet::new(),
         lookups: vec![],
-        opener: None,
-        said_opener: None,
-        acks: vec![],
         stt_ms: vec![],
         think_ms: vec![],
         timing: None,
@@ -222,7 +210,7 @@ pub async fn call(v: Arc<Voice>, mut up: mpsc::Receiver<Up>, down: mpsc::Sender<
         started: Instant::now(),
     };
     c.refresh();
-    c.render_acks();
+    c.v.tts().warm();
     c.state("listening");
     let mut tick = tokio::time::interval(Duration::from_millis(20));
     loop {
@@ -269,18 +257,6 @@ impl Direct {
                 let _ = done.send(Done::Contexts { asr, think });
             }
         });
-    }
-
-    fn render_acks(&self) {
-        for text in ACKS {
-            let (v, done) = (self.v.clone(), self.done.clone());
-            tokio::spawn(async move {
-                match v.tts().speak(text).await {
-                    Ok(pcm) => _ = done.send(Done::Ack { pcm }),
-                    Err(e) => eprintln!("seimei: voice: tts: {e}"),
-                }
-            });
-        }
     }
 
     fn mic(&mut self, pcm: &[u8]) {
@@ -344,7 +320,6 @@ impl Direct {
                     end: Instant::now(),
                     words,
                     text: None,
-                    opener: None,
                     sent: None,
                     delta: None,
                     stt: vec![],
@@ -354,18 +329,6 @@ impl Direct {
                     && let Some(t) = &mut self.timing
                 {
                     t.text = Some(t.end);
-                }
-                // The opener plays now: rendered at the last pause, or a plain acknowledgement.
-                let opener = self.opener.take().or_else(|| {
-                    let i = (self.turn as usize) % ACKS.len();
-                    self.acks.get(i).map(|pcm| (ACKS[i].to_string(), pcm.clone()))
-                });
-                if let Some((text, pcm)) = opener {
-                    if let Some(t) = &mut self.timing {
-                        t.opener = Some(Instant::now());
-                    }
-                    self.said_opener = Some(text.clone());
-                    self.play(&text, pcm);
                 }
                 self.maybe_send();
             }
@@ -383,9 +346,7 @@ impl Direct {
         self.windowing = false;
         self.asked.clear();
         self.lookups.clear();
-        self.opener = None;
         self.timing = None;
-        self.said_opener = None;
         self.stt_ms.clear();
         self.think_ms.clear();
         self.refresh();
@@ -445,11 +406,6 @@ impl Direct {
             return;
         }
         let mut extra = vec![];
-        if let Some(opener) = self.said_opener.take() {
-            extra.push(format!(
-                "[voice call: you already said \"{opener}\" aloud; go on from there without repeating it]"
-            ));
-        }
         if let Some(cut) = self.cut.take() {
             extra.push(format!("[voice call: the user cut your last reply off after \"{}\"]", chars(&cut, 300)));
         }
@@ -479,7 +435,6 @@ impl Direct {
                 self.asr_ctx = asr;
                 self.think_ctx = think;
             }
-            Done::Ack { pcm } => self.acks.push(pcm),
             Done::Text { turn, idx, text, ms } => {
                 if turn != self.turn || idx >= self.clauses.len() {
                     return;
@@ -527,25 +482,11 @@ impl Direct {
                         let _ = done.send(Done::Lookup { turn, key, out });
                     });
                 }
-                if !guess.opener.is_empty() && !self.ended {
-                    let (v, done, turn, text) = (self.v.clone(), self.done.clone(), self.turn, guess.opener);
-                    tokio::spawn(async move {
-                        match v.tts().speak(&text).await {
-                            Ok(pcm) => _ = done.send(Done::Opener { turn, text, pcm }),
-                            Err(e) => eprintln!("seimei: voice: tts: {e}"),
-                        }
-                    });
-                }
                 self.maybe_think();
             }
             Done::Lookup { turn, key, out } => {
                 if turn == self.turn {
                     self.lookups.push((key, out));
-                }
-            }
-            Done::Opener { turn, text, pcm } => {
-                if turn == self.turn && !self.ended {
-                    self.opener = Some((text, pcm));
                 }
             }
             Done::Audio { epoch, seq, text, pcm, ms } => {
@@ -560,15 +501,6 @@ impl Direct {
                 self.render();
             }
         }
-    }
-
-    /// Audio to play now, ahead of the reply's pieces: the opener.
-    fn play(&mut self, text: &str, pcm: Vec<u8>) {
-        self.saying(text);
-        self.heard.push_str(text);
-        self.heard.push(' ');
-        self.out.extend(pcm);
-        self.send_audio();
     }
 
     /// A piece of a reply to speak, in order.
@@ -742,9 +674,8 @@ impl Direct {
         let stt: Vec<String> = t.stt.iter().map(|ms| ms.to_string()).collect();
         let think: Vec<String> = t.think.iter().map(|ms| ms.to_string()).collect();
         eprintln!(
-            "seimei: voice: direct turn: from the end of speech: text {}, opener {}, sent {}, first delta {}, first reply sound {}; stt ms [{}], pre-think ms [{}], after {:?}",
+            "seimei: voice: direct turn: from the end of speech: text {}, sent {}, first delta {}, first reply sound {}; stt ms [{}], pre-think ms [{}], after {:?}",
             secs(t.end, t.text),
-            secs(t.end, t.opener),
             secs(t.end, t.sent),
             secs(t.end, t.delta),
             secs(t.end, Some(Instant::now())),

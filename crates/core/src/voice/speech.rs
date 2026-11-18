@@ -30,6 +30,14 @@ impl Tts {
         Tts { model: model.into(), voice: voice.into(), url: format!("{api}/audio/speech"), key_file, zdr, http }
     }
 
+    /// Opens the connection ahead of the first reply, so its speech skips the TLS handshake. Any answer will do.
+    pub fn warm(&self) {
+        let (http, url) = (self.http.clone(), self.url.clone());
+        tokio::spawn(async move {
+            let _ = http.get(url).timeout(Duration::from_secs(5)).send().await;
+        });
+    }
+
     /// The text as PCM16 mono at RATE.
     pub async fn speak(&self, text: &str) -> Result<Vec<u8>, String> {
         let key = std::fs::read_to_string(&self.key_file).map_err(|e| format!("no OpenRouter key: {e}"))?;
