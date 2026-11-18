@@ -5,6 +5,7 @@ import { $, S, el, snack, say, toLogin } from './util.js';
 import { render, toBottom, nearBottom } from './chat.js';
 import { Down, Barge, BARGE, RATE, FRAME, toPcm16, fromPcm16, level } from './pcm.js';
 import { frameDb } from './phrases.js';
+import { Stream, streamable } from './stream.js';
 
 const bar = $('callbar'), pill = $('call-pill'), who = $('call-who'), lvl = $('call-level'), time = $('call-time');
 const mute = $('call-mute'), end = $('call-end'), thread = $('thread'), debug = $('call-debug'), readout = $('call-readout');
@@ -20,7 +21,9 @@ const STATS_MS = 10000;
 // The debug panel stays open between calls once opened (a tap on the pill).
 const DEBUG_KEY = 'seimei.voiceDebug';
 // A phone may play nothing from one way out and fine from another: the panel's beeps try each, and the partner follows the last one tried.
-const PATHS = { page: 'the page audio', element: 'an audio element', fresh: 'a new audio context' };
+const PATHS = { page: 'the page audio', element: 'an audio element', fresh: 'a new audio context', stream: 'an audio stream' };
+// The stream must have started playing by then, or the call falls back to Web Audio.
+const STREAM_CHECK_MS = 2000;
 // What the last beeps did, newest last: the panel shows them, with the browser's error when it would not play.
 const tried = [];
 const LABEL = { connecting: 'Connecting…', listening: 'Listening', speaking: 'Speaking', reconnecting: 'Reconnecting…' };
@@ -35,16 +38,30 @@ function show(on) {
   render();
 }
 
+// Firefox on Android may play nothing through Web Audio while a media element plays fine (docs/voice.md): there the partner goes through the stream.
+// A page cannot hear whether its own Web Audio is audible, so the choice goes by browser; the stream's own start is checked.
+function choose() {
+  const ua = navigator.userAgent;
+  return streamable() && /Android/.test(ua) && /Firefox\//.test(ua) ? 'stream' : 'page';
+}
+
+// The partner's clock: the stream's playhead or the context's time.
+const clock = (c) => (c.sink.stream ? c.sink.stream.now() : c.sink.ctx.currentTime);
+
 async function start() {
   if (call) return;
-  // The context is made and resumed in the tap: a phone lets it play only then.
+  // The context and the stream's element are started in the tap: a phone lets them play only then.
   const ctx = new AudioContext();
   ctx.resume().catch(() => {});
+  const player = choose() === 'stream' ? new Stream(RATE) : null;
+  const started = player?.start();
+  started?.catch(() => {});
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
   } catch {
     ctx.close();
+    player?.close();
     snack('Allow the microphone to talk');
     return;
   }
@@ -58,7 +75,7 @@ async function start() {
   out.connect(ctx.destination);
   const c = {
     // Where the partner's audio goes: a context and the node to connect to (see PATHS).
-    sink: { ctx, out, path: 'page' }, got: 0, peak: -Infinity, beeps: 0,
+    sink: player ? { stream: player, path: 'stream' } : { ctx, out, path: 'page' }, got: 0, peak: -Infinity, beeps: 0, fallback: '',
     ctx, stream, ws, src, proc, out, t0: performance.now(), down: new Down(ctx.sampleRate), barge: new Barge(BARGE, learned()),
     pending: new Float32Array(0), sources: new Set(), until: 0, muted: false, state: 'connecting',
     levels: Array(BARS).fill(0), mic: 0, heard: 0, live: null, lock: null,
@@ -68,6 +85,16 @@ async function start() {
   // A phone may suspend the context, at a call or a route change: the next tap brings it back.
   ctx.onstatechange = () => { if (call === c && ctx.state !== 'running') document.addEventListener('pointerdown', () => ctx.resume().catch(() => {}), { once: true }); };
   call = c;
+  if (player) {
+    // The self-test: a stream that will not play, or whose playhead stands still, gives way to Web Audio.
+    const back = (why) => {
+      if (call !== c || c.sink.stream !== player) return;
+      c.fallback = why;
+      route(c, 'page');
+    };
+    started.catch((e) => back(`play() refused, ${e.name}`));
+    setTimeout(() => { if (player.now() < 0.2) back(`stood still at ${player.now().toFixed(2)} s`); }, STREAM_CHECK_MS);
+  }
   src.connect(proc);
   // A ScriptProcessor runs only while connected; it writes silence.
   proc.connect(ctx.destination);
@@ -119,16 +146,26 @@ function send(c, msg) {
 }
 
 // The partner's audio, played back to back as it comes.
-function play(c, data) {
+function play(c, data, beep = false) {
   const f = fromPcm16(data);
   if (!f.length) return;
+  c.peak = 20 * Math.log10(Math.max(1 / 32768, f.reduce((m, x) => Math.max(m, Math.abs(x)), 0)));
+  if (c.sink.stream) {
+    // Only a reply's first chunk counts for the wait: later ones queue behind it.
+    const [a, b] = c.sink.stream.push(new Int16Array(data), !beep && clock(c) >= c.until);
+    c.until = b;
+    c.heard = level(f);
+    c.played.push([a, b, frameDb(f)]);
+    c.stats.played += b - a;
+    c.stats.chunks++;
+    return;
+  }
   const { ctx, out } = c.sink;
   const buf = ctx.createBuffer(1, f.length, RATE);
   buf.copyToChannel(f, 0);
   const node = ctx.createBufferSource();
   node.buffer = buf;
   node.connect(out);
-  c.peak = 20 * Math.log10(Math.max(1 / 32768, f.reduce((m, x) => Math.max(m, Math.abs(x)), 0)));
   const at = Math.max(ctx.currentTime + (c.until > ctx.currentTime ? 0 : LEAD), c.until);
   node.start(at);
   c.until = at + buf.duration;
@@ -142,7 +179,7 @@ function play(c, data) {
 
 // The loudest sound that played lately, in dBFS, or null when nothing did.
 function playLevel(c) {
-  const now = c.sink.ctx.currentTime;
+  const now = clock(c);
   while (c.played.length && c.played[0][1] < now - ECHO_S) c.played.shift();
   let db = null;
   for (const [a, , d] of c.played) if (a <= now) db = Math.max(db ?? -Infinity, d);
@@ -162,14 +199,16 @@ function learned() {
 function stats(c) {
   const t = c.stream.getAudioTracks()[0]?.getSettings() || {};
   send(c, { type: 'stats', context: c.ctx.state, rate: c.ctx.sampleRate, base_latency: c.ctx.baseLatency, output_latency: c.ctx.outputLatency,
-    ...c.stats, echo: Math.round(c.barge.echo * 10) / 10, muted: c.muted, got: c.got, path: c.sink.path, out_context: c.sink.ctx.state,
-    out_time: Math.round(c.sink.ctx.currentTime * 10) / 10, beeps: c.beeps, agent: navigator.userAgent,
+    ...c.stats, echo: Math.round(c.barge.echo * 10) / 10, muted: c.muted, got: c.got, path: c.sink.path, fallback: c.fallback,
+    out_state: c.sink.stream ? (c.sink.stream.el.paused ? 'paused' : 'playing') : c.sink.ctx.state, out_time: Math.round(clock(c) * 10) / 10,
+    stream_wait_ms: c.sink.stream?.wait() ?? undefined, stream_stalls: c.sink.stream?.stalls, beeps: c.beeps, agent: navigator.userAgent,
     mic: { echo_cancellation: t.echoCancellation, noise_suppression: t.noiseSuppression, auto_gain: t.autoGainControl, rate: t.sampleRate } });
 }
 
 // Everything queued to play stops now.
 function cut(c) {
-  c.stats.cut += Math.max(0, c.until - c.sink.ctx.currentTime);
+  c.stats.cut += Math.max(0, c.until - clock(c));
+  c.sink.stream?.cut();
   for (const n of c.sources) {
     try { n.stop(); } catch {}
   }
@@ -210,7 +249,7 @@ function endLive(c) {
 
 function label(c) {
   const talking = !c.muted && c.barge.talking();
-  const playing = c.sink.ctx.currentTime < c.until;
+  const playing = clock(c) < c.until;
   who.textContent = c.muted ? 'Muted' : LABEL[c.state] || '';
   pill.classList.toggle('me', talking);
   pill.classList.toggle('them', playing && !talking);
@@ -219,7 +258,7 @@ function label(c) {
 function tick() {
   const c = call;
   if (!c) return;
-  const playing = c.sink.ctx.currentTime < c.until;
+  const playing = clock(c) < c.until;
   if (!debug.hidden) shown(c);
   if (performance.now() - (c.statsAt || c.t0) > STATS_MS) {
     c.statsAt = performance.now();
@@ -247,7 +286,8 @@ function hangUp(why) {
   c.stream.getTracks().forEach((t) => t.stop());
   cut(c);
   c.ctx.close();
-  if (c.sink.ctx !== c.ctx) c.sink.ctx.close();
+  if (c.sink.ctx && c.sink.ctx !== c.ctx) c.sink.ctx.close();
+  c.sink.stream?.close();
   c.audio?.pause();
   c.lock?.release().catch(() => {});
   endLive(c);
@@ -263,8 +303,12 @@ function shown(c = call) {
   const b = ua.match(/(Firefox|SamsungBrowser|EdgA|Chrome)\/(\d+)/);
   const lines = [`${b ? `${b[1]} ${b[2]}` : 'browser?'}${/Android/.test(ua) ? ' on Android' : ''}${c ? ` · out: ${PATHS[c.sink.path]}` : ' · no call, mic closed'}`];
   if (c) {
-    const s = c.sink.ctx;
-    lines.push(`audio ${s.state} at ${s.sampleRate} Hz, clock ${s.currentTime.toFixed(1)} s · mic ${c.ctx.state}`,
+    const s = c.sink.ctx, st = c.sink.stream;
+    if (st) {
+      const ahead = (st.at / st.rate - st.now()) * 1000;
+      lines.push(`stream ${st.el.paused ? 'paused' : 'playing'}, clock ${st.now().toFixed(1)} s, ${ahead.toFixed(0)} ms queued · wait ${st.wait() ?? '-'} ms · stalls ${st.stalls} · mic ${c.ctx.state}`);
+    } else lines.push(`audio ${s.state} at ${s.sampleRate} Hz, clock ${s.currentTime.toFixed(1)} s · mic ${c.ctx.state}${c.fallback ? ` · stream fell back: ${c.fallback}` : ''}`);
+    lines.push(
       `got ${c.got} chunks, played ${c.stats.chunks} (${c.stats.played.toFixed(1)} s), last peak ${c.peak.toFixed(0)} dBFS`,
       `barge cuts ${c.stats.barges} · flushes ${c.stats.flushes}`);
   }
@@ -298,10 +342,17 @@ function playing(el, label, then) {
 function route(c, path) {
   if (path === c.sink.path) return;
   cut(c);
-  if (c.sink.ctx !== c.ctx) c.sink.ctx.close();
+  if (c.sink.ctx && c.sink.ctx !== c.ctx) c.sink.ctx.close();
+  c.sink.stream?.close();
   c.audio?.pause();
   c.audio = null;
   c.out.disconnect();
+  if (path === 'stream') {
+    const stream = new Stream(RATE);
+    stream.start().catch((e) => note(`stream: play() refused, ${why(e)}`));
+    c.sink = { stream, path };
+    return;
+  }
   if (path === 'fresh') {
     const ctx = new AudioContext();
     const out = ctx.createGain();
@@ -356,9 +407,23 @@ function beep(path) {
     }
     if (c) {
       route(c, path);
+      if (c.sink.stream) {
+        const st = c.sink.stream, t0 = st.now();
+        play(c, tone().buffer, true);
+        setTimeout(() => note(`${label}: element ${st.el.paused ? 'paused' : 'playing'}, clock moved ${(st.now() - t0).toFixed(2)} s, stalls ${st.stalls}`), 600);
+        return;
+      }
       c.sink.ctx.resume().catch(() => {});
-      play(c, tone().buffer);
+      play(c, tone().buffer, true);
       watch(label, c.sink.ctx, c.audio ? (c.audio.paused ? 'paused' : 'playing') : '');
+      return;
+    }
+    if (path === 'stream') {
+      const st = new Stream(RATE);
+      st.start().catch((e) => note(`${label}: play() refused, ${why(e)}`));
+      st.push(tone());
+      setTimeout(() => note(`${label}: element ${st.el.paused ? 'paused' : 'playing'}, clock ${st.now().toFixed(2)} s, stalls ${st.stalls}`), 900);
+      setTimeout(() => st.close(), 2000);
       return;
     }
     const ctx = new AudioContext();

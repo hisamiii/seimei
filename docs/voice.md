@@ -79,10 +79,21 @@ The page offers a call from an empty composer. When voice mode is on and there i
 - **Echo** must not count as the user. A browser's echo canceller may miss audio the page plays itself, so the partner comes back through the microphone. Over the partner, voice must also be 6 dB louder than the loudest echo heard so far, relative to what plays. That estimate starts high, falls 15 dB a second, and the phone keeps it between calls.
 - **Mute** sends silence: Phonic expects a steady stream.
 - **The debug panel** opens with a tap on the pill, or before any call with `#voicedebug` in the address. It shows the browser, whether its audio runs, and the chunks received, played and cut.
-- **Its beeps** play half a second through each way out. The ways are the page's audio context, an audio element, a new context, `beep.wav` as a plain file, and an oscillator in a context with no options. Each one reports what the browser did, such as `NotAllowedError` for an autoplay block. In a call, the partner's audio then follows the last way tried.
+- **Its beeps** play half a second through each way out. The ways are the page's audio context, an audio element, a new context and `beep.wav` as a plain file. Then an oscillator in a context with no options, and the stream (below). Each one reports what the browser did, such as `NotAllowedError` for an autoplay block. In a call, the partner's audio then follows the last way tried.
 - The microphone runs with the browser's echo cancellation, noise suppression and gain control. It goes up as 16 kHz PCM16 in 20 ms frames, and the screen stays on during a call.
 
 A call needs https or localhost, since the browser gives the microphone to a secure page only.
+
+### The stream way out
+
+Firefox on Android can play nothing through Web Audio, on tone generator sites too, while an audio element plays a file fine. There the partner's audio goes through the stream, `web/stream.js`.
+
+- **The format.** Each 20 ms of PCM16 becomes a verbatim FLAC frame in fragmented MP4 (`web/fmp4.js`). The frames go to a MediaSource on an audio element. Verbatim frames need no encoder, and MediaSource takes FLAC but no raw PCM.
+- **The choice** goes by browser: Firefox on Android gets the stream when it takes FLAC, every other browser Web Audio. No sound test can choose, since a page cannot hear its own output and the echo canceller removes a test sound.
+- **The self-test.** When the stream's `play()` is refused, or its clock stands still for 2 s, the call falls back to Web Audio. The panel and the stats say why.
+- **Silence ahead.** The stream keeps 0.25 s of silence queued past the playhead. With half of that, Firefox's element starves and its clock slows to about 70 percent. A reply's first chunk replaces that silence from 40 ms past the playhead.
+- **The cost** is small. In headless Firefox a reply's first sample played 50 to 77 ms after it arrived, with no stalls. Web Audio schedules 60 ms ahead. The panel and the stats show the median wait and the stalls.
+- The page's policy allows `blob:` media, since the MediaSource is reached by a blob URL.
 
 ## The client socket
 
@@ -91,7 +102,7 @@ The socket carries PCM16 mono at 16 kHz both ways as binary frames, and JSON as 
 The client sends the microphone without pause, silence included, since Phonic expects a steady stream. Text frames up:
 
 - `{"type": "barge"}`: the client's own voice detection heard the user over the partner, and the client has cut its playback. The bridge then holds back the partner's audio until Phonic's own detection agrees, or for 1.5 s on a false alarm.
-- `{"type": "stats", ...}`: the page's numbers for the server log, every 10 s and at hang-up. They hold the audio context's state and rate, the seconds played and cut, barges, flushes and the echo estimate.
+- `{"type": "stats", ...}`: the page's numbers for the server log, every 10 s and at hang-up. They hold the audio context's state and rate, the way out and any fallback, the seconds played and cut, barges, flushes and the echo estimate. With the stream they also hold its wait and stalls.
 - `{"type": "end"}`: hang up.
 
 Text frames down:

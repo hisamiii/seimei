@@ -45,7 +45,7 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
-const CSP: &str = "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; font-src 'self'; \
+const CSP: &str = "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; font-src 'self'; media-src 'self' blob:; \
                    connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 const HEARTBEAT: Duration = Duration::from_secs(15);
 
