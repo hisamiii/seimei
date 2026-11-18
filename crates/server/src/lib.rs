@@ -359,6 +359,7 @@ fn mime(name: &str) -> &'static str {
         "jpg" | "jpeg" => "image/jpeg",
         "webp" => "image/webp",
         "woff2" => "font/woff2",
+        "wav" => "audio/wav",
         "txt" | "LICENSE" => "text/plain",
         _ => "application/octet-stream",
     }

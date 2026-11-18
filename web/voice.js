@@ -21,6 +21,8 @@ const STATS_MS = 10000;
 const DEBUG_KEY = 'seimei.voiceDebug';
 // A phone may play nothing from one way out and fine from another: the panel's beeps try each, and the partner follows the last one tried.
 const PATHS = { page: 'the page audio', element: 'an audio element', fresh: 'a new audio context' };
+// What the last beeps did, newest last: the panel shows them, with the browser's error when it would not play.
+const tried = [];
 const LABEL = { connecting: 'Connecting…', listening: 'Listening', speaking: 'Speaking', reconnecting: 'Reconnecting…' };
 let call = null;
 
@@ -250,21 +252,46 @@ function hangUp(why) {
   c.lock?.release().catch(() => {});
   endLive(c);
   show(false);
+  if (!debug.hidden) shown();
   if (why) snack(why);
   say('Call ended');
 }
 
-// The panel: what the browser is, whether its audio runs, and what reached it.
-function shown(c) {
+// The panel: what the browser is, whether its audio runs, what reached it, and what the beeps did.
+function shown(c = call) {
   const ua = navigator.userAgent;
   const b = ua.match(/(Firefox|SamsungBrowser|EdgA|Chrome)\/(\d+)/);
-  const s = c.sink.ctx;
-  readout.textContent = [
-    `${b ? `${b[1]} ${b[2]}` : 'browser?'}${/Android/.test(ua) ? ' on Android' : ''} · out: ${PATHS[c.sink.path]}`,
-    `audio ${s.state} at ${s.sampleRate} Hz, clock ${s.currentTime.toFixed(1)} s · mic ${c.ctx.state}`,
-    `got ${c.got} chunks, played ${c.stats.chunks} (${c.stats.played.toFixed(1)} s), last peak ${c.peak.toFixed(0)} dBFS`,
-    `barge cuts ${c.stats.barges} · flushes ${c.stats.flushes} · beeps ${c.beeps}`,
-  ].join('\n');
+  const lines = [`${b ? `${b[1]} ${b[2]}` : 'browser?'}${/Android/.test(ua) ? ' on Android' : ''}${c ? ` · out: ${PATHS[c.sink.path]}` : ' · no call, mic closed'}`];
+  if (c) {
+    const s = c.sink.ctx;
+    lines.push(`audio ${s.state} at ${s.sampleRate} Hz, clock ${s.currentTime.toFixed(1)} s · mic ${c.ctx.state}`,
+      `got ${c.got} chunks, played ${c.stats.chunks} (${c.stats.played.toFixed(1)} s), last peak ${c.peak.toFixed(0)} dBFS`,
+      `barge cuts ${c.stats.barges} · flushes ${c.stats.flushes}`);
+  }
+  readout.textContent = [...lines, ...tried.slice(-5)].join('\n');
+}
+
+// A beep's outcome, as the browser reports it.
+function note(text) {
+  tried.push(text);
+  shown();
+  if (call) send(call, { type: 'stats', beep: text });
+}
+
+// An error's name and message, as short as the browser lets it be.
+const why = (e) => `${e?.name || 'Error'}${e?.message ? `: ${e.message.slice(0, 80)}` : ''}`;
+
+// Watches an audio context for a moment after a beep: a context the browser holds back stays suspended.
+function watch(label, ctx, played) {
+  const t0 = ctx.currentTime;
+  setTimeout(() => note(`${label}: context ${ctx.state}, clock moved ${(ctx.currentTime - t0).toFixed(2)} s${played ? `, element ${typeof played === 'function' ? played() : played}` : ''}`), 400);
+}
+
+// An element's play(), whose refusal says why: NotAllowedError is the browser's autoplay block.
+function playing(el, label, then) {
+  let res = 'pending';
+  el.play().then(() => { res = 'playing'; }, (e) => { res = why(e); note(`${label}: play() refused, ${res}`); });
+  then(() => res);
 }
 
 // Moves the partner's audio to another way out, made in this tap.
@@ -293,27 +320,65 @@ function route(c, path) {
   c.sink.ctx.resume().catch(() => {});
 }
 
-// Half a second of 660 Hz at -10 dBFS, through the same path as the partner's audio.
-function beep(path) {
-  const c = call;
-  if (!c) return;
-  route(c, path);
-  c.sink.ctx.resume().catch(() => {});
+// Half a second of 660 Hz at -10 dBFS, as PCM16 at 16 kHz.
+function tone() {
   const n = RATE / 2, pcm = new Int16Array(n);
   for (let i = 0; i < n; i++) pcm[i] = 0.3 * 32767 * Math.sin(2 * Math.PI * 660 * i / RATE) * Math.min(1, i / 160, (n - i) / 160);
-  c.beeps++;
-  play(c, pcm.buffer);
-  shown(c);
+  return pcm;
+}
+
+// A beep through one way out. In a call it goes the partner's way and moves the partner there; before a call it uses its own audio, with the mic closed.
+// "file" is a plain WAV in an audio element, with no Web Audio at all.
+function beep(path) {
+  const c = call;
+  const label = `${c ? 'in call' : 'no call'}, ${path}`;
+  try {
+    if (path === 'file') {
+      // The page's policy plays media from its own address only: no blob URL.
+      const el = new Audio(new URL('beep.wav', import.meta.url));
+      playing(el, label, (res) => setTimeout(() => note(`${label}: element ${res()}, at ${el.currentTime.toFixed(2)} s, paused ${el.paused}`), 400));
+      return;
+    }
+    if (c) {
+      route(c, path);
+      c.sink.ctx.resume().catch(() => {});
+      play(c, tone().buffer);
+      watch(label, c.sink.ctx, c.audio ? (c.audio.paused ? 'paused' : 'playing') : '');
+      return;
+    }
+    const ctx = new AudioContext();
+    ctx.resume().catch((e) => note(`${label}: resume() refused, ${why(e)}`));
+    const buf = ctx.createBuffer(1, RATE / 2, RATE);
+    buf.copyToChannel(fromPcm16(tone().buffer), 0);
+    const node = ctx.createBufferSource();
+    node.buffer = buf;
+    let el = null;
+    if (path === 'element') {
+      const dest = ctx.createMediaStreamDestination();
+      node.connect(dest);
+      el = new Audio();
+      el.srcObject = dest.stream;
+      playing(el, label, () => {});
+    } else node.connect(ctx.destination);
+    node.start();
+    watch(label, ctx, el && (() => (el.paused ? 'paused' : 'playing')));
+    setTimeout(() => { el?.pause(); ctx.close(); }, 1500);
+  } catch (e) {
+    note(`${label}: threw ${why(e)}`);
+  }
 }
 
 $('talk').addEventListener('click', start);
-pill.addEventListener('click', () => {
-  debug.hidden = !debug.hidden;
-  try { localStorage.setItem(DEBUG_KEY, debug.hidden ? '' : '1'); } catch {}
-  if (call && !debug.hidden) shown(call);
-});
+function panel(open) {
+  debug.hidden = !open;
+  try { localStorage.setItem(DEBUG_KEY, open ? '1' : ''); } catch {}
+  if (open) shown();
+}
+pill.addEventListener('click', () => panel(debug.hidden));
+$('call-debug-x').addEventListener('click', () => panel(false));
 for (const b of debug.querySelectorAll('[data-beep]')) b.addEventListener('click', () => beep(b.dataset.beep));
-try { debug.hidden = !localStorage.getItem(DEBUG_KEY); } catch {}
+// #voicedebug in the address opens it too, before any call.
+try { if (localStorage.getItem(DEBUG_KEY) || location.hash === '#voicedebug') panel(true); } catch {}
 end.addEventListener('click', () => hangUp(''));
 mute.addEventListener('click', () => {
   if (!call) return;
