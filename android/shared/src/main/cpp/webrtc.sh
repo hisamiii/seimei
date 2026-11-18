@@ -9,8 +9,9 @@ tag=v2.1
 commit=846fe90a289f58b7c9303a635142aa2c7caa93e5
 [ -f "$out/lib/libwebrtc-audio-processing-2.a" ] && exit 0
 case "$abi" in
-    arm64-v8a) triple=aarch64-linux-android; family=aarch64 ;;
-    x86_64) triple=x86_64-linux-android; family=x86_64 ;;
+    arm64-v8a) triple=aarch64-linux-android; family=aarch64; cpu=aarch64 ;;
+    armeabi-v7a) triple=armv7a-linux-androideabi; family=arm; cpu=armv7a ;;
+    x86_64) triple=x86_64-linux-android; family=x86_64; cpu=x86_64 ;;
     *) echo "webrtc.sh: no build for $abi" >&2; exit 1 ;;
 esac
 work=$(dirname "$out")
@@ -31,7 +32,7 @@ strip = '$bin/llvm-strip'
 [host_machine]
 system = 'android'
 cpu_family = '$family'
-cpu = '$family'
+cpu = '$cpu'
 endian = 'little'
 CROSS
 # The bundled abseil, built with the library's own C++17: an installed one may want another standard.
