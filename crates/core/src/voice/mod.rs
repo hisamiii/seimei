@@ -13,6 +13,7 @@ pub mod web;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use base64::Engine;
@@ -200,8 +201,41 @@ pub type Reader = Box<dyn Fn(&str, &Value) -> Value + Send + Sync>;
 /// The paths no agent may read, from config; set after startup.
 pub type Denied = Box<dyn Fn() -> Vec<String> + Send + Sync>;
 
+/// The dispatcher's end_call tool reaching the direct calls that are on: it asks them to hang up once its words are spoken.
+#[derive(Default)]
+pub struct Line {
+    calls: AtomicUsize,
+    hang: AtomicBool,
+}
+
+impl Line {
+    /// Asks the calls that are on to hang up; false when none is.
+    pub fn hang_up(&self) -> bool {
+        let on = self.calls.load(Ordering::Relaxed) > 0;
+        if on {
+            self.hang.store(true, Ordering::Relaxed);
+        }
+        on
+    }
+
+    fn open(&self) {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        self.hang.store(false, Ordering::Relaxed);
+    }
+
+    fn close(&self) {
+        self.calls.fetch_sub(1, Ordering::Relaxed);
+    }
+
+    /// Whether the dispatcher asked to hang up since the last look.
+    fn asked(&self) -> bool {
+        self.hang.swap(false, Ordering::Relaxed)
+    }
+}
+
 pub struct Voice {
     pub cfg: Config,
+    pub line: Arc<Line>,
     events: Arc<EventLog>,
     dispatcher: Arc<Dispatcher>,
     audit: Arc<Audit>,
@@ -246,6 +280,7 @@ impl Voice {
         state: &Path,
         about: &str,
         asr: Option<Arc<crate::asr::Asr>>,
+        line: Arc<Line>,
     ) -> Arc<Voice> {
         let web = web::Web::new(&cfg.search_url, cfg.search_key_file.clone(), &cfg.search_model);
         let speech = asr.as_ref().map(|a| {
@@ -264,7 +299,7 @@ impl Voice {
             (tts, think::Think::new(&cfg.think_model, api, key, zdr, http))
         });
         let (state, about) = (state.into(), about.into());
-        Arc::new(Voice { cfg, events, dispatcher, audit, read, denied, state, about, web, asr, speech })
+        Arc::new(Voice { cfg, line, events, dispatcher, audit, read, denied, state, about, web, asr, speech })
     }
 
     /// A direct call's voice. Only called once `direct::call` checked that dictation is on.

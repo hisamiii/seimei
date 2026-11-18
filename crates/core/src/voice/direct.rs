@@ -27,6 +27,12 @@ const RENDERING: usize = 2;
 const USER_TURNS: usize = 5;
 /// A lookup's answer in the message, at most.
 const LOOKUP_MAX: usize = 2000;
+/// After the dispatcher asks to hang up: past the client's playback, its jitter buffer and the network still hold this much.
+const HANG_TAIL: Duration = Duration::from_millis(600);
+/// Everything must stay done this long before the call ends: the reply's last event may still be on its way.
+const HANG_SETTLE: Duration = Duration::from_millis(500);
+/// A dispatcher turn that goes on this long after it asked to hang up does not hold the call.
+const HANG_WAIT: Duration = Duration::from_secs(20);
 /// 20 ms of PCM16 at RATE.
 const CHUNK: usize = (RATE as usize / 50) * 2;
 
@@ -113,6 +119,9 @@ struct Direct {
     heard: String,
     cut: Option<String>,
     said_state: &'static str,
+    /// The dispatcher asked to hang up, and since when all it said has played.
+    hanging: Option<Instant>,
+    hang_ready: Option<Instant>,
     /// The whole call, for the summary.
     lines: Vec<String>,
     started: Instant,
@@ -316,6 +325,8 @@ pub async fn call(v: Arc<Voice>, mut up: mpsc::Receiver<Up>, down: mpsc::Sender<
         heard: String::new(),
         cut: None,
         said_state: "",
+        hanging: None,
+        hang_ready: None,
         lines: vec![],
         started: Instant::now(),
     };
@@ -323,6 +334,7 @@ pub async fn call(v: Arc<Voice>, mut up: mpsc::Receiver<Up>, down: mpsc::Sender<
     c.refresh();
     c.v.tts().warm();
     c.state("listening");
+    v.line.open();
     let mut tick = tokio::time::interval(Duration::from_millis(20));
     loop {
         tokio::select! {
@@ -336,9 +348,15 @@ pub async fn call(v: Arc<Voice>, mut up: mpsc::Receiver<Up>, down: mpsc::Sender<
                 None => break,
             },
             d = done_rx.recv() => if let Some(d) = d { c.finished(d) },
-            _ = tick.tick() => c.send_audio(),
+            _ = tick.tick() => {
+                c.send_audio();
+                if c.hang_up() {
+                    break;
+                }
+            }
         }
     }
+    v.line.close();
     c.state("ended");
     v.ended(&c.lines, c.started.elapsed().as_secs(), false);
 }
@@ -657,6 +675,9 @@ impl Direct {
                 extra.push(format!("{key}:\n{}", chars(out, LOOKUP_MAX)));
             }
         }
+        if self.hanging.take().is_some() {
+            eprintln!("seimei: voice: the user spoke on, the call stays");
+        }
         let id = self.v.dispatcher.send_spoken(&words, &extra.join("\n"));
         self.mine.insert(id);
         self.answering = Some(id);
@@ -836,6 +857,29 @@ impl Direct {
             self.heard.clear();
         }
         self.state(state);
+    }
+
+    /// The dispatcher's end_call: the call ends once its turn is over and the client played every word, unless the user talks.
+    fn hang_up(&mut self) -> bool {
+        let now = Instant::now();
+        if self.v.line.asked() && self.hanging.is_none() {
+            eprintln!("seimei: voice: seimei hangs up once its words are spoken");
+            self.hanging = Some(now);
+        }
+        let Some(asked) = self.hanging else { return false };
+        let spoken = self.queue.is_empty()
+            && self.rendering == 0
+            && self.rendered.is_empty()
+            && self.out.is_empty()
+            && self.clock + HANG_TAIL <= now;
+        let over = !self.v.dispatcher.busy() || now - asked > HANG_WAIT;
+        // The user talks, or their words are still being heard: they may want more.
+        let user = self.cutter.in_turn() || !self.clauses.is_empty();
+        if !spoken || !over || user {
+            self.hang_ready = None;
+            return false;
+        }
+        now - *self.hang_ready.get_or_insert(now) >= HANG_SETTLE
     }
 
     /// The client heard the user over seimei and cut its playback: what is still to say is dropped.

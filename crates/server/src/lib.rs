@@ -192,7 +192,9 @@ impl App {
         let tell = Box::new(move |line: &str| p.notify(line, false, None));
         let watches = Arc::new(Watches::new(&state.join("watches.json"), push.clone(), tell));
         let _ = watches.plugins.set(pool.plugins.clone());
+        let line = Arc::new(seimei_core::voice::Line::default());
         let tools = Arc::new(Tools {
+            line: line.clone(),
             adopter: adopter.clone(),
             watches: watches.clone(),
             pool: pool.clone(),
@@ -229,6 +231,7 @@ impl App {
                 state,
                 &about,
                 asr.clone(),
+                line,
             )
         });
         let _ = pool.dispatcher.set(dispatcher.clone());

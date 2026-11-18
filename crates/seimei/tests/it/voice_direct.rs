@@ -15,6 +15,8 @@ use crate::dispatcher::{after, app_full, until};
 const WORDS: &str = "Is the lantern benchmark done?";
 /// What a short clause is heard as: words that trail off, so the turn waits for more.
 const HALF: &str = "and the kiln, like";
+/// What a long clause is heard as: the user says bye, and the dispatcher hangs up.
+const BYE: &str = "Okay, that's all for now, bye.";
 
 #[test]
 fn a_direct_voice_call_on_the_fakes() {
@@ -71,7 +73,12 @@ async fn fake_openrouter(asked: Asked) -> u16 {
                     _ => {
                         // A clause of under 1.8 s, pre-roll and pause included, is the half sentence.
                         let wav = body.0["input_audio"]["data"].as_str().map_or(0, str::len) * 3 / 4;
-                        let text = if wav < 44 + 32_000 * 18 / 10 { HALF } else { WORDS };
+                        let secs = |tenths: usize| 44 + 32_000 * tenths / 10;
+                        let text = match wav {
+                            n if n < secs(18) => HALF,
+                            n if n < secs(30) => WORDS,
+                            _ => BYE,
+                        };
                         axum::Json(json!({"text": text})).into_response()
                     }
                 }
@@ -236,13 +243,26 @@ async fn run(base: PathBuf) {
     assert!(heard.contains("goes on from their last message"), "{heard}");
     assert_eq!(msgs().iter().filter(|m| m["type"] == "flush").count(), 1, "{:?}", msgs());
 
-    tx.send(Message::text(json!({"type": "end"}).to_string())).await.unwrap();
-    let _ = tokio::time::timeout(Duration::from_secs(10), reader).await;
+    // The user says bye: the dispatcher calls end_call before its goodbye, and the call ends once the goodbye played.
+    assert!(until(20, || msgs().last().is_some_and(|m| m["state"] == "listening")).await, "{:?}", msgs());
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let before = msgs().len();
+    for f in frames(3000, true).into_iter().chain(frames(800, false)) {
+        tx.send(Message::Binary(f.into())).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(until(20, || msgs().iter().any(|m| m["state"] == "ended")).await, "no hang up: {:?}", &msgs()[before..]);
+    let bye: Vec<Value> = msgs()[before..].to_vec();
+    let goodbye = bye.iter().position(|m| m["type"] == "said" && m["who"] == "partner").expect("the goodbye was spoken");
+    assert!(bye[goodbye]["text"].as_str().unwrap().contains("Bye"), "{bye:?}");
+    let ended = bye.iter().position(|m| m["state"] == "ended").unwrap();
+    assert!(goodbye < ended, "the call ended before the goodbye: {bye:?}");
+    assert!(tokio::time::timeout(Duration::from_secs(10), reader).await.is_ok(), "the socket stayed open");
 
     // The thread: the user's spoken words, seimei's reply to them, and the call's end.
     let evs = after(&app, from);
     let words: Vec<&Value> = evs.iter().filter(|e| e["type"] == "user" && e["spoken"] == true).collect();
-    assert_eq!(words.len(), 3, "{evs:?}");
+    assert_eq!(words.len(), 4, "{evs:?}");
     assert_eq!(words[0]["text"], WORDS);
     assert_eq!(words[0]["voice"], true);
     let first = words[0]["id"].as_i64().unwrap();

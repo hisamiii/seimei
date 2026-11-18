@@ -452,6 +452,17 @@
    "_meta": {
     "anthropic/alwaysLoad": true
    },
+   "description": "Hang up the user's voice call, as their red button does: when they say bye or ask you to hang up. The words of this turn are spoken first, so say your goodbye in the same reply. If the user speaks again before the call ends, it stays on. Only for a direct voice call ([voice call] messages).",
+   "inputSchema": {
+    "properties": {},
+    "type": "object"
+   },
+   "name": "end_call"
+  },
+  {
+   "_meta": {
+    "anthropic/alwaysLoad": true
+   },
    "description": "Push a notification to the user's phone. Nothing else pushes on its own except approval cards: use it when the user asked to hear about something (an APK is up, a run finished), when a shikigami or session needs them soon, or with reply=true when they asked you something and left the app (the tap opens the chat at your latest message; it skips a phone already showing the chat). level: silent (no sound), normal (default), urgent (sound, high priority; rare emergencies only). key: pings with the same key update one notification instead of stacking (e.g. 'build', 'render-7'). Pings without a key while the user is away show together. Check presence first when unsure.",
    "inputSchema": {
     "properties": {

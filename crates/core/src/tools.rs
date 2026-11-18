@@ -58,6 +58,8 @@ pub struct Tools {
     pub ask: bool,
     /// A side-thread offer waits for the end of the turn, to go under its reply.
     pub offer: AtomicBool,
+    /// The direct voice calls that are on, for end_call.
+    pub line: Arc<crate::voice::Line>,
 }
 
 pub fn text(t: &str, error: bool) -> Value {
@@ -594,6 +596,13 @@ impl Tools {
                 }
                 self.events.add(json!({"type": "voice_summary", "call": call, "summary": summary}));
                 text("Written onto the call's card.", false)
+            }
+            "end_call" => {
+                if self.line.hang_up() {
+                    text("The call hangs up once this turn's words are spoken. Say goodbye in this reply if you have not.", false)
+                } else {
+                    text("No direct voice call is on.", true)
+                }
             }
             "presence" => {
                 let rows = self.push.presence();

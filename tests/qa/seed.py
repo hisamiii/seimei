@@ -102,7 +102,7 @@ def seed():
     add({"type": "tool", "tool_id": "x2", "name": "mcp__seimei__peek", "summary": "app-tester", **turn}, 5990)
     add({"type": "tool_result", "tool_id": "x2", "error": False, "text": "ok", **turn}, 5989)
     add({"type": "assistant", "text": "app-tester is done: 3 bugs fixed in chat.js and a test added; the run passes.", **turn}, 5980)
-    # A voice call: one card with its turns and summary; the ask to seimei and its answer stay in the chat.
+    # A voice call: its turns show as plain messages with a wave mark; the end and the summary show nothing.
     add({"type": "voice", "who": "user", "text": "what's left on the board for this week"}, 5900)
     add({"type": "voice", "who": "partner", "text": "Three things: the shed door, the river review on Monday, and the font swap."}, 5890)
     add({"type": "voice", "who": "user", "text": "ask seimei to rename the garden repo to orchard"}, 5800)

@@ -155,6 +155,15 @@ The user may go on after the turn went out: after a long pause, or over seimei's
 - **One message completes the other.** The new words go out with a note: they go on from the last message, and the user heard so much of the reply.
 - **The dispatcher answers once.** It folds the message into its running turn at the next step. Its reply from then on answers the new message, so that is what is spoken.
 
+## Hanging up
+
+The dispatcher can end the call itself, as the user's red button does: when the user says bye or asks it to hang up.
+
+- **The tool.** `end_call` asks the direct calls that are on to hang up. It fails when no direct call is on. The `[voice call]` line of `dispatcher.md` says to say a short goodbye and call it.
+- **The goodbye plays first.** The call waits until the dispatcher's turn is over, every piece is rendered and sent, and the client has played it, plus 600 ms. Then the server sends the `ended` state, which both clients take as a hang up. So a client needs no update for it.
+- **The user may go on.** While the user talks, or their words are still being heard, the call stays. If their words go out to the dispatcher, the hang up is off.
+- **A long turn does not hold it.** After 20 s the call ends once its audio has played, even if the dispatcher's turn goes on.
+
 ## Config
 
 These keys under `[voice]` set direct mode.
