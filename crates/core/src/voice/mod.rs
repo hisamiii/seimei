@@ -326,9 +326,11 @@ impl Voice {
 
     /// A voice call, until the client hangs up or the partner ends it.
     /// It goes on in a new conversation, with a fresh pack, when Phonic's socket drops or the conversation reaches its time limit.
-    pub async fn call(self: Arc<Self>, mut up: mpsc::Receiver<Up>, down: mpsc::Sender<Down>) {
+    /// `speed` is the client's own audio_speed, over the config's; Phonic takes it only when a conversation starts.
+    pub async fn call(self: Arc<Self>, mut up: mpsc::Receiver<Up>, down: mpsc::Sender<Down>, speed: Option<f64>) {
         let mut live = self.events.subscribe();
         let mut call = Call::new(self.clone(), down);
+        call.speed = speed.filter(|s| s.is_finite()).map(|s| s.clamp(0.5, 1.5));
         let mut failures = 0;
         loop {
             call.state("connecting");
@@ -414,6 +416,7 @@ struct Call {
     running: HashMap<String, (String, Instant)>,
     /// A generate_reply that went out to speak seimei's answer, until its first sound.
     answer: Option<Instant>,
+    speed: Option<f64>,
 }
 
 impl Call {
@@ -435,6 +438,7 @@ impl Call {
             turn: None,
             running: HashMap::new(),
             answer: None,
+            speed: None,
         }
     }
 
@@ -475,7 +479,7 @@ impl Call {
         live: &mut mpsc::Receiver<crate::events::Event>,
     ) -> Result<End, String> {
         let v = self.v.clone();
-        let (prompt, config) = tokio::task::spawn_blocking(move || {
+        let (prompt, mut config) = tokio::task::spawn_blocking(move || {
             let src = v.sources();
             let p = pack::build(&src, &v.cfg.sections);
             let config = v.config(&p.text, v.keywords(&src));
@@ -483,6 +487,9 @@ impl Call {
         })
         .await
         .map_err(|e| e.to_string())?;
+        if let Some(s) = self.speed {
+            config["audio_speed"] = json!(s);
+        }
         self.offered = (config["tools"].as_array().into_iter().flatten())
             .filter_map(|t| t["tool_schema"]["function"]["name"].as_str().map(String::from))
             .collect();

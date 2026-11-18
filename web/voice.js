@@ -8,6 +8,7 @@ import { frameDb } from './phrases.js';
 import { Stream, streamable } from './stream.js';
 
 const bar = $('callbar'), pill = $('call-pill'), who = $('call-who'), lvl = $('call-level'), time = $('call-time');
+const speedBtn = $('call-speed');
 const mute = $('call-mute'), end = $('call-end'), thread = $('thread'), debug = $('call-debug'), readout = $('call-readout');
 const BARS = 26;
 // What the speaker has queued starts this far ahead, so a late chunk does not leave a gap.
@@ -27,6 +28,9 @@ const PATHS = { page: 'the page audio', element: 'an audio element', fresh: 'a n
 const GATE_TAIL = 0.3;
 // On such a barge the partner gets the microphone's last this many frames too (300 ms): the words that set it off.
 const GATE_KEEP = 15;
+// How fast the partner talks, kept on this device and sent as audio_speed. Phonic sets it when a call starts only.
+const SPEED_KEY = 'seimei.voiceSpeed';
+const SPEEDS = [0.9, 1, 1.1, 1.2, 1.3];
 // The stream must have started playing by then, or the call falls back to Web Audio.
 const STREAM_CHECK_MS = 2000;
 // What the last beeps did, newest last: the panel shows them, with the browser's error when it would not play.
@@ -71,6 +75,9 @@ async function start() {
     return;
   }
   const url = new URL('api/voice/ws', location.href);
+  const sp = speed();
+  showSpeed();
+  if (sp) url.searchParams.set('speed', String(sp));
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   const ws = new WebSocket(url);
   ws.binaryType = 'arraybuffer';
@@ -479,6 +486,32 @@ for (const b of debug.querySelectorAll('[data-beep]')) b.addEventListener('click
 // #voicedebug in the address opens it too, before any call.
 try { if (localStorage.getItem(DEBUG_KEY) || location.hash === '#voicedebug') panel(true); } catch {}
 end.addEventListener('click', () => hangUp(''));
+// The device's speed, or null for the server's default.
+function speed() {
+  try {
+    const v = Number(localStorage.getItem(SPEED_KEY));
+    return SPEEDS.includes(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+const times = (v) => `${v.toFixed(1)}×`;
+
+function showSpeed() {
+  const v = speed() ?? 1;
+  speedBtn.textContent = times(v);
+  speedBtn.setAttribute('aria-label', `Speed ${times(v)}`);
+}
+
+speedBtn.addEventListener('click', () => {
+  const v = SPEEDS[(SPEEDS.indexOf(speed() ?? 1) + 1) % SPEEDS.length];
+  try { localStorage.setItem(SPEED_KEY, String(v)); } catch {}
+  showSpeed();
+  snack(`Speed ${times(v)} from the next call`);
+});
+showSpeed();
+
 mute.addEventListener('click', () => {
   if (!call) return;
   call.muted = !call.muted;

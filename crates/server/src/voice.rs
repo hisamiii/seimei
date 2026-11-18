@@ -2,10 +2,11 @@
 //! Up: {"type": "barge"} when the client's own voice detection hears the user over the partner (it has cut its playback already), {"type": "stats"} for the server log, {"type": "end"}.
 //! Down: {"type": "state"}, "flush" (drop what is queued to play), "saying" (the partner's words as they play), "said", "asking", "answered", "error".
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use axum::extract::State;
 use axum::extract::ws::{Message, WebSocketUpgrade, rejection::WebSocketUpgradeRejection};
+use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use seimei_core::auth::Auth;
@@ -26,6 +27,7 @@ pub async fn status(State(app): State<Arc<App>>) -> Response {
 pub async fn ws(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
+    Query(q): Query<HashMap<String, String>>,
     ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
 ) -> Response {
     let Some(voice) = app.voice.clone() else { return text(StatusCode::NOT_FOUND, "404: Not Found") };
@@ -41,7 +43,9 @@ pub async fn ws(
     ws.on_upgrade(move |mut sock| async move {
         let (up_tx, up_rx) = mpsc::channel(QUEUE);
         let (down_tx, mut down_rx) = mpsc::channel(QUEUE);
-        let call = tokio::spawn(voice.call(up_rx, down_tx));
+        // The page's speed setting, kept on the device: `?speed=1.2`.
+        let speed = q.get("speed").and_then(|s| s.parse().ok());
+        let call = tokio::spawn(voice.call(up_rx, down_tx, speed));
         loop {
             tokio::select! {
                 msg = sock.recv() => match msg {

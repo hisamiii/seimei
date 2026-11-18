@@ -45,7 +45,7 @@ The table lists each section's keys, their defaults and what they set. Notes on 
 | | `voice` | Phonic's default | the voice id |
 | | `turn_taking` | `eager` | how soon the partner takes its turn |
 | | `intelligence_level` | `standard` | `high`: more capable, `standard`: faster |
-| | `audio_speed` | 1.0 | how fast the partner talks, 0.5 to 1.5 |
+| | `audio_speed` | 1.0 | how fast the partner talks, 0.5 to 1.5; see [voice.md](voice.md) |
 | | `default_language` | `en` | the language a call starts in |
 | | `additional_languages` | `[]` | more languages the partner hears and speaks, such as `["ru", "uk"]` |
 | | `multilingual_mode` | `request` | when the partner switches language, see below |

@@ -483,6 +483,7 @@ body:not([data-tab="chat"]) .callbar { background: var(--container); border-radi
 .callbar .mute.on { background: var(--on-tonal); color: var(--tonal); }
 .callbar .mute.on .off { display: block; }
 .callbar .end { background: var(--error); color: var(--surface); }
+.callbar .speed { background: var(--tonal); color: var(--on-tonal); font: 500 14px var(--sans); font-variant-numeric: tabular-nums; }
 .vline { align-self: flex-start; max-width: 88%; padding: 2px 0 2px 12px; box-shadow: inset 2px 0 var(--primary); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
 .vline.cut::after { content: " \2026"; color: var(--text-3); }
 .vline .caret { display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--primary); vertical-align: middle; animation: pulse 1.2s infinite; }

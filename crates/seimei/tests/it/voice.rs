@@ -196,7 +196,7 @@ async fn run(base: PathBuf, root: PathBuf) {
     tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
 
     let (mut sock, _) =
-        tokio_tungstenite::connect_async(format!("ws://127.0.0.1:{server}/api/voice/ws")).await.unwrap();
+        tokio_tungstenite::connect_async(format!("ws://127.0.0.1:{server}/api/voice/ws?speed=1.25")).await.unwrap();
     for _ in 0..3 {
         sock.send(Message::Binary(vec![0u8; 640].into())).await.unwrap();
     }
@@ -262,7 +262,8 @@ async fn run(base: PathBuf, root: PathBuf) {
     assert!(words.contains(&json!("seimei")) && words.contains(&json!("Loom")));
     assert_eq!(configs[0]["turn_taking"], "eager");
     assert_eq!(configs[0]["intelligence_level"], "standard");
-    assert_eq!(configs[0]["audio_speed"], 1.0);
+    // The page's own speed, over the config's 1.0.
+    assert_eq!(configs[0]["audio_speed"], 1.25);
     assert_eq!(configs[0]["default_language"], "en");
     assert_eq!(configs[0]["multilingual_mode"], "request");
     // The second conversation's pack holds the first one's voice turns.
