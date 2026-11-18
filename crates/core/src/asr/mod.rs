@@ -18,7 +18,6 @@ use crate::paths::{expand, home};
 use crate::util::append_line;
 use vocab::{Dict, Tagged};
 
-const URL: &str = "https://openrouter.ai/api/v1/audio/transcriptions";
 /// Short clips that come back as one of these were noise.
 const JUNK: [&str; 9] = ["", "thank you.", "thank you", "thanks.", "thanks for watching.", "you", "you.", "bye.", "."];
 const SENT_MAX: u64 = 10 << 20;
@@ -27,6 +26,8 @@ const SENT_MAX: u64 = 10 << 20;
 #[derive(Clone, Debug)]
 pub struct Config {
     pub key_file: PathBuf,
+    /// OpenRouter's API, which voice calls' speech and pre-think use too.
+    pub url: String,
     pub model: String,
     pub fallback: String,
     pub language: String,
@@ -56,6 +57,7 @@ impl Config {
         let on = |k: &str| src.and_then(|s| s.get(k)).and_then(|v| v.as_bool()).unwrap_or(true);
         Config {
             key_file: expand(&s("key_file", "~/.config/seimei/openrouter-key")).into(),
+            url: s("url", "https://openrouter.ai/api/v1").trim_end_matches('/').to_string(),
             model: s("model", "microsoft/mai-transcribe-2"),
             fallback: s("fallback", "mistralai/voxtral-mini-transcribe-3-0"),
             language: s("language", "en"),
@@ -218,7 +220,7 @@ impl Asr {
         }
         let r = self
             .http
-            .post(URL)
+            .post(format!("{}/audio/transcriptions", self.cfg.url))
             .bearer_auth(key.trim())
             .json(&body)
             .send()

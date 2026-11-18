@@ -151,7 +151,14 @@ fn contexts(v: &Voice) -> (Context, String) {
         .collect();
     let board: Vec<String> = src.board.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect();
     let names = v.keywords(&src);
-    let asr = Context { client: "voice".into(), chat: chat.clone(), agent: vec!["seimei".into()], names, board, ..Default::default() };
+    let asr = Context {
+        client: "voice".into(),
+        chat: chat.clone(),
+        agent: vec!["seimei".into()],
+        names,
+        board,
+        ..Default::default()
+    };
     let think = format!(
         "Board:\n{}\n\nShikigami:\n{}\n\nSessions:\n{}\n\nThe chat, newest last:\n{}",
         chars(&src.board, 3000),
@@ -439,7 +446,9 @@ impl Direct {
         }
         let mut extra = vec![];
         if let Some(opener) = self.said_opener.take() {
-            extra.push(format!("[voice call: you already said \"{opener}\" aloud; go on from there without repeating it]"));
+            extra.push(format!(
+                "[voice call: you already said \"{opener}\" aloud; go on from there without repeating it]"
+            ));
         }
         if let Some(cut) = self.cut.take() {
             extra.push(format!("[voice call: the user cut your last reply off after \"{}\"]", chars(&cut, 300)));
@@ -499,7 +508,10 @@ impl Direct {
                 self.thinking = false;
                 self.think_ms.push(ms);
                 for (name, params) in guess.lookups {
-                    let key = format!("{name}({})", params.as_object().and_then(|o| o.values().next()).and_then(Value::as_str).unwrap_or(""));
+                    let key = format!(
+                        "{name}({})",
+                        params.as_object().and_then(|o| o.values().next()).and_then(Value::as_str).unwrap_or("")
+                    );
                     if !self.asked.insert(key.clone()) {
                         continue;
                     }

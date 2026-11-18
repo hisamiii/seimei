@@ -159,7 +159,10 @@ impl Cutter {
         let enough = self.voiced >= frames(MIN_VOICE_MS);
         let long = self.clause.len() >= frames(MAX_CLAUSE_MS);
         let n = self.clause.len();
-        if v && !self.sent && n >= frames(FIRST_WINDOW_MS) && (n - frames(FIRST_WINDOW_MS)).is_multiple_of(frames(WINDOW_MS)) {
+        if v && !self.sent
+            && n >= frames(FIRST_WINDOW_MS)
+            && (n - frames(FIRST_WINDOW_MS)).is_multiple_of(frames(WINDOW_MS))
+        {
             out.push(Cut::Window(self.clause.concat()));
         }
         if !self.sent && ((self.quiet == frames(CLAUSE_MS) && enough) || long) {

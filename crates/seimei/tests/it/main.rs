@@ -23,3 +23,4 @@ mod share;
 mod threads;
 mod update;
 mod voice;
+mod voice_direct;

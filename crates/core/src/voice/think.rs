@@ -6,7 +6,6 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
-const URL: &str = "https://openrouter.ai/api/v1/chat/completions";
 /// Lookups one guess may ask for.
 const LOOKUPS: usize = 3;
 /// An opener this long at most, in words.
@@ -38,6 +37,7 @@ What seimei knows now:\n{context}";
 
 pub struct Think {
     pub model: String,
+    url: String,
     key_file: PathBuf,
     zdr: bool,
     http: reqwest::Client,
@@ -51,8 +51,9 @@ pub struct Guess {
 }
 
 impl Think {
-    pub fn new(model: &str, key_file: PathBuf, zdr: bool, http: reqwest::Client) -> Think {
-        Think { model: model.into(), key_file, zdr, http }
+    /// `api` is OpenRouter's API base.
+    pub fn new(model: &str, api: &str, key_file: PathBuf, zdr: bool, http: reqwest::Client) -> Think {
+        Think { model: model.into(), url: format!("{api}/chat/completions"), key_file, zdr, http }
     }
 
     pub async fn guess(&self, context: &str, words: &str) -> Result<Guess, String> {
@@ -69,7 +70,15 @@ impl Think {
         if self.zdr {
             body["provider"] = json!({"zdr": true});
         }
-        let r = (self.http.post(URL).timeout(Duration::from_secs(8)).bearer_auth(key.trim()).json(&body).send().await).map_err(|e| e.to_string())?;
+        let r = (self
+            .http
+            .post(&self.url)
+            .timeout(Duration::from_secs(8))
+            .bearer_auth(key.trim())
+            .json(&body)
+            .send()
+            .await)
+            .map_err(|e| e.to_string())?;
         let status = r.status();
         let text = r.text().await.map_err(|e| e.to_string())?;
         if !status.is_success() {

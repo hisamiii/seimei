@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use serde_json::json;
 
-const URL: &str = "https://openrouter.ai/api/v1/audio/speech";
 /// The socket's rate: PCM16 mono.
 pub const RATE: u32 = 16_000;
 /// The first piece of a reply is spoken from a clause this long, so the first words come sooner.
@@ -14,6 +13,7 @@ const FIRST_WORDS: usize = 6;
 pub struct Tts {
     pub model: String,
     pub voice: String,
+    url: String,
     key_file: PathBuf,
     zdr: bool,
     http: reqwest::Client,
@@ -25,8 +25,9 @@ pub fn client() -> reqwest::Client {
 }
 
 impl Tts {
-    pub fn new(model: &str, voice: &str, key_file: PathBuf, zdr: bool, http: reqwest::Client) -> Tts {
-        Tts { model: model.into(), voice: voice.into(), key_file, zdr, http }
+    /// `api` is OpenRouter's API base.
+    pub fn new(model: &str, voice: &str, api: &str, key_file: PathBuf, zdr: bool, http: reqwest::Client) -> Tts {
+        Tts { model: model.into(), voice: voice.into(), url: format!("{api}/audio/speech"), key_file, zdr, http }
     }
 
     /// The text as PCM16 mono at RATE.
@@ -36,12 +37,24 @@ impl Tts {
         if self.zdr {
             body["provider"] = json!({"zdr": true});
         }
-        let r = (self.http.post(URL).timeout(Duration::from_secs(20)).bearer_auth(key.trim()).json(&body).send().await).map_err(|e| e.to_string())?;
+        let r = (self
+            .http
+            .post(&self.url)
+            .timeout(Duration::from_secs(20))
+            .bearer_auth(key.trim())
+            .json(&body)
+            .send()
+            .await)
+            .map_err(|e| e.to_string())?;
         let status = r.status();
         let ctype = r.headers().get("content-type").and_then(|h| h.to_str().ok()).unwrap_or("").to_string();
         let bytes = r.bytes().await.map_err(|e| e.to_string())?;
         if !status.is_success() {
-            return Err(format!("HTTP {}: {}", status.as_u16(), crate::util::cut(&String::from_utf8_lossy(&bytes), 200)));
+            return Err(format!(
+                "HTTP {}: {}",
+                status.as_u16(),
+                crate::util::cut(&String::from_utf8_lossy(&bytes), 200)
+            ));
         }
         let samples: Vec<i16> = bytes.as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes(*b)).collect();
         let out = resample(&samples, rate(&ctype), RATE);
@@ -186,13 +199,22 @@ mod tests {
     fn splits_sentences_and_the_first_clause() {
         let mut s = Splitter::new();
         let mut got = vec![];
-        for piece in ["Yeah, so the echo test went through, the build", "'s on your phone. Version 3.5 is ", "out! Give it a call"] {
+        for piece in [
+            "Yeah, so the echo test went through, the build",
+            "'s on your phone. Version 3.5 is ",
+            "out! Give it a call",
+        ] {
             got.extend(s.push(piece));
         }
         got.extend(s.end());
         assert_eq!(
             got,
-            ["Yeah, so the echo test went through,", "the build's on your phone.", "Version 3.5 is out!", "Give it a call"]
+            [
+                "Yeah, so the echo test went through,",
+                "the build's on your phone.",
+                "Version 3.5 is out!",
+                "Give it a call"
+            ]
         );
     }
 

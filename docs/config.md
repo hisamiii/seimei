@@ -31,6 +31,7 @@ The table lists each section's keys, their defaults and what they set. Notes on 
 | `[agents.<name>]` | `command`, `args`, `env` | none | an ACP agent a shikigami can run on |
 | | `protocol` | `acp` | `codex` for `codex app-server` |
 | `[asr]` | `key_file` | `~/.config/seimei/openrouter-key` | the OpenRouter key for dictation |
+| | `url` | `https://openrouter.ai/api/v1` | OpenRouter's API, for dictation and direct voice calls |
 | | `model` | `microsoft/mai-transcribe-2` | the transcription model |
 | | `fallback` | `mistralai/voxtral-mini-transcribe-3-0` | the model that gets the call when the first fails |
 | | `language` | `en` | the spoken language |

@@ -219,9 +219,10 @@ impl Voice {
     ) -> Arc<Voice> {
         let web = web::Web::new(&cfg.search_url, cfg.search_key_file.clone(), &cfg.search_model);
         let speech = asr.as_ref().map(|a| {
-            let (key, zdr) = (a.cfg.key_file.clone(), a.cfg.zdr);
+            let (key, zdr, api) = (a.cfg.key_file.clone(), a.cfg.zdr, a.cfg.url.as_str());
             let http = speech::client();
-            (speech::Tts::new(&cfg.tts_model, &cfg.tts_voice, key.clone(), zdr, http.clone()), think::Think::new(&cfg.think_model, key, zdr, http))
+            let tts = speech::Tts::new(&cfg.tts_model, &cfg.tts_voice, api, key.clone(), zdr, http.clone());
+            (tts, think::Think::new(&cfg.think_model, api, key, zdr, http))
         });
         let (state, about) = (state.into(), about.into());
         Arc::new(Voice { cfg, events, dispatcher, audit, read, denied, state, about, web, asr, speech })

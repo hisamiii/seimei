@@ -33,6 +33,17 @@ pub(crate) fn app_on(state: &Path, work: &Path, keys: &str) -> seimei_server::Ap
 
 /// The same with a [voice] config.
 pub(crate) fn app_with(state: &Path, work: &Path, keys: &str, voice: seimei_core::voice::Config) -> seimei_server::App {
+    app_full(state, work, keys, voice, None)
+}
+
+/// The same with dictation too, which a direct voice call needs.
+pub(crate) fn app_full(
+    state: &Path,
+    work: &Path,
+    keys: &str,
+    voice: seimei_core::voice::Config,
+    asr: Option<Arc<seimei_core::asr::Asr>>,
+) -> seimei_server::App {
     let events = Arc::new(EventLog::open(&state.join("events.jsonl")).unwrap());
     let push = Push::new(
         events.clone(),
@@ -55,7 +66,7 @@ pub(crate) fn app_with(state: &Path, work: &Path, keys: &str, voice: seimei_core
         shikigami: "default".into(),
         terminal: String::new(),
         plugins,
-        asr: None,
+        asr,
         voice,
     })
     .unwrap()
