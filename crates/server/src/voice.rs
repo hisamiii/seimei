@@ -1,6 +1,6 @@
 //! GET /api/voice/ws (docs/voice.md): a voice call. Binary frames carry PCM16 mono at 16 kHz both ways; text frames carry JSON.
-//! Up: {"type": "speed", "speed": 1.2} when the device's speed changes mid-call, {"type": "barge"} when the client's own voice detection hears the user over the partner (it has cut its playback already), {"type": "stats"} for the server log, {"type": "end"}.
-//! Down: {"type": "state"}, "flush" (drop what is queued to play), "saying" (the partner's words as they play), "said", "asking", "answered", "error".
+//! Up: {"type": "speed", "speed": 1.2} when the device's speed changes mid-call, {"type": "mute", "muted": true} when the user presses mute, {"type": "barge"} when the client's own voice detection hears the user over the partner (it has cut its playback already), {"type": "stats"} for the server log, {"type": "end"}.
+//! Down: {"type": "state"}, "flush" (drop what is queued to play), "saying" (the partner's words as they play), "said", "asking", "answered", "error", and "mute" with "muted" (seimei mutes or unmutes the user's mic, as the mute button does).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -57,6 +57,7 @@ pub async fn ws(
                         match v["type"].as_str() {
                             Some("barge") => _ = up_tx.try_send(Up::Barge),
                             Some("speed") => if let Some(s) = v["speed"].as_f64() { _ = up_tx.try_send(Up::Speed(s)) },
+                            Some("mute") => _ = up_tx.try_send(Up::Mute(v["muted"] == true)),
                             Some("end") => _ = up_tx.send(Up::End).await,
                             // The page's own numbers: whether its audio could play, and what cut it.
                             Some("stats") => eprintln!("seimei: voice: page: {}", seimei_core::util::chars(&t, 600)),

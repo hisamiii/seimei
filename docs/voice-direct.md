@@ -164,6 +164,16 @@ The dispatcher can end the call itself, as the user's red button does: when the 
 - **The user may go on.** While the user talks, or their words are still being heard, the call stays. If their words go out to the dispatcher, the hang up is off.
 - **A long turn does not hold it.** After 20 s the call ends once its audio has played, even if the dispatcher's turn goes on.
 
+## Muting
+
+The dispatcher can mute the user's mic, as their mute button does: for "mute for a sec" or "hold on, I'm talking to someone".
+
+- **Mute waits for the words.** `mute_call` mutes once the dispatcher's words are spoken, on the same terms as a hang up. Then the server sends `{"type": "mute", "muted": true}` and a short falling tone.
+- **The clients show it.** The page, the app and the watch set their mute button from the message, so the call bar reads "Muted".
+- **Unmuting.** The user's mute button unmutes, as always, and tells the server. A message the user types in the chat also unmutes, and goes to the dispatcher as a normal message.
+- **A timed mute.** `unmute_call` unmutes at once. For "mute for two minutes" the dispatcher sets a time watch and calls it when the watch fires.
+- **The user hears it.** An unmute by seimei or by a typed message plays a short rising tone, and the mute button turns off.
+
 ## Config
 
 These keys under `[voice]` set direct mode.

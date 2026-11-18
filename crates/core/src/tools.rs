@@ -604,6 +604,20 @@ impl Tools {
                     text("No direct voice call is on.", true)
                 }
             }
+            "mute_call" => {
+                if self.line.mute(true) {
+                    text("The user's mic mutes once this turn's words are spoken, with a short falling tone. It is live again when they press their mute button, type in the chat, or you call unmute_call.", false)
+                } else {
+                    text("No direct voice call is on.", true)
+                }
+            }
+            "unmute_call" => {
+                if self.line.mute(false) {
+                    text("The user's mic is live again: they hear a short rising tone and their mute button turns off.", false)
+                } else {
+                    text("No direct voice call is on.", true)
+                }
+            }
             "presence" => {
                 let rows = self.push.presence();
                 if rows.is_empty() {

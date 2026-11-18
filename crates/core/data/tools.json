@@ -463,6 +463,28 @@
    "_meta": {
     "anthropic/alwaysLoad": true
    },
+   "description": "Mute the user's mic in their voice call, as their mute button does: when they ask you to (\"mute for a sec\", \"hold on, I'm talking to someone\"). The words of this turn are spoken first, then a short falling tone. Their button or a message they type in the chat unmutes it; for a timed mute (\"mute for two minutes\"), set a watch for the time and call unmute_call when it fires. Only for a direct voice call ([voice call] messages).",
+   "inputSchema": {
+    "properties": {},
+    "type": "object"
+   },
+   "name": "mute_call"
+  },
+  {
+   "_meta": {
+    "anthropic/alwaysLoad": true
+   },
+   "description": "Unmute the user's mic in their voice call, at once: a short rising tone tells them it is live again. For a timed mute you set with mute_call. Only for a direct voice call.",
+   "inputSchema": {
+    "properties": {},
+    "type": "object"
+   },
+   "name": "unmute_call"
+  },
+  {
+   "_meta": {
+    "anthropic/alwaysLoad": true
+   },
    "description": "Push a notification to the user's phone. Nothing else pushes on its own except approval cards: use it when the user asked to hear about something (an APK is up, a run finished), when a shikigami or session needs them soon, or with reply=true when they asked you something and left the app (the tap opens the chat at your latest message; it skips a phone already showing the chat). level: silent (no sound), normal (default), urgent (sound, high priority; rare emergencies only). key: pings with the same key update one notification instead of stacking (e.g. 'build', 'render-7'). Pings without a key while the user is away show together. Check presence first when unsure.",
    "inputSchema": {
     "properties": {

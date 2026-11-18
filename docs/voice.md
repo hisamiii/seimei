@@ -158,6 +158,7 @@ The socket carries PCM16 mono at 16 kHz both ways as binary frames, and JSON as 
 The client sends the microphone without pause, silence included, since Phonic expects a steady stream. Text frames up:
 
 - `{"type": "speed", "speed": 1.2}`: the device's speed changed during the call. A direct call speaks its next words at it; Phonic keeps the speed it started with.
+- `{"type": "mute", "muted": true}`: the user pressed their mute button. A direct call keeps track, so a typed message can unmute the mic.
 - `{"type": "barge"}`: the client's own voice detection heard the user over the partner, and the client has cut its playback. The bridge then holds back the partner's audio until Phonic's own detection agrees, or for 1.5 s on a false alarm.
 - `{"type": "stats", ...}`: the page's numbers for the server log, every 10 s and at hang-up. They hold the audio context's state and rate, the way out and any fallback, the seconds played and cut, barges, flushes and the echo estimate. With the stream they also hold its wait and stalls.
 - `{"type": "end"}`: hang up.
@@ -169,6 +170,7 @@ Text frames down:
 - `{"type": "saying", "text": ...}`: the partner's words that go with the audio just sent, for a live line.
 - `{"type": "said", "who": "user" | "partner", "text": ...}`: a finished turn.
 - `{"type": "asking", "request": ...}` and `{"type": "answered", "request": ...}`: an ask_seimei call and its answer.
+- `{"type": "mute", "muted": ...}`: seimei muted or unmuted the user's mic in a direct call. The client sets its mute button so, as if the user pressed it.
 - `{"type": "error", "text": ...}`.
 
 Down audio is only what is heard. Phonic streams silent chunks nonstop, so the bridge forwards a chunk only while the partner speaks, or when it holds sound or words.

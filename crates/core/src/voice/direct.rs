@@ -122,6 +122,10 @@ struct Direct {
     /// The dispatcher asked to hang up, and since when all it said has played.
     hanging: Option<Instant>,
     hang_ready: Option<Instant>,
+    /// The user's mic is muted on the client; the dispatcher asked to mute it, and since when all it said has played.
+    muted: bool,
+    muting: Option<Instant>,
+    mute_ready: Option<Instant>,
     /// The whole call, for the summary.
     lines: Vec<String>,
     started: Instant,
@@ -214,6 +218,23 @@ fn language_name(code: &str) -> &str {
 }
 
 /// PCM16 mono at RATE as a WAV file.
+/// Two short notes as PCM16 at RATE: rising when the mic opens, falling when it mutes.
+fn tone(muting: bool) -> Vec<u8> {
+    let notes: [f64; 2] = if muting { [880.0, 587.0] } else { [587.0, 880.0] };
+    let n = RATE as usize * 90 / 1000;
+    let mut pcm = Vec::with_capacity(4 * n);
+    for hz in notes {
+        for i in 0..n {
+            let t = i as f64 / f64::from(RATE);
+            // A short fade at both ends, so no click.
+            let edge = (i.min(n - i) as f64 / (n as f64 * 0.15)).min(1.0);
+            let s = (2.0 * std::f64::consts::PI * hz * t).sin() * 6000.0 * edge;
+            pcm.extend_from_slice(&(s as i16).to_le_bytes());
+        }
+    }
+    pcm
+}
+
 fn wav(pcm: &[i16]) -> Vec<u8> {
     let data = (pcm.len() * 2) as u32;
     let mut w = Vec::with_capacity(44 + data as usize);
@@ -327,6 +348,9 @@ pub async fn call(v: Arc<Voice>, mut up: mpsc::Receiver<Up>, down: mpsc::Sender<
         said_state: "",
         hanging: None,
         hang_ready: None,
+        muted: false,
+        muting: None,
+        mute_ready: None,
         lines: vec![],
         started: Instant::now(),
     };
@@ -342,6 +366,7 @@ pub async fn call(v: Arc<Voice>, mut up: mpsc::Receiver<Up>, down: mpsc::Sender<
                 Some(Up::Audio(pcm)) => c.mic(&pcm),
                 Some(Up::Barge) => c.barge(),
                 Some(Up::Speed(s)) => if s.is_finite() { c.speed = s.clamp(0.5, 1.5) },
+                Some(Up::Mute(on)) => c.pressed_mute(on),
                 Some(Up::End) | None => break,
             },
             ev = live.recv() => match ev {
@@ -351,6 +376,7 @@ pub async fn call(v: Arc<Voice>, mut up: mpsc::Receiver<Up>, down: mpsc::Sender<
             d = done_rx.recv() => if let Some(d) = d { c.finished(d) },
             _ = tick.tick() => {
                 c.send_audio();
+                c.mute_now();
                 if c.hang_up() {
                     break;
                 }
@@ -868,6 +894,16 @@ impl Direct {
             self.hanging = Some(now);
         }
         let Some(asked) = self.hanging else { return false };
+        if !self.said_all(asked) {
+            self.hang_ready = None;
+            return false;
+        }
+        now - *self.hang_ready.get_or_insert(now) >= HANG_SETTLE
+    }
+
+    /// Since `asked`, the dispatcher's turn is over (or went on past HANG_WAIT), the client played all it said, and the user is not talking.
+    fn said_all(&self, asked: Instant) -> bool {
+        let now = Instant::now();
         let spoken = self.queue.is_empty()
             && self.rendering == 0
             && self.rendered.is_empty()
@@ -876,11 +912,49 @@ impl Direct {
         let over = !self.v.dispatcher.busy() || now - asked > HANG_WAIT;
         // The user talks, or their words are still being heard: they may want more.
         let user = self.cutter.in_turn() || !self.clauses.is_empty();
-        if !spoken || !over || user {
-            self.hang_ready = None;
-            return false;
+        spoken && over && !user
+    }
+
+    /// The dispatcher's mute_call mutes the user's mic once its words are spoken; unmute_call unmutes it at once.
+    fn mute_now(&mut self) {
+        let now = Instant::now();
+        match self.v.line.muting() {
+            Some(true) if !self.muted && self.muting.is_none() => {
+                eprintln!("seimei: voice: seimei mutes the user's mic once its words are spoken");
+                self.muting = Some(now);
+            }
+            Some(false) => self.set_muted(false, "seimei"),
+            _ => {}
         }
-        now - *self.hang_ready.get_or_insert(now) >= HANG_SETTLE
+        let Some(asked) = self.muting else { return };
+        if !self.said_all(asked) {
+            self.mute_ready = None;
+            return;
+        }
+        if now - *self.mute_ready.get_or_insert(now) >= HANG_SETTLE {
+            self.set_muted(true, "seimei");
+        }
+    }
+
+    /// seimei mutes or unmutes the user's mic: the client sets its mute button so, and a short tone says it, falling for mute and rising for unmute.
+    fn set_muted(&mut self, on: bool, by: &str) {
+        self.muting = None;
+        self.mute_ready = None;
+        if self.muted == on {
+            return;
+        }
+        self.muted = on;
+        eprintln!("seimei: voice: {by} {} the user's mic", if on { "muted" } else { "unmuted" });
+        self.say(json!({"type": "mute", "muted": on}));
+        self.out.extend(tone(on));
+    }
+
+    /// The user pressed their mute button: no tone, they know.
+    fn pressed_mute(&mut self, on: bool) {
+        self.muted = on;
+        self.muting = None;
+        self.mute_ready = None;
+        eprintln!("seimei: voice: the user {} their mic", if on { "muted" } else { "unmuted" });
     }
 
     /// The client heard the user over seimei and cut its playback: what is still to say is dropped.
@@ -912,6 +986,10 @@ impl Direct {
     fn event(&mut self, ev: &Value) {
         let re = ev["re"].as_i64().is_some_and(|r| self.mine.contains(&r));
         match ev["type"].as_str().unwrap_or("") {
+            // The user typed in the chat while muted: they are back, so the mic is live again. The message itself is a normal one.
+            "user" if ev["voice"] != true && ev.get("thread").is_none() && (self.muted || self.muting.is_some()) => {
+                self.set_muted(false, "a typed message");
+            }
             "delta" if re && ev["lane"] == "c" => {
                 if let Some((_, t)) = self.timings.iter_mut().find(|(id, _)| Some(*id) == ev["re"].as_i64()) {
                     t.delta.get_or_insert_with(Instant::now);

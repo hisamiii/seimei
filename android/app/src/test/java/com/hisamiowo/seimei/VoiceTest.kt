@@ -234,6 +234,7 @@ class VoiceTest {
         assertEquals(VoiceMsg.Saying("Sure, "), VoiceMsg.parse("""{"type": "saying", "text": "Sure, "}"""))
         assertEquals(VoiceMsg.Said("partner", "Sure."), VoiceMsg.parse("""{"type": "said", "who": "partner", "text": "Sure."}"""))
         assertEquals(VoiceMsg.Error("no key"), VoiceMsg.parse("""{"type": "error", "text": "no key"}"""))
+        assertEquals(VoiceMsg.Mute(true), VoiceMsg.parse("""{"type": "mute", "muted": true}"""))
         assertNull(VoiceMsg.parse("""{"type": "asking", "request": "uptime"}"""))
         assertNull(VoiceMsg.parse("not json"))
     }

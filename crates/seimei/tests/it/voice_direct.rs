@@ -1,6 +1,6 @@
 //! A direct voice call through /api/voice/ws (docs/voice-direct.md), with the fake agent CLI as the dispatcher.
 //! A fake OpenRouter does speech recognition, pre-think and speech, and a fake HeyGen speaks with the account's voice until its credit runs out.
-//! It covers pre-think's lookups, the message to the dispatcher, its reply spoken back as the first sound, a barge, and the thread's events.
+//! It covers pre-think's lookups, the message to the dispatcher, its reply spoken back as the first sound, a barge, a mute and a hang up, and the thread's events.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -15,7 +15,9 @@ use crate::dispatcher::{after, app_full, until};
 const WORDS: &str = "Is the lantern benchmark done?";
 /// What a short clause is heard as: words that trail off, so the turn waits for more.
 const HALF: &str = "and the kiln, like";
-/// What a long clause is heard as: the user says bye, and the dispatcher hangs up.
+/// What a 3 to 4 s clause is heard as: the user asks for quiet, and the dispatcher mutes their mic.
+const MUTE: &str = "Hold on, mute for a sec.";
+/// What a longer clause is heard as: the user says bye, and the dispatcher hangs up.
 const BYE: &str = "Okay, that's all for now, bye.";
 
 #[test]
@@ -77,6 +79,7 @@ async fn fake_openrouter(asked: Asked) -> u16 {
                         let text = match wav {
                             n if n < secs(18) => HALF,
                             n if n < secs(30) => WORDS,
+                            n if n < secs(40) => MUTE,
                             _ => BYE,
                         };
                         axum::Json(json!({"text": text})).into_response()
@@ -150,7 +153,13 @@ async fn run(base: PathBuf) {
             while let Some(Ok(msg)) = rx.next().await {
                 match msg {
                     Message::Binary(b) => got.lock().unwrap().1 += b.len(),
-                    Message::Text(t) => got.lock().unwrap().0.push(serde_json::from_str(&t).unwrap()),
+                    Message::Text(t) => {
+                        // Each message notes how much audio came before it.
+                        let mut got = got.lock().unwrap();
+                        let mut m: Value = serde_json::from_str(&t).unwrap();
+                        m["_bytes"] = json!(got.1);
+                        got.0.push(m);
+                    }
                     Message::Close(_) => break,
                     _ => {}
                 }
@@ -243,11 +252,29 @@ async fn run(base: PathBuf) {
     assert!(heard.contains("goes on from their last message"), "{heard}");
     assert_eq!(msgs().iter().filter(|m| m["type"] == "flush").count(), 1, "{:?}", msgs());
 
+    // The user asks for quiet: the mic mutes once the reply played, with a tone; a message they type unmutes it.
+    assert!(until(20, || msgs().last().is_some_and(|m| m["state"] == "listening")).await, "{:?}", msgs());
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let before = msgs().len();
+    for f in frames(2700, true).into_iter().chain(frames(800, false)) {
+        tx.send(Message::Binary(f.into())).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let muted = |on: bool| msgs()[before..].iter().position(|m| m["type"] == "mute" && m["muted"] == on);
+    assert!(until(20, || muted(true).is_some()).await, "no mute: {:?}", &msgs()[before..]);
+    let reply = msgs()[before..].iter().position(|m| m["type"] == "said" && m["who"] == "partner").expect("the reply was spoken");
+    assert!(reply < muted(true).unwrap(), "muted before the reply: {:?}", &msgs()[before..]);
+    // The tone: two notes of 90 ms after the mute.
+    let bytes = msgs()[before + muted(true).unwrap()]["_bytes"].as_u64().unwrap() as usize;
+    assert!(until(5, || got.lock().unwrap().1 >= bytes + 2 * 16_000 * 18 / 100).await, "no tone");
+    app.dispatcher.send("back now", &[], vec![], &[], None, None);
+    assert!(until(10, || muted(false).is_some()).await, "the typed message did not unmute: {:?}", &msgs()[before..]);
+
     // The user says bye: the dispatcher calls end_call before its goodbye, and the call ends once the goodbye played.
     assert!(until(20, || msgs().last().is_some_and(|m| m["state"] == "listening")).await, "{:?}", msgs());
     tokio::time::sleep(Duration::from_millis(400)).await;
     let before = msgs().len();
-    for f in frames(3000, true).into_iter().chain(frames(800, false)) {
+    for f in frames(4000, true).into_iter().chain(frames(800, false)) {
         tx.send(Message::Binary(f.into())).await.unwrap();
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
@@ -262,7 +289,7 @@ async fn run(base: PathBuf) {
     // The thread: the user's spoken words, seimei's reply to them, and the call's end.
     let evs = after(&app, from);
     let words: Vec<&Value> = evs.iter().filter(|e| e["type"] == "user" && e["spoken"] == true).collect();
-    assert_eq!(words.len(), 4, "{evs:?}");
+    assert_eq!(words.len(), 5, "{evs:?}");
     assert_eq!(words[0]["text"], WORDS);
     assert_eq!(words[0]["voice"], true);
     let first = words[0]["id"].as_i64().unwrap();

@@ -13,7 +13,7 @@ pub mod web;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use base64::Engine;
@@ -188,6 +188,8 @@ pub enum Up {
     Barge,
     /// The client's speed changed during the call: a direct call speaks its next words at it; Phonic keeps the one it started with.
     Speed(f64),
+    /// The user pressed their mute button: whether the mic is muted now.
+    Mute(bool),
     End,
 }
 
@@ -203,12 +205,17 @@ pub type Reader = Box<dyn Fn(&str, &Value) -> Value + Send + Sync>;
 /// The paths no agent may read, from config; set after startup.
 pub type Denied = Box<dyn Fn() -> Vec<String> + Send + Sync>;
 
-/// The dispatcher's end_call tool reaching the direct calls that are on: it asks them to hang up once its words are spoken.
+/// The dispatcher's call tools reaching the direct calls that are on: end_call hangs up and mute_call mutes the user's mic once its words are spoken; unmute_call unmutes at once.
 #[derive(Default)]
 pub struct Line {
     calls: AtomicUsize,
     hang: AtomicBool,
+    /// 0 for nothing asked, MUTE or UNMUTE.
+    mute: AtomicU8,
 }
+
+const MUTE: u8 = 1;
+const UNMUTE: u8 = 2;
 
 impl Line {
     /// Asks the calls that are on to hang up; false when none is.
@@ -220,9 +227,19 @@ impl Line {
         on
     }
 
+    /// Asks the calls that are on to mute or unmute the user's mic; false when none is.
+    pub fn mute(&self, on: bool) -> bool {
+        let on_call = self.calls.load(Ordering::Relaxed) > 0;
+        if on_call {
+            self.mute.store(if on { MUTE } else { UNMUTE }, Ordering::Relaxed);
+        }
+        on_call
+    }
+
     fn open(&self) {
         self.calls.fetch_add(1, Ordering::Relaxed);
         self.hang.store(false, Ordering::Relaxed);
+        self.mute.store(0, Ordering::Relaxed);
     }
 
     fn close(&self) {
@@ -232,6 +249,15 @@ impl Line {
     /// Whether the dispatcher asked to hang up since the last look.
     fn asked(&self) -> bool {
         self.hang.swap(false, Ordering::Relaxed)
+    }
+
+    /// Whether the dispatcher asked to mute (true) or unmute (false) since the last look.
+    fn muting(&self) -> Option<bool> {
+        match self.mute.swap(0, Ordering::Relaxed) {
+            MUTE => Some(true),
+            UNMUTE => Some(false),
+            _ => None,
+        }
     }
 }
 
@@ -716,7 +742,7 @@ impl Call {
                             return Ok(End::Dropped);
                         }
                     }
-                    Some(Up::Speed(_)) => {}
+                    Some(Up::Speed(_) | Up::Mute(_)) => {}
                     Some(Up::Barge) => {
                         eprintln!("seimei: voice: barge from the page{}", if self.partner_speaking { "" } else { ", the partner was quiet" });
                         if self.partner_speaking {

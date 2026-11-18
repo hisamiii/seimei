@@ -213,9 +213,16 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
     /** The device's speed changed during the call: the bridge speaks the partner's next words at it. */
     fun changeSpeed(v: Double) = text(JSONObject().put("type", "speed").put("speed", v).toString())
 
+    /** The mute button: the server hears of it, so a message the user types can unmute what seimei muted. */
     fun toggleMute() {
-        muted = !muted
-        up.muted = muted
+        mute(!muted)
+        text(JSONObject().put("type", "mute").put("muted", muted).toString())
+    }
+
+    /** The button, or seimei asking for it (a "mute" message): the call bar on the phone and the watch shows it either way. */
+    private fun mute(on: Boolean) {
+        muted = on
+        up.muted = on
     }
 
     fun clearSaying() {
@@ -551,6 +558,7 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
                 }
                 is VoiceMsg.Said -> if (m.who == "partner") lineDone = true
                 is VoiceMsg.Error -> main.post { host.tell(m.text) }
+                is VoiceMsg.Mute -> main.post { mute(m.muted) }
                 null -> {}
             }
         }

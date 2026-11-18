@@ -64,6 +64,8 @@ sealed interface VoiceMsg {
     data class Saying(val text: String) : VoiceMsg
     data class Said(val who: String, val text: String) : VoiceMsg
     data class Error(val text: String) : VoiceMsg
+    /** seimei muted or unmuted the user's mic, as the mute button does. */
+    data class Mute(val muted: Boolean) : VoiceMsg
 
     companion object {
         fun parse(text: String): VoiceMsg? {
@@ -78,6 +80,7 @@ sealed interface VoiceMsg {
                 "saying" -> Saying(m.str("text"))
                 "said" -> Said(m.str("who"), m.str("text"))
                 "error" -> Error(m.str("text"))
+                "mute" -> Mute(m.optBoolean("muted"))
                 else -> null
             }
         }

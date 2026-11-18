@@ -247,6 +247,8 @@ function message(c, m) {
     c.state = m.state;
     label(c);
     if (m.state === 'ended') hangUp('');
+  } else if (m.type === 'mute') {
+    setMute(c, m.muted === true);
   } else if (m.type === 'flush') {
     c.stats.flushes++;
     cut(c);
@@ -492,12 +494,18 @@ speedBtn.addEventListener('click', () => {
 });
 showSpeed();
 
+// The mute button, or seimei muting the mic for the user (a "mute" message): the button shows it either way.
+function setMute(c, on) {
+  c.muted = on;
+  mute.classList.toggle('on', on);
+  mute.setAttribute('aria-label', on ? 'Unmute' : 'Mute');
+  label(c);
+}
+
 mute.addEventListener('click', () => {
   if (!call) return;
-  call.muted = !call.muted;
-  mute.classList.toggle('on', call.muted);
-  mute.setAttribute('aria-label', call.muted ? 'Unmute' : 'Mute');
-  label(call);
+  setMute(call, !call.muted);
+  send(call, { type: 'mute', muted: call.muted });
 });
 
 // The voice button shows when the server has voice on and the browser can record (https or localhost).
