@@ -31,6 +31,10 @@ class Prefs(ctx: Context) {
     var pushToken: String?
         get() = p.getString("pushToken", null)
         set(v) = p.edit().putString("pushToken", v).apply()
+    /** The voice partner's speed, as on the phone (Voice.SPEEDS); null for normal. */
+    var voiceSpeed: Double?
+        get() = p.getString("voiceSpeed", null)?.toDoubleOrNull()?.takeIf { it in Voice.SPEEDS }
+        set(v) = p.edit().putString("voiceSpeed", v?.toString()).apply()
     /** The echo the last voice call learned (Barge.learned). */
     var voiceEcho: Double?
         get() = p.getString("voiceEcho", null)?.toDoubleOrNull()

@@ -172,6 +172,8 @@ class Model(app: Application) : AndroidViewModel(app), Dictation.Host {
     /** The server takes voice calls. */
     var voiceOn by mutableStateOf(false)
         private set
+    var voiceSpeed by mutableStateOf(prefs.voiceSpeed)
+        private set
     /** The assist gesture opened the app: the chat's mic starts as soon as the chat shows. */
     var dictateNow by mutableStateOf(false)
 
@@ -784,8 +786,16 @@ class Model(app: Application) : AndroidViewModel(app), Dictation.Host {
             } catch (e: JSONException) {
                 return@launch tell("Couldn't reach the server", ::startCall)
             }
-            CallService.start(getApplication(), a)
+            CallService.start(getApplication(), a, voiceSpeed)
         }
+    }
+
+    /** The call bar's speed: the next one, for the partner's next words and the calls after. */
+    fun nextSpeed() {
+        val v = Voice.nextSpeed(voiceSpeed)
+        prefs.voiceSpeed = v
+        voiceSpeed = v
+        CallService.call?.changeSpeed(v)
     }
 
     /** What the server needs besides the audio (docs/asr.md). */

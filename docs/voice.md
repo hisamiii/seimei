@@ -146,6 +146,7 @@ The Wear OS app makes the phone app's call, with the same `VoiceCall`, canceller
 
 - **In the chat.** A call has no screen of its own: its turns land in the chat. A bar takes the composer's place, with mute, the call's time and hang up. The talk button sits in send's place on an empty composer, as on the phone.
 - **In the background.** The call runs in a foreground service for the microphone and media playback. It goes on with the screen off or another app in front. Its ongoing activity shows on the watch face, with Mute and Hang up, and a tap opens the chat.
+- **Speed.** A tap on the call's time sets the next speed, kept on the watch as on the phone. The speed shows in the time's place for a moment.
 - **Hiss.** A watch's small speaker makes "s" sounds hiss. So the watch's call runs the partner's audio through a high shelf, 4 dB down above 5 kHz, as it comes in. The speaker and the canceller's reference get the same filtered audio.
 - **The network.** The app uses the watch's default network: the phone's Bluetooth proxy when the phone is near, else the watch's own Wi-Fi or LTE. It never asks for a faster network, which would power up Wi-Fi and cost battery. 16 kHz PCM is 256 kbit/s each way.
 - **A new route.** When the default network changes, the app drops its connections at once and opens the event stream again on the new one. A dead route would otherwise hold the stream until its 40 s read timeout. A call's socket does not move: it ends with the old route.

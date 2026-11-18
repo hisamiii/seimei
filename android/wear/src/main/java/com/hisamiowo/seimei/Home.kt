@@ -189,7 +189,7 @@ fun ChatPage(vm: Model, active: Boolean, onFold: (String) -> Unit) {
             }
             Gap(6.dp)
             val call = CallService.call
-            if (call != null) CallBar(call)
+            if (call != null) CallBar(call, vm)
             else Composer(vm.draft, vm::edit, "Message seimei", "chat", vm, onSend = vm::send, autoDictate = vm.dictateNow, talk = true)
         }
         Header(vm, lift) { T("seimei", size = TITLE, weight = FontWeight.Medium, lines = 1) }
