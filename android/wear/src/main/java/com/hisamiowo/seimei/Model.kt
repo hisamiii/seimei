@@ -169,6 +169,9 @@ class Model(app: Application) : AndroidViewModel(app), Dictation.Host {
     val dictation = Dictation(this)
     var asrOn by mutableStateOf(false)
         private set
+    /** The server takes voice calls. */
+    var voiceOn by mutableStateOf(false)
+        private set
     /** The assist gesture opened the app: the chat's mic starts as soon as the chat shows. */
     var dictateNow by mutableStateOf(false)
 
@@ -414,6 +417,7 @@ class Model(app: Application) : AndroidViewModel(app), Dictation.Host {
             presence()
             refreshPage()
             checkAsr()
+            checkVoice()
             registerPush()
             return
         }
@@ -752,6 +756,35 @@ class Model(app: Application) : AndroidViewModel(app), Dictation.Host {
             } catch (e: JSONException) {
                 false
             }
+        }
+    }
+
+    private fun checkVoice() {
+        viewModelScope.launch {
+            voiceOn = try {
+                api.get("api/voice").optBoolean("enabled")
+            } catch (e: IOException) {
+                voiceOn
+            } catch (e: JSONException) {
+                false
+            }
+        }
+    }
+
+    /** Starts a voice call (docs/voice.md), which goes on in the chat; at a cold start it logs in first. The caller has the microphone's permission. */
+    fun startCall() {
+        go(Screen.Home)
+        homePage = 0
+        if (CallService.call != null) return
+        viewModelScope.launch {
+            val a = try {
+                Session.login(getApplication())
+            } catch (e: IOException) {
+                return@launch tell("Couldn't reach the server", ::startCall)
+            } catch (e: JSONException) {
+                return@launch tell("Couldn't reach the server", ::startCall)
+            }
+            CallService.start(getApplication(), a)
         }
     }
 

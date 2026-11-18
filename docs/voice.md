@@ -137,6 +137,15 @@ The Android app makes the same call as the page over the same socket, with the s
   - `comm`: the communication device's type that the platform reports;
   - `jitter`: its `stalls`, the worst `lateMs` and the `prebufferMs` now.
 
+## The watch app
+
+The Wear OS app makes the phone app's call, with the same `VoiceCall`, canceller and jitter buffer from `android/shared`. A watch's speaker and microphone sit millimeters apart, so it needs the canceller most.
+
+- **In the chat.** A call has no screen of its own: its turns land in the chat. A bar takes the composer's place, with mute, the call's time and hang up. The talk button sits in send's place on an empty composer, as on the phone.
+- **In the background.** The call runs in a foreground service for the microphone and media playback. It goes on with the screen off or another app in front. Its ongoing activity shows on the watch face, with Mute and Hang up, and a tap opens the chat.
+- **The network.** The app uses the watch's default network: the phone's Bluetooth proxy when the phone is near, else the watch's own Wi-Fi or LTE. It never asks for a faster network, which would power up Wi-Fi and cost battery. 16 kHz PCM is 256 kbit/s each way.
+- **A new route.** When the default network changes, the app drops its connections at once and opens the event stream again on the new one. A dead route would otherwise hold the stream until its 40 s read timeout. A call's socket does not move: it ends with the old route.
+
 ## The client socket
 
 The socket carries PCM16 mono at 16 kHz both ways as binary frames, and JSON as text frames. It needs a login, and a cookie login needs one of the page's own origins.

@@ -31,6 +31,10 @@ import androidx.wear.compose.material3.timeTextCurvedText
 import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
+    companion object {
+        const val CALL = "com.hisamiowo.seimei.CALL"
+    }
+
     private val vm: Model by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -60,8 +64,13 @@ class MainActivity : ComponentActivity() {
         take(intent)
     }
 
-    /** The assist gesture, a voice command, or the "seimei voice" entry: the chat with the mic already on. */
+    /** The call's ongoing activity: the chat, where the call's bar is. The assist gesture, a voice command, or the "seimei voice" entry: the chat with the mic already on. */
     private fun take(intent: Intent?) {
+        if (intent?.action == CALL && vm.phase == Phase.Ready) {
+            vm.go(Screen.Home)
+            vm.homePage = 0
+            return
+        }
         val voice = intent?.action == Intent.ACTION_ASSIST || intent?.action == Intent.ACTION_VOICE_COMMAND ||
             intent?.component?.className?.endsWith(".Voice") == true
         if (!voice || vm.phase != Phase.Ready) return
@@ -101,6 +110,10 @@ private fun Show(vm: Model, s: Screen) = when (s) {
 /** A short note for something that went wrong; a tap retries when there is something to retry. */
 @Composable
 private fun Snack(vm: Model) {
+    LaunchedEffect(CallService.told) {
+        CallService.told?.let { vm.tell(it, null) }
+        CallService.told = null
+    }
     val text = vm.snack ?: return
     val t = LocalT.current
     LaunchedEffect(text) {

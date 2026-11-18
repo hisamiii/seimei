@@ -31,6 +31,10 @@ class Prefs(ctx: Context) {
     var pushToken: String?
         get() = p.getString("pushToken", null)
         set(v) = p.edit().putString("pushToken", v).apply()
+    /** The echo the last voice call learned (Barge.learned). */
+    var voiceEcho: Double?
+        get() = p.getString("voiceEcho", null)?.toDoubleOrNull()
+        set(v) = p.edit().putString("voiceEcho", v?.toString()).apply()
     /** session id -> the last activity time the user has looked at, for "new reply" marks. */
     var seen: String
         get() = p.getString("seen", "{}") ?: "{}"

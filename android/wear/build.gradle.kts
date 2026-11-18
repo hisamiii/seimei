@@ -99,4 +99,5 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
     implementation("com.google.firebase:firebase-messaging:25.1.3")
+    implementation("androidx.wear:wear-ongoing:1.1.0")
 }

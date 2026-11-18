@@ -188,7 +188,9 @@ fun ChatPage(vm: Model, active: Boolean, onFold: (String) -> Unit) {
                 JumpDown(list, follow, if (open >= 0) lead + open else -1)
             }
             Gap(6.dp)
-            Composer(vm.draft, vm::edit, "Message seimei", "chat", vm, onSend = vm::send, autoDictate = vm.dictateNow)
+            val call = CallService.call
+            if (call != null) CallBar(call)
+            else Composer(vm.draft, vm::edit, "Message seimei", "chat", vm, onSend = vm::send, autoDictate = vm.dictateNow, talk = true)
         }
         Header(vm, lift) { T("seimei", size = TITLE, weight = FontWeight.Medium, lines = 1) }
         ScrollIndicator(list, Modifier.align(Alignment.CenterEnd))
@@ -296,12 +298,12 @@ fun openCard(rows: List<Item>) = rows.indexOfFirst { (it is Item.Approval && it.
 /**
  * The composer: one slim pill with the field, the mic and send inside, as v4 draws it.
  * Typing goes through the system keyboard; the mic dictates into the draft (docs/asr.md), and nothing is sent on its own.
- * [stop] shows a stop button while the agent works and the draft is empty.
+ * [stop] shows a stop button while the agent works and the draft is empty; else [talk] puts the voice call's button in send's place, as on the phone.
  */
 @Composable
 fun Composer(
     text: String, onChange: (String) -> Unit, hint: String, target: String, vm: Model, onSend: () -> Unit,
-    stop: (() -> Unit)? = null, autoDictate: Boolean = false,
+    stop: (() -> Unit)? = null, autoDictate: Boolean = false, talk: Boolean = false,
 ) {
     val t = LocalT.current
     val d = vm.dictation
@@ -312,6 +314,13 @@ fun Composer(
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) d.start(target, hintNow()) else vm.snack = "Allow the microphone to dictate"
     }
+    val askCall = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) vm.startCall() else vm.snack = "Allow the microphone to talk"
+    }
+    val call = if (!talk || !vm.voiceOn) null else ({
+        if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) vm.startCall()
+        else askCall.launch(Manifest.permission.RECORD_AUDIO)
+    })
     val mic = {
         if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) d.start(target, hintNow())
         else ask.launch(Manifest.permission.RECORD_AUDIO)
@@ -354,15 +363,15 @@ fun Composer(
                     }
                 },
             )
-            if (!grown) Buttons(vm, text, target, mic, onSend, stop)
+            if (!grown) Buttons(vm, text, target, mic, onSend, stop, call)
         }
         if (recording) RecordingRow(d)
-        else if (grown) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { Buttons(vm, text, target, mic, onSend, stop) }
+        else if (grown) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { Buttons(vm, text, target, mic, onSend, stop, call) }
     }
 }
 
 @Composable
-private fun Buttons(vm: Model, text: String, target: String, mic: () -> Unit, onSend: () -> Unit, stop: (() -> Unit)?) {
+private fun Buttons(vm: Model, text: String, target: String, mic: () -> Unit, onSend: () -> Unit, stop: (() -> Unit)?, call: (() -> Unit)?) {
     val t = LocalT.current
     val d = vm.dictation
     Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -378,6 +387,8 @@ private fun Buttons(vm: Model, text: String, target: String, mic: () -> Unit, on
                 .semantics { contentDescription = "Stop" }, contentAlignment = Alignment.Center) {
                 Box(Modifier.size(10.dp).clip(RoundedCornerShape(3.dp)).background(t.onPrimaryContainer))
             }
+            call != null -> Box(Modifier.size(24.dp).clip(CircleShape).background(t.primary).clickable(onClick = call)
+                .semantics { contentDescription = "Talk" }, contentAlignment = Alignment.Center) { Ico(Icons.wave, 14.dp, t.onPrimary) }
             else -> Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) { Ico(Icons.send, 17.dp, mix(t.text3, t.containerHigh, .45f)) }
         }
     }
