@@ -1,5 +1,6 @@
 package com.hisamiowo.seimei
 
+import android.net.NetworkCapabilities
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
@@ -22,6 +23,14 @@ import okio.buffer
 import okio.sink
 import okio.source
 import org.json.JSONObject
+
+/** The transports a network runs on, for logs and stats, like "bluetooth" for a watch through its phone's proxy or "wifi". */
+fun transport(c: NetworkCapabilities?): String {
+    if (c == null) return "none"
+    val names = listOf(NetworkCapabilities.TRANSPORT_BLUETOOTH to "bluetooth", NetworkCapabilities.TRANSPORT_WIFI to "wifi",
+        NetworkCapabilities.TRANSPORT_CELLULAR to "cellular", NetworkCapabilities.TRANSPORT_ETHERNET to "ethernet", NetworkCapabilities.TRANSPORT_VPN to "vpn")
+    return names.filter { c.hasTransport(it.first) }.joinToString("+") { it.second }.ifEmpty { "other" }
+}
 
 class HttpError(val code: Int, val body: String) : IOException("HTTP $code: ${body.take(200)}")
 
@@ -163,6 +172,12 @@ class Api(server: String) {
      * Cancelling the coroutine alone waits for the blocked read, until the server next writes; meanwhile the server thinks the app is on screen.
      */
     fun closeStream() {
+        current?.cancel()
+    }
+
+    /** The device's network changed: a connection over the old one can hang until its timeout, so the next calls open new ones. */
+    fun dropConnections() {
+        client.connectionPool.evictAll()
         current?.cancel()
     }
 

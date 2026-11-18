@@ -2,6 +2,9 @@ package com.hisamiowo.seimei
 
 import android.app.Application
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.util.Log
 import android.provider.Settings
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -244,6 +247,43 @@ class Model(app: Application) : AndroidViewModel(app), Dictation.Host {
     }
 
     // ---------- foreground and the stream ----------
+
+    // The route to the server: the phone's Bluetooth proxy, Wi-Fi or the watch's own LTE, as Wear OS picks the default network.
+    private val cm = app.getSystemService(ConnectivityManager::class.java)
+    private var network: Network? = null
+    private var routed = false
+    private val routes = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(n: Network) {
+            viewModelScope.launch { reroute(n) }
+        }
+
+        override fun onLost(n: Network) {
+            viewModelScope.launch { if (n == network) reroute(null) }
+        }
+    }
+
+    init {
+        cm.registerDefaultNetworkCallback(routes)
+    }
+
+    override fun onCleared() {
+        cm.unregisterNetworkCallback(routes)
+    }
+
+    /**
+     * A new route, or none: the stream over the old one would hang until its read timeout, so it goes now.
+     * On a new route the stream opens again at once, without the backoff's wait.
+     */
+    private fun reroute(n: Network?) {
+        val first = !routed
+        routed = true
+        if (n == network) return
+        network = n
+        Log.i("seimei", "route " + (n?.let { transport(cm.getNetworkCapabilities(it)) } ?: "none"))
+        if (first) return
+        api.dropConnections()
+        if (n != null && foreground && phase == Phase.Ready) connect()
+    }
 
     fun onStart() {
         foreground = true
