@@ -142,10 +142,6 @@ fun ChatTab(vm: Seimei, lane: String) {
     var zoom by remember { mutableStateOf<String?>(null) }
     val traj = lane == "t"
     val rows = (if (traj) vm.trail else vm.items).asReversed()
-    // The running voice call's card: the open one with a turn since the call started.
-    val call = if (traj) null else CallService.call
-    val saying = call?.saying.orEmpty()
-    val callKey = call?.let { c -> (vm.items.lastOrNull { it is Item.Voice } as? Item.Voice)?.takeIf { !it.ended && it.t1 >= c.since }?.key }
     val scope = rememberCoroutineScope()
     // Rows added below keep the first visible row in place, so after a burst the first visible index says nothing about the reader.
     // Whether they follow the end is judged only while the list scrolls (their finger, or a jump to the end).
@@ -155,7 +151,7 @@ fun ChatTab(vm: Seimei, lane: String) {
             .collect { (moving, i, off) -> if (moving) follow = i == 0 && off < 160 }
     }
     val newest = rows.firstOrNull()
-    LaunchedEffect(newest?.key, vm.live.isEmpty(), vm.busy, saying.isEmpty()) {
+    LaunchedEffect(newest?.key, vm.live.isEmpty(), vm.busy) {
         if (vm.focus != null) return@LaunchedEffect
         // A card waiting for the user's OK always comes into view.
         if (follow || (newest is Item.Approval && newest.outcome == null)) {
@@ -172,7 +168,7 @@ fun ChatTab(vm: Seimei, lane: String) {
     }
     // Rows sit after the away card and the live or working row, when those show.
     val liveHere = vm.live.isNotEmpty() && vm.liveLane == lane
-    val lead = listOf(!vm.online && vm.awaySince != null, liveHere || (vm.online && vm.busy && vm.waiting == 0), saying.isNotEmpty()).count { it } +
+    val lead = listOf(!vm.online && vm.awaySince != null, liveHere || (vm.online && vm.busy && vm.waiting == 0)).count { it } +
         if (traj) 0 else vm.pending.size
     // A tapped notification names an event; it may sit in either lane.
     LaunchedEffect(vm.focus, rows.size) {
@@ -230,17 +226,14 @@ fun ChatTab(vm: Seimei, lane: String) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         if (!vm.online && vm.awaySince != null) item(key = "away") { Away(vm) }
-        // The partner speaks before the call's first turn is in the chat: its card is drawn already, last.
-        if (call != null && callKey == null && saying.isNotEmpty()) item(key = "saying") { CallCard(Item.Voice("saying", call.since, call.since), call) }
         if (liveHere) item(key = "live") { Md(vm.live) }
         else if (vm.online && vm.busy && vm.waiting == 0) item(key = "working") { Working() }
         if (!traj) items(vm.pending.asReversed(), key = { "p" + it.cid }) { PendingMsg(it, vm) }
         items(rows, key = { it.key }, contentType = { it::class }) { row ->
             Box(if (row.key == flashing) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp)) else Modifier) {
                 val quote = row.quote(if (traj) "t" else "c")
-                val live = if (row.key == callKey) call else null
-                if (quote != null) SwipeReply({ vm.replyIn(quote) }) { Row(row, vm, chat = !traj, call = live) { zoom = it } }
-                else Row(row, vm, chat = !traj, call = live) { zoom = it }
+                if (quote != null) SwipeReply({ vm.replyIn(quote) }) { Row(row, vm, chat = !traj) { zoom = it } }
+                else Row(row, vm, chat = !traj) { zoom = it }
             }
         }
         if (vm.hasOlder) item(key = "older") {
@@ -379,12 +372,10 @@ fun TrigRow(t: Item.Trig) {
 }
 
 @Composable
-fun Row(item: Item, vm: Seimei, live: JSONObject? = null, chat: Boolean = false, call: VoiceCall? = null, onPicture: (String) -> Unit) {
+fun Row(item: Item, vm: Seimei, live: JSONObject? = null, chat: Boolean = false, onPicture: (String) -> Unit) {
     when (item) {
         is Item.Day -> NotePill(dayLabel(item.t), "", day = true)
         is Item.Msg -> if (item.role == "user") UserMsg(item, vm, onPicture) else AssistantMsg(item, vm, chat)
-        is Item.Asked -> AskedLine(item)
-        is Item.Voice -> CallCard(item, call)
         is Item.Fold -> FoldPill(item, vm)
         is Item.Trig -> TrigRow(item)
         is Item.Note -> NotePill(item.text + if (item.n > 1) "  ×${item.n}" else "", item.level)
@@ -495,7 +486,14 @@ fun UserMsg(m: Item.Msg, vm: Seimei, onPicture: (String) -> Unit) {
                 Spacer(Modifier.size(6.dp))
             }
             if (m.text.isNotEmpty()) SelectionContainer {
-                Text(m.text, color = MaterialTheme.colorScheme.onPrimaryContainer, lineHeight = 23.2.sp, fontSize = 16.sp)
+                Row {
+                    // Said in a voice call: a small wave before the words.
+                    if (m.voiced) {
+                        Icon(Icons.wave, "Spoken", Modifier.padding(top = 4.dp).size(14.dp).alpha(.6f), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(m.text, color = MaterialTheme.colorScheme.onPrimaryContainer, lineHeight = 23.2.sp, fontSize = 16.sp)
+                }
             }
             if (time) Text(clock(m.t), fontSize = 12.sp, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = .7f))
         }
@@ -601,6 +599,8 @@ fun AssistantMsg(m: Item.Msg, vm: Seimei, chat: Boolean = false) {
             }) { time = !time }
         else Modifier.clickable(indication = null, interactionSource = null) { time = !time })) {
         m.anchor?.let { AnchorChip(it, vm) }
+        // Spoken in a voice call: a small wave over the reply.
+        if (m.voiced) Icon(Icons.wave, "Spoken", Modifier.padding(bottom = 2.dp).size(14.dp).alpha(.5f), tint = LocalExtra.current.text3)
         // The long press is the menu's here; Copy takes the whole text
         Md(m.text, select = !chat)
         if (time) Text(clock(m.t), fontSize = 12.sp, color = LocalExtra.current.text3, modifier = Modifier.padding(top = 4.dp))

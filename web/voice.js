@@ -2,7 +2,7 @@
 // The microphone goes up as 16 kHz PCM16 without pause, silence included; the partner's audio comes down and plays at once.
 // The page cuts the partner off itself when the user talks over it, well before the partner's own detection does.
 import { $, S, el, snack, say, toLogin } from './util.js';
-import { render, toBottom, nearBottom, callNow } from './chat.js';
+import { render, toBottom, nearBottom } from './chat.js';
 import { Down, Barge, BARGE, RATE, FRAME, toPcm16, fromPcm16, level } from './pcm.js';
 import { frameDb } from './phrases.js';
 import { Stream, streamable } from './stream.js';
@@ -251,24 +251,7 @@ function message(c, m) {
     c.stats.flushes++;
     cut(c);
   }
-  else if (m.type === 'saying') saying(c, m.text);
-  else if (m.type === 'said' && m.who === 'partner') endLive(c);
   else if (m.type === 'error') snack(m.text);
-}
-
-// The partner's words as they play, as the call card's line; its finished turn takes their place.
-function saying(c, text) {
-  const stick = nearBottom();
-  const card = callNow(c.since, true);
-  card.node.classList.add('live');
-  c.saying += text;
-  card.last.replaceChildren(c.saying, el('i', 'caret'));
-  if (stick) toBottom();
-}
-
-function endLive(c) {
-  c.saying = '';
-  callNow(c.since)?.last.querySelector('.caret')?.remove();
 }
 
 function label(c) {
@@ -292,12 +275,6 @@ function tick() {
   c.levels.forEach((l, i) => { lvl.children[i].style.height = `${4 + 24 * l}px`; });
   const sec = Math.floor((performance.now() - c.t0) / 1000);
   time.textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
-  const card = callNow(c.since);
-  if (card) {
-    card.node.classList.add('live');
-    card.title.textContent = 'Voice call';
-    card.time.textContent = `${card.at} · ${time.textContent}`;
-  }
   label(c);
   setTimeout(tick, 80);
 }
@@ -320,12 +297,6 @@ function hangUp(why) {
   c.sink.stream?.close();
   c.audio?.pause();
   c.lock?.release().catch(() => {});
-  endLive(c);
-  const card = callNow(c.since);
-  if (card) {
-    card.node.classList.remove('live');
-    card.time.textContent = card.at;
-  }
   show(false);
   if (!debug.hidden) shown();
   if (why) snack(why);

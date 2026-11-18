@@ -340,7 +340,7 @@ pub async fn call(v: Arc<Voice>, mut up: mpsc::Receiver<Up>, down: mpsc::Sender<
         }
     }
     c.state("ended");
-    v.ended(&c.lines, c.started.elapsed().as_secs());
+    v.ended(&c.lines, c.started.elapsed().as_secs(), false);
 }
 
 impl Direct {

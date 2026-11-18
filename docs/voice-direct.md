@@ -79,7 +79,7 @@ An earlier build spoke a guessed opener or a canned acknowledgement as the turn 
 The dispatcher runs as one long agent session, and `Turns::delta` already flashes its reply as `delta` events while it is written.
 
 - **The message.** At the end of the turn the call sends `[voice call] <the words>` through `Dispatcher::send_spoken`. Notes follow the words: where the user cut seimei off, and the lookups' answers.
-- **The thread.** The user's words are a `user` event with `voice` and `spoken` set. The reply is the usual `assistant` event answering it.
+- **The thread.** The user's words are a `user` event with `voice` and `spoken` set. The reply is the usual `assistant` event answering it. The chat shows both as plain messages with a small wave mark, and the call's end writes no summary.
 - **The reply back.** Delta events carry `re`, the id of the message they answer. The call speaks the chat-lane deltas whose `re` is one of its own messages.
 - **Sentence by sentence.** The splitter in `voice/speech.rs` cuts after a full stop, or after a clause of 6 words for the first piece. Two pieces render at a time, and they play in order.
 - **News while the call is on.** A reply to a shikigami's or a timer's event is spoken whole, once the user is quiet.

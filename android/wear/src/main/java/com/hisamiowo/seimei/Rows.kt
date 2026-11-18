@@ -138,11 +138,6 @@ fun ItemRow(it: Item, vm: Model, lane: String, onFold: (String) -> Unit = {}) {
         is Item.Day -> T(dayLabel(it.t), Modifier.fillMaxWidth().padding(top = 4.dp), LABEL, t.text3, FontWeight.Medium, 1, align = TextAlign.Center)
         is Item.Msg -> if (it.role == "user") Bubble(it.text + if (it.images.isNotEmpty()) "  [${plural(it.images.size, "photo", "photos")}]" else "")
             else Md(it.text)
-        is Item.Asked -> T("Asked seimei: ${it.text}", size = SMALL, color = t.text3, lines = 3)
-        is Item.Voice -> Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            T(if (it.ended) "Voice call · ${callMinutes(it.secs.toDouble())}" else "Voice call", size = SMALL, color = t.text3, weight = FontWeight.Medium, lines = 1)
-            if (it.summary.isNotEmpty()) T(it.summary, size = SMALL, color = t.text2, lines = 4)
-        }
         is Item.Fold -> if (it.text.isNotEmpty()) Chip(it.text.cap(), Icons.list) { onFold(it.goto) }
         is Item.Trig -> T(it.text, size = LABEL, color = t.text3, lines = 1)
         is Item.Note -> T(it.text + if (it.n > 1) " (${it.n}x)" else "", size = SMALL, lines = 3,

@@ -242,34 +242,15 @@ class VoiceTest {
         val c = Chat(ZoneOffset.UTC)
         val t = 1_800_000_000.0
         c.add(JSONObject("""{"id": 1, "type": "voice", "who": "user", "text": "what is the uptime", "t": $t}"""))
-        c.add(JSONObject("""{"id": 2, "type": "user", "voice": true, "text": "the laptop's uptime", "t": ${t + 2}}"""))
-        c.add(JSONObject("""{"id": 3, "type": "voice", "who": "partner", "text": "Asking seimei.", "cut": true, "t": ${t + 3}}"""))
-        val ask = c.items.filterIsInstance<Item.Asked>().single()
-        assertTrue(ask.waiting)
-        c.add(JSONObject("""{"id": 4, "type": "assistant", "re": 2, "text": "Up 3 days.", "t": ${t + 9}}"""))
-        // One card holds the turns; the ask and seimei's reply stay in the chat.
-        assertEquals(listOf("Day", "Voice", "Asked", "Msg"), c.items.map { it::class.simpleName })
-        val card = c.items[1] as Item.Voice
-        assertEquals(listOf("e1", "e3"), card.turns.map { it.key })
-        assertEquals(Item.Spoken("e3", "partner", "Asking seimei.", true), card.turns[1])
-        assertEquals("Asking seimei.", card.last)
-        assertEquals(t + 3, card.t1, 0.0)
-        assertFalse(card.ended)
-        assertFalse((c.items[2] as Item.Asked).waiting)
-        // The reply sits right under the ask: no chip naming what it answers.
-        assertNull((c.items[3] as Item.Msg).anchor)
-        // The call's end closes the card with its length, however late it comes; seimei's summary fills it in after.
-        c.add(JSONObject("""{"id": 5, "type": "voice_end", "secs": 372, "t": ${t + 700}}"""))
-        val ended = c.items[1] as Item.Voice
-        assertTrue(ended.ended)
-        assertEquals(372L, ended.secs)
-        assertEquals("", ended.summary)
-        c.add(JSONObject("""{"id": 8, "type": "voice_summary", "call": 5, "summary": "Asked for the uptime: 3 days.", "t": ${t + 720}}"""))
-        assertEquals("Asked for the uptime: 3 days.", (c.items[1] as Item.Voice).summary)
-        // A turn after the end, or more than 5 minutes after the last one, is another call.
-        c.add(JSONObject("""{"id": 6, "type": "voice", "who": "user", "text": "hi again", "t": ${t + 710}}"""))
-        c.add(JSONObject("""{"id": 7, "type": "voice", "who": "user", "text": "still there?", "t": ${t + 1100}}"""))
-        assertEquals(3, c.items.count { it is Item.Voice })
+        c.add(JSONObject("""{"id": 2, "type": "voice", "who": "partner", "text": "Up 3 days.", "t": ${t + 3}}"""))
+        // The call's end and its summary add nothing: the turns are already in the chat.
+        c.add(JSONObject("""{"id": 3, "type": "voice_end", "secs": 372, "t": ${t + 700}}"""))
+        c.add(JSONObject("""{"id": 4, "type": "voice_summary", "call": 3, "summary": "Asked for the uptime.", "t": ${t + 720}}"""))
+        assertEquals(listOf("Day", "Msg", "Msg"), c.items.map { it::class.simpleName })
+        val (said, heard) = c.items.drop(1).map { it as Item.Msg }
+        assertEquals("user" to "what is the uptime", said.role to said.text)
+        assertEquals("assistant" to "Up 3 days.", heard.role to heard.text)
+        assertTrue(said.voiced && heard.voiced)
     }
 
     @Test fun aDirectCallInTheChat() {
@@ -278,10 +259,8 @@ class VoiceTest {
         c.add(JSONObject("""{"id": 1, "type": "user", "voice": true, "spoken": true, "text": "is the build green", "t": $t}"""))
         c.add(JSONObject("""{"id": 2, "type": "assistant", "re": 1, "text": "Yeah, all green.", "t": ${t + 3}}"""))
         c.add(JSONObject("""{"id": 3, "type": "assistant", "text": "Something else.", "t": ${t + 4}}"""))
-        // The words and the spoken reply are turns in the card; a reply to something else stays in the chat.
-        assertEquals(listOf("Day", "Voice", "Msg"), c.items.map { it::class.simpleName })
-        val card = c.items[1] as Item.Voice
-        assertEquals(listOf(Item.Spoken("e1", "user", "is the build green"), Item.Spoken("e2", "partner", "Yeah, all green.")), card.turns)
-        assertEquals("Yeah, all green.", card.last)
+        // The words and the spoken reply are plain messages with the wave; a reply to something else has none.
+        assertEquals(listOf("Day", "Msg", "Msg", "Msg"), c.items.map { it::class.simpleName })
+        assertEquals(listOf(true, true, false), c.items.drop(1).map { (it as Item.Msg).voiced })
     }
 }

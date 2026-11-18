@@ -664,27 +664,6 @@ const REPLY = 'M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11';
 const WAVE = 'M4 10v4M8 6v12M12 9v6M16 4v16M20 10v4';
 const CHEVRON = 'M6 9l6 6 6-6';
 
-// A voice call as one card: its length and summary, and a tap opens the transcript.
-function callCard(t) {
-  const node = el('div', 'vcall');
-  const head = el('button', 'head sl');
-  head.type = 'button';
-  const badge = el('span', 'badge');
-  badge.append(svg(WAVE, 18));
-  const title = el('b', null, 'Voice call');
-  const at = clock(t);
-  const time = el('time', null, at);
-  head.append(badge, title, time, svg(CHEVRON, 20));
-  const sum = el('div', 'sum');
-  const last = el('div', 'last');
-  const turns = el('div', 'turns');
-  sum.hidden = true;
-  head.addEventListener('click', () => node.classList.toggle('open'));
-  node.append(head, sum, last, turns);
-  return { node, title, time, at, sum, last, turns, t0: t, t1: t, ended: false };
-}
-
-const minutes = (secs) => `${Math.max(1, Math.round(secs / 60))} min`;
 const ENDED = { done: 'finished', failed: 'failed', stopped: 'was stopped', interrupted: 'was interrupted' };
 
 // A server note's times in this device's clock: clock pairs each time with its text in the note.
@@ -735,13 +714,6 @@ function anchor(text, id, lane) {
   return b;
 }
 
-// The card of the call that runs now, started at `since` (unix seconds): the open card when its last turn came since, or with make a new one.
-export function callNow(since, make = false) {
-  const v = main.vcall;
-  if (v && !v.ended && v.t1 >= since) return v;
-  return make ? main.call(Date.now() / 1000, true) : null;
-}
-
 // One instance appends live; a fresh one renders older pages for prepending.
 // The chat and the trajectory share the open question cards (asks), so a report in one settles a card in the other.
 // What the trajectory does within this long after a card settles is the card's own doing: its outcome line says it, no fold line.
@@ -765,12 +737,8 @@ export class Renderer {
     // Trajectory: the dispatcher turn being drawn.
     this.turn = null;
     this.cur = null;
-    // Voice: the open call's card, and the partner's open asks to seimei by event id.
-    this.vcall = null;
-    this.calls = new Map();
-    this.asked = new Map();
-    // The user's words in a direct call, by event id -> the call's card, where seimei's replies to them go too.
-    this.spoken = new Map();
+    // The user's spoken messages in a voice call, by event id: seimei's replies to them carry the voice mark too.
+    this.spoken = new Set();
   }
 
   put(node) {
@@ -858,54 +826,6 @@ export class Renderer {
     at.after(b);
   }
 
-  // A voice call is one card where it starts, with its turns inside; what the partner asked seimei stays in the chat, as the reply that answers it does.
-  // Turns more than 5 minutes apart are another call; a voice_end closes the card with the call's length, and a voice_summary from seimei fills in its summary.
-  call(t, fresh = false) {
-    if (fresh || !this.vcall || this.vcall.ended || t - this.vcall.t1 > 300) {
-      this.vcall = callCard(t);
-      this.put(this.vcall.node);
-    }
-    this.vcall.t1 = t;
-    return this.vcall;
-  }
-
-  voice(ev) {
-    if (ev.type === 'voice_summary') {
-      const c = this.calls.get(ev.call);
-      if (c) { c.sum.textContent = ev.summary; c.sum.hidden = !ev.summary; }
-      return;
-    }
-    if (ev.type === 'voice_end') {
-      // It closes the open card, however long the call stayed silent; with no card open, its turns are on an older page.
-      const c = this.vcall;
-      if (!c || c.ended) return;
-      c.ended = true;
-      this.calls.set(ev.id, c);
-      c.title.textContent = `Voice call · ${minutes(ev.secs)}`;
-      c.node.classList.remove('live');
-      return;
-    }
-    const c = this.call(ev.t);
-    this.between = false;
-    if (!c.node.classList.contains('live')) c.title.textContent = `Voice call · ${minutes(c.t1 - c.t0)}`;
-    if (ev.type === 'user' && ev.spoken) {
-      // The user talked with seimei itself: the words and their replies stay in the card.
-      this.lastUser = ev.id;
-      said.set(ev.id, ev.text);
-      this.spoken.set(ev.id, c);
-      c.turns.append(el('div', 'msg user voiced', ev.text));
-    } else if (ev.type === 'user') {
-      // The partner asked seimei: the reply that follows answers it, with no chip.
-      this.lastUser = ev.id;
-      said.set(ev.id, ev.text);
-      this.asked.set(ev.id, this.put(el('div', 'ask wait', `Asked seimei: ${ev.text}`)));
-    } else if (ev.who === 'user') c.turns.append(el('div', 'msg user voiced', ev.text));
-    else {
-      c.turns.append(el('div', `vline${ev.cut ? ' cut' : ''}`, ev.text));
-      c.last.textContent = ev.text;
-    }
-  }
-
   add(ev) {
     if (ev.type === 'approval_done') {
       if (this.card?.aid === ev.aid) this.card.done = ev.t || Date.now() / 1000;
@@ -943,15 +863,10 @@ export class Renderer {
       return;
     }
     this.activity = null;
-    if (ev.type === 'voice' || ev.type === 'voice_end' || ev.type === 'voice_summary' || (ev.type === 'user' && ev.voice)) return this.voice(ev);
-    // seimei's spoken reply in a direct call: a line in the call's card.
-    const card = ev.type === 'assistant' && ev.text && this.spoken.get(ev.re);
-    if (card) {
-      said.set(ev.id, ev.text);
-      card.turns.append(el('div', 'vline', ev.text));
-      card.last.textContent = ev.text;
-      return;
-    }
+    // A voice call flows into the chat like typed messages, with a voice mark: no card, no summary.
+    if (ev.type === 'voice_end' || ev.type === 'voice_summary') return;
+    // A Phonic call's own lines, from before direct calls: the user's words and the partner's, as messages.
+    if (ev.type === 'voice') ev = { ...ev, type: ev.who === 'user' ? 'user' : 'assistant', voice: true };
     if (ev.type === 'user' || ev.type === 'assistant') {
       if (ev.text) said.set(ev.id, ev.text);
       // Sent from a side thread: the thread's name above the message, one tap from it
@@ -959,6 +874,8 @@ export class Renderer {
       // In a side thread: what seimei wrote to it, over its message
       if (ev.type === 'user' && ev.from) this.put(el('div', 'trig sender', ev.from));
       const node = this.put(message(ev));
+      if (ev.type === 'user' && ev.voice) this.spoken.add(ev.id);
+      if (ev.voice || (ev.type === 'assistant' && this.spoken.has(ev.re))) node.classList.add('voiced');
       if (ev.type === 'user') {
         this.lastUser = ev.id;
         this.between = false;
@@ -969,7 +886,6 @@ export class Renderer {
         this.between = false;
       }
       if (ev.type === 'assistant') replyable(node, ev, ev.text || '');
-      if (ev.type === 'assistant' && ev.re) this.asked.get(ev.re)?.classList.remove('wait');
       if (this.lane === 't' && ev.type === 'assistant') {
         const b = el('button', 'reply-btn sl', 'Reply in chat');
         b.type = 'button';

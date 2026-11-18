@@ -276,13 +276,16 @@ impl Voice {
         &self.speech.as_ref().expect("dictation is on").1
     }
 
-    /// The call is over: its card in the chat gets the length, and the dispatcher reads the transcript to write the summary.
-    /// A call where nobody said a word leaves no card.
-    pub fn ended(&self, lines: &[String], secs: u64) {
+    /// The call is over: voice_end logs its length, and the dispatcher reads the transcript to write the summary.
+    /// A direct call's turns are in the dispatcher's thread already: it gets no summary. A call where nobody said a word logs nothing.
+    pub fn ended(&self, lines: &[String], secs: u64, summary: bool) {
         if lines.is_empty() {
             return;
         }
         let ev = self.events.add(json!({"type": "voice_end", "secs": secs}));
+        if !summary {
+            return;
+        }
         let call = ev["id"].as_i64().unwrap_or(0);
         let said = chars(&lines.join("\n"), SUMMARY_IN);
         self.dispatcher.chore(&format!(
@@ -599,7 +602,7 @@ impl Call {
     /// The call is over: its card in the chat gets the length, and the dispatcher reads the transcript to write the summary.
     /// A call where nobody said a word leaves no card.
     fn end(&self) {
-        self.v.ended(&self.lines, self.started.elapsed().as_secs());
+        self.v.ended(&self.lines, self.started.elapsed().as_secs(), true);
     }
 
     /// The conversation went away: open tool calls died with it, so answers still to come are spoken with generate_reply.

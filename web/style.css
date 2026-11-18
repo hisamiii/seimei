@@ -412,7 +412,6 @@ body:not([data-tab="chat"]):not([data-tab="threads"]) #new-thread { display: non
 .wcard .more { align-self: flex-start; border: 0; background: none; color: var(--primary); font-size: 13px; font-weight: 500; padding: 15px 8px; margin: -15px -8px; border-radius: 8px; }
 
 .run { --t-bg: var(--primary-container); --t-fg: var(--on-primary-container); --t-dot: var(--primary); }
-.ask { --t-bg: var(--warn-container); --t-fg: var(--on-warn-container); --t-dot: var(--warn); }
 .ok { --t-bg: var(--ok-container); --t-fg: var(--on-ok-container); --t-dot: var(--ok); }
 .bad { --t-bg: var(--error-container); --t-fg: var(--on-error-container); --t-dot: var(--error); }
 .idle { --t-bg: var(--container-high); --t-fg: var(--text); --t-dot: var(--text-3); }
@@ -490,32 +489,11 @@ body:not([data-tab="chat"]) .callbar { background: var(--container); border-radi
 .callbar .mute.on .off { display: block; }
 .callbar .end { background: var(--error); color: var(--surface); }
 .callbar .speed { background: var(--tonal); color: var(--on-tonal); font: 500 14px var(--sans); font-variant-numeric: tabular-nums; }
-.vline { align-self: flex-start; max-width: 88%; padding: 2px 0 2px 12px; box-shadow: inset 2px 0 var(--primary); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
-.vline.cut::after { content: " \2026"; color: var(--text-3); }
-.msg.user.voiced::before {
+.msg.voiced::before {
   content: ""; float: left; width: 14px; height: 14px; margin: 3px 8px 0 -4px; background: currentColor; opacity: .6;
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round'%3E%3Cpath d='M4 10v4M8 6v12M12 9v6M16 4v16M20 10v4'/%3E%3C/svg%3E") center / contain no-repeat;
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round'%3E%3Cpath d='M4 10v4M8 6v12M12 9v6M16 4v16M20 10v4'/%3E%3C/svg%3E") center / contain no-repeat;
 }
-.vcall { align-self: stretch; display: flex; flex-direction: column; gap: 6px; background: var(--container); border-radius: 20px; padding: 12px 16px; }
-.vcall.live { box-shadow: inset 0 0 0 1.5px var(--primary); }
-.vcall .head { display: flex; align-items: center; gap: 10px; border: 0; padding: 0; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
-.vcall .badge { flex: none; width: 30px; height: 30px; border-radius: 10px; display: grid; place-items: center; background: var(--primary-container); color: var(--on-primary-container); }
-.vcall .head b { font-weight: 600; font-size: 14px; }
-.vcall .head time { margin-left: auto; font-size: 12.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
-.vcall .head > svg:last-child { flex: none; color: var(--text-3); transition: transform .2s; }
-.vcall.open .head > svg:last-child { transform: rotate(180deg); }
-.vcall .sum { font-size: 14px; color: var(--text-2); }
-.vcall .last { display: none; font-size: 14px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 10px; box-shadow: inset 2px 0 var(--primary); }
-.vcall.live .last:not(:empty) { display: block; }
-.vcall .last .caret { display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--primary); vertical-align: middle; animation: pulse 1.2s infinite; }
-.vcall .turns { display: none; flex-direction: column; gap: 10px; margin-top: 8px; padding-top: 12px; border-top: 1px solid var(--container-high); }
-.vcall.open .turns { display: flex; }
-.vcall .turns .msg, .vcall .turns .vline { font-size: 14px; }
-.vcall .turns .msg.user { background: var(--container-high); color: var(--text); }
-.ask { display: flex; align-items: center; gap: 8px; color: var(--text-3); font-size: 12.5px; overflow-wrap: anywhere; }
-.ask::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 3px; background: var(--primary); }
-.ask.wait::before { animation: pulse 1.2s infinite; }
 .attachments { max-width: 720px; margin: 0 auto 8px; display: flex; gap: 8px; overflow-x: auto; }
 .att { position: relative; flex: none; width: 72px; height: 72px; border-radius: 14px; overflow: hidden; background: var(--container); }
 .att img { width: 100%; height: 100%; object-fit: cover; display: block; }

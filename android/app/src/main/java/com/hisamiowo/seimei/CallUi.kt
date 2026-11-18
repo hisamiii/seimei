@@ -71,13 +71,6 @@ fun TalkButton(vm: Seimei) {
     }
 }
 
-/** The pulse of the page's dots: full, down to 30%, and back in 1.2 s. */
-@Composable
-private fun pulse(): Float {
-    val a by rememberInfiniteTransition(label = "pulse").animateFloat(1f, .3f, infiniteRepeatable(tween(600), RepeatMode.Reverse), label = "pulse")
-    return a
-}
-
 /** During a call, in the composer's place: mute, the pill with the state, the level and the time, the speed, and the red hang-up. */
 @Composable
 fun CallBar(vm: Seimei, c: VoiceCall) {
@@ -115,85 +108,3 @@ private fun Round(bg: androidx.compose.ui.graphics.Color, label: String, onClick
         .semantics { contentDescription = label }, contentAlignment = Alignment.Center) { content() }
 }
 
-/** A turn the user spoke: their bubble, with the wave mark. */
-@Composable
-fun SpokenMsg(text: String) {
-    val cs = MaterialTheme.colorScheme
-    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) { Box(Modifier.fillMaxWidth(.88f), contentAlignment = Alignment.CenterEnd) {
-        Row(Modifier.clip(RoundedCornerShape(20.dp, 20.dp, 4.dp, 20.dp)).background(cs.primaryContainer).padding(start = 12.dp, end = 16.dp, top = 11.dp, bottom = 11.dp)) {
-            Icon(Icons.wave, "Spoken", Modifier.padding(top = 4.dp).size(14.dp).alpha(.6f), tint = cs.onPrimaryContainer)
-            Spacer(Modifier.width(8.dp))
-            Text(text, color = cs.onPrimaryContainer, lineHeight = 23.2.sp, fontSize = 16.sp)
-        }
-    } }
-}
-
-/** A line of the voice partner's: plain, with a bar on the left, so it never reads as seimei's; [cut] when the user cut it off. */
-@Composable
-fun PartnerLine(text: String, cut: Boolean = false) {
-    val cs = MaterialTheme.colorScheme
-    val x = LocalTokens.current
-    Row(Modifier.fillMaxWidth(.88f).height(IntrinsicSize.Min)) {
-        Box(Modifier.width(2.dp).fillMaxHeight().background(cs.primary))
-        Text(buildAnnotatedString {
-            append(text)
-            if (cut) withStyle(SpanStyle(color = x.text3)) { append(" …") }
-        }, Modifier.padding(start = 10.dp, top = 2.dp, bottom = 2.dp), color = x.text2, fontSize = 16.sp, lineHeight = 23.2.sp)
-    }
-}
-
-/** A voice call as one card: its length, the time and the summary, and a tap on the head opens the turns.
- * While [live] runs it has an outline, the running time and the partner's current line. */
-@Composable
-fun CallCard(c: Item.Voice, live: VoiceCall?) {
-    val cs = MaterialTheme.colorScheme
-    val x = LocalTokens.current
-    var open by rememberSaveable(c.key) { mutableStateOf(false) }
-    val shape = RoundedCornerShape(20.dp)
-    Column(Modifier.fillMaxWidth().clip(shape).background(cs.surfaceContainer)
-        .then(if (live != null) Modifier.border(1.5.dp, cs.primary, shape) else Modifier),
-        verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(Modifier.fillMaxWidth().clickable(onClickLabel = if (open) "Close" else "Open") { open = !open }
-            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = if (c.summary.isEmpty() && live == null && !open) 12.dp else 0.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Box(Modifier.size(30.dp).clip(RoundedCornerShape(10.dp)).background(cs.primaryContainer), contentAlignment = Alignment.Center) {
-                Icon(Icons.wave, null, Modifier.size(18.dp), tint = cs.onPrimaryContainer)
-            }
-            val length = if (live != null) null else callMinutes(if (c.ended) c.secs.toDouble() else c.t1 - c.t0)
-            Text(if (length == null) "Voice call" else "Voice call · $length", Modifier.weight(1f), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-            val running = live?.let { " · %d:%02d".format(it.seconds / 60, it.seconds % 60) }.orEmpty()
-            Text(clock(c.t0) + running, fontSize = 12.5.sp, color = x.text3)
-            Icon(Icons.expand, null, Modifier.size(20.dp).rotate(if (open) 180f else 0f), tint = x.text3)
-        }
-        Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (c.summary.isNotEmpty()) Text(c.summary, fontSize = 14.sp, lineHeight = 20.sp, color = x.text2)
-            val line = live?.saying?.ifEmpty { null } ?: c.last
-            if (live != null && line.isNotEmpty()) Row(Modifier.height(IntrinsicSize.Min)) {
-                Box(Modifier.width(2.dp).fillMaxHeight().background(cs.primary))
-                val dot = if (live.saying.isNotEmpty()) pulse() else 0f
-                Text(buildAnnotatedString {
-                    append(line)
-                    if (live.saying.isNotEmpty()) withStyle(SpanStyle(color = cs.primary.copy(alpha = dot), fontSize = 10.sp)) { append("  ●") }
-                }, Modifier.padding(start = 10.dp), color = x.text2, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            if (open) {
-                HorizontalDivider(Modifier.padding(vertical = 6.dp), color = cs.surfaceContainerHigh)
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    for (t in c.turns) if (t.who == "user") SpokenMsg(t.text) else PartnerLine(t.text, t.cut)
-                }
-            }
-        }
-    }
-}
-
-/** What the partner asked seimei; the dot pulses until seimei's reply lands under it. */
-@Composable
-fun AskedLine(a: Item.Asked) {
-    val cs = MaterialTheme.colorScheme
-    val dot = if (a.waiting) pulse() else 1f
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(6.dp).clip(CircleShape).background(cs.primary.copy(alpha = dot)))
-        Spacer(Modifier.width(8.dp))
-        Text("Asked seimei: ${a.text}", fontSize = 12.5.sp, lineHeight = 17.sp, color = LocalTokens.current.text3)
-    }
-}
