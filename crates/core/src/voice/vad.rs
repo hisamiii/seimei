@@ -12,7 +12,7 @@ const END_MS: u32 = 200;
 /// Speech this long goes to recognition as a clause even without a pause.
 const MAX_CLAUSE_MS: u32 = 15_000;
 /// A clause still going after FIRST_WINDOW_MS goes to recognition as a window, for pre-think only, and again each time it grows WINDOW_MS.
-/// The first comes early: pre-think and the opener's voice take about 1.5 s, and most turns are short.
+/// The first comes early, so pre-think's lookups can finish before the turn ends: most turns are short.
 const FIRST_WINDOW_MS: u32 = 1200;
 const WINDOW_MS: u32 = 2000;
 /// A turn with less voice is dropped: a cough comes back as "Thank you."
