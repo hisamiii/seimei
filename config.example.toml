@@ -113,3 +113,12 @@ enabled = []
 # pronounce = {}                    # e.g. { NPU = "N P U" }
 # search_key_file = "~/.config/seimei/openrouter-key"   # without a key there are no web tools
 # search_model = "openai/gpt-4.1-mini"
+# Direct mode (docs/voice-direct.md): the dispatcher answers. It uses dictation's OpenRouter key, [asr] key_file.
+# engine = "phonic"                 # "direct" for direct mode
+# heygen_voice = ""                 # a voice in your HeyGen account, spoken on HeyGen's own API; empty for OpenRouter only
+# heygen_model = "heygen-voice-1-turbo"   # "heygen-voice-1-turbo-free" costs nothing until 2026-11-30
+# heygen_key_file = "~/.config/heygen/api_key"
+# tts_fallback = true               # tts_voice on OpenRouter speaks when HeyGen fails
+# tts_model = "heygen/heygen-voice-1-turbo"
+# tts_voice = "bram"
+# think_model = "mistralai/mistral-small-3.2-24b-instruct"

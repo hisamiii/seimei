@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
-use super::speech::{RATE, Splitter};
+use super::speech::{By, RATE, Splitter};
 use super::vad::{Cut, Cutter};
 use super::{Down, Up, Voice};
 use crate::asr::{Asr, Context};
@@ -34,7 +34,7 @@ enum Done {
     Window { turn: u64, idx: usize, text: String },
     Guess { turn: u64, guess: super::think::Guess, ms: u64 },
     Lookup { turn: u64, key: String, out: String },
-    Audio { epoch: u64, seq: u64, text: String, pcm: Vec<u8>, ms: u64 },
+    Audio { epoch: u64, seq: u64, text: String, pcm: Vec<u8>, by: By, ms: u64 },
     Contexts { asr: Context, think: String },
 }
 
@@ -86,7 +86,7 @@ struct Direct {
     out_seq: u64,
     queue: VecDeque<String>,
     rendering: usize,
-    rendered: BTreeMap<u64, (String, Vec<u8>)>,
+    rendered: BTreeMap<u64, (String, Vec<u8>, By)>,
     /// A reply's last piece by its seq: once that piece goes out, the page hears the reply ended.
     ends: BTreeMap<u64, String>,
     /// The page's live line has words: the next piece joins it after a space.
@@ -489,7 +489,7 @@ impl Direct {
                     self.lookups.push((key, out));
                 }
             }
-            Done::Audio { epoch, seq, text, pcm, ms } => {
+            Done::Audio { epoch, seq, text, pcm, by, ms } => {
                 if epoch != self.epoch {
                     return;
                 }
@@ -497,7 +497,7 @@ impl Direct {
                 if pcm.is_empty() {
                     eprintln!("seimei: voice: tts gave nothing for {:?} in {ms} ms", chars(&text, 60));
                 }
-                self.rendered.insert(seq, (text, pcm));
+                self.rendered.insert(seq, (text, pcm, by));
                 self.render();
             }
         }
@@ -519,19 +519,19 @@ impl Direct {
             self.rendering += 1;
             tokio::spawn(async move {
                 let t0 = Instant::now();
-                let pcm = v.tts().speak(&text).await.unwrap_or_else(|e| {
+                let (pcm, by) = v.tts().speak(&text).await.unwrap_or_else(|e| {
                     eprintln!("seimei: voice: tts: {e}");
-                    vec![]
+                    (vec![], By::OpenRouter)
                 });
                 let ms = t0.elapsed().as_millis() as u64;
-                let _ = done.send(Done::Audio { epoch, seq, text, pcm, ms });
+                let _ = done.send(Done::Audio { epoch, seq, text, pcm, by, ms });
             });
         }
-        while let Some((text, pcm)) = self.rendered.remove(&self.out_seq) {
+        while let Some((text, pcm, by)) = self.rendered.remove(&self.out_seq) {
             let seq = self.out_seq;
             self.out_seq += 1;
             if !pcm.is_empty() {
-                self.first_sound();
+                self.first_sound(by);
                 self.saying(&text);
                 self.heard.push_str(&text);
                 self.heard.push(' ');
@@ -668,17 +668,18 @@ impl Direct {
     }
 
     /// The first sound of a reply to one of this call's messages: its timings go to the server log.
-    fn first_sound(&mut self) {
+    fn first_sound(&mut self, by: By) {
         let Some(i) = self.timings.iter().position(|(_, t)| t.delta.is_some()) else { return };
         let (_, t) = self.timings.remove(i);
         let stt: Vec<String> = t.stt.iter().map(|ms| ms.to_string()).collect();
         let think: Vec<String> = t.think.iter().map(|ms| ms.to_string()).collect();
         eprintln!(
-            "seimei: voice: direct turn: from the end of speech: text {}, sent {}, first delta {}, first reply sound {}; stt ms [{}], pre-think ms [{}], after {:?}",
+            "seimei: voice: direct turn: from the end of speech: text {}, sent {}, first delta {}, first reply sound {} by {}; stt ms [{}], pre-think ms [{}], after {:?}",
             secs(t.end, t.text),
             secs(t.end, t.sent),
             secs(t.end, t.delta),
             secs(t.end, Some(Instant::now())),
+            by.name(),
             stt.join(", "),
             think.join(", "),
             t.words,

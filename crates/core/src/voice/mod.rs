@@ -87,6 +87,13 @@ pub struct Config {
     pub engine: String,
     pub tts_model: String,
     pub tts_voice: String,
+    /// A voice in the user's HeyGen account, spoken on HeyGen's own API; empty leaves speech to tts_model and tts_voice.
+    pub heygen_voice: String,
+    pub heygen_model: String,
+    pub heygen_key_file: PathBuf,
+    pub heygen_url: String,
+    /// tts_voice on OpenRouter speaks when HeyGen fails.
+    pub tts_fallback: bool,
     pub think_model: String,
 }
 
@@ -146,6 +153,11 @@ impl Config {
             engine: s("engine", "phonic"),
             tts_model: s("tts_model", "heygen/heygen-voice-1-turbo"),
             tts_voice: s("tts_voice", "bram"),
+            heygen_voice: s("heygen_voice", ""),
+            heygen_model: s("heygen_model", "heygen-voice-1-turbo"),
+            heygen_key_file: expand(&s("heygen_key_file", "~/.config/heygen/api_key")).into(),
+            heygen_url: s("heygen_url", "https://api.heygen.com").trim_end_matches('/').to_string(),
+            tts_fallback: t.and_then(|t| t.get("tts_fallback")).and_then(|v| v.as_bool()).unwrap_or(true),
             think_model: s("think_model", "mistralai/mistral-small-3.2-24b-instruct"),
         }
     }
@@ -221,7 +233,16 @@ impl Voice {
         let speech = asr.as_ref().map(|a| {
             let (key, zdr, api) = (a.cfg.key_file.clone(), a.cfg.zdr, a.cfg.url.as_str());
             let http = speech::client();
-            let tts = speech::Tts::new(&cfg.tts_model, &cfg.tts_voice, api, key.clone(), zdr, http.clone());
+            let mut tts = speech::Tts::new(&cfg.tts_model, &cfg.tts_voice, api, key.clone(), zdr, http.clone());
+            if !cfg.heygen_voice.is_empty() {
+                let heygen = speech::HeyGen {
+                    voice: cfg.heygen_voice.clone(),
+                    model: cfg.heygen_model.clone(),
+                    url: cfg.heygen_url.clone(),
+                    key_file: cfg.heygen_key_file.clone(),
+                };
+                tts = tts.with_heygen(heygen, cfg.tts_fallback);
+            }
             (tts, think::Think::new(&cfg.think_model, api, key, zdr, http))
         });
         let (state, about) = (state.into(), about.into());

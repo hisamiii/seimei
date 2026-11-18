@@ -1,5 +1,5 @@
 //! A direct voice call through /api/voice/ws (docs/voice-direct.md), with the fake agent CLI as the dispatcher.
-//! A fake OpenRouter does speech recognition, pre-think and speech.
+//! A fake OpenRouter does speech recognition, pre-think and speech, and a fake HeyGen speaks with the account's voice until its credit runs out.
 //! It covers pre-think's lookups, the message to the dispatcher, its reply spoken back as the first sound, a barge, and the thread's events.
 
 use std::path::{Path, PathBuf};
@@ -38,15 +38,25 @@ fn a_direct_voice_call_on_the_fakes() {
 /// What the fake OpenRouter was asked, by path.
 type Asked = Arc<Mutex<Vec<(String, Value)>>>;
 
-/// OpenRouter's three endpoints: recognition hears WORDS, pre-think asks for a board lookup, speech is 200 ms of tone per piece.
+/// OpenRouter's three endpoints and HeyGen's speech: recognition hears WORDS, pre-think asks for lookups, speech is 200 ms of tone per piece.
+/// HeyGen speaks the first piece, then answers 402 as an account out of credit does.
 async fn fake_openrouter(asked: Asked) -> u16 {
     let route = |path: &'static str, asked: Asked| {
         axum::routing::post(move |body: axum::Json<Value>| {
             let asked = asked.clone();
             async move {
-                asked.lock().unwrap().push((path.to_string(), body.0));
+                let n = {
+                    let mut asked = asked.lock().unwrap();
+                    asked.push((path.to_string(), body.0));
+                    asked.iter().filter(|(p, _)| p == path).count()
+                };
                 match path {
-                    "speech" => {
+                    "heygen" if n > 1 => (
+                        axum::http::StatusCode::PAYMENT_REQUIRED,
+                        axum::Json(json!({"error": {"code": "insufficient_credit"}})),
+                    )
+                        .into_response(),
+                    "speech" | "heygen" => {
                         let pcm: Vec<u8> = (0..3200i32)
                             .flat_map(|i| (((f64::from(i) * 0.2).sin() * 8000.0) as i16).to_le_bytes())
                             .collect();
@@ -65,7 +75,8 @@ async fn fake_openrouter(asked: Asked) -> u16 {
     let app = axum::Router::new()
         .route("/api/v1/audio/transcriptions", route("asr", asked.clone()))
         .route("/api/v1/chat/completions", route("think", asked.clone()))
-        .route("/api/v1/audio/speech", route("speech", asked.clone()));
+        .route("/api/v1/audio/speech", route("speech", asked.clone()))
+        .route("/v3/models/audio/tts/stream", route("heygen", asked.clone()));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -84,6 +95,7 @@ async fn run(base: PathBuf) {
     let asked: Asked = Arc::new(Mutex::new(vec![]));
     let port = fake_openrouter(asked.clone()).await;
     std::fs::write(base.join("keys/or"), "sk-or-test\n").unwrap();
+    std::fs::write(base.join("keys/heygen"), "hg-test\n").unwrap();
     let asr: toml::Table =
         format!("key_file = \"{}/keys/or\"\nurl = \"http://127.0.0.1:{port}/api/v1/\"\n", base.display())
             .parse()
@@ -92,7 +104,12 @@ async fn run(base: PathBuf) {
         seimei_core::asr::Config::from_toml(Some(&toml::Value::Table(asr))),
         &base.join("state"),
     );
-    let voice: toml::Table = "on = true\nengine = \"direct\"\n".parse().unwrap();
+    let voice: toml::Table = format!(
+        "on = true\nengine = \"direct\"\nheygen_voice = \"voice-a\"\nheygen_key_file = \"{}/keys/heygen\"\nheygen_url = \"http://127.0.0.1:{port}\"\n",
+        base.display()
+    )
+    .parse()
+    .unwrap();
     let app = Arc::new(app_full(
         &base.join("state"),
         &base.join("work"),
@@ -158,6 +175,13 @@ async fn run(base: PathBuf) {
         .map(|(_, b)| b["input"].as_str().unwrap_or("").to_string())
         .collect();
     assert!(speech.iter().all(|s| !s.contains('[') && !s.contains('*')), "markdown was spoken: {speech:?}");
+    // HeyGen spoke the first piece with the account's voice.
+    let heygen: Vec<Value> =
+        (asked.lock().unwrap().iter()).filter(|(p, _)| p == "heygen").map(|(_, b)| b.clone()).collect();
+    assert!(
+        heygen[0]["voice_id"] == "voice-a" && heygen[0]["text"].as_str().unwrap().starts_with("Echo"),
+        "{heygen:?}"
+    );
 
     // A second turn, cut off by a barge while seimei speaks: the client hears a flush.
     for f in frames(1000, true).into_iter().chain(frames(600, false)) {
@@ -176,6 +200,9 @@ async fn run(base: PathBuf) {
     );
     tx.send(Message::text(json!({"type": "barge"}).to_string())).await.unwrap();
     assert!(until(10, || msgs().iter().any(|m| m["type"] == "flush")).await, "no flush: {:?}", msgs());
+    // After HeyGen's 402, bram on OpenRouter spoke the rest, and HeyGen rested.
+    let by = |path: &str| asked.lock().unwrap().iter().filter(|(p, _)| p == path).count();
+    assert!(by("heygen") == 2 && by("speech") >= 2, "heygen {}, openrouter {}", by("heygen"), by("speech"));
 
     tx.send(Message::text(json!({"type": "end"}).to_string())).await.unwrap();
     let _ = tokio::time::timeout(Duration::from_secs(10), reader).await;

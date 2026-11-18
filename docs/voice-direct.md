@@ -14,6 +14,7 @@ mic --PCM 16 kHz over /api/voice/ws--> server VAD --clause--> MAI-Transcribe-2 -
                                             +--end of turn--> [voice call] message --> dispatcher --> deltas
                                                                                                       |
 client <--PCM-- HeyGen Voice Turbo, one sentence a request <-- sentence splitter <-------------------+
+                (HeyGen's own API, or OpenRouter)
 ```
 
 | stage | what | measured |
@@ -103,6 +104,19 @@ HeyGen Voice Turbo through OpenRouter's `/audio/speech` is the pick: casual voic
 - **HeyGen's free variant** allows 50 requests a day, and a 10 minute call needs about 100.
 - An hour of speech is about 54,000 characters.
 
+### A voice from the user's HeyGen account
+
+A voice designed or cloned in the user's HeyGen account speaks on HeyGen's own API: OpenRouter answers "Voice not found" for it. `[voice] heygen_voice` turns this on, with the key in `heygen_key_file`.
+
+- **The request.** Each piece goes to `/v3/models/audio/tts/stream` as PCM at 16 kHz, read whole. The whole piece comes 0.1 to 0.4 s after its first audio, which came at 0.3 to 0.8 s.
+- **The first sound.** On the QA server it came 1.48 s after the end of speech, against 1.76 to 2.32 s with bram on OpenRouter.
+- **The fallback.** When HeyGen fails, `tts_voice` on OpenRouter speaks the piece, unless `tts_fallback = false`. HeyGen then rests for a while:
+  - 10 minutes after a refusal, such as 402 for no credit;
+  - the `Retry-After` time after a 429;
+  - 30 s after a timeout, a 5xx or a dropped link. No first audio in 2 s counts as a timeout.
+- **The log.** Each fallback logs `voice: heygen:` with HeyGen's answer, and each turn's `direct turn:` line says who spoke the first sound.
+- **The models.** `heygen-voice-1-turbo` needs credit in the account's wallet. `heygen-voice-1-turbo-free` costs nothing until 2026-11-30, with 30 requests a minute and capacity shared by all its users.
+
 ## Barge-in
 
 The client keeps its own barge detector, the one in `web/pcm.js` and the app. The echo canceller in the app works under it.
@@ -113,7 +127,7 @@ The client keeps its own barge detector, the one in `web/pcm.js` and the app. Th
 
 ## Config
 
-Four keys under `[voice]` set direct mode.
+These keys under `[voice]` set direct mode.
 
 | key | default | what |
 |---|---|---|
@@ -121,6 +135,10 @@ Four keys under `[voice]` set direct mode.
 | `tts_model` | `"heygen/heygen-voice-1-turbo"` | the speech model on OpenRouter |
 | `tts_voice` | `"bram"` | its voice |
 | `think_model` | `"mistralai/mistral-small-3.2-24b-instruct"` | the pre-think model, for the lookups |
+| `heygen_voice` | `""` | a voice in the user's HeyGen account |
+| `heygen_model` | `"heygen-voice-1-turbo"` | HeyGen's speech model |
+| `heygen_key_file` | `"~/.config/heygen/api_key"` | the HeyGen API key |
+| `tts_fallback` | `true` | `tts_voice` on OpenRouter speaks when HeyGen fails |
 
 The key and `zdr` come from `[asr]`, so direct mode needs dictation set up.
 
@@ -131,7 +149,7 @@ Most risks are about speed and about services outside seimei.
 - **A 300 ms end cuts thinking pauses.** The rest of the speech then becomes the next message. If that happens often, the end can wait longer after a clause with no full stop.
 - **The dispatcher may be busy.** A voice message during another turn folds into it, and the answer waits for that turn's next step.
 - **The dispatcher's speed is the floor.** Its 2 to 4 s to the first word set the answer's time.
-- **OpenRouter's routing.** Pre-think needs Mistral and speech needs HeyGen on OpenRouter. If either goes, voice goes with it.
+- **OpenRouter's routing.** Pre-think needs Mistral and speech needs HeyGen on OpenRouter, or HeyGen's own API. If either goes, voice goes with it.
 - **Echo.** The server holds the microphone while seimei speaks, so it relies on the client's barge to hear the user over it.
 - **Russian.** MAI runs with `[asr] language`. A call in Russian needs that language per call, or detection.
 
@@ -141,4 +159,4 @@ Each call sends audio and text to three providers through OpenRouter. `[asr] zdr
 
 - **The audio** of each clause and window goes to Microsoft, with the word list.
 - **The words so far**, the board, the shikigami and the last chat lines go to Mistral.
-- **Every spoken piece** goes to HeyGen.
+- **Every spoken piece** goes to HeyGen. With `heygen_voice` set it goes straight to HeyGen's API, where `zdr` does not apply.

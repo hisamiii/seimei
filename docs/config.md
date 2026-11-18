@@ -43,6 +43,11 @@ The table lists each section's keys, their defaults and what they set. Notes on 
 | | `engine` | `phonic` | `direct`: the dispatcher answers, see [voice-direct.md](voice-direct.md) |
 | | `tts_model` | `heygen/heygen-voice-1-turbo` | direct mode's speech model on OpenRouter |
 | | `tts_voice` | `bram` | its voice |
+| | `heygen_voice` | empty | a HeyGen account's voice; empty for OpenRouter only |
+| | `heygen_model` | `heygen-voice-1-turbo` | HeyGen's speech model |
+| | `heygen_key_file` | `~/.config/heygen/api_key` | the HeyGen API key |
+| | `heygen_url` | `https://api.heygen.com` | HeyGen's API |
+| | `tts_fallback` | `true` | `tts_voice` on OpenRouter speaks when HeyGen fails |
 | | `think_model` | `mistralai/mistral-small-3.2-24b-instruct` | direct mode's pre-think model |
 | | `key_file` | `~/.config/phonic/api_key` | the Phonic API key |
 | | `url` | `wss://api.phonic.ai/v1/sts/ws` | Phonic's conversation socket |
