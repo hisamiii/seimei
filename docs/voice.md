@@ -130,6 +130,7 @@ The Android app makes the same call as the page over the same socket, with the s
   - `session`: whether the track plays in the microphone's audio session;
   - `gate`: whether the mic gate is on;
   - `callMode`, the routed `mic` and `speaker` device types, and the `phone` model;
+  - `net`: the transport the call's network runs on, like `bluetooth` for a watch through its phone, `wifi` or `cellular`;
   - the track's `underruns`;
   - `wrote`: seconds of the partner's audio written to the track, and `outDb`, its mean power in dBFS;
   - `head`: seconds the play head moved, silence included;

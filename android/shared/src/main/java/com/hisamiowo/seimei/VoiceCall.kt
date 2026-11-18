@@ -3,6 +3,7 @@ package com.hisamiowo.seimei
 import android.annotation.SuppressLint
 import android.content.Context
 import android.media.AudioAttributes
+import android.net.ConnectivityManager
 import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioFormat
@@ -468,12 +469,19 @@ class VoiceCall(private val ctx: Context, private val api: Api, val speed: Doubl
             .put("head", round1(headTotal.toDouble() / Voice.RATE)).put("route", route)
             .put("comm", if (Build.VERSION.SDK_INT >= 31) am.communicationDevice?.type ?: -1 else -1)
             .put("session", track?.audioSessionId == rec?.audioSessionId).put("gate", up.gate).put("callMode", am.mode == AudioManager.MODE_IN_COMMUNICATION)
-            .put("mic", rec?.routedDevice?.type ?: -1).put("speaker", track?.routedDevice?.type ?: -1).put("phone", Build.MODEL)
+            .put("mic", rec?.routedDevice?.type ?: -1).put("speaker", track?.routedDevice?.type ?: -1).put("phone", Build.MODEL).put("net", net())
             .put("underruns", track?.underrunCount ?: -1).put("jitter", synchronized(lock) { jitter.run {
                 JSONObject().put("stalls", stalls).put("lateMs", Math.round(lateMax * 1000)).put("prebufferMs", Math.round(target * 1000))
             } })
             // Last: the server log keeps a stats line's first 600 characters, and this list is long.
             .put("effects", JSONArray(offered)).toString())
+    }
+
+    /** The transport the call's network runs on now: bluetooth for a watch through its phone, wifi or cellular. */
+    private fun net() = try {
+        ctx.getSystemService(ConnectivityManager::class.java).run { transport(getNetworkCapabilities(activeNetwork)) }
+    } catch (e: SecurityException) {
+        "unknown"
     }
 
     private fun round1(v: Double) = Math.round(v * 10) / 10.0
