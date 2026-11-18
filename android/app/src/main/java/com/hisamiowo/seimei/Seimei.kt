@@ -278,6 +278,12 @@ class Seimei(app: Application) : AndroidViewModel(app), Dictation.Host {
         private set
     var attachments by mutableStateOf<List<Attachment>>(emptyList())
         private set
+    /** The talk button on an empty composer; shown when the server has voice mode on (GET api/voice). */
+    var voiceOn by mutableStateOf(false)
+        private set
+    /** How fast the voice partner talks, kept on this phone; it counts from the next call. */
+    var voiceSpeed by mutableStateOf(prefs.voiceSpeed)
+        private set
 
     private var events = ArrayList<JSONObject>()
     private var chat = Chat()
@@ -780,6 +786,7 @@ class Seimei(app: Application) : AndroidViewModel(app), Dictation.Host {
             loadBoard()
             refreshPage()
             checkAsr()
+            checkVoice()
             return
         }
         val type = ev.str("type")
@@ -788,6 +795,8 @@ class Seimei(app: Application) : AndroidViewModel(app), Dictation.Host {
             if (id <= lastId) return
             lastId = id
             if (type == "assistant") live = ""
+            // The partner's finished turn takes the place of its live line.
+            if (type == "voice" && ev.str("who") == "partner") CallService.call?.clearSaying()
             if (type == "user" && ev.str("cid").isNotEmpty()) pending.removeAll { it.cid == ev.str("cid") }
             events.add(ev)
             route(ev)
@@ -1474,6 +1483,31 @@ class Seimei(app: Application) : AndroidViewModel(app), Dictation.Host {
     fun edit(text: String) {
         draft = text
         prefs.draft = text
+    }
+
+    private fun checkVoice() {
+        viewModelScope.launch {
+            voiceOn = try {
+                api.get("api/voice").optBoolean("enabled")
+            } catch (e: IOException) {
+                voiceOn
+            } catch (e: JSONException) {
+                false
+            }
+        }
+    }
+
+    /** The talk button: a hands-free call with the voice partner (docs/voice.md), which goes on in [CallService]. */
+    fun startCall() {
+        CallService.start(getApplication(), api, voiceSpeed)
+    }
+
+    /** The call bar's speed button: the next speed, from the next call on. */
+    fun nextSpeed() {
+        val v = Voice.nextSpeed(voiceSpeed)
+        prefs.voiceSpeed = v
+        voiceSpeed = v
+        tell("Speed ${Voice.speedText(v)} from the next call", null)
     }
 
     private fun checkAsr() {

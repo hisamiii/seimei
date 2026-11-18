@@ -28,6 +28,11 @@ pub(crate) fn app(state: &Path, work: &Path) -> seimei_server::App {
 
 /// The same with more [dispatcher] keys.
 pub(crate) fn app_on(state: &Path, work: &Path, keys: &str) -> seimei_server::App {
+    app_with(state, work, keys, seimei_core::voice::Config::from_toml(None))
+}
+
+/// The same with a [voice] config.
+pub(crate) fn app_with(state: &Path, work: &Path, keys: &str, voice: seimei_core::voice::Config) -> seimei_server::App {
     let events = Arc::new(EventLog::open(&state.join("events.jsonl")).unwrap());
     let push = Push::new(
         events.clone(),
@@ -51,6 +56,7 @@ pub(crate) fn app_on(state: &Path, work: &Path, keys: &str) -> seimei_server::Ap
         terminal: String::new(),
         plugins,
         asr: None,
+        voice,
     })
     .unwrap()
 }

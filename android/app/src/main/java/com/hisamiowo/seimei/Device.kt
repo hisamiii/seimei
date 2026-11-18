@@ -81,6 +81,14 @@ class Prefs(ctx: Context) {
     var boardOpen: String
         get() = p.getString("boardOpen", "{}") ?: "{}"
         set(v) = p.edit().putString("boardOpen", v).apply()
+    /** How fast the voice partner talks (Voice.SPEEDS); null for the server's default. */
+    var voiceSpeed: Double?
+        get() = p.getString("voiceSpeed", null)?.toDoubleOrNull()?.takeIf { it in Voice.SPEEDS }
+        set(v) = p.edit().putString("voiceSpeed", v?.toString()).apply()
+    /** The echo the last voice call learned on this phone, in dB (Barge). */
+    var voiceEcho: Double?
+        get() = p.getString("voiceEcho", null)?.toDoubleOrNull()
+        set(v) = p.edit().putString("voiceEcho", v?.toString()).apply()
 }
 
 val b64url: Base64.Encoder = Base64.getUrlEncoder().withoutPadding()

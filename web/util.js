@@ -65,6 +65,9 @@ export const S = {
   workersTotal: 0,
   sessions: [],
   usage: null,
+  // Voice mode is on in the server, and a call runs (voice.js).
+  voice: false,
+  onCall: false,
 };
 
 // Set by app.js: redraw the header and the drawer after state changes.

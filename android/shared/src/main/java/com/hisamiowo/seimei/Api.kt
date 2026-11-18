@@ -185,6 +185,11 @@ class Api(server: String) {
         }
     }
 
+    /** Opens a WebSocket with this login: the voice call's socket. Pings find a dead link; no read timeout between messages, as the partner may be quiet. */
+    fun socket(path: String, listener: okhttp3.WebSocketListener): okhttp3.WebSocket =
+        client.newBuilder().readTimeout(0, TimeUnit.SECONDS).pingInterval(15, TimeUnit.SECONDS).build()
+            .newWebSocket(request(path).build(), listener)
+
     companion object {
         val JSON = "application/json".toMediaType()
         val OCTET = "application/octet-stream".toMediaType()

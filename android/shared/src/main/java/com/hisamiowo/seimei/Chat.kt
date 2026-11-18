@@ -18,6 +18,10 @@ sealed interface Item {
     data class Msg(override val key: String, val role: String, val text: String, val images: List<String>, val t: Double,
                    val files: List<FileRef> = emptyList(), val anchor: Anchor? = null, val reply: Long = 0,
                    val thread: String = "", val threadName: String = "", val sender: String = "", val offer: Boolean = false) : Item
+    /** A voice call's turn of the user's (their bubble with a wave mark) or of the partner's (a line with a bar), cut when the user barged in or hung up. */
+    data class Spoken(override val key: String, val who: String, val text: String, val cut: Boolean = false) : Item
+    /** The voice partner asked seimei; [waiting] until seimei's reply lands under it. */
+    data class Asked(override val key: String, val text: String, val waiting: Boolean = true) : Item
     /** A run of trajectory events, as one line in the chat; goto is the key of the first one. */
     data class Fold(override val key: String, val text: String, val goto: String) : Item
     /** What started a dispatcher turn in the trajectory: "after app-tester finished". */
@@ -137,6 +141,9 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
     /** Where each message sits in items, by event id: an offer marks the reply it is about. */
     private val msgAt = HashMap<Long, Int>()
     private var seq = 0
+    // Voice: the last voice turn's time, and the partner's open asks to seimei by event id.
+    private var lastVoice = 0.0
+    private val asked = HashMap<Long, Int>()
 
     val waiting get() = approvals.keys.count { it !in outcomes }
 
@@ -225,6 +232,20 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
         items[fold] = (items[fold] as Item.Fold).copy(text = text)
     }
 
+    /** A voice call's turns; a call opens with a note, and turns more than 5 minutes apart are another call. */
+    private fun voice(ev: JSONObject, key: String, t: Double) {
+        if (lastVoice == 0.0 || t - lastVoice > 300) put(Item.Note("v$key", "Voice call · ${clock(t)}", ""))
+        lastVoice = t
+        between = false
+        if (ev.str("type") == "user") {
+            // The partner asked seimei: the reply that follows answers it, with no chip.
+            val id = ev.optLong("id")
+            lastUser = id
+            if (id > 0) said[id] = ev.str("text")
+            asked[id] = put(Item.Asked(key, ev.str("text")))
+        } else put(Item.Spoken(key, ev.str("who"), ev.str("text"), ev.optBoolean("cut")))
+    }
+
     fun add(ev: JSONObject) {
         val type = ev.str("type")
         val t = ev.optDouble("t", 0.0).let { if (it.isNaN()) 0.0 else it }
@@ -282,6 +303,7 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
         }
         activity = -1
         val id = ev.optLong("id")
+        if (type == "voice" || (type == "user" && ev.optBoolean("voice"))) return voice(ev, key, t)
         if (type == "user" || type == "assistant") {
             if (id > 0) said[id] = ev.str("text")
             val re = ev.optLong("re")
@@ -308,6 +330,7 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
                 // "from" is a number on seimei's events (the turn's trigger), a name on a thread's
                 sender = (ev.opt("from") as? String).orEmpty()))
             if (id > 0) msgAt[id] = at
+            if (type == "assistant") asked.remove(re)?.let { i -> items[i] = (items[i] as Item.Asked).copy(waiting = false) }
             return
         }
         // What the turn itself shows (lane c: a summoned card, a picture) does not come between.

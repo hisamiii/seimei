@@ -306,6 +306,7 @@ struct Config {
     models: Option<toml::Table>,
     agents: Option<toml::Table>,
     asr: Option<toml::Value>,
+    voice: Option<toml::Value>,
 }
 
 #[derive(serde::Deserialize)]
@@ -448,6 +449,7 @@ fn main() {
         }),
         plugins: Arc::new(Plugins::load(&cfg.plugins, &state, &BUILTINS).about(about)),
         asr: Some(seimei_core::asr::Asr::new(seimei_core::asr::Config::from_toml(cfg.asr.as_ref()), &state)),
+        voice: seimei_core::voice::Config::from_toml(cfg.voice.as_ref()),
     };
     let app = Arc::new(seimei_server::App::new(setup).unwrap_or_else(|e| die(&format!("workers: {e}"))));
     let _ = app.pool.agents.set(seimei_core::workers::agents_from(cfg.agents.as_ref()));

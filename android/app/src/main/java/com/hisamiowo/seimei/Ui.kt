@@ -531,6 +531,11 @@ fun AppScreen(vm: Seimei) {
     val snacks = remember { SnackbarHostState() }
     val snackScope = rememberCoroutineScope()
     // Shown from its own scope: clearing vm.snack restarts this effect, which would cancel a snackbar shown inside it.
+    // What a voice call has to say (it could not start, the partner's error) shows as a snack.
+    LaunchedEffect(CallService.told) {
+        CallService.told?.let { vm.tell(it, null) }
+        CallService.told = null
+    }
     LaunchedEffect(vm.snack) {
         val t = vm.snack ?: return@LaunchedEffect
         val undo = vm.undo
@@ -579,10 +584,13 @@ fun AppScreen(vm: Seimei) {
             }
         }
         // The bottom container: the chat's composer on surface-container, 24 corners on top (the sheet shows in its corners)
-        val composing = vm.tab == "chat" && vm.lane != "k"
+        // A voice call's bar takes the composer's place, and stays on every tab while the call runs.
+        val call = CallService.call
+        val composing = vm.tab == "chat" && vm.lane != "k" || call != null
         Column(Modifier.onSizeChanged { vm.barPx = it.height }.background(MaterialTheme.colorScheme.surfaceContainerLow)
             .then(if (composing) Modifier.clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)).background(MaterialTheme.colorScheme.surfaceContainer) else Modifier)) {
-            if (composing) Composer(vm)
+            if (call != null) CallBar(vm, call)
+            else if (composing) Composer(vm)
             if (!WindowInsets.isImeVisible) Spacer(Modifier.navigationBarsPadding())
         }
     }
@@ -597,7 +605,7 @@ fun AppScreen(vm: Seimei) {
     // The one polite live region TalkBack reads: a card that arrives, a reply, a card that settles
     Text(vm.said, Modifier.size(1.dp).alpha(0f).semantics { liveRegion = LiveRegionMode.Polite })
     // Above whatever holds the bottom edge, measured: never over the field (44 over a composer, 32 over the bar)
-    val composer = vm.page != null || (vm.tab == "chat" && vm.lane != "k")
+    val composer = vm.page != null || (vm.tab == "chat" && vm.lane != "k") || CallService.call != null
     val above = with(LocalDensity.current) { (if (vm.page != null) vm.pageBarPx else vm.barPx).toDp() } + if (composer) 44.dp else 32.dp
     SnackbarHost(snacks, Modifier.align(Alignment.BottomCenter).then(if (vm.page != null) Modifier.navigationBarsPadding() else Modifier)
         .imePadding().padding(bottom = above)) { d ->

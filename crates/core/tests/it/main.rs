@@ -14,5 +14,6 @@ mod sessionevents;
 mod shikigami;
 mod tasks;
 mod views;
+mod voice;
 mod watches;
 mod workers;

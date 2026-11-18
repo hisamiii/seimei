@@ -120,6 +120,7 @@ async fn run(work: std::path::PathBuf, state: std::path::PathBuf) {
         terminal: String::new(),
         plugins,
         asr: None,
+        voice: seimei_core::voice::Config::from_toml(None),
     })
     .unwrap();
     let plugins = app.pool.plugins.clone();
