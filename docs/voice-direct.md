@@ -160,7 +160,7 @@ The user may go on after the turn went out: after a long pause, or over seimei's
 The dispatcher can end the call itself, as the user's red button does: when the user says bye or asks it to hang up.
 
 - **The tool.** `end_call` asks the direct calls that are on to hang up. It fails when no direct call is on. The `[voice call]` line of `dispatcher.md` says to say a short goodbye and call it.
-- **The goodbye plays first.** The call waits until the dispatcher's turn is over, every piece is rendered and sent, and the client has played it, plus 600 ms. Then the server sends the `ended` state, which both clients take as a hang up. So a client needs no update for it.
+- **The goodbye plays first.** The call waits for the dispatcher's turn to end and for every piece to go out. Then it waits until the client has played them all, plus 600 ms. Then the server sends the `ended` state, which both clients take as a hang up. So a client needs no update for it.
 - **The user may go on.** While the user talks, or their words are still being heard, the call stays. If their words go out to the dispatcher, the hang up is off.
 - **A long turn does not hold it.** After 20 s the call ends once its audio has played, even if the dispatcher's turn goes on.
 
