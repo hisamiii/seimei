@@ -408,13 +408,21 @@ pub fn timeline(path: &Path, start: Option<u64>, events: usize) -> Value {
         let call = (row["message"]["id"].as_str().and_then(|m| calls.get(m)).map(String::as_str))
             .or_else(|| blocks.clone().find_map(|b| b["id"].as_str()));
         for (i, b) in blocks.enumerate() {
-            if b["type"] == "text" && b["text"].as_str().is_some_and(|x| !x.trim().is_empty()) {
-                let text = chars(b["text"].as_str().unwrap_or("").trim(), 20000);
+            // A thinking block's text is the short update the harness shows between tool calls.
+            let kind = match b["type"].as_str() {
+                Some("text") => Some(("text", "assistant")),
+                Some("thinking") => Some(("thinking", "update")),
+                _ => None,
+            };
+            if let Some((key, kind)) = kind
+                && b[key].as_str().is_some_and(|x| !x.trim().is_empty())
+            {
+                let text = chars(b[key].as_str().unwrap_or("").trim(), 20000);
                 let id = call.map_or_else(
                     || format!("{uid}:{i}"),
                     |c| format!("{c}:{}", chars(&sha256_hex(text.as_bytes()), 12)),
                 );
-                out.push(json!({"id": id, "type": "assistant", "text": text, "t": t}));
+                out.push(json!({"id": id, "type": kind, "text": text, "t": t}));
             } else if b["type"] == "tool_use" {
                 let inp = input_of(b);
                 let id = b["id"].as_str().map_or_else(|| format!("{uid}:{i}"), String::from);

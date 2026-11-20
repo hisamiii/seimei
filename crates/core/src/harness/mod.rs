@@ -25,6 +25,8 @@ pub enum Ev {
     /// A whole reply, for its markers.
     Reply(String),
     Thinking,
+    /// The short update the agent shows between tool calls, from its thinking.
+    Update(String),
     /// A tool call. agent: the subagent that made it, whose calls are audited but not shown.
     Tool {
         id: String,

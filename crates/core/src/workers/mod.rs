@@ -1233,6 +1233,9 @@ impl Session {
                     self.turn_text = true;
                     self.w.doing(json!({"text": first_line(text, 160)}));
                 }
+                ContentBlock::Thinking { thinking, .. } if !thinking.trim().is_empty() => {
+                    self.w.add(json!({"type": "update", "text": thinking.trim()}));
+                }
                 ContentBlock::ToolUse { id, name, input } => {
                     self.step(id, name, input);
                     let summary = summarize(input);

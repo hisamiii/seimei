@@ -66,8 +66,14 @@ def seed():
         return r
     md = "Done. Summary:\n\n- **3 bugs** fixed in `chat.js`\n- added a test\n\n```bash\nuv run pytest -q tests/test_chat.py::test_optimistic_send_reconciles_with_server_echo\n```"
     worker("app-tester", "done", summary="QA report written to tmp/qa-report.md", tokens=120000,
-           evs=[{"type": "tool", "tool_id": "t1", "name": "Bash", "summary": "uv run python -m seimei --dev"},
+           evs=[{"type": "update", "text": "Starting the dev server to check the chat's send path."},
+                {"type": "tool", "tool_id": "t1", "name": "Bash", "summary": "uv run python -m seimei --dev"},
                 {"type": "tool_result", "tool_id": "t1", "error": False, "text": "dev server up\n" * 30},
+                {"type": "tool", "tool_id": "t1r", "name": "Read", "summary": "web/chat.js"},
+                {"type": "tool_result", "tool_id": "t1r", "error": False, "text": "..."},
+                {"type": "assistant", "text": "The echo never replaces the pending bubble. Running the chat tests:"},
+                {"type": "tool", "tool_id": "t1t", "name": "Bash", "summary": "uv run pytest -q tests/test_chat.py"},
+                {"type": "tool_result", "tool_id": "t1t", "error": False, "text": "3 passed"},
                 {"type": "assistant", "text": md}])
     worker("asr-bench", "failed", cwd=f"{HOME}/src/asr", summary="GPU open timed out behind claude-queue after 3 retries", tokens=310000,
            evs=[{"type": "tool", "tool_id": "t2", "name": "Bash", "summary": "python bench.py --gpu"},

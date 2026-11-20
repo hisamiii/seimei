@@ -863,6 +863,11 @@ export class Renderer {
       return;
     }
     this.activity = null;
+    // The agent's short update between tool calls: it ends the tool group before it, as in the terminal.
+    if (ev.type === 'update') {
+      this.put(el('div', 'msg update', ev.text));
+      return;
+    }
     // A voice call flows into the chat like typed messages, with a voice mark: no card, no summary.
     if (ev.type === 'voice_end' || ev.type === 'voice_summary') return;
     // A Phonic call's own lines, from before direct calls: the user's words and the partner's, as messages.

@@ -179,6 +179,13 @@ class Fake:
         self.stream({"type": "message_stop"})
         self.assistant({"type": "text", "text": text})
 
+    def think(self, text: str):
+        """One thinking block whose text is the short update the CLI shows between tool calls."""
+        self.stream({"type": "message_start", "message": {"id": "m", "model": MODEL}})
+        self.stream({"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": ""}})
+        self.stream({"type": "content_block_stop", "index": 0})
+        self.assistant({"type": "thinking", "thinking": text, "signature": "fake"})
+
     async def hook(self, event: str, tool: str, inp: dict, tid: str, extra: dict | None = None) -> dict:
         """Every hook of [event] whose matcher takes [tool]; the first decision wins."""
         for m in self.hooks.get(event) or []:
@@ -385,6 +392,7 @@ async def dispatcher(self: Fake, text: str, images: int):
             await self.tool("mcp__seimei__send_file", {"path": str(QA / "img" / f), "caption": "here you go"})
         await self.say("Sent.")
     elif t == "tool":
+        self.think("Listing the projects.")
         await self.tool("Bash", {"command": "ls ~/src"}, "seimei\nyah\nhrx")
         await self.tool("Read", {"file_path": f"{HOME}/src/yah/README.md"}, "# yah")
         await self.say("Listed it.")
@@ -494,6 +502,15 @@ async def shikigami(self: Fake, text: str):
         await self.say("Building the renderer first.")
         await self.tool("Bash", {"command": "make -j16 render"}, hang=True)
         said = "Rendered."
+    elif t == "updates":
+        # What the CLI writes between tool calls: an update, two calls, a text, an empty thinking block, a call.
+        self.think("Checking which frames are there.")
+        await self.tool("Bash", {"command": "ls frames"})
+        await self.tool("Bash", {"command": "ls old"})
+        await self.say("Renaming them:")
+        self.think("")
+        await self.tool("Bash", {"command": "mv a b"})
+        said = "Renamed."
     elif t == "late":
         # Its first words come late, as after a compaction or a long think.
         await asyncio.sleep(7)

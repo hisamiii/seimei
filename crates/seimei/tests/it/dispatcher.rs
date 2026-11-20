@@ -138,10 +138,14 @@ async fn run(base: PathBuf, state: PathBuf, work: PathBuf, agent: PathBuf) {
     let evs = turn(&first, "!tool").await;
     let kinds: Vec<(&str, &str)> = evs
         .iter()
-        .filter(|e| e["type"] == "tool" || e["type"] == "assistant")
+        .filter(|e| matches!(e["type"].as_str(), Some("tool" | "assistant" | "update")))
         .map(|e| (e["type"].as_str().unwrap(), e["name"].as_str().or(e["text"].as_str()).unwrap()))
         .collect();
-    assert_eq!(kinds, [("tool", "Bash"), ("tool", "Read"), ("assistant", "Listed it.")]);
+    assert_eq!(
+        kinds,
+        [("update", "Listing the projects."), ("tool", "Bash"), ("tool", "Read"), ("assistant", "Listed it.")]
+    );
+    assert_eq!(evs.iter().find(|e| e["type"] == "update").unwrap()["lane"], json!("c"));
     let bash = evs.iter().find(|e| e["name"] == "Bash").unwrap();
     let result = evs.iter().find(|e| e["type"] == "tool_result" && e["tool_id"] == bash["tool_id"]).unwrap();
     assert_eq!((&result["text"], &result["error"]), (&json!("seimei\nyah\nhrx"), &json!(false)));

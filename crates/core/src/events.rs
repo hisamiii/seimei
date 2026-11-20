@@ -14,7 +14,7 @@ use crate::util::now;
 pub type Event = Arc<Value>;
 
 /// Events the dispatcher's own turn produces: they go where the turn goes.
-const TURN: [&str; 5] = ["assistant", "tool", "tool_result", "image", "file"];
+const TURN: [&str; 6] = ["assistant", "update", "tool", "tool_result", "image", "file"];
 /// A stalled client loses its stream past this many queued events; it reconnects and replays from its last id.
 const QUEUE: usize = 2000;
 

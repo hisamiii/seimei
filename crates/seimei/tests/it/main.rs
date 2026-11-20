@@ -13,6 +13,7 @@ mod dispatcher;
 mod dispatcher_acp;
 mod dispatcher_codex;
 mod fake_queue;
+mod interim;
 mod live_acp;
 mod live_dispatcher;
 mod plugin;

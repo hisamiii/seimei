@@ -62,6 +62,9 @@ impl Session {
                         ContentBlock::Text { text } if agent.is_none() && !text.trim().is_empty() => {
                             q.push_back(Ev::Reply(text))
                         }
+                        ContentBlock::Thinking { thinking, .. } if agent.is_none() && !thinking.trim().is_empty() => {
+                            q.push_back(Ev::Update(thinking.trim().to_string()))
+                        }
                         _ => {}
                     }
                 }

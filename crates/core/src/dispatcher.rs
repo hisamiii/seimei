@@ -1181,6 +1181,10 @@ impl Turns {
                 self.route_held(false);
                 self.events.flash(json!({"type": "thinking"}));
             }
+            Ev::Update(text) => {
+                self.route_held(false);
+                self.events.add(json!({"type": "update", "text": text}));
+            }
             Ev::Reply(text) => {
                 if let Some((_, said)) = &mut self.handoff {
                     said.push_str(&text);
