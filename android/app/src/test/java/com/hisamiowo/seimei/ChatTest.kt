@@ -30,6 +30,25 @@ class ChatTest {
         assertEquals(2, c.items.filterIsInstance<Item.Activity>().size)
     }
 
+    @Test fun updatesAndTextsComeBetweenToolGroups() {
+        val c = Chat(utc)
+        c.add(ev("update", kv = arrayOf("text" to "Checking which frames are there.")))
+        c.add(ev("tool", kv = arrayOf("name" to "Bash", "tool_id" to "a", "summary" to "ls frames")))
+        c.add(ev("tool", kv = arrayOf("name" to "Bash", "tool_id" to "b", "summary" to "ls old")))
+        c.add(ev("update", kv = arrayOf("text" to "Both are there.")))
+        c.add(ev("tool", kv = arrayOf("name" to "Bash", "tool_id" to "c", "summary" to "mv a b")))
+        c.add(ev("assistant", kv = arrayOf("text" to "Renamed.")))
+        val rows = c.items.filter { it !is Item.Day }.map {
+            when (it) {
+                is Item.Update -> "update ${it.text}"
+                is Item.Activity -> "tools ${it.calls.size}"
+                is Item.Msg -> "${it.role} ${it.text}"
+                else -> it.toString()
+            }
+        }
+        assertEquals(listOf("update Checking which frames are there.", "tools 2", "update Both are there.", "tools 1", "assistant Renamed."), rows)
+    }
+
     @Test fun threadTagsSenderAndOffer() {
         val c = Chat(utc)
         c.add(ev("user", kv = arrayOf("text" to "reuse the sheet", "thread" to "t1", "thread_name" to "kryosheet")))

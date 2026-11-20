@@ -23,6 +23,8 @@ sealed interface Item {
     data class Fold(override val key: String, val text: String, val goto: String) : Item
     /** What started a dispatcher turn in the trajectory: "after app-tester finished". */
     data class Trig(override val key: String, val text: String) : Item
+    /** The agent's short update between tool calls (from its thinking): it ends the tool group before it. */
+    data class Update(override val key: String, val text: String) : Item
     data class Note(override val key: String, val text: String, val level: String, val n: Int = 1, val t: Double = 0.0) : Item
     data class Activity(override val key: String, val calls: List<Call>) : Item
     data class Worker(
@@ -284,6 +286,10 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
             return
         }
         activity = -1
+        if (type == "update") {
+            put(Item.Update(key, ev.str("text")))
+            return
+        }
         val id = ev.optLong("id")
         // A voice call flows into the chat like typed messages, with a wave: no card, no summary.
         if (type == "voice_end" || type == "voice_summary") return

@@ -378,6 +378,7 @@ fun Row(item: Item, vm: Seimei, live: JSONObject? = null, chat: Boolean = false,
         is Item.Msg -> if (item.role == "user") UserMsg(item, vm, onPicture) else AssistantMsg(item, vm, chat)
         is Item.Fold -> FoldPill(item, vm)
         is Item.Trig -> TrigRow(item)
+        is Item.Update -> Text(item.text, fontSize = 14.sp, lineHeight = 20.sp, color = LocalExtra.current.text2)
         is Item.Note -> NotePill(item.text + if (item.n > 1) "  ×${item.n}" else "", item.level)
         is Item.Activity -> ActivityChip(item, live)
         is Item.Worker -> WorkerCard(item, vm)

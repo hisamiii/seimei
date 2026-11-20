@@ -140,6 +140,7 @@ fun ItemRow(it: Item, vm: Model, lane: String, onFold: (String) -> Unit = {}) {
             else Md(it.text)
         is Item.Fold -> if (it.text.isNotEmpty()) Chip(it.text.cap(), Icons.list) { onFold(it.goto) }
         is Item.Trig -> T(it.text, size = LABEL, color = t.text3, lines = 1)
+        is Item.Update -> T(it.text, size = SMALL, color = t.text2, lines = 4)
         is Item.Note -> T(it.text + if (it.n > 1) " (${it.n}x)" else "", size = SMALL, lines = 3,
             color = when (it.level) { "error" -> t.error; "warn" -> t.warn; else -> t.text3 })
         is Item.Activity -> Chip(activityLabel(it.calls), iconFor(it.calls.lastOrNull()?.name ?: ""))
