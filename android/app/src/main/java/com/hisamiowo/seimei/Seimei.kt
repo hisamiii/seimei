@@ -707,7 +707,7 @@ class Seimei(app: Application) : AndroidViewModel(app), Dictation.Host {
         pg.save = viewModelScope.launch {
             delay(1000)
             val data = JSONObject().put("events", JSONArray(pg.raw)).put("last", pg.last).put("row", pg.row)
-                .apply { pg.next?.let { put("next", it) } }.toString()
+                .put("shape", Store.SESSION_SHAPE).apply { pg.next?.let { put("next", it) } }.toString()
             withContext(Dispatchers.IO + NonCancellable) { store.write(Store.pageKey(pg.kind, pg.id), data) }
         }
     }
@@ -987,6 +987,7 @@ class Seimei(app: Application) : AndroidViewModel(app), Dictation.Host {
         page?.poll?.cancel()
         viewModelScope.launch {
             val kept = withContext(Dispatchers.IO) { store.read(Store.pageKey(kind, id)) }
+                ?.takeIf { kind != "session" || it.optInt("shape") == Store.SESSION_SHAPE }
             if (token != opening) return@launch
             val listed = when (kind) {
                 "worker" -> workers.firstOrNull { it.str("id") == id }

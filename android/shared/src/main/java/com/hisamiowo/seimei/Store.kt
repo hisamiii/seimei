@@ -55,6 +55,8 @@ class Store(dir: File) {
         const val CHAT_KEEP = 300
         /** Events a page keeps: what the server sends for a page at most. */
         const val PAGE_KEEP = 400
+        /** What a session's timeline holds: a kept copy of another shape is read anew, so bump it with the web page's SHAPE. */
+        const val SESSION_SHAPE = 3
         /** Agent pages kept, the most recently opened ones. */
         const val PAGES = 40
 

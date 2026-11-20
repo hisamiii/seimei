@@ -770,7 +770,7 @@ function stick(force = false) {
 // Draws what is new (an event with an id already drawn is skipped) and keeps the page's last KEEP_PAGE events.
 const KEEP_PAGE = 400;
 // What a session's timeline holds: a copy of another shape is drawn anew, so bump it when the server shows more of a transcript.
-const SHAPE = 2;
+const SHAPE = 3;
 function add(events) {
   const fresh = events.filter((ev) => ev.id == null || !P.ids.has(String(ev.id)));
   for (const ev of fresh) {
