@@ -28,6 +28,7 @@ class WearApp : Application() {
     override fun onCreate() {
         super.onCreate()
         Notify.start(this)
+        Caffeine.restore(this)
     }
 }
 
