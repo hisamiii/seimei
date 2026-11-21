@@ -46,27 +46,19 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
-        <!-- A second entry for keys that open an app: seimei with the mic already on. -->
+        <!-- Started by name, not from the launcher: seimei with the mic already on. -->
         <activity-alias
             android:name="com.hisamiowo.seimei.Voice"
             android:label="seimei voice"
             android:targetActivity="com.hisamiowo.seimei.MainActivity"
             android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
         </activity-alias>
-        <!-- And one that starts a voice call, for the quick button's press. -->
+        <!-- Started by name, not from the launcher: a voice call, for the quick button's press. -->
         <activity-alias
             android:name="com.hisamiowo.seimei.Talk"
             android:label="seimei call"
             android:targetActivity="com.hisamiowo.seimei.MainActivity"
             android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
         </activity-alias>
         <service android:name="com.hisamiowo.seimei.FcmService" android:exported="false">
             <intent-filter>
