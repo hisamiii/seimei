@@ -9,12 +9,15 @@ use std::time::Duration;
 use serde_json::{Value, json};
 
 use crate::sessions::{self, Live, Own, Pending};
+use crate::transcripts::{self, summary};
 use crate::util::{as_text, b64url, b64url_decode, chars, now, uuid4};
 
 /// The kind its rows carry in the session list.
 pub const KIND: &str = "dsh";
 /// dsh's question tool: an open call is a question waiting for the user.
 const ASK: &str = "ask_user_question";
+/// A tool result on the page, at most.
+const RESULT: usize = 4000;
 
 /// A running `dsh web` process and the sessions it holds open.
 pub struct Server {
@@ -181,6 +184,61 @@ fn events(s: &Server, sid: &str, turns: usize, messages: usize) -> Result<Vec<Va
     Ok(page["records"].as_array().into_iter().flatten().map(|r| r["event"].clone()).collect())
 }
 
+/// Whether a session list key is a dsh session's.
+pub fn is_key(pid: i64) -> bool {
+    pid >= 1 << 32
+}
+
+/// The key a dsh session's row has in the session list where other rows have a pid: above any pid, and the same on every scan.
+pub fn key(sid: &str) -> i64 {
+    let h = openssl::sha::sha256(sid.as_bytes());
+    (1 << 32) + i64::from(u32::from_be_bytes([h[0], h[1], h[2], h[3]]))
+}
+
+/// The tool calls still open at the end of the events: a turn's end cuts off what it left open.
+fn open_calls(evs: &[Value]) -> Vec<&Value> {
+    let mut open: Vec<&Value> = vec![];
+    for e in evs {
+        match e["type"].as_str().unwrap_or("") {
+            "tool/call" => open.push(e),
+            "tool/result" => open.retain(|c| c["data"]["callId"] != e["data"]["message"]["toolCallId"]),
+            "turn/end" => open.clear(),
+            _ => {}
+        }
+    }
+    open
+}
+
+fn input(call: &Value) -> Value {
+    serde_json::from_str(call["data"]["arguments"].as_str().unwrap_or("")).unwrap_or(json!({}))
+}
+
+/// What the lists show of a session's last turn, in the shape of a transcript's brief: its last line, the call it runs and its open question.
+fn brief(evs: &[Value]) -> Value {
+    let said = evs
+        .iter()
+        .rev()
+        .filter(|e| e["type"] == "assistant/message")
+        .map(|e| text_parts(&e["data"]["message"]["content"]));
+    let last = said.into_iter().find(|t| !t.is_empty()).unwrap_or_default();
+    let line: String = last.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("").chars().take(200).collect();
+    let (mut ask, mut doing) = (Value::Null, Value::Null);
+    for c in open_calls(evs) {
+        let (id, since) = (as_text(&c["data"]["callId"]), c["time"].as_f64().unwrap_or(0.0) / 1000.0);
+        if c["data"]["name"] == ASK {
+            // dsh web takes the answer to an open question only over its own socket: the user answers there.
+            ask = transcripts::question(&input(c));
+            ask["answerable"] = json!(false);
+            ask["tool_id"] = json!(id);
+            ask["since"] = json!(since);
+        } else if doing.is_null() {
+            let what = summary(&input(c));
+            doing = json!({"tool_id": id, "since": since, "tool": c["data"]["name"], "what": what});
+        }
+    }
+    json!({"line": line.trim_start_matches(['#', '*', ' ']), "ask": ask, "doing": doing})
+}
+
 /// The sessions the servers hold, as rows of the session list; seimei's own are left out.
 fn rows(s: &Server, own: &Own) -> Vec<Live> {
     let held: Vec<&String> = s.held.iter().filter(|sid| !own.contains_key(*sid)).collect();
@@ -200,26 +258,30 @@ fn rows(s: &Server, own: &Own) -> Vec<Live> {
             continue;
         }
         let values = &item["projections"]["values"];
-        let state = match &fault {
-            None => call(s, "session/state", json!({"request": {"sessionId": sid}})).unwrap_or_default(),
-            Some(_) => Value::Null,
+        let (state, recent) = match &fault {
+            None => (
+                call(s, "session/state", json!({"request": {"sessionId": sid}})).unwrap_or_default(),
+                events(s, sid, 1, 1).unwrap_or_default(),
+            ),
+            Some(_) => (Value::Null, vec![]),
         };
         let idle = state["running"] == false && state["pendingInput"].as_array().is_some_and(|p| p.is_empty());
-        let recent = if idle { events(s, sid, 1, 1).unwrap_or_default() } else { vec![] };
-        let since =
-            recent.iter().rev().find(|e| e["type"] == "turn/end").map_or(0.0, |e| e["time"].as_f64().unwrap_or(0.0));
+        let ended = recent.iter().rev().find(|e| e["type"] == "turn/end").and_then(|e| e["time"].as_f64());
         let active = item["updatedAt"].as_f64().unwrap_or(0.0) / 1000.0;
         let title = values["title"].as_str().filter(|t| !t.trim().is_empty());
+        let mut rec = brief(&recent);
+        rec["sessionId"] = json!(sid);
+        rec["dsh"] = json!({"port": s.port, "home": s.home, "server": s.pid});
         out.push(Live {
             name: title.map_or_else(|| format!("dsh {}", chars(sid.trim_start_matches("session-"), 8)), String::from),
-            pid: s.pid,
+            pid: key(sid),
             session_id: sid.clone(),
             status: fault.as_ref().map_or_else(|| status(&state, &recent), |e| format!("unreadable: {e}")),
-            since: if since > 0.0 { since / 1000.0 } else { active },
+            since: ended.filter(|_| idle).map_or(active, |t| t / 1000.0),
             active,
             cwd: item["cwd"].as_str().map_or_else(|| as_text(&values["workingDirectory"]), String::from),
             kind: KIND.into(),
-            rec: json!({"sessionId": sid, "dsh": {"port": s.port, "home": s.home, "server": s.pid}}),
+            rec,
             origin: String::new(),
             origin_pid: 0,
             view_pid: 0,
@@ -233,6 +295,34 @@ pub fn live(own: &Own) -> Vec<Live> {
     let mut out: Vec<Live> = servers().iter().flat_map(|s| rows(s, own)).collect();
     out.sort_by(|a, b| b.active.total_cmp(&a.active));
     out
+}
+
+/// A row of the page's session list, with the fields a transcript's row has: the page and the app show both alike.
+pub fn list_row(s: &Live, project: Value) -> Value {
+    let waiting = s.status.strip_prefix("waiting: ");
+    let status = if waiting.is_some() {
+        "waiting"
+    } else if s.status == "busy" {
+        "busy"
+    } else {
+        "idle"
+    };
+    let line = match s.status.strip_prefix("failed: ").or(s.status.strip_prefix("unreadable: ")) {
+        Some(why) => format!("{}: {why}", if s.status.starts_with("failed") { "Failed" } else { "Unreadable" }),
+        None => as_text(&s.rec["line"]),
+    };
+    let ask = &s.rec["ask"];
+    let first = ask["questions"][0]["question"].clone();
+    let waiting_text = match waiting {
+        Some("approval") => "Waiting for an approval in dsh web",
+        Some(_) => "Waiting for an answer in dsh web",
+        None => "",
+    };
+    json!({"pid": s.pid, "name": s.name, "session_id": s.session_id, "status": status, "waiting_for": waiting,
+        "waiting_text": waiting_text, "since": s.since, "active": s.active, "cwd": s.cwd, "kind": s.kind,
+        "question": !ask.is_null(), "ask": if ask.is_null() { Value::Null } else { first },
+        "project": project, "line": line, "context": null, "doing": s.rec["doing"], "model": null, "effort": null,
+        "ask_detail": ask, "job": null, "moved_from": null, "screen": s.pid, "proc_start": null, "reach": null})
 }
 
 /// The server a row's session is open in.
@@ -252,29 +342,88 @@ pub fn peek(row: &Live, count: usize) -> Result<Value, String> {
 /// What peek shows of a session's events, oldest first.
 fn read(evs: &[Value], count: usize) -> Value {
     let (mut users, mut texts) = (vec![], vec![]);
-    let mut pending: Vec<Pending> = vec![];
     for e in evs {
-        let d = &e["data"];
-        let t = stamp(&e["time"]);
+        let (d, t) = (&e["data"], stamp(&e["time"]));
+        if e["type"] == "user/message" && d["source"]["kind"] == "user" {
+            users.push((t, text_parts(&d["content"])));
+        } else if e["type"] == "assistant/message" {
+            let said = text_parts(&d["message"]["content"]);
+            if !said.is_empty() {
+                texts.push((t, said));
+            }
+        }
+    }
+    let pending: Vec<Pending> = (open_calls(evs).into_iter())
+        .map(|c| (as_text(&c["data"]["callId"]), stamp(&c["time"]), as_text(&c["data"]["name"]), input(c)))
+        .collect();
+    sessions::peek_value(&users, &texts, pending, ASK, count)
+}
+
+/// The events of a session as the page draws a transcript's: prompts, texts, tool calls and their results, failed turns.
+fn page_events(evs: &[Value]) -> Vec<Value> {
+    let mut out = vec![];
+    for e in evs {
+        let (d, t, seq) = (&e["data"], e["time"].as_f64().unwrap_or(0.0) / 1000.0, as_text(&e["seq"]));
         match e["type"].as_str().unwrap_or("") {
-            "user/message" if d["source"]["kind"] == "user" => users.push((t, text_parts(&d["content"]))),
+            "user/message" if d["source"]["kind"] == "user" => {
+                out.push(json!({"id": format!("d{seq}"), "type": "user", "text": chars(&text_parts(&d["content"]), 8000), "t": t}));
+            }
             "assistant/message" => {
                 let said = text_parts(&d["message"]["content"]);
                 if !said.is_empty() {
-                    texts.push((t, said));
+                    out.push(
+                        json!({"id": format!("d{seq}"), "type": "assistant", "text": chars(&said, 20000), "t": t}),
+                    );
                 }
             }
             "tool/call" => {
-                let inp = serde_json::from_str(d["arguments"].as_str().unwrap_or("")).unwrap_or(json!({}));
-                pending.push((as_text(&d["callId"]), t, as_text(&d["name"]), inp));
+                let id = as_text(&d["callId"]);
+                out.push(json!({"id": id, "type": "tool", "name": d["name"], "tool_id": id, "summary": summary(&input(e)), "t": t}));
             }
-            "tool/result" => pending.retain(|p| json!(p.0) != d["message"]["toolCallId"]),
-            // Calls a turn left open when it ended were cut off, not running.
-            "turn/end" => pending.clear(),
+            "tool/result" => {
+                let (id, text) = (as_text(&d["message"]["toolCallId"]), text_parts(&d["message"]["content"]));
+                let text =
+                    if text.chars().count() <= RESULT { text } else { format!("{}\n[...]", chars(&text, RESULT)) };
+                out.push(json!({"id": format!("r:{id}"), "type": "tool_result", "tool_id": id,
+                    "error": d["message"]["isError"] == true, "text": text, "t": t}));
+            }
+            "turn/end" if d["reason"]["kind"] != "completed" => {
+                let why = match d["reason"]["kind"].as_str() {
+                    Some("error") => format!("Failed: {}", chars(&as_text(&d["reason"]["error"]["message"]), 300)),
+                    _ => "Interrupted".into(),
+                };
+                out.push(json!({"id": format!("d{seq}"), "type": "system", "text": why, "t": t}));
+            }
             _ => {}
         }
     }
-    sessions::peek_value(&users, &texts, pending, ASK, count)
+    out
+}
+
+/// The session's page from event `from` on, else its last turns: {events, next, reset}, as `sessions::timeline` answers for a transcript.
+/// next is dsh's event cursor; a page too far behind to extend gets the last turns again, with reset.
+pub fn timeline(row: &Live, from: Option<u64>) -> Result<Value, String> {
+    let s = server_of(row)?;
+    let address = json!({"kind": "session", "sessionId": row.session_id});
+    if let Some(from) = from {
+        let page = call(&s, "session/events", json!({"request": {"address": address, "maxMessages": 20}}))?;
+        let evs: Vec<Value> = page["records"].as_array().into_iter().flatten().map(|r| r["event"].clone()).collect();
+        let first = evs.first().and_then(|e| e["seq"].as_u64()).unwrap_or(0);
+        if page["cursor"].as_u64().unwrap_or(0) >= from && (first <= from + 1 || page["hasMore"] == false) {
+            let new: Vec<Value> = evs.into_iter().filter(|e| e["seq"].as_u64().is_some_and(|q| q > from)).collect();
+            return Ok(json!({"events": page_events(&new), "next": page["cursor"], "reset": false}));
+        }
+    }
+    let window = json!({"minMessages": 40, "minTurns": 5});
+    let page =
+        call(&s, "session/events", json!({"request": {"address": address, "maxMessages": 100, "turnWindow": window}}))?;
+    let evs: Vec<Value> = page["records"].as_array().into_iter().flatten().map(|r| r["event"].clone()).collect();
+    Ok(json!({"events": page_events(&evs), "next": page["cursor"], "reset": from.is_some() || page["hasMore"] == true}))
+}
+
+/// The open question and the running call, read now: what the session's page shows under its events.
+pub fn now_open(row: &Live) -> Result<Value, String> {
+    Ok(brief(&events(&server_of(row)?, &row.session_id, 1, 1)?))
 }
 
 /// Give the session the user's message as their own prompt: into its running turn at its next step, else as a new turn.
@@ -368,6 +517,84 @@ mod tests {
         );
         assert_eq!(p["questions"][0]["questions"][0]["question"], "tea?");
         assert_eq!(read(&evs, 1)["user"], json!([["1970-01-01T00:00:08.000Z", "second"]]));
+    }
+
+    #[test]
+    fn a_key_is_above_every_pid_and_stays_the_same() {
+        let k = key("session-144a13e6-319c-415c-bfdc-01c4491ed3ef");
+        assert!(is_key(k) && !is_key(4_194_304));
+        assert_eq!(k, key("session-144a13e6-319c-415c-bfdc-01c4491ed3ef"));
+        assert_ne!(k, key("session-145bd9ae-6cc5-43b7-b378-cf37fba818ce"));
+    }
+
+    fn row(status: &str, rec: Value) -> Live {
+        Live {
+            name: "Greeting".into(),
+            pid: key("session-a"),
+            session_id: "session-a".into(),
+            status: status.into(),
+            since: 10.0,
+            active: 12.0,
+            cwd: "/w".into(),
+            kind: KIND.into(),
+            rec,
+            origin: String::new(),
+            origin_pid: 0,
+            view_pid: 0,
+        }
+    }
+
+    #[test]
+    fn a_list_row_has_the_fields_of_a_transcripts_row() {
+        let ask = json!({"tool_id": "c1", "questions": [{"question": "tea?"}], "answerable": true});
+        let r = list_row(&row("waiting: question", json!({"line": "", "ask": ask, "doing": null})), json!("w"));
+        assert_eq!(
+            (r["status"].as_str(), r["question"].as_bool(), r["ask"].as_str()),
+            (Some("waiting"), Some(true), Some("tea?"))
+        );
+        assert_eq!(r["pid"], json!(key("session-a")));
+        assert_eq!(r["waiting_text"], "Waiting for an answer in dsh web");
+        let r = list_row(&row("failed: 400: bad", json!({"line": "done", "ask": null, "doing": null})), Value::Null);
+        assert_eq!(
+            (r["status"].as_str(), r["line"].as_str(), r["question"].as_bool()),
+            (Some("idle"), Some("Failed: 400: bad"), Some(false))
+        );
+        let doing = json!({"tool": "bash", "what": "make"});
+        let r = list_row(&row("busy", json!({"line": "x", "ask": null, "doing": doing})), Value::Null);
+        assert_eq!((r["status"].as_str(), &r["doing"]), (Some("busy"), &doing));
+    }
+
+    #[test]
+    fn the_page_shows_prompts_texts_calls_and_failed_turns() {
+        let ev =
+            |seq: i64, kind: &str, data: Value| json!({"type": kind, "seq": seq, "time": 1_000 * seq, "data": data});
+        let say = |text: &str| json!([{"type": "text", "text": text}]);
+        let evs = vec![
+            ev(1, "user/message", json!({"content": say("hi"), "source": {"kind": "user"}})),
+            ev(2, "user/message", json!({"content": say("<system-reminder>"), "source": {"kind": "time-context"}})),
+            ev(
+                3,
+                "assistant/message",
+                json!({"message": {"content": [{"type": "reasoning", "text": "hm"}, {"type": "text", "text": "yo"}]}}),
+            ),
+            ev(4, "tool/call", json!({"callId": "c1", "name": "bash", "arguments": "{\"command\":\"ls\"}"})),
+            ev(5, "tool/result", json!({"message": {"toolCallId": "c1", "content": say("a\nb"), "isError": false}})),
+            ev(6, "turn/end", json!({"reason": {"kind": "completed"}})),
+            ev(7, "turn/end", json!({"reason": {"kind": "error", "error": {"message": "400"}}})),
+        ];
+        let kinds: Vec<(String, String)> = page_events(&evs)
+            .iter()
+            .map(|e| (as_text(&e["type"]), as_text(e.get("text").unwrap_or(&e["summary"]))))
+            .collect();
+        let want =
+            [("user", "hi"), ("assistant", "yo"), ("tool", "ls"), ("tool_result", "a\nb"), ("system", "Failed: 400")];
+        assert_eq!(kinds, want.map(|(a, b)| (a.to_string(), b.to_string())));
+        let b = brief(&evs[..4]);
+        assert_eq!(
+            (b["line"].as_str(), b["doing"]["tool"].as_str(), b["doing"]["since"].as_f64()),
+            (Some("yo"), Some("bash"), Some(4.0))
+        );
+        assert!(brief(&evs).get("doing").is_some_and(Value::is_null));
     }
 
     #[test]

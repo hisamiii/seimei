@@ -648,10 +648,9 @@ impl Tools {
                 let lines: Vec<String> = (rows.iter())
                     .map(|s| {
                         let head = match self.pool.aliases.of(s) {
-                            Some(a) if s.in_dsh_web() => format!("{a} = \"{}\" [dsh web pid {}]", s.name, s.pid),
+                            Some(a) if s.in_dsh_web() => format!("{a} = \"{}\" [{}]", s.name, s.pid_text()),
                             Some(a) => format!("{a} = \"{}\" [pid {}, to {}]", s.name, s.pid, s.address()),
-                            None if s.in_dsh_web() => format!("{} [dsh web pid {}]", s.name, s.pid),
-                            None => format!("{} [pid {}]", s.name, s.pid),
+                            None => format!("{} [{}]", s.name, s.pid_text()),
                         };
                         let mode = (!s.in_dsh_web()).then(|| sessions::transcript_of(&s.rec)).flatten();
                         let mode = mode.and_then(|p| sessions::mode_of(&p));
@@ -887,7 +886,7 @@ impl Tools {
             }
             let lines: Vec<String> = (all.iter())
                 .map(|al| match aliases.resolve(al, &rows) {
-                    Some(s) => format!("{al} = \"{}\" [pid {}], {}", s.name, s.pid, s.send_hint()),
+                    Some(s) => format!("{al} = \"{}\" [{}], {}", s.name, s.pid_text(), s.send_hint()),
                     None => format!("{al} = (not running)"),
                 })
                 .collect();
@@ -910,7 +909,7 @@ impl Tools {
             return text("An alias is up to 32 letters, digits, dots, dashes or underscores.", true);
         }
         aliases.set(&name, &s);
-        text(&format!("{name} = \"{}\" [pid {}], {}.", s.name, s.pid, s.send_hint()), false)
+        text(&format!("{name} = \"{}\" [{}], {}.", s.name, s.pid_text(), s.send_hint()), false)
     }
 
     /// A message to one of the user's dsh web sessions, as their own prompt.
@@ -961,9 +960,9 @@ impl Tools {
         };
         let ts = |v: &Value| chars(v.as_str().unwrap_or(""), 19);
         let mut lines = vec![format!(
-            "{} [pid {}, {}{mode}]: {} since {}, last activity {}, in {}; {}",
+            "{} [{}, {}{mode}]: {} since {}, last activity {}, in {}; {}",
             s.name,
-            s.pid,
+            s.pid_text(),
             s.kind,
             s.status,
             sessions::ago(s.since),

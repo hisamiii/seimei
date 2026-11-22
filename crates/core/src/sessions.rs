@@ -114,6 +114,14 @@ impl Live {
         }
     }
 
+    /// Its pid as the dispatcher reads it: a dsh session runs inside its server's process.
+    pub fn pid_text(&self) -> String {
+        match self.in_dsh_web() {
+            true => format!("dsh web pid {}", as_text(&self.rec["dsh"]["server"])),
+            false => format!("pid {}", self.pid),
+        }
+    }
+
     /// Where SendMessage reaches it, whatever its name.
     pub fn address(&self) -> String {
         let sock = self.rec["messagingSocketPath"].as_str().filter(|p| !p.is_empty()).map(String::from);
@@ -575,7 +583,7 @@ fn hidden(s: &Live, own: &Own) -> bool {
     s.rec["entrypoint"] != "cli" && OURS.is_match(&s.name)
 }
 
-/// The user's running sessions for the page: seimei's and parked terminals left out.
+/// The user's running sessions for the page, then the ones open in dsh web: seimei's and parked terminals left out.
 pub fn listing(own: &Own) -> Vec<Value> {
     let home = home().display().to_string();
     let mut out = vec![];
@@ -609,6 +617,11 @@ pub fn listing(own: &Own) -> Vec<Value> {
             "moved_from": if s.origin.is_empty() { Value::Null } else { json!({"session_id": s.origin, "pid": s.origin_pid}) },
             // The process whose window shows it: its own, or a parked terminal's.
             "screen": s.screen_pid(), "proc_start": rec["procStart"], "reach": terminal::reachable(s.screen_pid())}));
+    }
+    for s in dsh_web::live(own) {
+        let project =
+            if s.cwd.is_empty() || s.cwd == home { Value::Null } else { json!(project_of(&format!("{}/x", s.cwd))) };
+        out.push(dsh_web::list_row(&s, project));
     }
     out
 }
@@ -644,7 +657,9 @@ impl SessionEvents {
         // Sessions working in an agent's scratch folder are test fixtures, not the user's work.
         let jobs = harness::jobs_dir();
         let test = std::env::var_os("SEIMEI_TEST_SESSIONS").is_some_and(|v| !v.is_empty());
+        // dsh web's sessions have no transcript or window: what they run into is not read yet.
         let rows: Vec<&Value> = (rows.iter())
+            .filter(|r| r["kind"] != dsh_web::KIND)
             .filter(|r| {
                 test || !Path::new(r["cwd"].as_str().filter(|c| !c.is_empty()).unwrap_or("/")).starts_with(&jobs)
             })
