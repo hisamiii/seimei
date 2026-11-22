@@ -76,7 +76,7 @@ const ICONS = {
   Edit: 'M4 20h4L19 9l-4-4L4 16zM13 7l4 4',
   Search: 'M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14zM16 16l4 4',
   Web: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18',
-  Tool: 'M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-2.4z',
+  Tool: 'M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-2.4z',  Think: 'M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z',
 };
 
 // The built-in plugins' tools (mcp__browser__browser_tabs) read like seimei's own, as they were named before them.
@@ -866,6 +866,24 @@ export class Renderer {
     // The agent's short update between tool calls: it ends the tool group before it, as in the terminal.
     if (ev.type === 'update') {
       this.put(el('div', 'msg update', ev.text));
+      return;
+    }
+    // The model's reasoning (dsh records it): a chip like the tool activity one, folded until tapped.
+    if (ev.type === 'reasoning') {
+      const node = el('div', 'activity');
+      const chip = el('button', 'chip sl');
+      chip.type = 'button';
+      const chev = svg(ICON.chev);
+      chev.classList.add('chev');
+      chip.append(svg(ICONS.Think), el('span', null, 'Thought'), chev);
+      const body = el('div', 'calls thought', ev.text);
+      body.hidden = true;
+      chip.addEventListener('click', () => {
+        body.hidden = !body.hidden;
+        node.classList.toggle('open', !body.hidden);
+      });
+      node.append(chip, body);
+      this.put(node);
       return;
     }
     // A voice call flows into the chat like typed messages, with a voice mark: no card, no summary.

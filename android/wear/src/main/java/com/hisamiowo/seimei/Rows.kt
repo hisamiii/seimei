@@ -144,6 +144,7 @@ fun ItemRow(it: Item, vm: Model, lane: String, onFold: (String) -> Unit = {}) {
         is Item.Note -> T(it.text + if (it.n > 1) " (${it.n}x)" else "", size = SMALL, lines = 3,
             color = when (it.level) { "error" -> t.error; "warn" -> t.warn; else -> t.text3 })
         is Item.Activity -> Chip(activityLabel(it.calls), iconFor(it.calls.lastOrNull()?.name ?: ""))
+        is Item.Thought -> Chip("Thought", Icons.think)
         is Item.Worker -> {
             val open = { vm.push(Screen.Agent("worker", it.worker)) }
             if (it.event == "asking" && it.settled == null && it.text.isNotEmpty()) Column(

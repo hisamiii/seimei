@@ -25,6 +25,8 @@ sealed interface Item {
     data class Trig(override val key: String, val text: String) : Item
     /** The agent's short update between tool calls (from its thinking): it ends the tool group before it. */
     data class Update(override val key: String, val text: String) : Item
+    /** The model's reasoning (dsh records it): a chip folded until tapped. */
+    data class Thought(override val key: String, val text: String) : Item
     data class Note(override val key: String, val text: String, val level: String, val n: Int = 1, val t: Double = 0.0) : Item
     data class Activity(override val key: String, val calls: List<Call>) : Item
     data class Worker(
@@ -288,6 +290,10 @@ class Chat(private val zone: ZoneId = ZoneId.systemDefault(), private val lane: 
         activity = -1
         if (type == "update") {
             put(Item.Update(key, ev.str("text")))
+            return
+        }
+        if (type == "reasoning") {
+            put(Item.Thought(key, ev.str("text")))
             return
         }
         val id = ev.optLong("id")

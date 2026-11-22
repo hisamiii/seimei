@@ -369,6 +369,14 @@ fn page_events(evs: &[Value]) -> Vec<Value> {
                 out.push(json!({"id": format!("d{seq}"), "type": "user", "text": chars(&text_parts(&d["content"]), 8000), "t": t}));
             }
             "assistant/message" => {
+                // The model's reasoning comes before its reply: the page folds it away until tapped.
+                let parts = d["message"]["content"].as_array().into_iter().flatten().enumerate();
+                for (i, c) in parts.filter(|(_, c)| c["type"] == "reasoning") {
+                    let thought = c["text"].as_str().unwrap_or("").trim();
+                    if !thought.is_empty() {
+                        out.push(json!({"id": format!("d{seq}:{i}"), "type": "reasoning", "text": chars(thought, 20000), "t": t}));
+                    }
+                }
                 let said = text_parts(&d["message"]["content"]);
                 if !said.is_empty() {
                     out.push(
@@ -565,7 +573,7 @@ mod tests {
     }
 
     #[test]
-    fn the_page_shows_prompts_texts_calls_and_failed_turns() {
+    fn the_page_shows_prompts_reasoning_texts_calls_and_failed_turns() {
         let ev =
             |seq: i64, kind: &str, data: Value| json!({"type": kind, "seq": seq, "time": 1_000 * seq, "data": data});
         let say = |text: &str| json!([{"type": "text", "text": text}]);
@@ -586,8 +594,14 @@ mod tests {
             .iter()
             .map(|e| (as_text(&e["type"]), as_text(e.get("text").unwrap_or(&e["summary"]))))
             .collect();
-        let want =
-            [("user", "hi"), ("assistant", "yo"), ("tool", "ls"), ("tool_result", "a\nb"), ("system", "Failed: 400")];
+        let want = [
+            ("user", "hi"),
+            ("reasoning", "hm"),
+            ("assistant", "yo"),
+            ("tool", "ls"),
+            ("tool_result", "a\nb"),
+            ("system", "Failed: 400"),
+        ];
         assert_eq!(kinds, want.map(|(a, b)| (a.to_string(), b.to_string())));
         let b = brief(&evs[..4]);
         assert_eq!(

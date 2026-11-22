@@ -381,6 +381,7 @@ fun Row(item: Item, vm: Seimei, live: JSONObject? = null, chat: Boolean = false,
         is Item.Update -> Text(item.text, fontSize = 14.sp, lineHeight = 20.sp, color = LocalExtra.current.text2)
         is Item.Note -> NotePill(item.text + if (item.n > 1) "  ×${item.n}" else "", item.level)
         is Item.Activity -> ActivityChip(item, live)
+        is Item.Thought -> ThoughtChip(item)
         is Item.Worker -> WorkerCard(item, vm)
         is Item.Approval -> ApprovalCard(item, vm)
         is Item.Sent -> Column(Modifier.fillMaxWidth()) {
@@ -757,6 +758,28 @@ fun ActivityChip(a: Item.Activity, live: JSONObject? = null) {
         if (open) Column(Modifier.padding(start = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             for (c in a.calls) CallRow(c)
         }
+    }
+}
+
+/** The model's reasoning: the activity chip's shape with "Thought", and its text when open. */
+@Composable
+fun ThoughtChip(a: Item.Thought) {
+    var open by rememberSaveable(a.key) { mutableStateOf(false) }
+    Column(Modifier.animateContentSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceContainer)
+                .clickable { open = !open }.padding(start = 12.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.think, null, Modifier.size(16.dp), tint = LocalExtra.current.text2)
+            Spacer(Modifier.width(8.dp))
+            Text("Thought", fontSize = 14.sp, lineHeight = 20.sp, color = LocalExtra.current.text2)
+            Spacer(Modifier.width(8.dp))
+            Icon(Icons.chev, null, Modifier.size(20.dp).then(if (open) Modifier.rotate90() else Modifier), tint = LocalExtra.current.text3)
+        }
+        if (open) Text(a.text, fontSize = 13.sp, lineHeight = 19.sp, color = LocalExtra.current.text2,
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceContainerLowest)
+                .padding(horizontal = 14.dp, vertical = 12.dp))
     }
 }
 

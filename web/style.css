@@ -266,6 +266,7 @@ body:not([data-tab="chat"]) .ltabs { display: none; }
 .chip.err { background: color-mix(in srgb, var(--error) 14%, var(--container)); color: var(--error); }
 .activity.open .chev { transform: rotate(90deg); }
 .calls { align-self: stretch; background: var(--surface-lowest); border-radius: 16px; padding: 6px; display: flex; flex-direction: column; }
+.calls.thought { display: block; padding: 12px 14px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.5; color: var(--text-2); }
 .call {
   display: flex; align-items: baseline; gap: 10px; min-height: 36px; padding: 8px 10px;
   border: 0; border-radius: 10px; background: none; text-align: left; font: 12.5px/1.5 var(--mono); color: var(--text-2);

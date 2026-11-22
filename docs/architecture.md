@@ -51,6 +51,7 @@ seimei runs three kinds of session: the dispatcher, the shikigami and the user's
 The page and the app list them next to the other sessions, with the same rows and session page. A row's `pid` is a key above any real pid, made from the session id, so the clients need nothing new.
 
 - The session page reads `session/events` and polls from dsh's event cursor, as it polls a transcript from a byte offset.
+- The model's reasoning parts become `reasoning` events. The page and the app fold each one into a "Thought" chip, the tool activity chip's shape, that opens on tap.
 - A message from the page goes through `session/prompt`, as session_message's does.
 - An open question shows, but the user answers it in dsh web: dsh web takes that answer only over its own socket.
 - Hand off refuses a dsh session, since only the harness's own sessions can become shikigami.
