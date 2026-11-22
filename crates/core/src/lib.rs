@@ -11,6 +11,7 @@ pub mod boot;
 pub mod cost;
 pub mod deploys;
 pub mod dispatcher;
+pub mod dsh_web;
 pub mod events;
 pub mod files;
 pub mod harness;

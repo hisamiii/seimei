@@ -285,7 +285,7 @@
    "_meta": {
     "anthropic/alwaysLoad": true
    },
-   "description": "List every running Claude Code session on the server: your alias for it, name, status (idle, busy, waiting with what for, shell, parked), kind, folder and last activity. Includes the user's own sessions. Aliased ones show their SendMessage address, which holds through renames.",
+   "description": "List every running session on the server: your alias for it, name, status (idle, busy, waiting with what for, shell, parked, failed), kind, folder and last activity. Includes the user's own Claude Code sessions and the ones open in their dsh web (kind dsh). Aliased Claude Code ones show their SendMessage address, which holds through renames.",
    "inputSchema": {
     "properties": {},
     "required": [],
@@ -297,7 +297,7 @@
    "_meta": {
     "anthropic/alwaysLoad": true
    },
-   "description": "Read a running session: its last user messages and assistant texts, an open AskUserQuestion with its options (SendMessage does not reach a session sitting in one), and tool calls still running. Session by name, pid or session id.",
+   "description": "Read a running session: its last user messages and assistant texts, an open question with its options (SendMessage does not reach a session sitting in an AskUserQuestion), and tool calls still running. Session by name, pid, session id or alias.",
    "inputSchema": {
     "properties": {
      "session": {
@@ -314,6 +314,28 @@
     "type": "object"
    },
    "name": "session_peek"
+  },
+  {
+   "_meta": {
+    "anthropic/alwaysLoad": true
+   },
+   "description": "Send a message into one of the user's dsh sessions (kind dsh in sessions) as their own prompt: a new turn when it is idle, into its running turn at its next step when busy. No card. Claude Code sessions take SendMessage at their address instead.",
+   "inputSchema": {
+    "properties": {
+     "session": {
+      "type": "string"
+     },
+     "text": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "session",
+     "text"
+    ],
+    "type": "object"
+   },
+   "name": "session_message"
   },
   {
    "_meta": {

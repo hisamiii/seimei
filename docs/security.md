@@ -74,6 +74,8 @@ In bypass mode, approval cards protect against mistakes and casual prompt inject
 
 Such an agent runs as the user and can reach what the user can: seimei's state, its sockets and the local port. Ask mode, `default`, puts shell commands behind cards.
 
+seimei's server reads dsh web's cookie secret from dsh's `.credentials.yaml` to read and message the user's dsh sessions, see [architecture.md](architecture.md). It keeps the secret only for the call, and sends the cookie only to 127.0.0.1.
+
 One call on the plugin socket needs no session token. With it, `seimei mcp` under one of the user's own sessions puts a picture or file in the chat. The socket is the user's alone, mode 600.
 
 ## Third-party content

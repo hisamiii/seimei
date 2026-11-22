@@ -9,6 +9,7 @@ use regex::Regex;
 use serde_json::{Value, json};
 
 use crate::aliases::Aliases;
+use crate::dsh_web;
 use crate::events::EventLog;
 use crate::paths::home;
 use crate::terminal;
@@ -97,6 +98,20 @@ impl Live {
     /// Whether this row is the session `sid`, moved to a background job or not.
     pub fn is(&self, sid: &str) -> bool {
         !sid.is_empty() && self.ids().contains(&sid)
+    }
+
+    /// Open in a dsh web server: read and messaged through its API.
+    pub fn in_dsh_web(&self) -> bool {
+        self.kind == dsh_web::KIND && self.rec.get("dsh").is_some()
+    }
+
+    /// How the dispatcher messages it: SendMessage at its address, or seimei's own tool.
+    pub fn send_hint(&self) -> String {
+        if self.in_dsh_web() {
+            "message it with session_message".into()
+        } else {
+            format!("SendMessage to {}", self.address())
+        }
     }
 
     /// Where SendMessage reaches it, whatever its name.
@@ -272,14 +287,29 @@ fn viewers(out: &mut [Live], clients: &[i64], showing: &dyn Fn(i64) -> Vec<Strin
     }
 }
 
+/// The running sessions with the ones open in a dsh web server after them.
+pub fn all(own: &Own) -> Vec<Live> {
+    let mut rows = live(own);
+    rows.extend(dsh_web::live(own));
+    rows
+}
+
 /// By alias, exact name, pid, session id prefix, then a unique part of the name.
 pub fn find(key: &str, own: &Own, aliases: Option<&Aliases>) -> Option<Live> {
+    find_among(key, &live(own), aliases)
+}
+
+/// As find, among dsh web's sessions too.
+pub fn find_any(key: &str, own: &Own, aliases: Option<&Aliases>) -> Option<Live> {
+    find_among(key, &all(own), aliases)
+}
+
+fn find_among(key: &str, rows: &[Live], aliases: Option<&Aliases>) -> Option<Live> {
     let key = key.trim();
-    let rows = live(own);
-    if let Some(s) = aliases.and_then(|a| a.resolve(key, &rows)) {
+    if let Some(s) = aliases.and_then(|a| a.resolve(key, rows)) {
         return Some(s.clone());
     }
-    find_in(key, &rows)
+    find_in(key, rows)
 }
 
 /// The one row the key names: exact name, pid, session id prefix, then a unique part of the name.
@@ -307,7 +337,7 @@ pub fn peek(path: &Path, count: usize) -> Value {
     let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
     let (rows, _) = rows_since(path, size.saturating_sub(TAIL), now());
     let (mut users, mut texts) = (vec![], vec![]);
-    let mut pending: Vec<(String, String, String, Value)> = vec![];
+    let mut pending: Vec<Pending> = vec![];
     for row in &rows {
         let content = &row["message"]["content"];
         let t = as_text(&row["timestamp"]);
@@ -334,19 +364,34 @@ pub fn peek(path: &Path, count: usize) -> Value {
             }
         }
     }
-    let cut = |x: &str| if x.chars().count() <= TEXT { x.to_string() } else { format!("{} [...]", chars(x, TEXT)) };
-    let last = |v: &Vec<(String, String)>| -> Vec<Value> {
-        v[v.len().saturating_sub(count)..].iter().map(|(t, x)| json!([t, cut(x)])).collect()
-    };
+    peek_value(&users, &texts, pending, "AskUserQuestion", count)
+}
+
+/// A tool call still open: its id, time, tool name and input.
+pub type Pending = (String, String, String, Value);
+
+/// What peek answers: the last `count` prompts and texts as (time, text), cut to a readable length, and the calls still open.
+/// An open call of the harness's question tool `ask` is a question for the user.
+pub fn peek_value(
+    users: &[(String, String)],
+    texts: &[(String, String)],
+    pending: Vec<Pending>,
+    ask: &str,
+    count: usize,
+) -> Value {
     let (mut questions, mut open) = (vec![], vec![]);
     for (_, t, name, inp) in pending {
-        if name == "AskUserQuestion" {
+        if name == ask {
             questions.push(json!({"asked": t, "questions": inp.get("questions").cloned().unwrap_or(json!([]))}));
         } else {
             open.push(json!({"since": t, "tool": name, "what": summary(&inp)}));
         }
     }
-    json!({"user": last(&users), "assistant": last(&texts), "questions": questions, "open_calls": open})
+    let cut = |x: &str| if x.chars().count() <= TEXT { x.to_string() } else { format!("{} [...]", chars(x, TEXT)) };
+    let last = |v: &[(String, String)]| -> Vec<Value> {
+        v[v.len().saturating_sub(count)..].iter().map(|(t, x)| json!([t, cut(x)])).collect()
+    };
+    json!({"user": last(users), "assistant": last(texts), "questions": questions, "open_calls": open})
 }
 
 /// The permission mode the session runs in, as its transcript last recorded it.

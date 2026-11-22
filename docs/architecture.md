@@ -41,6 +41,15 @@ seimei runs three kinds of session: the dispatcher, the shikigami and the user's
 - **Side threads** are small chats for tangents, apart from the dispatcher's context. Each runs on its own Claude Code process with look-up tools only, named by its first reply. The user starts one from the top bar or from a message of seimei's, and sends seimei its summary as their own message. The dispatcher lists, reads, starts and messages them, and offers one under a reply. A thread archives itself after a day without activity and keeps its text. It can become a shikigami with its text as context, and is read-only from then on.
 - **The user's own sessions** come from Claude Code's registry in `~/.claude/sessions/*.json` and from the transcripts. The page lists them. A session's page shows its transcript, with the prompts queued mid-turn or relayed by seimei. The server looks at each transcript four times a second. After some compactions Claude Code logs a session's turns only in the API requests it keeps there, so the page reads those as well. When one grows, it tells the clients on the stream, and an open page reads on at once. A background task's end shows as a note. When Claude Code moves a terminal's session to a background job, the job's process is that session's one row. Its messages go there too. The link comes from the parked terminal's record or the job's command line, and seimei keeps it in `moved-sessions.json` once seen, since the terminal may close and a respawned job no longer says. The warm spare kept for the next job is no one's work and is left out. seimei's own sessions are left out by its records. Another seimei's are left out by their names, but only where the SDK drives them. A session in a terminal or a background job is the user's whatever its name. So one handed over lists like any other. Adopting one makes it a shikigami, and stopping, resuming or deleting one takes a card.
 
+**The user's dsh web sessions** list next to them, as kind "dsh". A session counts as running while a `dsh web` process holds its `session.lock`. seimei finds them in that process's open files, and the server's port by its listening socket. seimei reads and messages them through that server's own HTTP API, `POST /api/<namespace>/<method>`, and never touches dsh's session files. The dispatcher's sessions, session_peek, alias and session_message tools reach them; the page does not list them.
+
+- `session/list` gives each session's title, folder and activity. Sessions that seimei's own processes hold are left out, and so are subagents.
+- `session/state` gives the status: "waiting: question" or "waiting: approval" while it waits for the user, "busy" while it runs. Otherwise `session/events` tells "failed" when its last turn ended in an error, else "idle".
+- `session/events` gives what session_peek shows: the user's prompts, the assistant's texts and the open tool calls. An open `ask_user_question` call is a question for the user.
+- `session/prompt` takes a message from the dispatcher's session_message as the user's own prompt. An idle session starts a new turn with it. A busy one takes it at its next step, as dsh web's "steer" does.
+
+The API takes only a signed browser cookie. seimei signs one per call with the secret dsh web keeps in `.credentials.yaml` in its home folder. The server signs the same cookie after a login with its token, so seimei needs no token from the printed URL. The dispatcher cannot answer a dsh session's questions; the user answers them in dsh web.
+
 A message to the dispatcher or a shikigami during its turn cuts in at once, as the terminal's "send now" does. A tool call that runs finishes first.
 
 When a shikigami finishes, fails or asks, the dispatcher hears it at its next turn. Questions and failures wake the dispatcher at once. A shikigami's process closes a few seconds after its turn ends, because an idle one holds about 330 MB. The next message resumes the session. After a restart, running shikigami get a "continue", at most 3 per hour. "Open on server" or "Give to me" hands a shikigami to the user as a terminal session. "Hand to seimei" takes it back.
@@ -153,6 +162,7 @@ The code map lists where each part lives. Paths are relative to the repo root.
 - `workers/acp_session.rs`: the adapter for ACP and Codex agents.
 - `tools.rs`: the dispatcher's MCP tools, with schemas in `data/tools.json`.
 - `sessions.rs`, `transcripts.rs` and `adopt.rs`: the user's own sessions.
+- `dsh_web.rs`: the user's sessions in a dsh web server, through its HTTP API.
 - `terminal.rs`: types into the user's terminal windows through kitty remote control.
 - `tasks.rs`: the board.
 - `plan.rs`: the `[models]` plan.

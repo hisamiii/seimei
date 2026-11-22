@@ -519,7 +519,7 @@ impl Tools {
             }
             "sessions" if heard.trim().is_empty() => self.blocking("sessions", &json!({})),
             "sessions" => {
-                let live = sessions::live(&self.pool.own_sessions());
+                let live = sessions::all(&self.pool.own_sessions());
                 let mut names: Vec<String> = live.iter().map(|s| s.name.clone()).collect();
                 names.extend(live.iter().filter_map(|s| self.pool.aliases.of(s)));
                 let Some(found) = crate::voice::lookups::closest(&heard, &names) else {
@@ -640,7 +640,7 @@ impl Tools {
                 text(&lines.join("\n"), false)
             }
             "sessions" => {
-                let rows = sessions::live(&self.pool.own_sessions());
+                let rows = sessions::all(&self.pool.own_sessions());
                 if rows.is_empty() {
                     return text("No running sessions.", false);
                 }
@@ -648,10 +648,13 @@ impl Tools {
                 let lines: Vec<String> = (rows.iter())
                     .map(|s| {
                         let head = match self.pool.aliases.of(s) {
+                            Some(a) if s.in_dsh_web() => format!("{a} = \"{}\" [dsh web pid {}]", s.name, s.pid),
                             Some(a) => format!("{a} = \"{}\" [pid {}, to {}]", s.name, s.pid, s.address()),
+                            None if s.in_dsh_web() => format!("{} [dsh web pid {}]", s.name, s.pid),
                             None => format!("{} [pid {}]", s.name, s.pid),
                         };
-                        let mode = sessions::transcript_of(&s.rec).and_then(|p| sessions::mode_of(&p));
+                        let mode = (!s.in_dsh_web()).then(|| sessions::transcript_of(&s.rec)).flatten();
+                        let mode = mode.and_then(|p| sessions::mode_of(&p));
                         let mode = mode.map(|m| format!(", mode {m}")).unwrap_or_default();
                         let moved = if s.moved() {
                             format!(", moved here from its terminal (pid {})", s.origin_pid)
@@ -675,6 +678,7 @@ impl Tools {
             "alias" => self.alias(a),
             "watch" => self.watch(a),
             "session_peek" => self.session_peek(a),
+            "session_message" => self.session_message(a),
             _ => text(&format!("Tool '{name}' not found"), true),
         }
     }
@@ -875,7 +879,7 @@ impl Tools {
         let (name, key) = (arg(a, "alias").trim().to_string(), arg(a, "session").trim().to_string());
         let aliases = &self.pool.aliases;
         let own = self.pool.own_sessions();
-        let rows = sessions::live(&own);
+        let rows = sessions::all(&own);
         if key.is_empty() && name.is_empty() {
             let all = aliases.all();
             if all.is_empty() {
@@ -883,7 +887,7 @@ impl Tools {
             }
             let lines: Vec<String> = (all.iter())
                 .map(|al| match aliases.resolve(al, &rows) {
-                    Some(s) => format!("{al} = \"{}\" [pid {}, to {}]", s.name, s.pid, s.address()),
+                    Some(s) => format!("{al} = \"{}\" [pid {}], {}", s.name, s.pid, s.send_hint()),
                     None => format!("{al} = (not running)"),
                 })
                 .collect();
@@ -893,7 +897,7 @@ impl Tools {
             let said = if aliases.remove(&name) { format!("Removed {name}.") } else { format!("No alias {name}.") };
             return text(&said, false);
         }
-        let Some(s) = sessions::find(&key, &own, Some(aliases)) else {
+        let Some(s) = sessions::find_any(&key, &own, Some(aliases)) else {
             return text(&format!("No single running session matches \"{key}\"."), true);
         };
         if name.is_empty() {
@@ -906,31 +910,58 @@ impl Tools {
             return text("An alias is up to 32 letters, digits, dots, dashes or underscores.", true);
         }
         aliases.set(&name, &s);
-        text(&format!("{name} = \"{}\" [pid {}], SendMessage to {}.", s.name, s.pid, s.address()), false)
+        text(&format!("{name} = \"{}\" [pid {}], {}.", s.name, s.pid, s.send_hint()), false)
+    }
+
+    /// A message to one of the user's dsh web sessions, as their own prompt.
+    fn session_message(&self, a: &Value) -> Value {
+        let said = arg(a, "text").trim().to_string();
+        if said.is_empty() {
+            return text("text is the message", true);
+        }
+        let own = self.pool.own_sessions();
+        let Some(s) = sessions::find_any(&arg(a, "session"), &own, Some(&self.pool.aliases)) else {
+            return text("No single running session matches.", true);
+        };
+        if !s.in_dsh_web() {
+            return text(&format!("{} is not in dsh web: {}.", s.name, s.send_hint()), true);
+        }
+        match crate::dsh_web::send(&s, &said) {
+            Ok(how) => text(&format!("Sent to {}, {how}.", s.name), false),
+            Err(e) => text(&format!("Not sent to {}: {e}", s.name), true),
+        }
     }
 
     /// A running session's last messages, open question and running calls.
     fn session_peek(&self, a: &Value) -> Value {
         let own = self.pool.own_sessions();
-        let Some(s) = sessions::find(&arg(a, "session"), &own, Some(&self.pool.aliases)) else {
-            let names: Vec<String> = sessions::live(&own).into_iter().map(|x| x.name).collect();
+        let Some(s) = sessions::find_any(&arg(a, "session"), &own, Some(&self.pool.aliases)) else {
+            let names: Vec<String> = sessions::all(&own).into_iter().map(|x| x.name).collect();
             return text(&format!("No single running session matches. Running: {}", names.join(", ")), true);
-        };
-        let Some(path) = sessions::transcript_of(&s.rec) else {
-            return text(&format!("{} has no transcript yet.", s.name), false);
         };
         let count = a.get("count").map_or(Some(3), |c| c.as_i64().or_else(|| arg(a, "count").trim().parse().ok()));
         let Some(count) = count else { return text("count is a number", true) };
-        let p = sessions::peek(&path, count.clamp(1, 20) as usize);
+        let count = count.clamp(1, 20) as usize;
+        let (p, mode, full) = if s.in_dsh_web() {
+            match crate::dsh_web::peek(&s, count) {
+                Ok(p) => (p, String::new(), "its page in dsh web".to_string()),
+                Err(e) => return text(&format!("Could not read {}: {e}", s.name), true),
+            }
+        } else {
+            let Some(path) = sessions::transcript_of(&s.rec) else {
+                return text(&format!("{} has no transcript yet.", s.name), false);
+            };
+            let mode = sessions::mode_of(&path).map(|m| format!(", mode {m}")).unwrap_or_default();
+            (sessions::peek(&path, count), mode, format!("the transcript: {}", path.display()))
+        };
         let py = |v: &Value| match v {
             Value::String(x) => x.clone(),
             Value::Null => "None".into(),
             v => v.to_string(),
         };
         let ts = |v: &Value| chars(v.as_str().unwrap_or(""), 19);
-        let mode = sessions::mode_of(&path).map(|m| format!(", mode {m}")).unwrap_or_default();
         let mut lines = vec![format!(
-            "{} [pid {}, {}{mode}]: {} since {}, last activity {}, in {}; SendMessage to {}",
+            "{} [pid {}, {}{mode}]: {} since {}, last activity {}, in {}; {}",
             s.name,
             s.pid,
             s.kind,
@@ -938,12 +969,14 @@ impl Tools {
             sessions::ago(s.since),
             sessions::ago(s.active),
             s.cwd,
-            s.address()
+            s.send_hint()
         )];
         for q in p["questions"].as_array().into_iter().flatten() {
             lines.push(format!(
-                "\nOPEN AskUserQuestion (asked {}Z), waiting for an answer in the terminal:",
-                ts(&q["asked"])
+                "\nOPEN {} (asked {}Z), waiting for an answer in {}:",
+                if s.in_dsh_web() { "question" } else { "AskUserQuestion" },
+                ts(&q["asked"]),
+                if s.in_dsh_web() { "dsh web" } else { "the terminal" }
             ));
             for item in q["questions"].as_array().into_iter().flatten() {
                 let multi = if item["multiSelect"].as_bool().unwrap_or(false) { " (multi-select)" } else { "" };
@@ -970,7 +1003,7 @@ impl Tools {
         if let Some(first) = recent.first_mut() {
             *first = format!("\nRecent messages, oldest first:\n{first}");
         }
-        text(&capped(&lines.join("\n"), &recent, &format!("the transcript: {}", path.display())), false)
+        text(&capped(&lines.join("\n"), &recent, &full), false)
     }
 
     /// Shikigami from the last day, the archived ones, or every one's task metrics.
