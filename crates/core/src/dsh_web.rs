@@ -227,6 +227,30 @@ fn brief(evs: &[Value]) -> Value {
     json!({"line": line.trim_start_matches(['#', '*', ' ']), "ask": ask, "doing": doing})
 }
 
+/// The sessions the servers hold, as bare rows that reach them without reading them: for their sockets.
+pub fn held(own: &Own) -> Vec<Live> {
+    let mut out = vec![];
+    for s in servers() {
+        for sid in s.held.iter().filter(|sid| !own.contains_key(*sid)) {
+            out.push(Live {
+                name: sid.clone(),
+                pid: key(sid),
+                session_id: sid.clone(),
+                status: String::new(),
+                since: 0.0,
+                active: 0.0,
+                cwd: String::new(),
+                kind: KIND.into(),
+                rec: json!({"dsh": {"port": s.port, "home": s.home, "server": s.pid}}),
+                origin: String::new(),
+                origin_pid: 0,
+                view_pid: 0,
+            });
+        }
+    }
+    out
+}
+
 /// The sessions the servers hold, as rows of the session list; seimei's own are left out.
 fn rows(s: &Server, own: &Own) -> Vec<Live> {
     let held: Vec<&String> = s.held.iter().filter(|sid| !own.contains_key(*sid)).collect();
@@ -259,7 +283,7 @@ fn rows(s: &Server, own: &Own) -> Vec<Live> {
         let title = values["title"].as_str().filter(|t| !t.trim().is_empty());
         let mut rec = brief(&recent);
         rec["sessionId"] = json!(sid);
-        rec["dsh"] = json!({"port": s.port, "home": s.home, "server": s.pid});
+        rec["dsh"] = json!({"port": s.port, "home": s.home, "server": s.pid, "inbox": crate::vibe::inbox(KIND, sid)});
         out.push(Live {
             name: title.map_or_else(|| format!("dsh {}", chars(sid.trim_start_matches("session-"), 8)), String::from),
             pid: key(sid),

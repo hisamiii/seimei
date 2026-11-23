@@ -67,6 +67,8 @@ The API takes only a signed browser cookie. seimei signs one per call with the s
 - The session page polls from the newest entry's update time. A message from the page or session_message is typed into the kitty window that shows the session, then Enter, with Shift+Enter between lines. Without such a window it is refused. An answer and Hand off refuse a Vibe session.
 - Each running Vibe session also gets a messaging socket, `$XDG_RUNTIME_DIR/seimei/vibe/<id>.sock`, mode 600. It speaks Claude Code's peer frame, so a Claude Code session reaches it with SendMessage to `uds:<path>`. seimei types each message into the window as `[from <name>] <text>`. Such a message goes past the dispatcher and does not wake it; the audit log keeps it as a `message` line. It is one-way: the sender gets no answer. The socket goes when the session ends. The sessions tool and the list row (`inbox`) show the path.
 
+A dsh web session gets the same socket at `$XDG_RUNTIME_DIR/seimei/dsh/<id>.sock`, for each session lock a `dsh web` process holds. A message on it goes in through `session/prompt` as session_message's does, past the dispatcher, with an audit line.
+
 A message to the dispatcher or a shikigami during its turn cuts in at once, as the terminal's "send now" does. A tool call that runs finishes first.
 
 When a shikigami finishes, fails or asks, the dispatcher hears it at its next turn. Questions and failures wake the dispatcher at once. A shikigami's process closes a few seconds after its turn ends, because an idle one holds about 330 MB. The next message resumes the session. After a restart, running shikigami get a "continue", at most 3 per hour. "Open on server" or "Give to me" hands a shikigami to the user as a terminal session. "Hand to seimei" takes it back.

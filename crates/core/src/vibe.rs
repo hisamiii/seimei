@@ -239,7 +239,7 @@ fn row(h: &Held) -> Option<Live> {
     let title = [&s["title"], &meta["title"]].into_iter().find_map(|t| t.as_str().filter(|t| !t.trim().is_empty()));
     let mut rec = brief(entries(&state));
     let screen = screen(h.pid);
-    rec["vibe"] = json!({"dir": h.dir, "holder": h.pid, "screen": screen, "inbox": inbox(&h.sid)});
+    rec["vibe"] = json!({"dir": h.dir, "holder": h.pid, "screen": screen, "inbox": inbox(KIND, &h.sid)});
     // seimei types into the terminal window that shows it, as into the harness's own sessions.
     rec["reach"] = json!(crate::terminal::reachable(screen));
     Some(Live {
@@ -290,38 +290,47 @@ fn screen(pid: i64) -> i64 {
 }
 
 /// The session's messaging socket, which speaks the harness's peer frame: $XDG_RUNTIME_DIR/seimei/vibe/<id>.sock.
-pub fn inbox(sid: &str) -> PathBuf {
-    crate::plugins::link::runtime_path("vibe", false).with_extension("").join(format!("{sid}.sock"))
+/// A dsh web session gets one too, under seimei/dsh.
+pub fn inbox(kind: &str, sid: &str) -> PathBuf {
+    crate::plugins::link::runtime_path(kind, false).with_extension("").join(format!("{sid}.sock"))
 }
 
-/// Serve a socket for each running Vibe session, for good: a message on one is typed into that session's window.
+/// Serve a socket for each running Vibe and dsh web session, for good: a message on one is typed into the Vibe session's window, or prompted through dsh web's API.
 /// It goes past the dispatcher and does not wake it; the audit log keeps it.
 pub async fn inboxes(pool: std::sync::Arc<crate::workers::Pool>) {
     use std::os::unix::fs::PermissionsExt;
-    let mut open: std::collections::HashMap<String, tokio::task::JoinHandle<()>> = Default::default();
+    let mut open: std::collections::HashMap<PathBuf, tokio::task::JoinHandle<()>> = Default::default();
     loop {
         let p = pool.clone();
-        let rows = tokio::task::spawn_blocking(move || live(&p.own_sessions())).await.unwrap_or_default();
-        open.retain(|sid, task| {
-            let keep = rows.iter().any(|r| &r.session_id == sid);
+        let rows = tokio::task::spawn_blocking(move || {
+            let own = p.own_sessions();
+            let mut rows = live(&own);
+            rows.extend(crate::dsh_web::held(&own));
+            rows
+        })
+        .await
+        .unwrap_or_default();
+        let id = |r: &Live| inbox(&r.kind, &r.session_id);
+        open.retain(|path, task| {
+            let keep = rows.iter().any(|r| &id(r) == path);
             if !keep {
                 task.abort();
-                let _ = std::fs::remove_file(inbox(sid));
+                let _ = std::fs::remove_file(path);
             }
             keep
         });
         for r in rows {
-            if open.contains_key(&r.session_id) {
+            let path = id(&r);
+            if open.contains_key(&path) {
                 continue;
             }
-            let path = inbox(&r.session_id);
             let dir = path.parent().expect("a folder");
             let _ = std::fs::create_dir_all(dir);
             let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
             let _ = std::fs::remove_file(&path);
             let Ok(listener) = tokio::net::UnixListener::bind(&path) else { continue };
             let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-            open.insert(r.session_id.clone(), tokio::spawn(serve(listener, r, pool.clone())));
+            open.insert(path, tokio::spawn(serve(listener, r, pool.clone())));
         }
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
     }
@@ -335,8 +344,17 @@ async fn serve(listener: tokio::net::UnixListener, row: Live, pool: std::sync::A
         while let Ok(Some(line)) = lines.next_line().await {
             let Some((from, text)) = seimei_proto::peer::received(&line) else { continue };
             pool.audit.message(&from, &row.session_id, &text);
-            if let Err(e) = send(&row, &format!("[from {from}] {text}")).await {
-                eprintln!("vibe inbox {}: {e}", row.session_id);
+            let said = format!("[from {from}] {text}");
+            let sent = if row.in_dsh_web() {
+                let r = row.clone();
+                tokio::task::spawn_blocking(move || crate::dsh_web::send(&r, &said).map(|_| ()))
+                    .await
+                    .unwrap_or_else(|e| Err(e.to_string()))
+            } else {
+                send(&row, &said).await
+            };
+            if let Err(e) = sent {
+                eprintln!("{} inbox {}: {e}", row.kind, row.session_id);
             }
         }
     }
@@ -458,7 +476,7 @@ mod tests {
 
     #[test]
     fn the_inbox_sits_in_seimeis_runtime_folder() {
-        let p = inbox("abc");
+        let p = inbox(KIND, "abc");
         assert!(p.ends_with("seimei/vibe/abc.sock"), "{}", p.display());
     }
 
@@ -479,6 +497,7 @@ mod tests {
             view_pid: 0,
         };
         assert_eq!(send(&row(json!({})), "hi").await.unwrap_err(), "not a Vibe session");
+        assert!(inbox(crate::dsh_web::KIND, "session-a").ends_with("seimei/dsh/session-a.sock"));
         let gone = row(json!({"vibe": {"screen": i64::from(i32::MAX)}}));
         assert_eq!(send(&gone, "hi").await.unwrap_err(), "The session is gone.");
     }

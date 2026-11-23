@@ -123,7 +123,7 @@ impl Live {
     /// How the dispatcher messages it: SendMessage at its address, seimei's own tool, or not at all.
     pub fn send_hint(&self) -> String {
         if self.in_dsh_web() {
-            "message it with session_message".into()
+            format!("message it with session_message, or SendMessage to uds:{}", as_text(&self.rec["dsh"]["inbox"]))
         } else if self.in_vibe() {
             format!("message it with session_message, or SendMessage to uds:{}", as_text(&self.rec["vibe"]["inbox"]))
         } else {
@@ -678,7 +678,7 @@ pub fn outside_row(s: &Live, project: Value) -> Value {
         "question": !ask.is_null(), "ask": if ask.is_null() { Value::Null } else { first },
         "project": project, "line": line, "context": null, "doing": s.rec["doing"], "model": null, "effort": null,
         "ask_detail": ask, "job": null, "moved_from": null, "screen": s.pid, "proc_start": null, "reach": s.rec["reach"],
-        "inbox": s.rec["vibe"]["inbox"]})
+        "inbox": if s.in_vibe() { s.rec["vibe"]["inbox"].clone() } else { s.rec["dsh"]["inbox"].clone() }})
 }
 
 /// What the scan knows about one session.
