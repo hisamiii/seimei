@@ -346,7 +346,11 @@ fn find_in(key: &str, rows: &[Live]) -> Option<Live> {
     let low = key.to_lowercase();
     let tests: [&dyn Fn(&Live) -> bool; 4] = [
         &|s| s.name == key,
-        &|s| s.pid.to_string() == key || s.moved() && s.origin_pid.to_string() == key,
+        &|s| {
+            s.pid.to_string() == key
+                || s.moved() && s.origin_pid.to_string() == key
+                || !key.is_empty() && as_text(&s.rec["vibe"]["holder"]) == key
+        },
         &|s| s.ids().iter().any(|i| i.starts_with(key)),
         &|s| s.name.to_lowercase().contains(&low),
     ];

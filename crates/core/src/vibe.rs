@@ -223,21 +223,25 @@ fn row(h: &Held) -> Option<Live> {
         return None;
     }
     // A store seimei cannot read still lists, with the reason as its status.
+    // A session without a first prompt has saved no generation yet: it is idle.
     let (state, fault) = match state(&h.dir, BRIEF) {
         Ok(s) => (s, None),
+        Err(_) if !h.dir.join("CURRENT").exists() => (Value::Null, None),
         Err(e) => (Value::Null, Some(e)),
     };
     let s = &state["session"];
     let ms = |v: &Value| v.as_f64().map(|t| t / 1000.0);
-    let active = ms(&s["updatedAt"]).unwrap_or_else(|| crate::util::mtime(&h.dir.join("CURRENT")));
+    let made = Some(crate::util::mtime(&h.dir)).filter(|t| *t > 0.0).unwrap_or_else(crate::util::now);
+    let active = ms(&s["updatedAt"]).unwrap_or(made);
     let st = fault.as_ref().map_or_else(|| status(&state), |e| format!("unreadable: {e}"));
     let at_work = st == "busy" || st.starts_with("waiting");
     let since = ms(&state["latestTurn"][if at_work { "startedAt" } else { "completedAt" }]);
     let title = [&s["title"], &meta["title"]].into_iter().find_map(|t| t.as_str().filter(|t| !t.trim().is_empty()));
     let mut rec = brief(entries(&state));
-    rec["vibe"] = json!({"dir": h.dir, "holder": h.pid, "inbox": inbox(&h.sid)});
+    let screen = screen(h.pid);
+    rec["vibe"] = json!({"dir": h.dir, "holder": h.pid, "screen": screen, "inbox": inbox(&h.sid)});
     // seimei types into the terminal window that shows it, as into the harness's own sessions.
-    rec["reach"] = json!(crate::terminal::reachable(h.pid));
+    rec["reach"] = json!(crate::terminal::reachable(screen));
     Some(Live {
         name: title.map_or_else(|| format!("vibe {}", chars(&h.sid, 8)), String::from),
         pid: key(&h.sid),
@@ -245,7 +249,10 @@ fn row(h: &Held) -> Option<Live> {
         status: st,
         since: since.unwrap_or(active),
         active,
-        cwd: as_text(&meta["environment"]["working_directory"]),
+        cwd: meta["environment"]["working_directory"].as_str().map_or_else(
+            || std::fs::read_link(format!("/proc/{}/cwd", h.pid)).map(|p| p.display().to_string()).unwrap_or_default(),
+            String::from,
+        ),
         kind: KIND.into(),
         rec,
         origin: String::new(),
@@ -264,6 +271,22 @@ pub fn live(own: &Own) -> Vec<Live> {
 /// The store folder of a row's session.
 fn dir_of(row: &Live) -> Result<PathBuf, String> {
     row.rec["vibe"]["dir"].as_str().map(PathBuf::from).ok_or_else(|| "not a Vibe session".into())
+}
+
+/// The process whose terminal window shows the session: the server holding it is a child of the TUI, which runs in the window.
+fn screen(pid: i64) -> i64 {
+    let mut at = pid;
+    for _ in 0..8 {
+        let env = std::fs::read(format!("/proc/{at}/environ")).unwrap_or_default();
+        if env.split(|b| *b == 0).any(|v| v.starts_with(b"KITTY_WINDOW_ID=")) {
+            return at;
+        }
+        match crate::util::stat_field(at, 1).and_then(|p| p.parse::<i64>().ok()) {
+            Some(up) if up > 1 => at = up,
+            _ => break,
+        }
+    }
+    pid
 }
 
 /// The session's messaging socket, which speaks the harness's peer frame: $XDG_RUNTIME_DIR/seimei/vibe/<id>.sock.
@@ -321,7 +344,7 @@ async fn serve(listener: tokio::net::UnixListener, row: Live, pool: std::sync::A
 
 /// Type the user's message into the session's terminal window and send it.
 pub async fn send(row: &Live, text: &str) -> Result<(), String> {
-    let pid = row.rec["vibe"]["holder"].as_i64().ok_or("not a Vibe session")?;
+    let pid = row.rec["vibe"]["screen"].as_i64().ok_or("not a Vibe session")?;
     crate::terminal::type_plain(pid, text).await
 }
 
@@ -420,6 +443,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_session_without_a_first_prompt_is_idle_and_its_window_is_found_up_the_tree() {
+        let dir = std::env::temp_dir().join(format!("seimei-vibe-fresh-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let me = i64::from(std::process::id());
+        let r = row(&Held { pid: me, dir: dir.clone(), sid: "fresh".into() }).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(r.status, "idle");
+        assert!(r.active > 1e9 && r.since == r.active);
+        assert_eq!(r.cwd, std::env::current_dir().unwrap().display().to_string());
+        // The test runs in no window of its own here or in one: either way the walk ends on a real process.
+        assert!(std::path::Path::new(&format!("/proc/{}", screen(me))).exists());
+    }
+
+    #[test]
     fn the_inbox_sits_in_seimeis_runtime_folder() {
         let p = inbox("abc");
         assert!(p.ends_with("seimei/vibe/abc.sock"), "{}", p.display());
@@ -442,7 +479,7 @@ mod tests {
             view_pid: 0,
         };
         assert_eq!(send(&row(json!({})), "hi").await.unwrap_err(), "not a Vibe session");
-        let gone = row(json!({"vibe": {"holder": i64::from(i32::MAX)}}));
+        let gone = row(json!({"vibe": {"screen": i64::from(i32::MAX)}}));
         assert_eq!(send(&gone, "hi").await.unwrap_err(), "The session is gone.");
     }
 
