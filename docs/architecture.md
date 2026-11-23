@@ -58,13 +58,13 @@ The page and the app list them next to the other sessions, with the same rows an
 
 The API takes only a signed browser cookie. seimei signs one per call with the secret dsh web keeps in `.credentials.yaml` in its home folder. The server signs the same cookie after a login with its token, so seimei needs no token from the printed URL. The dispatcher cannot answer a dsh session's questions; the user answers them in dsh web.
 
-**The user's Vibe sessions** list the same way, as kind "vibe", and are read-only. A session counts as running while a Vibe process, such as `vibe-app-server` or `vibe-acp`, holds its lease `<vibe home>/logs/session/active/<id>.lock`. Vibe has no local API outside its own stdio, so seimei reads its session store, `logs/session/unified/<id>/`, and never writes there.
+**The user's Vibe sessions** list the same way, as kind "vibe". A session counts as running while a Vibe process, such as `vibe-app-server` or `vibe-acp`, holds its lease `<vibe home>/logs/session/active/<id>.lock`. Vibe has no local API outside its own stdio, so seimei reads its session store, `logs/session/unified/<id>/`, and never writes there.
 
 - `CURRENT` names the newest generation. Its `manifest.json` names the projection, the session's public state, whose history sits in content-addressed files under `chunks/`, oldest first. seimei reads only the newest chunks a view needs.
 - The generation's journal segment adds `projection_delta` records since then: entries appended, replaced or removed, and a new envelope. seimei applies them on top and skips a record cut short.
 - The envelope's `session.status` gives the status. It is "waiting: question" or "waiting: approval" while blocked on the user, "busy" while running, "failed" after a failed turn, else "idle". `meta.json` gives the folder and the parent of a subagent, whose session belongs to its parent's row.
 - The history's user and assistant messages and its `effect` entries, one per tool call, give what session_peek and the session page show. An effect stays open until Vibe marks it completed. An open `ask_user_question` call is a question for the user.
-- The session page polls from the newest entry's update time. The composer, a message, an answer and Hand off all refuse a Vibe session: the user messages it in Vibe.
+- The session page polls from the newest entry's update time. A message from the page or session_message is typed into the kitty window that shows the session, then Enter, with Shift+Enter between lines. Without such a window it is refused. An answer and Hand off refuse a Vibe session.
 
 A message to the dispatcher or a shikigami during its turn cuts in at once, as the terminal's "send now" does. A tool call that runs finishes first.
 

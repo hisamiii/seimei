@@ -1,5 +1,5 @@
 //! The user's sessions in Vibe: found by the session leases its processes hold, read from its session store on disk.
-//! seimei never writes there: these sessions are read-only.
+//! seimei never writes there: a message goes into the session's terminal window instead.
 
 use std::path::{Path, PathBuf};
 
@@ -11,8 +11,6 @@ use crate::util::{as_text, chars, stamp, text_parts};
 
 /// The kind its rows carry in the session list.
 pub const KIND: &str = "vibe";
-/// What the composer says on such a session's page.
-pub const READ_ONLY: &str = "Read-only here: message it in Vibe";
 /// The store format this reader knows, as CURRENT names it.
 const STORE: &str = "mistral.vibe.unified-session-store/v1";
 /// Vibe's question tool, after its tool group: an open call is a question waiting for the user.
@@ -238,7 +236,8 @@ fn row(h: &Held) -> Option<Live> {
     let title = [&s["title"], &meta["title"]].into_iter().find_map(|t| t.as_str().filter(|t| !t.trim().is_empty()));
     let mut rec = brief(entries(&state));
     rec["vibe"] = json!({"dir": h.dir, "holder": h.pid});
-    rec["reach"] = json!(READ_ONLY);
+    // seimei types into the terminal window that shows it, as into the harness's own sessions.
+    rec["reach"] = json!(crate::terminal::reachable(h.pid));
     Some(Live {
         name: title.map_or_else(|| format!("vibe {}", chars(&h.sid, 8)), String::from),
         pid: key(&h.sid),
@@ -265,6 +264,12 @@ pub fn live(own: &Own) -> Vec<Live> {
 /// The store folder of a row's session.
 fn dir_of(row: &Live) -> Result<PathBuf, String> {
     row.rec["vibe"]["dir"].as_str().map(PathBuf::from).ok_or_else(|| "not a Vibe session".into())
+}
+
+/// Type the user's message into the session's terminal window and send it.
+pub async fn send(row: &Live, text: &str) -> Result<(), String> {
+    let pid = row.rec["vibe"]["holder"].as_i64().ok_or("not a Vibe session")?;
+    crate::terminal::type_plain(pid, text).await
 }
 
 /// Last prompts and assistant texts, open questions and tool calls still running, in the shape of `sessions::peek`.
@@ -360,6 +365,27 @@ pub fn now_open(row: &Live) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_message_needs_the_window_of_a_running_session() {
+        let row = |rec: Value| Live {
+            name: "v".into(),
+            pid: key("s"),
+            session_id: "s".into(),
+            status: "idle".into(),
+            since: 0.0,
+            active: 0.0,
+            cwd: "/w".into(),
+            kind: KIND.into(),
+            rec,
+            origin: String::new(),
+            origin_pid: 0,
+            view_pid: 0,
+        };
+        assert_eq!(send(&row(json!({})), "hi").await.unwrap_err(), "not a Vibe session");
+        let gone = row(json!({"vibe": {"holder": i64::from(i32::MAX)}}));
+        assert_eq!(send(&gone, "hi").await.unwrap_err(), "The session is gone.");
+    }
 
     #[test]
     fn a_vibe_process_is_the_launcher_or_one_of_its_servers() {

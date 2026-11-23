@@ -1547,7 +1547,7 @@ async fn outside_session(sess: Live, info: Value, start: Option<u64>) -> Respons
     }
     (out["ask"], out["doing"]) = (open["ask"].clone(), open["doing"].clone());
     (out["live"], out["via"], out["reach"]) = match in_vibe {
-        true => (Value::Null, Value::Null, json!(vibe::READ_ONLY)),
+        true => (Value::Null, Value::Null, out["session"]["reach"].clone()),
         false => (Value::Null, json!("dsh"), Value::Null),
     };
     ok(out)
@@ -1585,7 +1585,10 @@ async fn session_send(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes: 
         return text(StatusCode::BAD_REQUEST, "text, up to 20000 characters");
     }
     if sess.in_vibe() {
-        return conflict(vibe::READ_ONLY);
+        return match vibe::send(&sess, said.trim()).await {
+            Ok(()) => ok(json!({"ok": true})),
+            Err(e) => conflict(e),
+        };
     }
     if sess.in_dsh_web() {
         let said = said.trim().to_string();

@@ -435,6 +435,11 @@ pub async fn type_message(pid: i64, text: &str, named: Option<&str>) -> Result<(
     type_text(&w, text, &["ctrl+x", "ctrl+s"]).await
 }
 
+/// Paste the text at a plain TUI's prompt and send it with Enter, lines apart with Shift+Enter: for agents other than the harness's own.
+pub async fn type_plain(pid: i64, text: &str) -> Result<(), String> {
+    type_text(&window(pid)?, text, &["enter"]).await
+}
+
 /// Press option n of the open question, only while that question and option are on screen.
 pub async fn answer(pid: i64, question: &str, n: i64, label: &str) -> Result<(), String> {
     let w = window(pid)?;

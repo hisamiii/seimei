@@ -922,6 +922,14 @@ impl Tools {
         let Some(s) = sessions::find_any(&arg(a, "session"), &own, Some(&self.pool.aliases)) else {
             return text("No single running session matches.", true);
         };
+        if s.in_vibe() {
+            // Tools run on a blocking thread, which may wait on the runtime.
+            let sent = tokio::runtime::Handle::current().block_on(crate::vibe::send(&s, &said));
+            return match sent {
+                Ok(()) => text(&format!("Typed into {}'s window and sent.", s.name), false),
+                Err(e) => text(&format!("Not sent to {}: {e}", s.name), true),
+            };
+        }
         if !s.in_dsh_web() {
             return text(&format!("{} is not in dsh web: {}.", s.name, s.send_hint()), true);
         }

@@ -106,7 +106,7 @@ impl Live {
         self.kind == dsh_web::KIND && self.rec.get("dsh").is_some()
     }
 
-    /// Open in Vibe: read from its session store, never messaged.
+    /// Open in Vibe: read from its session store, messaged through its terminal window.
     pub fn in_vibe(&self) -> bool {
         self.kind == vibe::KIND && self.rec.get("vibe").is_some()
     }
@@ -125,7 +125,7 @@ impl Live {
         if self.in_dsh_web() {
             "message it with session_message".into()
         } else if self.in_vibe() {
-            "read-only, the user messages it in Vibe".into()
+            "message it with session_message (typed into its terminal window)".into()
         } else {
             format!("SendMessage to {}", self.address())
         }

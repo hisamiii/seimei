@@ -285,7 +285,7 @@
    "_meta": {
     "anthropic/alwaysLoad": true
    },
-   "description": "List every running session on the server: your alias for it, name, status (idle, busy, waiting with what for, shell, parked, failed), kind, folder and last activity. Includes the user's own Claude Code sessions, the ones open in their dsh web (kind dsh) and in Vibe (kind vibe, read-only). Aliased Claude Code ones show their SendMessage address, which holds through renames.",
+   "description": "List every running session on the server: your alias for it, name, status (idle, busy, waiting with what for, shell, parked, failed), kind, folder and last activity. Includes the user's own Claude Code sessions, the ones open in their dsh web (kind dsh) and in Vibe (kind vibe). Aliased Claude Code ones show their SendMessage address, which holds through renames.",
    "inputSchema": {
     "properties": {},
     "required": [],
@@ -319,7 +319,7 @@
    "_meta": {
     "anthropic/alwaysLoad": true
    },
-   "description": "Send a message into one of the user's dsh sessions (kind dsh in sessions) as their own prompt: a new turn when it is idle, into its running turn at its next step when busy. No card. Claude Code sessions take SendMessage at their address instead.",
+   "description": "Send a message into one of the user's dsh sessions (kind dsh in sessions) as their own prompt: a new turn when it is idle, into its running turn at its next step when busy. A Vibe session (kind vibe) gets it typed into its kitty window. No card. Claude Code sessions take SendMessage at their address instead.",
    "inputSchema": {
     "properties": {
      "session": {
