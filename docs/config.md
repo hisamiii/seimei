@@ -80,6 +80,7 @@ Notes on the keys:
 - `web = false` still runs the plugins, the GPU queue among them.
 - `[dispatcher] name` is `seimei-dev` with `--dev`.
 - `compact_window` is 80% of `[models] context` when that is less than 400000.
+- An ACP agent is one `[agents.<name>]` entry, such as `command = "vibe-acp"` for Mistral Vibe. It keeps its own login, and its permission requests become cards.
 - `harness` takes the same values as summon's harness option. A Codex dispatcher is an `[agents.<name>]` entry with `protocol = "codex"`.
 - On an ACP agent or Codex, `[approvals] dispatcher` works as for an ACP shikigami: seimei applies the mode, and what is left becomes a card. The agent uses its own model and compacts at its own point, so `model` and `compact_window` apply to Claude Code only.
 - A changed `harness` starts a fresh session on the next start, seeded with the last handoff and the After compaction block.
