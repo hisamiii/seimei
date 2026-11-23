@@ -436,8 +436,15 @@ pub async fn type_message(pid: i64, text: &str, named: Option<&str>) -> Result<(
 }
 
 /// Paste the text at a plain TUI's prompt and send it with Enter, lines apart with Shift+Enter: for agents other than the harness's own.
-pub async fn type_plain(pid: i64, text: &str) -> Result<(), String> {
-    type_text(&window(pid)?, text, &["enter"]).await
+/// again: keys pressed once the TUI has taken the message, such as an Enter on the empty prompt that steers a queued message into the running turn.
+pub async fn type_plain(pid: i64, text: &str, again: &[&str]) -> Result<(), String> {
+    let w = window(pid)?;
+    type_text(&w, text, &["enter"]).await?;
+    for k in again {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        rc(&w, "send-key", &[k], None).await?;
+    }
+    Ok(())
 }
 
 /// Press option n of the open question, only while that question and option are on screen.

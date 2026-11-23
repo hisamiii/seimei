@@ -363,7 +363,14 @@ async fn serve(listener: tokio::net::UnixListener, row: Live, pool: std::sync::A
 /// Type the user's message into the session's terminal window and send it.
 pub async fn send(row: &Live, text: &str) -> Result<(), String> {
     let pid = row.rec["vibe"]["screen"].as_i64().ok_or("not a Vibe session")?;
-    crate::terminal::type_plain(pid, text).await
+    let dir = dir_of(row)?;
+    let now = tokio::task::spawn_blocking(move || state(&dir, 1).map(|s| status(&s)).unwrap_or_default()).await;
+    crate::terminal::type_plain(pid, text, steer_keys(&now.unwrap_or_default())).await
+}
+
+/// While a turn runs, Vibe queues a sent message; Enter on the empty prompt then steers the queue into that turn.
+fn steer_keys(status: &str) -> &'static [&'static str] {
+    if status == "busy" { &["enter"] } else { &[] }
 }
 
 /// Last prompts and assistant texts, open questions and tool calls still running, in the shape of `sessions::peek`.
@@ -475,6 +482,12 @@ mod tests {
     }
 
     #[test]
+    fn a_message_steers_only_into_a_running_turn() {
+        assert_eq!(steer_keys("busy"), ["enter"]);
+        assert!(steer_keys("idle").is_empty() && steer_keys("waiting: question").is_empty());
+    }
+
+    #[test]
     fn the_inbox_sits_in_seimeis_runtime_folder() {
         let p = inbox(KIND, "abc");
         assert!(p.ends_with("seimei/vibe/abc.sock"), "{}", p.display());
@@ -498,7 +511,7 @@ mod tests {
         };
         assert_eq!(send(&row(json!({})), "hi").await.unwrap_err(), "not a Vibe session");
         assert!(inbox(crate::dsh_web::KIND, "session-a").ends_with("seimei/dsh/session-a.sock"));
-        let gone = row(json!({"vibe": {"screen": i64::from(i32::MAX)}}));
+        let gone = row(json!({"vibe": {"screen": i64::from(i32::MAX), "dir": "/nonexistent"}}));
         assert_eq!(send(&gone, "hi").await.unwrap_err(), "The session is gone.");
     }
 
