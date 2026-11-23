@@ -648,11 +648,11 @@ impl Tools {
                 let lines: Vec<String> = (rows.iter())
                     .map(|s| {
                         let head = match self.pool.aliases.of(s) {
-                            Some(a) if s.in_dsh_web() => format!("{a} = \"{}\" [{}]", s.name, s.pid_text()),
+                            Some(a) if s.app().is_some() => format!("{a} = \"{}\" [{}]", s.name, s.pid_text()),
                             Some(a) => format!("{a} = \"{}\" [pid {}, to {}]", s.name, s.pid, s.address()),
                             None => format!("{} [{}]", s.name, s.pid_text()),
                         };
-                        let mode = (!s.in_dsh_web()).then(|| sessions::transcript_of(&s.rec)).flatten();
+                        let mode = s.app().is_none().then(|| sessions::transcript_of(&s.rec)).flatten();
                         let mode = mode.and_then(|p| sessions::mode_of(&p));
                         let mode = mode.map(|m| format!(", mode {m}")).unwrap_or_default();
                         let moved = if s.moved() {
@@ -941,9 +941,10 @@ impl Tools {
         let count = a.get("count").map_or(Some(3), |c| c.as_i64().or_else(|| arg(a, "count").trim().parse().ok()));
         let Some(count) = count else { return text("count is a number", true) };
         let count = count.clamp(1, 20) as usize;
-        let (p, mode, full) = if s.in_dsh_web() {
-            match crate::dsh_web::peek(&s, count) {
-                Ok(p) => (p, String::new(), "its page in dsh web".to_string()),
+        let (p, mode, full) = if s.in_dsh_web() || s.in_vibe() {
+            let read = if s.in_vibe() { crate::vibe::peek(&s, count) } else { crate::dsh_web::peek(&s, count) };
+            match read {
+                Ok(p) => (p, String::new(), format!("its page in {}", s.app().unwrap_or("its app"))),
                 Err(e) => return text(&format!("Could not read {}: {e}", s.name), true),
             }
         } else {
@@ -973,9 +974,9 @@ impl Tools {
         for q in p["questions"].as_array().into_iter().flatten() {
             lines.push(format!(
                 "\nOPEN {} (asked {}Z), waiting for an answer in {}:",
-                if s.in_dsh_web() { "question" } else { "AskUserQuestion" },
+                if s.app().is_some() { "question" } else { "AskUserQuestion" },
                 ts(&q["asked"]),
-                if s.in_dsh_web() { "dsh web" } else { "the terminal" }
+                s.app().unwrap_or("the terminal")
             ));
             for item in q["questions"].as_array().into_iter().flatten() {
                 let multi = if item["multiSelect"].as_bool().unwrap_or(false) { " (multi-select)" } else { "" };

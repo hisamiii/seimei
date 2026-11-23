@@ -255,6 +255,18 @@ pub fn as_text(v: &serde_json::Value) -> String {
     }
 }
 
+/// The text blocks of a message's content, joined and trimmed.
+pub fn text_parts(content: &serde_json::Value) -> String {
+    let parts = content.as_array().into_iter().flatten().filter(|c| c["type"] == "text");
+    parts.filter_map(|c| c["text"].as_str()).collect::<Vec<_>>().join("\n").trim().to_string()
+}
+
+/// "2026-01-02T03:04:05.678Z" from unix milliseconds, as the transcripts write their times.
+pub fn stamp(ms: &serde_json::Value) -> String {
+    let at = chrono::DateTime::from_timestamp_millis(ms.as_i64().unwrap_or(0)).unwrap_or_default();
+    at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
 /// A yes or no from a tool call or a page: true, a non-zero number, or "true", "yes" or "1" (models send strings at times, and "false" must stay false).
 pub fn flag(v: &serde_json::Value) -> bool {
     match v {

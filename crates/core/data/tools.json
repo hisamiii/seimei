@@ -285,7 +285,7 @@
    "_meta": {
     "anthropic/alwaysLoad": true
    },
-   "description": "List every running session on the server: your alias for it, name, status (idle, busy, waiting with what for, shell, parked, failed), kind, folder and last activity. Includes the user's own Claude Code sessions and the ones open in their dsh web (kind dsh). Aliased Claude Code ones show their SendMessage address, which holds through renames.",
+   "description": "List every running session on the server: your alias for it, name, status (idle, busy, waiting with what for, shell, parked, failed), kind, folder and last activity. Includes the user's own Claude Code sessions, the ones open in their dsh web (kind dsh) and in Vibe (kind vibe, read-only). Aliased Claude Code ones show their SendMessage address, which holds through renames.",
    "inputSchema": {
     "properties": {},
     "required": [],

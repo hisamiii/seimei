@@ -19,6 +19,7 @@ use crate::transcripts::{
 use crate::util::{
     as_text, chars, children, data_dir, mtime, now, read_json, read_tail, save_json, sha256_hex, stat_field,
 };
+use crate::vibe;
 use crate::workers::Pool;
 use crate::workers::harness::{self, transcript, waiting_text};
 
@@ -105,20 +106,39 @@ impl Live {
         self.kind == dsh_web::KIND && self.rec.get("dsh").is_some()
     }
 
-    /// How the dispatcher messages it: SendMessage at its address, or seimei's own tool.
+    /// Open in Vibe: read from its session store, never messaged.
+    pub fn in_vibe(&self) -> bool {
+        self.kind == vibe::KIND && self.rec.get("vibe").is_some()
+    }
+
+    /// The app it is open in, for a session that is not the harness's own: there the user answers its questions.
+    pub fn app(&self) -> Option<&'static str> {
+        match self.kind.as_str() {
+            dsh_web::KIND => Some("dsh web"),
+            vibe::KIND => Some("Vibe"),
+            _ => None,
+        }
+    }
+
+    /// How the dispatcher messages it: SendMessage at its address, seimei's own tool, or not at all.
     pub fn send_hint(&self) -> String {
         if self.in_dsh_web() {
             "message it with session_message".into()
+        } else if self.in_vibe() {
+            "read-only, the user messages it in Vibe".into()
         } else {
             format!("SendMessage to {}", self.address())
         }
     }
 
-    /// Its pid as the dispatcher reads it: a dsh session runs inside its server's process.
+    /// Its pid as the dispatcher reads it: a dsh or Vibe session runs inside its server's process.
     pub fn pid_text(&self) -> String {
-        match self.in_dsh_web() {
-            true => format!("dsh web pid {}", as_text(&self.rec["dsh"]["server"])),
-            false => format!("pid {}", self.pid),
+        if self.in_dsh_web() {
+            format!("dsh web pid {}", as_text(&self.rec["dsh"]["server"]))
+        } else if self.in_vibe() {
+            format!("Vibe pid {}", as_text(&self.rec["vibe"]["holder"]))
+        } else {
+            format!("pid {}", self.pid)
         }
     }
 
@@ -295,10 +315,11 @@ fn viewers(out: &mut [Live], clients: &[i64], showing: &dyn Fn(i64) -> Vec<Strin
     }
 }
 
-/// The running sessions with the ones open in a dsh web server after them.
+/// The running sessions with the ones open in a dsh web server and in Vibe after them.
 pub fn all(own: &Own) -> Vec<Live> {
     let mut rows = live(own);
     rows.extend(dsh_web::live(own));
+    rows.extend(vibe::live(own));
     rows
 }
 
@@ -307,7 +328,7 @@ pub fn find(key: &str, own: &Own, aliases: Option<&Aliases>) -> Option<Live> {
     find_among(key, &live(own), aliases)
 }
 
-/// As find, among dsh web's sessions too.
+/// As find, among dsh web's and Vibe's sessions too.
 pub fn find_any(key: &str, own: &Own, aliases: Option<&Aliases>) -> Option<Live> {
     find_among(key, &all(own), aliases)
 }
@@ -583,7 +604,7 @@ fn hidden(s: &Live, own: &Own) -> bool {
     s.rec["entrypoint"] != "cli" && OURS.is_match(&s.name)
 }
 
-/// The user's running sessions for the page, then the ones open in dsh web: seimei's and parked terminals left out.
+/// The user's running sessions for the page, then the ones open in dsh web and Vibe: seimei's and parked terminals left out.
 pub fn listing(own: &Own) -> Vec<Value> {
     let home = home().display().to_string();
     let mut out = vec![];
@@ -618,12 +639,41 @@ pub fn listing(own: &Own) -> Vec<Value> {
             // The process whose window shows it: its own, or a parked terminal's.
             "screen": s.screen_pid(), "proc_start": rec["procStart"], "reach": terminal::reachable(s.screen_pid())}));
     }
-    for s in dsh_web::live(own) {
+    for s in dsh_web::live(own).into_iter().chain(vibe::live(own)) {
         let project =
             if s.cwd.is_empty() || s.cwd == home { Value::Null } else { json!(project_of(&format!("{}/x", s.cwd))) };
-        out.push(dsh_web::list_row(&s, project));
+        out.push(outside_row(&s, project));
     }
     out
+}
+
+/// A row of the page's session list for a session open in another app, with the fields a transcript's row has: the page and the app show both alike.
+pub fn outside_row(s: &Live, project: Value) -> Value {
+    let waiting = s.status.strip_prefix("waiting: ");
+    let status = if waiting.is_some() {
+        "waiting"
+    } else if s.status == "busy" {
+        "busy"
+    } else {
+        "idle"
+    };
+    let line = match s.status.strip_prefix("failed: ").or(s.status.strip_prefix("unreadable: ")) {
+        Some(why) => format!("{}: {why}", if s.status.starts_with("failed") { "Failed" } else { "Unreadable" }),
+        None => as_text(&s.rec["line"]),
+    };
+    let ask = &s.rec["ask"];
+    let first = ask["questions"][0]["question"].clone();
+    let app = s.app().unwrap_or("its app");
+    let waiting_text = match waiting {
+        Some("approval") => format!("Waiting for an approval in {app}"),
+        Some(_) => format!("Waiting for an answer in {app}"),
+        None => String::new(),
+    };
+    json!({"pid": s.pid, "name": s.name, "session_id": s.session_id, "status": status, "waiting_for": waiting,
+        "waiting_text": waiting_text, "since": s.since, "active": s.active, "cwd": s.cwd, "kind": s.kind,
+        "question": !ask.is_null(), "ask": if ask.is_null() { Value::Null } else { first },
+        "project": project, "line": line, "context": null, "doing": s.rec["doing"], "model": null, "effort": null,
+        "ask_detail": ask, "job": null, "moved_from": null, "screen": s.pid, "proc_start": null, "reach": s.rec["reach"]})
 }
 
 /// What the scan knows about one session.
@@ -657,9 +707,9 @@ impl SessionEvents {
         // Sessions working in an agent's scratch folder are test fixtures, not the user's work.
         let jobs = harness::jobs_dir();
         let test = std::env::var_os("SEIMEI_TEST_SESSIONS").is_some_and(|v| !v.is_empty());
-        // dsh web's sessions have no transcript or window: what they run into is not read yet.
+        // dsh web's and Vibe's sessions have no transcript or window: what they run into is not read yet.
         let rows: Vec<&Value> = (rows.iter())
-            .filter(|r| r["kind"] != dsh_web::KIND)
+            .filter(|r| r["kind"] != dsh_web::KIND && r["kind"] != vibe::KIND)
             .filter(|r| {
                 test || !Path::new(r["cwd"].as_str().filter(|c| !c.is_empty()).unwrap_or("/")).starts_with(&jobs)
             })

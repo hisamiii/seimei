@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 
 use crate::sessions::{self, Live, Own, Pending};
 use crate::transcripts::{self, summary};
-use crate::util::{as_text, b64url, b64url_decode, chars, now, uuid4};
+use crate::util::{as_text, b64url, b64url_decode, chars, now, stamp, text_parts, uuid4};
 
 /// The kind its rows carry in the session list.
 pub const KIND: &str = "dsh";
@@ -143,18 +143,6 @@ fn call(s: &Server, method: &str, args: Value) -> Result<Value, String> {
     }
 }
 
-/// The text parts of a message's content.
-fn text_parts(content: &Value) -> String {
-    let parts = content.as_array().into_iter().flatten().filter(|c| c["type"] == "text");
-    parts.filter_map(|c| c["text"].as_str()).collect::<Vec<_>>().join("\n").trim().to_string()
-}
-
-/// "2026-01-02T03:04:05.678Z" from dsh's milliseconds, as the other transcripts write their times.
-fn stamp(ms: &Value) -> String {
-    let at = chrono::DateTime::from_timestamp_millis(ms.as_i64().unwrap_or(0)).unwrap_or_default();
-    at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-}
-
 /// The session's status, from its state and its last events: waiting on the user, busy, failed or idle.
 fn status(state: &Value, events: &[Value]) -> String {
     let pending = state["pendingInput"].as_array().cloned().unwrap_or_default();
@@ -186,7 +174,7 @@ fn events(s: &Server, sid: &str, turns: usize, messages: usize) -> Result<Vec<Va
 
 /// Whether a session list key is a dsh session's.
 pub fn is_key(pid: i64) -> bool {
-    pid >= 1 << 32
+    (1 << 32..2 << 32).contains(&pid)
 }
 
 /// The key a dsh session's row has in the session list where other rows have a pid: above any pid, and the same on every scan.
@@ -295,34 +283,6 @@ pub fn live(own: &Own) -> Vec<Live> {
     let mut out: Vec<Live> = servers().iter().flat_map(|s| rows(s, own)).collect();
     out.sort_by(|a, b| b.active.total_cmp(&a.active));
     out
-}
-
-/// A row of the page's session list, with the fields a transcript's row has: the page and the app show both alike.
-pub fn list_row(s: &Live, project: Value) -> Value {
-    let waiting = s.status.strip_prefix("waiting: ");
-    let status = if waiting.is_some() {
-        "waiting"
-    } else if s.status == "busy" {
-        "busy"
-    } else {
-        "idle"
-    };
-    let line = match s.status.strip_prefix("failed: ").or(s.status.strip_prefix("unreadable: ")) {
-        Some(why) => format!("{}: {why}", if s.status.starts_with("failed") { "Failed" } else { "Unreadable" }),
-        None => as_text(&s.rec["line"]),
-    };
-    let ask = &s.rec["ask"];
-    let first = ask["questions"][0]["question"].clone();
-    let waiting_text = match waiting {
-        Some("approval") => "Waiting for an approval in dsh web",
-        Some(_) => "Waiting for an answer in dsh web",
-        None => "",
-    };
-    json!({"pid": s.pid, "name": s.name, "session_id": s.session_id, "status": status, "waiting_for": waiting,
-        "waiting_text": waiting_text, "since": s.since, "active": s.active, "cwd": s.cwd, "kind": s.kind,
-        "question": !ask.is_null(), "ask": if ask.is_null() { Value::Null } else { first },
-        "project": project, "line": line, "context": null, "doing": s.rec["doing"], "model": null, "effort": null,
-        "ask_detail": ask, "job": null, "moved_from": null, "screen": s.pid, "proc_start": null, "reach": null})
 }
 
 /// The server a row's session is open in.
@@ -555,20 +515,26 @@ mod tests {
     #[test]
     fn a_list_row_has_the_fields_of_a_transcripts_row() {
         let ask = json!({"tool_id": "c1", "questions": [{"question": "tea?"}], "answerable": true});
-        let r = list_row(&row("waiting: question", json!({"line": "", "ask": ask, "doing": null})), json!("w"));
+        let r = sessions::outside_row(
+            &row("waiting: question", json!({"line": "", "ask": ask, "doing": null})),
+            json!("w"),
+        );
         assert_eq!(
             (r["status"].as_str(), r["question"].as_bool(), r["ask"].as_str()),
             (Some("waiting"), Some(true), Some("tea?"))
         );
         assert_eq!(r["pid"], json!(key("session-a")));
         assert_eq!(r["waiting_text"], "Waiting for an answer in dsh web");
-        let r = list_row(&row("failed: 400: bad", json!({"line": "done", "ask": null, "doing": null})), Value::Null);
+        let r = sessions::outside_row(
+            &row("failed: 400: bad", json!({"line": "done", "ask": null, "doing": null})),
+            Value::Null,
+        );
         assert_eq!(
             (r["status"].as_str(), r["line"].as_str(), r["question"].as_bool()),
             (Some("idle"), Some("Failed: 400: bad"), Some(false))
         );
         let doing = json!({"tool": "bash", "what": "make"});
-        let r = list_row(&row("busy", json!({"line": "x", "ask": null, "doing": doing})), Value::Null);
+        let r = sessions::outside_row(&row("busy", json!({"line": "x", "ask": null, "doing": doing})), Value::Null);
         assert_eq!((r["status"].as_str(), &r["doing"]), (Some("busy"), &doing));
     }
 

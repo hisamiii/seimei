@@ -27,7 +27,6 @@ use seimei_core::audit::Audit;
 use seimei_core::auth::Auth;
 use seimei_core::cost::Cost;
 use seimei_core::dispatcher::{self, Dispatcher};
-use seimei_core::dsh_web;
 use seimei_core::events::{Event, EventLog};
 use seimei_core::files::{Files, MAX_MODEL_BYTES};
 use seimei_core::metrics::WorkerEvents;
@@ -43,6 +42,7 @@ use seimei_core::util::{as_text, flag, now, read_json, truthy, write_json};
 use seimei_core::watches::Watches;
 use seimei_core::workers::harness::{self, Delivery};
 use seimei_core::workers::{self, Pool};
+use seimei_core::{dsh_web, vibe};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -1464,6 +1464,9 @@ async fn user_session(app: &App, pid: &str) -> Result<(Live, Option<PathBuf>), R
         if dsh_web::is_key(pid) {
             return Some((dsh_web::live(&own).into_iter().find(|x| x.pid == pid)?, None));
         }
+        if vibe::is_key(pid) {
+            return Some((vibe::live(&own).into_iter().find(|x| x.pid == pid)?, None));
+        }
         let s = sessions::live(&own).into_iter().find(|x| x.pid == pid)?;
         if !sessions::listing(&own).iter().any(|x| x["pid"] == json!(pid)) {
             return None;
@@ -1491,8 +1494,8 @@ async fn session(
     });
     // The transcript as of now, not as of the list's last scan: the page's byte offsets hold only within one transcript.
     info["session_id"] = json!(sess.session_id);
-    if sess.in_dsh_web() {
-        return dsh_session(sess, info, start).await;
+    if sess.in_dsh_web() || sess.in_vibe() {
+        return outside_session(sess, info, start).await;
     }
     let (rec, spid) = (sess.rec.clone(), sess.screen_pid());
     let read = tokio::task::spawn_blocking(move || {
@@ -1524,10 +1527,13 @@ async fn session(
     ok(out)
 }
 
-/// A dsh web session's page: its events from dsh's cursor `start` on, its open question and running call. Messages reach it through dsh web.
-async fn dsh_session(sess: Live, info: Value, start: Option<u64>) -> Response {
-    let read = tokio::task::spawn_blocking(move || {
-        Ok::<_, String>((dsh_web::timeline(&sess, start)?, dsh_web::now_open(&sess)?))
+/// A dsh web or Vibe session's page: its events from the app's cursor `start` on, its open question and running call.
+/// Messages reach a dsh session through dsh web; a Vibe one is read-only.
+async fn outside_session(sess: Live, info: Value, start: Option<u64>) -> Response {
+    let in_vibe = sess.in_vibe();
+    let read = tokio::task::spawn_blocking(move || match in_vibe {
+        true => Ok::<_, String>((vibe::timeline(&sess, start)?, vibe::now_open(&sess)?)),
+        false => Ok((dsh_web::timeline(&sess, start)?, dsh_web::now_open(&sess)?)),
     })
     .await;
     let (tl, open) = match read {
@@ -1540,7 +1546,10 @@ async fn dsh_session(sess: Live, info: Value, start: Option<u64>) -> Response {
         out[k] = v.clone();
     }
     (out["ask"], out["doing"]) = (open["ask"].clone(), open["doing"].clone());
-    (out["live"], out["via"], out["reach"]) = (Value::Null, json!("dsh"), Value::Null);
+    (out["live"], out["via"], out["reach"]) = match in_vibe {
+        true => (Value::Null, Value::Null, json!(vibe::READ_ONLY)),
+        false => (Value::Null, json!("dsh"), Value::Null),
+    };
     ok(out)
 }
 
@@ -1574,6 +1583,9 @@ async fn session_send(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes: 
     let said = format!("{}{lines}", as_text(&b["text"]).trim());
     if said.trim().is_empty() || said.chars().count() > 20000 {
         return text(StatusCode::BAD_REQUEST, "text, up to 20000 characters");
+    }
+    if sess.in_vibe() {
+        return conflict(vibe::READ_ONLY);
     }
     if sess.in_dsh_web() {
         let said = said.trim().to_string();
@@ -1615,8 +1627,8 @@ async fn session_send(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes: 
 async fn session_answer(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes: Bytes) -> Response {
     let (sess, path) = attempt!(user_session(&app, &pid).await);
     let b = attempt!(body(&bytes));
-    if sess.in_dsh_web() {
-        return conflict("Answer this one in dsh web");
+    if let Some(app) = sess.app() {
+        return conflict(format!("Answer this one in {app}"));
     }
     let (rec, spid) = (sess.rec.clone(), sess.screen_pid());
     let ask = tokio::task::spawn_blocking(move || {
@@ -1704,8 +1716,8 @@ async fn worker_release(State(app): Shared, UrlPath(id): UrlPath<String>) -> Res
 /// Hand off: adopt this session as a shikigami, through the same card as seimei's adopt.
 async fn session_adopt(State(app): Shared, UrlPath(pid): UrlPath<String>) -> Response {
     let (sess, _) = attempt!(user_session(&app, &pid).await);
-    if sess.in_dsh_web() {
-        return conflict("A dsh web session cannot become a shikigami");
+    if let Some(app) = sess.app() {
+        return conflict(format!("A {app} session cannot become a shikigami"));
     }
     let app = app.clone();
     tokio::spawn(async move {
