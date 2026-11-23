@@ -125,7 +125,7 @@ impl Live {
         if self.in_dsh_web() {
             "message it with session_message".into()
         } else if self.in_vibe() {
-            "message it with session_message (typed into its terminal window)".into()
+            format!("message it with session_message, or SendMessage to uds:{}", as_text(&self.rec["vibe"]["inbox"]))
         } else {
             format!("SendMessage to {}", self.address())
         }
@@ -673,7 +673,8 @@ pub fn outside_row(s: &Live, project: Value) -> Value {
         "waiting_text": waiting_text, "since": s.since, "active": s.active, "cwd": s.cwd, "kind": s.kind,
         "question": !ask.is_null(), "ask": if ask.is_null() { Value::Null } else { first },
         "project": project, "line": line, "context": null, "doing": s.rec["doing"], "model": null, "effort": null,
-        "ask_detail": ask, "job": null, "moved_from": null, "screen": s.pid, "proc_start": null, "reach": s.rec["reach"]})
+        "ask_detail": ask, "job": null, "moved_from": null, "screen": s.pid, "proc_start": null, "reach": s.rec["reach"],
+        "inbox": s.rec["vibe"]["inbox"]})
 }
 
 /// What the scan knows about one session.

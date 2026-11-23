@@ -51,6 +51,11 @@ impl Audit {
         let _ = crate::util::append_line(&self.path, &rec.to_string());
     }
 
+    /// A message one agent sent another past the dispatcher.
+    pub fn message(&self, from: &str, to: &str, text: &str) {
+        self.write(json!({"event": "message", "who": from, "session": to, "text": crate::util::chars(text, 2000)}));
+    }
+
     /// A tool call the agent made.
     pub fn call(&self, c: Call) {
         self.write(json!({"event": "call", "who": c.who, "worker": c.worker, "session": c.session, "agent": c.agent,

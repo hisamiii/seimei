@@ -235,7 +235,7 @@ fn row(h: &Held) -> Option<Live> {
     let since = ms(&state["latestTurn"][if at_work { "startedAt" } else { "completedAt" }]);
     let title = [&s["title"], &meta["title"]].into_iter().find_map(|t| t.as_str().filter(|t| !t.trim().is_empty()));
     let mut rec = brief(entries(&state));
-    rec["vibe"] = json!({"dir": h.dir, "holder": h.pid});
+    rec["vibe"] = json!({"dir": h.dir, "holder": h.pid, "inbox": inbox(&h.sid)});
     // seimei types into the terminal window that shows it, as into the harness's own sessions.
     rec["reach"] = json!(crate::terminal::reachable(h.pid));
     Some(Live {
@@ -264,6 +264,59 @@ pub fn live(own: &Own) -> Vec<Live> {
 /// The store folder of a row's session.
 fn dir_of(row: &Live) -> Result<PathBuf, String> {
     row.rec["vibe"]["dir"].as_str().map(PathBuf::from).ok_or_else(|| "not a Vibe session".into())
+}
+
+/// The session's messaging socket, which speaks the harness's peer frame: $XDG_RUNTIME_DIR/seimei/vibe/<id>.sock.
+pub fn inbox(sid: &str) -> PathBuf {
+    crate::plugins::link::runtime_path("vibe", false).with_extension("").join(format!("{sid}.sock"))
+}
+
+/// Serve a socket for each running Vibe session, for good: a message on one is typed into that session's window.
+/// It goes past the dispatcher and does not wake it; the audit log keeps it.
+pub async fn inboxes(pool: std::sync::Arc<crate::workers::Pool>) {
+    use std::os::unix::fs::PermissionsExt;
+    let mut open: std::collections::HashMap<String, tokio::task::JoinHandle<()>> = Default::default();
+    loop {
+        let p = pool.clone();
+        let rows = tokio::task::spawn_blocking(move || live(&p.own_sessions())).await.unwrap_or_default();
+        open.retain(|sid, task| {
+            let keep = rows.iter().any(|r| &r.session_id == sid);
+            if !keep {
+                task.abort();
+                let _ = std::fs::remove_file(inbox(sid));
+            }
+            keep
+        });
+        for r in rows {
+            if open.contains_key(&r.session_id) {
+                continue;
+            }
+            let path = inbox(&r.session_id);
+            let dir = path.parent().expect("a folder");
+            let _ = std::fs::create_dir_all(dir);
+            let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+            let _ = std::fs::remove_file(&path);
+            let Ok(listener) = tokio::net::UnixListener::bind(&path) else { continue };
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+            open.insert(r.session_id.clone(), tokio::spawn(serve(listener, r, pool.clone())));
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    }
+}
+
+/// One session's socket: each frame's text typed in as the user's prompt. One-way, as SendMessage is: the sender gets no answer.
+async fn serve(listener: tokio::net::UnixListener, row: Live, pool: std::sync::Arc<crate::workers::Pool>) {
+    use tokio::io::AsyncBufReadExt;
+    while let Ok((s, _)) = listener.accept().await {
+        let mut lines = tokio::io::BufReader::new(s).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let Some((from, text)) = seimei_proto::peer::received(&line) else { continue };
+            pool.audit.message(&from, &row.session_id, &text);
+            if let Err(e) = send(&row, &format!("[from {from}] {text}")).await {
+                eprintln!("vibe inbox {}: {e}", row.session_id);
+            }
+        }
+    }
 }
 
 /// Type the user's message into the session's terminal window and send it.
@@ -365,6 +418,12 @@ pub fn now_open(row: &Live) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_inbox_sits_in_seimeis_runtime_folder() {
+        let p = inbox("abc");
+        assert!(p.ends_with("seimei/vibe/abc.sock"), "{}", p.display());
+    }
 
     #[tokio::test]
     async fn a_message_needs_the_window_of_a_running_session() {

@@ -480,6 +480,7 @@ fn main() {
             }
         });
         tokio::spawn(app.watcher.clone().run());
+        tokio::spawn(seimei_core::vibe::inboxes(app.pool.clone()));
         tokio::spawn(app.watcher.clone().follow());
         if web_on && app.auth.is_some() && cfg.server.adb != 0 {
             // --dev moves it too, as it moves the port.

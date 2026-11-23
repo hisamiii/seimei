@@ -39,13 +39,7 @@ pub async fn send(to: &Path, name: &str, mode: &str, msg_id: &str, text: &str) -
     let dir = to.parent().ok_or_else(|| io::Error::other("the inbox path has no folder"))?;
     let hex: String = msg_id.chars().filter(char::is_ascii_hexdigit).take(8).collect();
     let reply = Reply::bind(dir.join(format!("{}-{hex}.sock", std::process::id())))?;
-    // The envelope names no reply address: the agent answers in its own session, where the user reads it.
-    let body = text.replace(&format!("</{TAG}"), &format!("<\\/{TAG}"));
-    let content = format!("<{TAG} from-name=\"{name}\" from-mode=\"{}\">\n{body}\n</{TAG}>", mode_class(mode));
-    let frame = json!({
-        "msgV": 1, "msg_id": msg_id, "type": "user", "message": {"role": "user", "content": content},
-        "priority": "now", "from": format!("uds:{}", reply.path.display()),
-    });
+    let frame = frame(name, mode, msg_id, text, &format!("uds:{}", reply.path.display()));
     let write = async {
         let mut s = UnixStream::connect(to).await?;
         s.write_all(format!("{frame}\n").as_bytes()).await?;
@@ -53,6 +47,25 @@ pub async fn send(to: &Path, name: &str, mode: &str, msg_id: &str, text: &str) -
     };
     tokio::time::timeout(SEND, write).await.map_err(|_| io::Error::from(io::ErrorKind::TimedOut))??;
     Ok(tokio::time::timeout(ANSWER, reply.answer(msg_id)).await.unwrap_or(Delivery::Inbox))
+}
+
+/// The frame SendMessage writes. The envelope names no reply address: the agent answers in its own session, where the user reads it.
+fn frame(name: &str, mode: &str, msg_id: &str, text: &str, from: &str) -> Value {
+    let body = text.replace(&format!("</{TAG}"), &format!("<\\/{TAG}"));
+    let content = format!("<{TAG} from-name=\"{name}\" from-mode=\"{}\">\n{body}\n</{TAG}>", mode_class(mode));
+    json!({"msgV": 1, "msg_id": msg_id, "type": "user", "message": {"role": "user", "content": content},
+        "priority": "now", "from": from})
+}
+
+/// The sender's name and the text of one frame SendMessage wrote, as `send` writes it.
+pub fn received(line: &str) -> Option<(String, String)> {
+    let v: Value = serde_json::from_str(line).ok()?;
+    let content = v["message"]["content"].as_str()?;
+    let open = content.strip_prefix(&format!("<{TAG} "))?;
+    let (attrs, rest) = open.split_once(">\n")?;
+    let body = rest.strip_suffix(&format!("\n</{TAG}>"))?.replace(&format!("<\\/{TAG}"), &format!("</{TAG}"));
+    let name = attrs.split_once("from-name=\"").and_then(|(_, n)| n.split_once('"')).map_or("", |(n, _)| n);
+    Some((name.to_string(), body))
 }
 
 /// The sender's own socket for the inbox's answer, removed when dropped.
@@ -92,5 +105,18 @@ impl Reply {
 impl Drop for Reply {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_received_frame_gives_back_the_sender_and_the_text() {
+        let text = format!("hi\nnot the end: </{TAG}> yet");
+        let line = frame("ops", "default", "m1", &text, "uds:/r.sock").to_string();
+        assert_eq!(received(&line), Some(("ops".into(), text)));
+        assert_eq!(received("{\"message\": {\"content\": \"plain\"}}"), None);
     }
 }
