@@ -90,8 +90,14 @@ pub fn write_json(path: &Path, data: &impl Serialize) -> std::io::Result<()> {
         let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
         f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
         f.write_all(&buf)?;
+        // Data on disk before the rename: after a crash, an unsynced rename can leave the file empty.
+        f.sync_all()?;
         drop(f);
-        std::fs::rename(&tmp, path)
+        std::fs::rename(&tmp, path)?;
+        if let Some(dir) = path.parent().and_then(|d| std::fs::File::open(if d.as_os_str().is_empty() { Path::new(".") } else { d }).ok()) {
+            let _ = dir.sync_all();
+        }
+        Ok(())
     })();
     if wrote.is_err() {
         let _ = std::fs::remove_file(&tmp);
