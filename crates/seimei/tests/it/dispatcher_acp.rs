@@ -44,6 +44,7 @@ fn app(state: &Path, work: &Path, fake: &Path, no_load: bool) -> seimei_server::
         .chain(no_load.then(|| ("FAKE_ACP_NO_LOAD".to_string(), "1".to_string())))
         .collect(),
         protocol: "acp".into(),
+        ..Agent::default()
     };
     app.pool.agents.set(BTreeMap::from([("fake".to_string(), agent)])).unwrap();
     app

@@ -34,6 +34,7 @@ fn app(state: &Path, work: &Path, fake: &Path) -> seimei_server::App {
             ("FAKE_CODEX_LOG".into(), fake.join("log.jsonl").display().to_string()),
         ],
         protocol: "codex".into(),
+        ..Agent::default()
     };
     app.pool.agents.set(BTreeMap::from([("codex".to_string(), agent)])).unwrap();
     app

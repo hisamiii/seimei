@@ -56,6 +56,8 @@ pub struct Spec {
     pub name: String,
     pub cwd: PathBuf,
     pub model: String,
+    /// Set only when config or CLI named a model explicitly; ACP agents use it over their own default.
+    pub explicit_model: Option<String>,
     /// None leaves it to the harness's own settings.
     pub effort: Option<String>,
     pub mode: String,

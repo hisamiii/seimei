@@ -42,7 +42,7 @@ use seimei_core::util::{as_text, flag, now, read_json, truthy, write_json};
 use seimei_core::watches::Watches;
 use seimei_core::workers::harness::{self, Delivery};
 use seimei_core::workers::{self, Pool};
-use seimei_core::{dsh_web, vibe};
+use seimei_core::{agy, dsh_web, vibe};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -1467,6 +1467,9 @@ async fn user_session(app: &App, pid: &str) -> Result<(Live, Option<PathBuf>), R
         if vibe::is_key(pid) {
             return Some((vibe::live(&own).into_iter().find(|x| x.pid == pid)?, None));
         }
+        if agy::is_key(pid) {
+            return Some((agy::live(&own).into_iter().find(|x| x.pid == pid)?, None));
+        }
         let s = sessions::live(&own).into_iter().find(|x| x.pid == pid)?;
         if !sessions::listing(&own).iter().any(|x| x["pid"] == json!(pid)) {
             return None;
@@ -1494,7 +1497,7 @@ async fn session(
     });
     // The transcript as of now, not as of the list's last scan: the page's byte offsets hold only within one transcript.
     info["session_id"] = json!(sess.session_id);
-    if sess.in_dsh_web() || sess.in_vibe() {
+    if sess.in_dsh_web() || sess.in_vibe() || sess.in_agy() {
         return outside_session(sess, info, start).await;
     }
     let (rec, spid) = (sess.rec.clone(), sess.screen_pid());
@@ -1527,13 +1530,13 @@ async fn session(
     ok(out)
 }
 
-/// A dsh web or Vibe session's page: its events from the app's cursor `start` on, its open question and running call.
-/// Messages reach a dsh session through dsh web; a Vibe one is read-only.
+/// A dsh web, Vibe or Antigravity session's page: its events from cursor `start` on, its open question and running call.
 async fn outside_session(sess: Live, info: Value, start: Option<u64>) -> Response {
-    let in_vibe = sess.in_vibe();
-    let read = tokio::task::spawn_blocking(move || match in_vibe {
-        true => Ok::<_, String>((vibe::timeline(&sess, start)?, vibe::now_open(&sess)?)),
-        false => Ok((dsh_web::timeline(&sess, start)?, dsh_web::now_open(&sess)?)),
+    let (in_vibe, in_agy) = (sess.in_vibe(), sess.in_agy());
+    let read = tokio::task::spawn_blocking(move || match (in_vibe, in_agy) {
+        (true, _) => Ok::<_, String>((vibe::timeline(&sess, start)?, vibe::now_open(&sess)?)),
+        (_, true) => Ok((agy::timeline(&sess, start)?, agy::now_open(&sess)?)),
+        _ => Ok((dsh_web::timeline(&sess, start)?, dsh_web::now_open(&sess)?)),
     })
     .await;
     let (tl, open) = match read {
@@ -1546,9 +1549,9 @@ async fn outside_session(sess: Live, info: Value, start: Option<u64>) -> Respons
         out[k] = v.clone();
     }
     (out["ask"], out["doing"]) = (open["ask"].clone(), open["doing"].clone());
-    (out["live"], out["via"], out["reach"]) = match in_vibe {
-        true => (Value::Null, Value::Null, out["session"]["reach"].clone()),
-        false => (Value::Null, json!("dsh"), Value::Null),
+    (out["live"], out["via"], out["reach"]) = match (in_vibe, in_agy) {
+        (true, _) | (_, true) => (Value::Null, Value::Null, out["session"]["reach"].clone()),
+        _ => (Value::Null, json!("dsh"), Value::Null),
     };
     ok(out)
 }
@@ -1586,6 +1589,12 @@ async fn session_send(State(app): Shared, UrlPath(pid): UrlPath<String>, bytes: 
     }
     if sess.in_vibe() {
         return match vibe::send(&sess, said.trim()).await {
+            Ok(()) => ok(json!({"ok": true})),
+            Err(e) => conflict(e),
+        };
+    }
+    if sess.in_agy() {
+        return match agy::send(&sess, said.trim()).await {
             Ok(()) => ok(json!({"ok": true})),
             Err(e) => conflict(e),
         };

@@ -55,6 +55,7 @@ async fn acp_shikigami() {
             ("FAKE_ACP_LOG".into(), fake.join("log.jsonl").display().to_string()),
         ],
         protocol: "acp".into(),
+        ..Agent::default()
     };
     let broken = Agent { command: "/nonexistent/acp-agent".into(), ..agent.clone() };
     pool.agents.set(BTreeMap::from([("fake".to_string(), agent), ("broken".to_string(), broken)])).unwrap();

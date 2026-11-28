@@ -102,6 +102,11 @@ fn arg(a: &Value, k: &str) -> String {
 
 /// Why a summon call cannot go ahead (a pick missing or not one of the choices), or "".
 pub fn summon_problem(a: &Value) -> String {
+    summon_problem_for(a, None)
+}
+
+/// Why a summon call cannot go ahead, with `agent_models` when the target ACP agent defines its own model choices.
+fn summon_problem_for(a: &Value, agent_models: Option<&[String]>) -> String {
     let plan = crate::plan::get();
     let given = |k: &str| match &a[k] {
         Value::Null | Value::Bool(false) => false,
@@ -109,18 +114,38 @@ pub fn summon_problem(a: &Value) -> String {
         Value::String(s) => !s.trim().is_empty(),
         _ => true,
     };
-    let missing: Vec<&str> = SUMMON_PICKS.into_iter().filter(|k| !given(k)).collect();
+    let picks: &[&str] = if agent_models.is_some() { &["cwd", "model"] } else { &SUMMON_PICKS };
+    let missing: Vec<&str> = picks.iter().copied().filter(|k| !given(k)).collect();
     if !missing.is_empty() {
         let each = if missing.len() == 1 { "it" } else { "each" };
+        let models = match agent_models {
+            Some(ms) => ms.join(", "),
+            None => plan.model_guide(),
+        };
         return format!(
             "summon needs {}: pick {each} for this task, there are no defaults. cwd: the project folder (~ only for \
-             home tasks). model: {}. effort: {EFFORT_GUIDE}. context: {}.",
+             home tasks). model: {models}. effort: {EFFORT_GUIDE}. context: {}.",
             missing.join(", "),
-            plan.model_guide(),
             plan.context_guide()
         );
     }
     let contexts = plan.contexts();
+    if let Some(ms) = agent_models {
+        if !a["model"].as_str().is_some_and(|v| ms.iter().any(|m| m == v)) {
+            let shown = match &a["model"] {
+                Value::String(s) => format!("'{s}'"),
+                v => v.to_string(),
+            };
+            return format!("summon: model must be one of {}, not {shown}.", ms.join(", "));
+        }
+        if given("effort") && !a["effort"].as_str().is_some_and(|v| EFFORTS.contains(&v)) {
+            return format!("summon: effort must be one of {}.", EFFORTS.join(", "));
+        }
+        if given("context") && !a["context"].as_str().is_some_and(|v| contexts.contains(&v)) {
+            return format!("summon: context must be one of {}.", contexts.join(", "));
+        }
+        return String::new();
+    }
     for (k, choices) in [("model", &MODELS[..]), ("effort", &EFFORTS[..]), ("context", &contexts[..])] {
         if !a[k].as_str().is_some_and(|v| choices.contains(&v)) {
             let shown = match &a[k] {
@@ -267,10 +292,43 @@ fn upper_first(s: &str) -> String {
 
 /// The summon tool as listed: tools.json's with the plan's models and contexts, plus a tools option when plugins can be granted and a harness option when config has ACP agents.
 pub fn summon_spec(groups: &[String], agents: &[String]) -> Value {
+    let empty = std::collections::BTreeMap::new();
+    let map: std::collections::BTreeMap<String, crate::workers::Agent> =
+        agents.iter().map(|a| (a.clone(), crate::workers::Agent::default())).collect();
+    summon_spec_with(groups, if agents.is_empty() { &empty } else { &map }, None)
+}
+
+fn summon_spec_with(
+    groups: &[String],
+    agents: &std::collections::BTreeMap<String, crate::workers::Agent>,
+    default_harness: Option<&str>,
+) -> Value {
     let mut t = (SERVER["tools"].as_array().into_iter().flatten()).find(|t| t["name"] == "summon").cloned().unwrap();
     let props = &mut t["inputSchema"]["properties"];
     let plan = crate::plan::get();
-    props["model"]["description"] = json!(plan.model_guide());
+    let mut model_choices: Vec<String> = MODELS.iter().map(|m| m.to_string()).collect();
+    let mut model_notes: Vec<String> = vec![];
+    for (name, a) in agents {
+        if !a.models.is_empty() {
+            for m in &a.models {
+                if !model_choices.contains(m) {
+                    model_choices.push(m.clone());
+                }
+            }
+            model_notes.push(format!("acp:{name}: {}", a.models.join(", ")));
+        }
+    }
+    let default_agent = default_harness.and_then(|h| h.strip_prefix("acp:")).and_then(|n| agents.get(n));
+    let drop_effort_context = default_agent.is_some_and(|a| !a.models.is_empty());
+    if drop_effort_context {
+        props["model"]["enum"] = json!(model_choices);
+        props["model"]["description"] = json!(format!("model for this task ({})", model_notes.join("; ")));
+    } else if !model_notes.is_empty() {
+        props["model"]["enum"] = json!(model_choices);
+        props["model"]["description"] = json!(format!("{}; {}", plan.model_guide(), model_notes.join("; ")));
+    } else {
+        props["model"]["description"] = json!(plan.model_guide());
+    }
     props["context"]["enum"] = json!(plan.contexts());
     props["context"]["description"] = json!(plan.context_guide());
     props["subagent_model"]["default"] = json!(plan.quick);
@@ -281,12 +339,23 @@ pub fn summon_spec(groups: &[String], agents: &[String]) -> Value {
     }
     if !agents.is_empty() {
         let harness: Vec<String> =
-            std::iter::once("claude".into()).chain(agents.iter().map(|a| format!("acp:{a}"))).collect();
-        props["harness"] = json!({"type": "string", "enum": harness,
-                "description": "what it runs on: claude (Claude Code, the default) or an ACP agent from config. An \
-                                agent keeps its own login and model, so model, effort and context are ignored, and it \
-                                cannot be tuned, handed to the user or opened in a terminal. Only when the user asks \
-                                for that agent."});
+            std::iter::once("claude".into()).chain(agents.keys().map(|a| format!("acp:{a}"))).collect();
+        let desc = match default_harness {
+            Some(def) => format!(
+                "what it runs on: {def} (the default) or another configured harness ({}). An agent with models in \
+                 config uses the model you pick; one without picks its own.",
+                harness.join(", ")
+            ),
+            None => "what it runs on: claude (Claude Code, the default) or an ACP agent from config. An agent with \
+                     models in config uses the model you pick; otherwise it keeps its own model, and effort and \
+                     context are ignored. It cannot be handed to the user or opened in a terminal. Only when the user \
+                     asks for that agent."
+                .into(),
+        };
+        props["harness"] = json!({"type": "string", "enum": harness, "description": desc});
+    }
+    if drop_effort_context && let Some(req) = t["inputSchema"]["required"].as_array_mut() {
+        req.retain(|v| v != "effort" && v != "context");
     }
     t
 }
@@ -306,10 +375,23 @@ impl Tools {
         {
             tools.retain(|t| t["name"] != "ask");
         }
-        let agents: Vec<String> = self.pool.agents.get().into_iter().flatten().map(|(n, _)| n.clone()).collect();
+        let empty = std::collections::BTreeMap::new();
+        let agents = self.pool.agents.get().unwrap_or(&empty);
+        let default_harness = self.pool.default_harness();
+        let mut tune_models: Vec<String> = MODELS.iter().map(|m| m.to_string()).collect();
+        for a in agents.values() {
+            for m in &a.models {
+                if !tune_models.contains(m) {
+                    tune_models.push(m.clone());
+                }
+            }
+        }
         for t in spec["tools"].as_array_mut().into_iter().flatten() {
             match t["name"].as_str() {
-                Some("summon") => *t = summon_spec(&self.pool.plugins.names(), &agents),
+                Some("summon") => *t = summon_spec_with(&self.pool.plugins.names(), agents, default_harness),
+                Some("tune") if tune_models.len() > MODELS.len() => {
+                    t["inputSchema"]["properties"]["model"]["enum"] = json!(tune_models);
+                }
                 Some("adopt") => {
                     t["inputSchema"]["properties"]["context"]["enum"] = json!(crate::plan::get().contexts())
                 }
@@ -437,7 +519,10 @@ impl Tools {
     }
 
     async fn summon(&self, a: &Value) -> Value {
-        let bad = summon_problem(a);
+        let opt = |k: &str| Some(arg(a, k)).filter(|s| !s.is_empty());
+        let harness = opt("harness").or_else(|| self.pool.default_harness().map(String::from));
+        let agent_models = harness.as_deref().and_then(|h| self.pool.agent(h)).filter(|a| !a.models.is_empty());
+        let bad = summon_problem_for(a, agent_models.as_ref().map(|a| a.models.as_slice()));
         if !bad.is_empty() {
             return text(&bad, true);
         }
@@ -451,15 +536,16 @@ impl Tools {
                 true,
             );
         }
-        let opt = |k: &str| Some(arg(a, k)).filter(|s| !s.is_empty());
         let tools = (a["tools"].as_array().into_iter().flatten()).map(as_text).collect();
+        let context =
+            opt("context").unwrap_or_else(|| crate::plan::get().contexts().last().copied().unwrap_or("256k").into());
         let s = Summon {
             name: arg(a, "name"),
             task: arg(a, "task"),
             cwd: arg(a, "cwd"),
             model: arg(a, "model"),
             effort: opt("effort"),
-            context: arg(a, "context"),
+            context,
             subagents: opt("subagent_model").unwrap_or_default(),
             project: opt("project"),
             link: opt("task_id"),
@@ -611,9 +697,15 @@ impl Tools {
                 self.events.flash(json!({"type": "call", "do": what, "seconds": seconds}));
                 text(
                     match name {
-                        "end_call" => "The call hangs up once your words before this call are spoken; words after it are not.",
-                        "mute_call" if seconds.is_some() => "The user's mic and your voice pause once your words before this call are spoken, with a short falling tone, and come back after the seconds with a rising tone. Their button or a typed message unmutes sooner. Your replies meanwhile go to the chat as text.",
-                        "mute_call" => "The user's mic and your voice pause once your words before this call are spoken, with a short falling tone. Their button, a typed message or unmute_call brings both back. Your replies meanwhile go to the chat as text.",
+                        "end_call" => {
+                            "The call hangs up once your words before this call are spoken; words after it are not."
+                        }
+                        "mute_call" if seconds.is_some() => {
+                            "The user's mic and your voice pause once your words before this call are spoken, with a short falling tone, and come back after the seconds with a rising tone. Their button or a typed message unmutes sooner. Your replies meanwhile go to the chat as text."
+                        }
+                        "mute_call" => {
+                            "The user's mic and your voice pause once your words before this call are spoken, with a short falling tone. Their button, a typed message or unmute_call brings both back. Your replies meanwhile go to the chat as text."
+                        }
                         _ => "The user's mic and your voice are back: they hear a short rising tone.",
                     },
                     false,
@@ -922,9 +1014,13 @@ impl Tools {
         let Some(s) = sessions::find_any(&arg(a, "session"), &own, Some(&self.pool.aliases)) else {
             return text("No single running session matches.", true);
         };
-        if s.in_vibe() {
+        if s.in_vibe() || s.in_agy() {
             // Tools run on a blocking thread, which may wait on the runtime.
-            let sent = tokio::runtime::Handle::current().block_on(crate::vibe::send(&s, &said));
+            let sent = if s.in_vibe() {
+                tokio::runtime::Handle::current().block_on(crate::vibe::send(&s, &said))
+            } else {
+                tokio::runtime::Handle::current().block_on(crate::agy::send(&s, &said))
+            };
             return match sent {
                 Ok(()) => text(&format!("Typed into {}'s window and sent.", s.name), false),
                 Err(e) => text(&format!("Not sent to {}: {e}", s.name), true),
@@ -949,8 +1045,14 @@ impl Tools {
         let count = a.get("count").map_or(Some(3), |c| c.as_i64().or_else(|| arg(a, "count").trim().parse().ok()));
         let Some(count) = count else { return text("count is a number", true) };
         let count = count.clamp(1, 20) as usize;
-        let (p, mode, full) = if s.in_dsh_web() || s.in_vibe() {
-            let read = if s.in_vibe() { crate::vibe::peek(&s, count) } else { crate::dsh_web::peek(&s, count) };
+        let (p, mode, full) = if s.in_dsh_web() || s.in_vibe() || s.in_agy() {
+            let read = if s.in_vibe() {
+                crate::vibe::peek(&s, count)
+            } else if s.in_agy() {
+                crate::agy::peek(&s, count)
+            } else {
+                crate::dsh_web::peek(&s, count)
+            };
             match read {
                 Ok(p) => (p, String::new(), format!("its page in {}", s.app().unwrap_or("its app"))),
                 Err(e) => return text(&format!("Could not read {}: {e}", s.name), true),

@@ -172,6 +172,7 @@ fn tool_call(item: &Value, cwd: &str) -> Option<ToolCall> {
     };
     Some(ToolCall {
         id,
+        name: String::new(),
         title,
         kind: kind.into(),
         status: status.into(),

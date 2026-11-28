@@ -70,6 +70,13 @@ enabled = []
 # command = "dsh"
 # args = ["--profile", "acp"]
 # env = { }            # extra environment, if it needs any
+# [agents.agy]
+# command = "agy"
+# args = ["acp"]
+# model = "gemini-4-neon-high"         # default model via ACP session/set_model
+# models = ["gemini-4-neon-high", "gemini-4-neon-medium", "gemini-3.8-flash-high"]
+# [workers]
+# harness = "acp:agy"                  # default shikigami harness when summon leaves harness unset
 # Codex runs through its own app-server protocol instead (protocol = "codex"); its sandbox and MCP servers come from its own config, and seimei adds the shikigami's.
 # [agents.codex]
 # command = "codex"

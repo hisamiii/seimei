@@ -29,8 +29,11 @@ The table lists each section's keys, their defaults and what they set. Notes on 
 | | `shikigami` | `default` | the permission mode and ceiling for shikigami |
 | | `deny_paths` | seimei's secrets | paths no agent may read or edit |
 | `[plugins]` | `enabled` | `[]` | the plugins to load |
+| `[workers]` | `harness` | `claude` | default shikigami harness when summon names none |
 | `[agents.<name>]` | `command`, `args`, `env` | none | an ACP agent a shikigami can run on |
 | | `protocol` | `acp` | `codex` for `codex app-server` |
+| | `model` | none | default ACP model id set on session open |
+| | `models` | `[]` | ACP model ids summon and tune may pick |
 | `[asr]` | `key_file` | `~/.config/seimei/openrouter-key` | the OpenRouter key for dictation |
 | | `url` | `https://openrouter.ai/api/v1` | OpenRouter's API, for dictation and direct voice calls |
 | | `model` | `microsoft/mai-transcribe-2` | the transcription model |
@@ -80,7 +83,9 @@ Notes on the keys:
 - `web = false` still runs the plugins, the GPU queue among them.
 - `[dispatcher] name` is `seimei-dev` with `--dev`.
 - `compact_window` is 80% of `[models] context` when that is less than 400000.
-- An ACP agent is one `[agents.<name>]` entry, such as `command = "vibe-acp"` for Mistral Vibe. It keeps its own login, and its permission requests become cards.
+- An ACP agent is one `[agents.<name>]` entry, such as `command = "vibe-acp"` for Mistral Vibe or `command = "agy"` with `args = ["acp"]` for Antigravity CLI. It keeps its own login, and its permission requests become cards.
+- Setting `model` on `[agents.<name>]` (or `[dispatcher] model`) calls ACP `session/set_model` on open. Setting `models` lets summon and tune pick among those model ids for shikigami on that agent.
+- `[workers] harness` sets the default shikigami harness when summon leaves `harness` unset.
 - `harness` takes the same values as summon's harness option. A Codex dispatcher is an `[agents.<name>]` entry with `protocol = "codex"`.
 - On an ACP agent or Codex, `[approvals] dispatcher` works as for an ACP shikigami: seimei applies the mode, and what is left becomes a card. The agent uses its own model and compacts at its own point, so `model` and `compact_window` apply to Claude Code only.
 - A changed `harness` starts a fresh session on the next start, seeded with the last handoff and the After compaction block.

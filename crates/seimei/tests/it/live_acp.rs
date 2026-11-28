@@ -77,6 +77,7 @@ async fn dsh_shikigami_live() {
         args: vec!["--profile".into(), "acp".into()],
         env: vec![],
         protocol: "acp".into(),
+        ..Agent::default()
     };
     pool.agents.set(BTreeMap::from([("dsh".to_string(), dsh)])).unwrap();
     tokio::spawn(pool.plugins.clone().listen(approvals.clone()));

@@ -35,6 +35,11 @@ impl Session {
         servers.insert("seimei".into(), Value::Object(spec.own_server.clone()));
         let mut env = spec.env.clone();
         env.extend(a.env);
+        let model = match (spec.explicit_model.as_ref(), a.model.as_ref()) {
+            (Some(m), _) if a.models.is_empty() || a.models.iter().any(|x| x == m) => Some(m.clone()),
+            (_, Some(m)) => Some(m.clone()),
+            _ => None,
+        };
         let mut opts = acp::Options {
             program: a.command.into(),
             args: a.args,
@@ -43,6 +48,7 @@ impl Session {
             env_remove: vec![],
             mcp_servers: acp_servers(servers),
             load: (!spec.fresh).then(|| spec.session.clone()),
+            model: model.clone(),
             // Codex takes the system prompt as the thread's developer instructions, on a resumed thread too.
             instructions: (a.protocol == "codex").then(|| spec.prompt.clone()),
         };
@@ -64,7 +70,10 @@ impl Session {
         // A loaded session replays its history, which the event log has already.
         client.drain();
         let prompt = (opts.load.is_none() && opts.instructions.is_none()).then_some(spec.prompt);
-        let model = client.session["model"].as_str().unwrap_or("codex").to_string();
+        let model = model
+            .or_else(|| client.session["models"]["currentModelId"].as_str().map(String::from))
+            .or_else(|| client.session["model"].as_str().map(String::from))
+            .unwrap_or_else(|| "codex".into());
         Ok(Session {
             client,
             queue: VecDeque::new(),

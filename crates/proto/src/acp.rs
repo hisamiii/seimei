@@ -85,6 +85,8 @@ pub struct Options {
     pub mcp_servers: Vec<McpServer>,
     /// Go on with this session (session/load) instead of a new one.
     pub load: Option<String>,
+    /// Model to switch the session to once opened (session/set_model).
+    pub model: Option<String>,
     /// Codex's developer instructions for the thread; an ACP agent has no place for them.
     pub instructions: Option<String>,
 }
@@ -93,6 +95,8 @@ pub struct Options {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ToolCall {
     pub id: String,
+    /// The tool's raw name when the agent sends one alongside the display title.
+    pub name: String,
     pub title: String,
     /// read, edit, delete, move, search, execute, think, fetch, switch_mode or other.
     pub kind: String,
@@ -107,7 +111,12 @@ impl ToolCall {
     /// What an update (or a permission request's partial call) says, over what was known; it takes its id.
     pub(crate) fn merge(&mut self, u: &ToolCall) {
         self.id.clone_from(&u.id);
-        for (mine, theirs) in [(&mut self.title, &u.title), (&mut self.kind, &u.kind), (&mut self.status, &u.status)] {
+        for (mine, theirs) in [
+            (&mut self.name, &u.name),
+            (&mut self.title, &u.title),
+            (&mut self.kind, &u.kind),
+            (&mut self.status, &u.status),
+        ] {
             if !theirs.is_empty() {
                 mine.clone_from(theirs);
             }
@@ -330,6 +339,12 @@ impl Client {
             }
         };
         self.session = r;
+        if let Some(m) = opts.model.as_deref().filter(|m| !m.is_empty())
+            && self.session["models"].is_object()
+            && self.session["models"]["currentModelId"].as_str() != Some(m)
+        {
+            self.set_model(m).await?;
+        }
         Ok(())
     }
 
@@ -398,6 +413,11 @@ impl Client {
         self.request("session/set_mode", json!({"sessionId": self.session_id, "modeId": mode})).await.map(|_| ())
     }
 
+    /// Switch an ACP session to one of the models it offered.
+    pub async fn set_model(&self, model: &str) -> Result<(), Error> {
+        self.request("session/set_model", json!({"sessionId": self.session_id, "modelId": model})).await.map(|_| ())
+    }
+
     pub async fn request(&self, method: &str, params: Value) -> Result<Value, Error> {
         let rpc = &self.rpc;
         let n = rpc.id();
@@ -454,6 +474,7 @@ fn tool_call(u: &Value) -> ToolCall {
     });
     ToolCall {
         id: s(&u["toolCallId"]),
+        name: s(&u["name"]),
         title: s(&u["title"]),
         kind: s(&u["kind"]),
         status: s(&u["status"]),

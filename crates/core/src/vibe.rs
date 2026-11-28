@@ -306,6 +306,7 @@ pub async fn inboxes(pool: std::sync::Arc<crate::workers::Pool>) {
             let own = p.own_sessions();
             let mut rows = live(&own);
             rows.extend(crate::dsh_web::held(&own));
+            rows.extend(crate::agy::live(&own));
             rows
         })
         .await
@@ -350,6 +351,8 @@ async fn serve(listener: tokio::net::UnixListener, row: Live, pool: std::sync::A
                 tokio::task::spawn_blocking(move || crate::dsh_web::send(&r, &said).map(|_| ()))
                     .await
                     .unwrap_or_else(|e| Err(e.to_string()))
+            } else if row.in_agy() {
+                crate::agy::send(&row, &said).await
             } else {
                 send(&row, &said).await
             };

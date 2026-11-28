@@ -69,6 +69,12 @@ The API takes only a signed browser cookie. seimei signs one per call with the s
 
 A dsh web session gets the same socket at `$XDG_RUNTIME_DIR/seimei/dsh/<id>.sock`, for each session lock a `dsh web` process holds. A message on it goes in through `session/prompt` as session_message's does, past the dispatcher, with an audit line.
 
+**The user's Antigravity CLI sessions** list next to them, as kind "agy". A session counts as running while an interactive `agy` process holds its presence lock `<app data dir>/presence/<id>.lock`. seimei reads its transcript `<app data dir>/brain/<id>/.system_generated/logs/transcript.jsonl` and title `<app data dir>/annotations/<id>.pbtxt`, and never writes there.
+
+- `USER_INPUT`, `PLANNER_RESPONSE` (thinking, text and tool calls) and `GENERIC` tool outputs give what session_peek and the session page show. An open `ask_question` call is a question for the user.
+- The session page polls from the newest step index. A message from the page or session_message is typed into the kitty window that shows the session, then Enter, with Shift+Enter between lines.
+- Each running session gets a messaging socket at `$XDG_RUNTIME_DIR/seimei/agy/<id>.sock`, mode 600, which types peer frames into its window past the dispatcher with an audit line. `seimei mcp` also recognizes `agy` sessions up the caller's process tree.
+
 A message to the dispatcher or a shikigami during its turn cuts in at once, as the terminal's "send now" does. A tool call that runs finishes first.
 
 When a shikigami finishes, fails or asks, the dispatcher hears it at its next turn. Questions and failures wake the dispatcher at once. A shikigami's process closes a few seconds after its turn ends, because an idle one holds about 330 MB. The next message resumes the session. After a restart, running shikigami get a "continue", at most 3 per hour. "Open on server" or "Give to me" hands a shikigami to the user as a terminal session. "Hand to seimei" takes it back.
@@ -183,6 +189,7 @@ The code map lists where each part lives. Paths are relative to the repo root.
 - `sessions.rs`, `transcripts.rs` and `adopt.rs`: the user's own sessions.
 - `dsh_web.rs`: the user's sessions in a dsh web server, through its HTTP API.
 - `vibe.rs`: the user's sessions in Vibe, read from its session store.
+- `agy.rs`: the user's sessions in Antigravity CLI, read from its transcript.
 - `terminal.rs`: types into the user's terminal windows through kitty remote control.
 - `tasks.rs`: the board.
 - `plan.rs`: the `[models]` plan.

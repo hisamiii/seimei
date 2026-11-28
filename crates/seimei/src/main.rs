@@ -301,6 +301,7 @@ struct Config {
     host: Host,
     sessions: Sessions,
     dispatcher: toml::Table,
+    workers: Option<toml::Table>,
     approvals: toml::Table,
     plugins: toml::Table,
     models: Option<toml::Table>,
@@ -455,6 +456,11 @@ fn main() {
     };
     let app = Arc::new(seimei_server::App::new(setup).unwrap_or_else(|e| die(&format!("workers: {e}"))));
     let _ = app.pool.agents.set(seimei_core::workers::agents_from(cfg.agents.as_ref()));
+    if let Some(h) =
+        cfg.workers.as_ref().and_then(|w| w.get("harness")).and_then(|v| v.as_str()).filter(|h| !h.is_empty())
+    {
+        let _ = app.pool.default_harness.set(h.to_string());
+    }
     let _ = app.pool.deny_paths.set(seimei_core::permissions::deny_paths(&cfg.approvals));
     let _ = app.watches.detach.set(detach());
     wire(&app);

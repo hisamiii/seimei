@@ -98,7 +98,7 @@ const NUDGE_AFTER: u64 = 15;
 const NUDGE: &str = "seimei: you have made about 15 tool calls on this task without a step list. Write one now (3-8 \
                      steps, TaskCreate) and keep it current with TaskUpdate: it shows live on the user's board.";
 static STEP: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"Task #(\w+)").unwrap());
-/// An agent a shikigami can run on (config [agents.<name>]: command, args, env, protocol). It uses its own login:
+/// An agent a shikigami can run on (config [agents.<name>]: command, args, env, protocol, model, models). It uses its own login:
 /// seimei never handles its keys.
 #[derive(Clone, Debug, Default)]
 pub struct Agent {
@@ -107,6 +107,10 @@ pub struct Agent {
     pub env: Vec<(String, String)>,
     /// "acp" (the default), or "codex" for `codex app-server`.
     pub protocol: String,
+    /// Default model id passed via ACP session/set_model when none is picked.
+    pub model: Option<String>,
+    /// Selectable model ids for summon and tune on this agent.
+    pub models: Vec<String>,
 }
 
 /// The [agents] table: each entry with a command.
@@ -121,7 +125,12 @@ pub fn agents_from(cfg: Option<&toml::Table>) -> BTreeMap<String, Agent> {
             .filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_string())))
             .collect();
         let protocol = a.get("protocol").and_then(|p| p.as_str()).unwrap_or("acp").to_string();
-        out.insert(name.clone(), Agent { command: expand(command), args: strs(a.get("args")), env, protocol });
+        let model = a.get("model").and_then(|m| m.as_str()).filter(|m| !m.is_empty()).map(String::from);
+        let models = strs(a.get("models"));
+        out.insert(
+            name.clone(),
+            Agent { command: expand(command), args: strs(a.get("args")), env, protocol, model, models },
+        );
     }
     out
 }
@@ -714,16 +723,28 @@ impl Worker {
         model: Option<&str>,
         by: &str,
     ) -> Result<Vec<String>, String> {
-        if effort.is_some_and(|e| !EFFORTS.contains(&e)) {
-            return Err(format!("effort is one of {}", EFFORTS.join(", ")));
-        }
-        if model.is_some_and(|m| !MODELS.contains(&m)) {
-            return Err(format!("model is one of {}", MODELS.join(", ")));
-        }
         if self.state() == "released" {
             return Err(format!("{} is the user's own session now", self.name()));
         }
-        self.default_harness_only("change its effort or model")?;
+        if let Some(agent_name) = self.agent() {
+            let models =
+                self.pool().agents.get().and_then(|m| m.get(&agent_name)).map(|a| a.models.clone()).unwrap_or_default();
+            if models.is_empty() || effort.is_some() {
+                self.default_harness_only("change its effort or model")?;
+            }
+            if let Some(m) = model
+                && !models.iter().any(|x| x == m)
+            {
+                return Err(format!("model is one of {}", models.join(", ")));
+            }
+        } else {
+            if effort.is_some_and(|e| !EFFORTS.contains(&e)) {
+                return Err(format!("effort is one of {}", EFFORTS.join(", ")));
+            }
+            if model.is_some_and(|m| !MODELS.contains(&m)) {
+                return Err(format!("model is one of {}", MODELS.join(", ")));
+            }
+        }
         let (done, rx) = oneshot::channel();
         let (effort, model) = (effort.map(String::from), model.map(String::from));
         self.cmd(Cmd::Tune { effort, model, by: by.into(), done });
@@ -1095,6 +1116,8 @@ impl Session {
         if let Some(m) = model.filter(|m| r.model != *m) {
             if let Some(c) = &self.client {
                 c.set_model(Some(&crate::plan::get().model_id(&m))).await.map_err(|e| e.to_string())?;
+            } else if let Some(c) = &self.acp {
+                c.set_model(&m).await.map_err(|e| e.to_string())?;
             }
             changed.push(format!("model {} → {m}", r.model));
             self.w.edit(|r| r.model = m);
@@ -1628,6 +1651,8 @@ pub struct Pool {
     pub plugins: Arc<Plugins>,
     /// The ACP agents a shikigami can run on (config [agents]), set once at startup.
     pub agents: OnceLock<BTreeMap<String, Agent>>,
+    /// The default harness for shikigami when summon names none (config [workers] harness), set once at startup.
+    pub default_harness: OnceLock<String>,
     /// The paths no agent may read or edit (config [approvals] deny_paths), set once at startup.
     pub deny_paths: OnceLock<Vec<String>>,
     batch: Mutex<Batch>,
@@ -1670,6 +1695,7 @@ impl Pool {
                 terminal: parts.terminal,
                 plugins: parts.plugins,
                 agents: OnceLock::new(),
+                default_harness: OnceLock::new(),
                 deny_paths: OnceLock::new(),
                 batch: Mutex::new(vec![]),
                 flushing: AtomicBool::new(false),
@@ -1691,6 +1717,17 @@ impl Pool {
     /// The paths no agent may read or edit: config's, or seimei's own secrets when it was not read.
     pub fn denied(&self) -> Vec<String> {
         self.deny_paths.get().cloned().unwrap_or_else(|| crate::permissions::deny_paths(&toml::Table::new()))
+    }
+
+    /// The configured default shikigami harness (an acp:<name> entry), or None for the default harness.
+    pub fn default_harness(&self) -> Option<&str> {
+        self.default_harness.get().map(String::as_str).filter(|h| h.starts_with("acp:"))
+    }
+
+    /// The configured ACP agent for a harness name ("acp:<name>"), if any.
+    pub fn agent(&self, harness: &str) -> Option<Agent> {
+        let name = harness.strip_prefix("acp:")?;
+        self.agents.get()?.get(name).cloned()
     }
 
     /// Every worker, in workers.json's order.
@@ -1856,11 +1893,12 @@ impl Pool {
     /// show_image and send_file for one of the user's own sessions (`seimei mcp`): the session is the one whose process runs the caller.
     pub fn share_for(&self, pid: u32, tool: &str, args: &Value) -> Value {
         let own = self.own_sessions();
-        let rows = sessions::live(&own);
+        let mut rows = sessions::live(&own);
+        rows.extend(crate::agy::live(&own));
         // The nearest session up the caller's process tree: a session started inside another one is its own.
         let (mut p, mut found) = (pid as i64, None);
         for _ in 0..64 {
-            found = rows.iter().find(|s| s.pid == p);
+            found = rows.iter().find(|s| s.pid == p || s.rec["agy"]["holder"].as_i64() == Some(p));
             match crate::util::stat_field(p, 1).and_then(|v| v.parse().ok()) {
                 _ if found.is_some() => break,
                 Some(parent) if parent > 1 => p = parent,
@@ -1985,21 +2023,40 @@ impl Pool {
             let enabled = if names.is_empty() { "none".into() } else { names.join(", ") };
             return Err(format!("no such tool group: {} (enabled: {enabled})", unknown.join(", ")));
         }
-        let harness = s.harness.as_deref().filter(|h| !h.is_empty() && *h != "claude");
-        if let Some(h) = harness {
-            let agents = self.agents.get().map(|a| a.keys().map(|k| format!("acp:{k}")).collect::<Vec<_>>());
-            let agents = agents.unwrap_or_default();
-            if !agents.iter().any(|a| a == h) {
-                let known = if agents.is_empty() { "none in config".into() } else { agents.join(", ") };
-                return Err(format!("harness is claude or an ACP agent from config [agents] ({known})"));
+        let harness = s
+            .harness
+            .as_deref()
+            .filter(|h| !h.is_empty())
+            .or_else(|| self.default_harness())
+            .filter(|h| *h != "claude");
+        let agent = if let Some(h) = harness {
+            match self.agent(h) {
+                Some(a) => Some(a),
+                None => {
+                    let agents = self.agents.get().map(|a| a.keys().map(|k| format!("acp:{k}")).collect::<Vec<_>>());
+                    let agents = agents.unwrap_or_default();
+                    let known = if agents.is_empty() { "none in config".into() } else { agents.join(", ") };
+                    return Err(format!("harness is claude or an ACP agent from config [agents] ({known})"));
+                }
             }
-        }
+        } else {
+            None
+        };
         let at = now();
-        // An ACP agent picks its own model: the record names the agent.
-        let model = match harness {
-            Some(h) => h.to_string(),
-            None if s.model.is_empty() => crate::plan::get().work.clone(),
-            None => s.model.clone(),
+        let model = match (harness, agent) {
+            (Some(h), Some(a)) if !a.models.is_empty() => {
+                if s.model.is_empty() {
+                    a.model.unwrap_or_else(|| a.models[0].clone())
+                } else if a.models.iter().any(|m| m == &s.model) {
+                    s.model.clone()
+                } else {
+                    return Err(format!("model for {h} is one of {}", a.models.join(", ")));
+                }
+            }
+            (Some(h), Some(a)) => a.model.unwrap_or_else(|| h.to_string()),
+            (Some(h), None) => h.to_string(),
+            (None, _) if s.model.is_empty() => crate::plan::get().work.clone(),
+            (None, _) => s.model.clone(),
         };
         let subagents = if s.subagents.is_empty() { crate::plan::get().quick.clone() } else { s.subagents.clone() };
         let cwd = path.display().to_string();

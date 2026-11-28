@@ -1,6 +1,7 @@
 //! seimei's state: events, login, files, push, and the checks in front of every tool call.
 
 pub mod adopt;
+pub mod agy;
 pub mod aliases;
 pub mod approvals;
 pub mod archive;

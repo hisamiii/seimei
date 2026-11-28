@@ -248,10 +248,7 @@ static NEEDS_USER: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 static NOISE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r#"^seimei restarted|was interrupted by a restart$|^session ".*" \(pid \d+\) was closed$"#,
-    )
-    .unwrap()
+    Regex::new(r#"^seimei restarted|was interrupted by a restart$|^session ".*" \(pid \d+\) was closed$"#).unwrap()
 });
 
 /// The class of the [seimei] lines that start a turn: the user's if one needs them, noise if all are.
@@ -294,6 +291,8 @@ pub struct Config {
     pub name: String,
     /// The model as the CLI takes it: fable already named as the plan's.
     pub model: String,
+    /// Set only when config or CLI named a model explicitly; ACP harnesses apply it over their own default.
+    pub explicit_model: Option<String>,
     /// None leaves it to the CLI's settings.
     pub effort: Option<String>,
     pub cwd: PathBuf,
@@ -328,9 +327,11 @@ impl Config {
             }
             known
         });
+        let explicit_model = s("model").filter(|m| !m.is_empty()).map(|m| plan.model_id(&m));
         Config {
             name: s("name").unwrap_or_else(|| if dev { "seimei-dev" } else { "seimei" }.into()),
-            model: plan.model_id(&s("model").unwrap_or_else(|| plan.work.clone())),
+            model: explicit_model.clone().unwrap_or_else(|| plan.model_id(&plan.work)),
+            explicit_model,
             effort,
             cwd: PathBuf::from(expand(&s("cwd").unwrap_or_else(|| "~".into()))),
             mode: mode.into(),
@@ -434,10 +435,16 @@ impl Dispatcher {
             grants
         } else {
             let list = agents.iter().map(|n| format!("acp:{n}")).collect::<Vec<_>>().join(", ");
-            format!(
-                "{grants}- summon's harness option runs a shikigami on an ACP agent ({list}) instead of Claude Code, \
-                 on that agent's own login and model; only when the user asks for it.\n"
-            )
+            match self.tools.pool.default_harness() {
+                Some(def) => format!(
+                    "{grants}- shikigami run on {def} by default (other harnesses: {list}); pick a model from \
+                     summon's model choices for each task.\n"
+                ),
+                None => format!(
+                    "{grants}- summon's harness option runs a shikigami on an ACP agent ({list}) instead of Claude \
+                     Code, on that agent's own login and model; only when the user asks for it.\n"
+                ),
+            }
         };
         PROMPT
             .replace("{notes}", &self.notes_path().display().to_string())
@@ -666,6 +673,7 @@ impl Dispatcher {
             name: self.cfg.name.clone(),
             cwd: self.cfg.cwd.clone(),
             model: self.cfg.model.clone(),
+            explicit_model: self.cfg.explicit_model.clone(),
             effort: self.cfg.effort.clone(),
             mode: self.cfg.mode.clone(),
             prompt: self.prompt(),

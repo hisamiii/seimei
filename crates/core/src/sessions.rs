@@ -8,6 +8,7 @@ use std::time::Duration;
 use regex::Regex;
 use serde_json::{Value, json};
 
+use crate::agy;
 use crate::aliases::Aliases;
 use crate::dsh_web;
 use crate::events::EventLog;
@@ -111,11 +112,17 @@ impl Live {
         self.kind == vibe::KIND && self.rec.get("vibe").is_some()
     }
 
+    /// Open in Antigravity CLI: read from its transcript, messaged through its terminal window.
+    pub fn in_agy(&self) -> bool {
+        self.kind == agy::KIND && self.rec.get("agy").is_some()
+    }
+
     /// The app it is open in, for a session that is not the harness's own: there the user answers its questions.
     pub fn app(&self) -> Option<&'static str> {
         match self.kind.as_str() {
             dsh_web::KIND => Some("dsh web"),
             vibe::KIND => Some("Vibe"),
+            agy::KIND => Some("Antigravity"),
             _ => None,
         }
     }
@@ -126,17 +133,21 @@ impl Live {
             format!("message it with session_message, or SendMessage to uds:{}", as_text(&self.rec["dsh"]["inbox"]))
         } else if self.in_vibe() {
             format!("message it with session_message, or SendMessage to uds:{}", as_text(&self.rec["vibe"]["inbox"]))
+        } else if self.in_agy() {
+            format!("message it with session_message, or SendMessage to uds:{}", as_text(&self.rec["agy"]["inbox"]))
         } else {
             format!("SendMessage to {}", self.address())
         }
     }
 
-    /// Its pid as the dispatcher reads it: a dsh or Vibe session runs inside its server's process.
+    /// Its pid as the dispatcher reads it: a dsh, Vibe or Antigravity session runs inside its server's process.
     pub fn pid_text(&self) -> String {
         if self.in_dsh_web() {
             format!("dsh web pid {}", as_text(&self.rec["dsh"]["server"]))
         } else if self.in_vibe() {
             format!("Vibe pid {}", as_text(&self.rec["vibe"]["holder"]))
+        } else if self.in_agy() {
+            format!("agy pid {}", as_text(&self.rec["agy"]["holder"]))
         } else {
             format!("pid {}", self.pid)
         }
@@ -315,11 +326,12 @@ fn viewers(out: &mut [Live], clients: &[i64], showing: &dyn Fn(i64) -> Vec<Strin
     }
 }
 
-/// The running sessions with the ones open in a dsh web server and in Vibe after them.
+/// The running sessions with the ones open in dsh web, Vibe and Antigravity CLI after them.
 pub fn all(own: &Own) -> Vec<Live> {
     let mut rows = live(own);
     rows.extend(dsh_web::live(own));
     rows.extend(vibe::live(own));
+    rows.extend(agy::live(own));
     rows
 }
 
@@ -350,6 +362,7 @@ fn find_in(key: &str, rows: &[Live]) -> Option<Live> {
             s.pid.to_string() == key
                 || s.moved() && s.origin_pid.to_string() == key
                 || !key.is_empty() && as_text(&s.rec["vibe"]["holder"]) == key
+                || !key.is_empty() && as_text(&s.rec["agy"]["holder"]) == key
         },
         &|s| s.ids().iter().any(|i| i.starts_with(key)),
         &|s| s.name.to_lowercase().contains(&low),
@@ -643,7 +656,7 @@ pub fn listing(own: &Own) -> Vec<Value> {
             // The process whose window shows it: its own, or a parked terminal's.
             "screen": s.screen_pid(), "proc_start": rec["procStart"], "reach": terminal::reachable(s.screen_pid())}));
     }
-    for s in dsh_web::live(own).into_iter().chain(vibe::live(own)) {
+    for s in dsh_web::live(own).into_iter().chain(vibe::live(own)).chain(agy::live(own)) {
         let project =
             if s.cwd.is_empty() || s.cwd == home { Value::Null } else { json!(project_of(&format!("{}/x", s.cwd))) };
         out.push(outside_row(&s, project));
@@ -673,12 +686,19 @@ pub fn outside_row(s: &Live, project: Value) -> Value {
         Some(_) => format!("Waiting for an answer in {app}"),
         None => String::new(),
     };
+    let inbox = if s.in_vibe() {
+        s.rec["vibe"]["inbox"].clone()
+    } else if s.in_agy() {
+        s.rec["agy"]["inbox"].clone()
+    } else {
+        s.rec["dsh"]["inbox"].clone()
+    };
     json!({"pid": s.pid, "name": s.name, "session_id": s.session_id, "status": status, "waiting_for": waiting,
         "waiting_text": waiting_text, "since": s.since, "active": s.active, "cwd": s.cwd, "kind": s.kind,
         "question": !ask.is_null(), "ask": if ask.is_null() { Value::Null } else { first },
-        "project": project, "line": line, "context": null, "doing": s.rec["doing"], "model": null, "effort": null,
-        "ask_detail": ask, "job": null, "moved_from": null, "screen": s.pid, "proc_start": null, "reach": s.rec["reach"],
-        "inbox": if s.in_vibe() { s.rec["vibe"]["inbox"].clone() } else { s.rec["dsh"]["inbox"].clone() }})
+        "project": project, "line": line, "context": null, "doing": s.rec["doing"], "model": s.rec["model"],
+        "effort": null, "ask_detail": ask, "job": null, "moved_from": null, "screen": s.pid, "proc_start": null,
+        "reach": s.rec["reach"], "inbox": inbox})
 }
 
 /// What the scan knows about one session.
@@ -712,9 +732,9 @@ impl SessionEvents {
         // Sessions working in an agent's scratch folder are test fixtures, not the user's work.
         let jobs = harness::jobs_dir();
         let test = std::env::var_os("SEIMEI_TEST_SESSIONS").is_some_and(|v| !v.is_empty());
-        // dsh web's and Vibe's sessions have no transcript or window: what they run into is not read yet.
+        // External app sessions have their own stores: what they run into is not scanned here.
         let rows: Vec<&Value> = (rows.iter())
-            .filter(|r| r["kind"] != dsh_web::KIND && r["kind"] != vibe::KIND)
+            .filter(|r| r["kind"] != dsh_web::KIND && r["kind"] != vibe::KIND && r["kind"] != agy::KIND)
             .filter(|r| {
                 test || !Path::new(r["cwd"].as_str().filter(|c| !c.is_empty()).unwrap_or("/")).starts_with(&jobs)
             })

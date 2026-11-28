@@ -21,6 +21,7 @@ impl Session {
         let mcp = acp_servers(servers);
         let mut env = self.pool.plugins.env(&name);
         env.extend(a.env);
+        let model = Some(r.model.clone()).filter(|m| !m.is_empty() && !m.starts_with("acp:")).or(a.model);
         let opts = acp::Options {
             program: a.command.into(),
             args: a.args,
@@ -29,6 +30,7 @@ impl Session {
             env_remove: vec![],
             mcp_servers: mcp,
             load: started.then(|| r.session_id.clone()),
+            model,
             instructions: None,
         };
         let handler: Arc<dyn acp::Handler> = Arc::new(AcpSide { w: self.w.clone() });
@@ -203,29 +205,48 @@ pub(crate) fn acp_servers(servers: Map<String, Value>) -> Vec<acp::McpServer> {
         .collect()
 }
 
+/// Single-underscore MCP tool names (`mcp_<server>_<tool>`, or a display title `Run mcp_<server>_<tool>`) normalized to `mcp__<server>__<tool>`.
+fn mcp_name(raw: &str) -> Option<String> {
+    let n = raw.trim().strip_prefix("Run ").unwrap_or(raw.trim());
+    if n.starts_with("mcp__") {
+        return Some(n.to_string());
+    }
+    let rest = n.strip_prefix("mcp_")?;
+    let (server, tool) = rest.split_once('_')?;
+    if server.is_empty() || tool.is_empty() {
+        return None;
+    }
+    Some(format!("mcp__{server}__{tool}"))
+}
+
 /// An ACP tool call in the shape the cards and the audit log know: a command is Bash, a file edit Write, a read Read, a fetch WebFetch.
 /// An agent that calls everything kind other (dsh) is read by its tool's name.
 /// What has no such shape keeps its name and its raw input, which a card shows.
 pub fn shaped(t: &acp::ToolCall) -> (String, Value) {
     let raw = t.input.clone().unwrap_or(json!({}));
+    if let Some(mcp) = mcp_name(&t.name).or_else(|| mcp_name(&t.title)) {
+        return (mcp, raw);
+    }
     let named = matches!(t.kind.as_str(), "other" | "");
-    let kind = match t.title.to_lowercase().as_str() {
-        "bash" | "shell" if named => "execute",
-        "write" | "edit" | "str_replace_editor" if named => "edit",
-        "read" | "read_image" if named => "read",
+    let label = if !t.name.is_empty() { t.name.as_str() } else { t.title.as_str() };
+    let kind = match label.to_lowercase().as_str() {
+        "bash" | "shell" | "run_command" if named => "execute",
+        "write" | "edit" | "str_replace_editor" | "edit_file" | "write_file" if named => "edit",
+        "read" | "read_image" | "read_file" if named => "read",
         "web_fetch" if named => "fetch",
-        "grep" if named => return ("Grep".into(), raw),
-        "glob" if named => return ("Glob".into(), raw),
-        "web_search" if named => return ("WebSearch".into(), raw),
-        _ if named && !t.title.is_empty() => return (t.title.clone(), raw),
+        "grep" | "grep_search" if named => return ("Grep".into(), raw),
+        "glob" | "find_by_name" if named => return ("Glob".into(), raw),
+        "web_search" | "search_web" if named => return ("WebSearch".into(), raw),
+        _ if named && !label.is_empty() => return (label.to_string(), raw),
         _ => t.kind.as_str(),
     };
     let s = |k: &str| raw[k].as_str().filter(|v| !v.is_empty()).map(String::from);
-    let path = ["file_path", "path", "abs_path"].iter().find_map(|k| s(k));
-    let command = match &raw["command"] {
-        Value::String(c) => Some(c.clone()),
+    let path = ["file_path", "path", "abs_path", "Path", "TargetFile", "AbsolutePath"].iter().find_map(|k| s(k));
+    let cmd = raw.get("command").filter(|v| !v.is_null()).or_else(|| raw.get("CommandLine"));
+    let command = match cmd {
+        Some(Value::String(c)) => Some(c.clone()),
         // Codex sends argv; a shell's -c script is the command itself.
-        Value::Array(a) => {
+        Some(Value::Array(a)) => {
             let argv: Vec<&str> = a.iter().filter_map(Value::as_str).collect();
             let shell = |p: &str| ["sh", "bash", "zsh", "dash"].contains(&p.rsplit('/').next().unwrap_or(p));
             match argv.as_slice() {
@@ -243,11 +264,12 @@ pub fn shaped(t: &acp::ToolCall) -> (String, Value) {
         (Some(c), Some(wd)) => Some(format!("cd {} && {c}", sh_quote(&wd))),
         (c, _) => c,
     };
+    let url = s("url").or_else(|| s("Url"));
     match (kind, command, path) {
         ("execute", Some(c), _) => ("Bash".into(), json!({"command": c})),
         ("edit" | "delete" | "move", _, Some(p)) => ("Write".into(), json!({"file_path": p})),
         ("read" | "search", _, Some(p)) => ("Read".into(), json!({"file_path": p})),
-        ("fetch", _, _) if s("url").is_some() => ("WebFetch".into(), json!({"url": s("url")})),
+        ("fetch", _, _) if url.is_some() => ("WebFetch".into(), json!({"url": url})),
         (kind, _, _) => (if kind.is_empty() { "tool".into() } else { kind.into() }, raw),
     }
 }
@@ -348,5 +370,48 @@ pub fn acp_mode(mode: &str, tool: &str, own: &[String]) -> Mode {
         "dontAsk" => Mode::Deny("the mode is dontAsk, so only allowed tools run".into()),
         "plan" => Mode::Deny("the mode is plan: only reads until the plan is approved".into()),
         _ => Mode::Card,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn single_underscore_mcp_and_pascal_case_inputs_shape_cleanly() {
+        let own = vec!["mcp__seimei".into(), "mcp__desktop".into()];
+        let mcp = acp::ToolCall {
+            id: "c1".into(),
+            name: "mcp_seimei_summon".into(),
+            title: "Run mcp_seimei_summon".into(),
+            kind: "other".into(),
+            input: Some(json!({"name": "w"})),
+            ..acp::ToolCall::default()
+        };
+        let (name, _) = shaped(&mcp);
+        assert_eq!(name, "mcp__seimei__summon");
+        assert_eq!(acp_mode("default", &name, &own), Mode::Allow);
+
+        let cmd = acp::ToolCall {
+            id: "c2".into(),
+            name: "run_command".into(),
+            title: "echo hi".into(),
+            kind: "execute".into(),
+            input: Some(json!({"CommandLine": "echo hi"})),
+            ..acp::ToolCall::default()
+        };
+        assert_eq!(shaped(&cmd), ("Bash".into(), json!({"command": "echo hi"})));
+        assert_eq!(acp_mode("bypassPermissions", "Bash", &own), Mode::Allow);
+
+        let edit = acp::ToolCall {
+            id: "c3".into(),
+            name: "edit_file".into(),
+            title: "edit".into(),
+            kind: "other".into(),
+            input: Some(json!({"Path": "/tmp/a.rs"})),
+            ..acp::ToolCall::default()
+        };
+        assert_eq!(shaped(&edit), ("Write".into(), json!({"file_path": "/tmp/a.rs"})));
+        assert_eq!(acp_mode("acceptEdits", "Write", &own), Mode::Allow);
     }
 }
